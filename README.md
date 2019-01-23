@@ -8,7 +8,7 @@ override tempo, override instruments of midis, fix headers (if possible) and eve
 
 If you're still not amazed, The Launcher made on pure C++ without any frameworks. ***It's a console app which you can control with mouse!***
 
-There's also discord server, where SAFC were publishing all that time since July/August of 2018: https://discord.gg/CsgEW4P
+There's also discord server, where SAFC wфы publishing all that time since July/August of 2018: https://discord.gg/CsgEW4P
 
 Includes:
 * SAFC.exe (executable doing all the work) *(work like a compilier, taking a ton of arguments)*
