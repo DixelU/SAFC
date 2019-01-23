@@ -1,0 +1,23 @@
+/* THIS FILE WILL BE OVERWRITTEN BY DEV-C++ */
+/* DO NOT EDIT ! */
+
+#ifndef LAUNCHER_PRIVATE_H
+#define LAUNCHER_PRIVATE_H
+
+/* VERSION DEFINITIONS */
+#define VER_STRING	"0.9.6.121"
+#define VER_MAJOR	0
+#define VER_MINOR	9
+#define VER_RELEASE	6
+#define VER_BUILD	121
+#define COMPANY_NAME	"DixelU"
+#define FILE_VERSION	"0.9.6.121"
+#define FILE_DESCRIPTION	"Launcher for SAFC"
+#define INTERNAL_NAME	""
+#define LEGAL_COPYRIGHT	""
+#define LEGAL_TRADEMARKS	""
+#define ORIGINAL_FILENAME	""
+#define PRODUCT_NAME	"Launcher"
+#define PRODUCT_VERSION	"0.9.6.121"
+
+#endif /*LAUNCHER_PRIVATE_H*/
