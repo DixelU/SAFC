@@ -1,4 +1,6 @@
-####Simple AF Converter (SAFC)
+Simple AF Converter (SAFC)
+==========================
+
 Is a first application in *SAF* branch apps. 
 
 SAFC is a converter which can merge midis with different **PPQ**s and specify some unusual ones (like 17);
