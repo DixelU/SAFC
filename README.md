@@ -1,10 +1,10 @@
 Simple AF Converter (SAFC)
 ==========================
 
-Is a first application in *SAF* branch apps. 
+Is a first application in *SAF* branch apps. *Specifically for Black MIDIS*
 
 SAFC is a converter which can merge midis with different **PPQ**s and specify some unusual ones (like 17);
-override tempo, override instruments of midis, fix headers (if possible) and events (if possible). And all that SAFC does *without loading it midi in memory. Wow!* 
+override tempo, override instruments of midis, fix headers (if possible) and events (if possible). And all that SAFC does *without loading midi in memory. Wow!* 
 
 If you're still not amazed, The Launcher made on pure C++ without any frameworks. ***It's a console app which you can control with mouse!***
 
