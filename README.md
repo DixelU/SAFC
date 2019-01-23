@@ -1,7 +1,11 @@
-##Simple AF Converter (SAFC)
+####Simple AF Converter (SAFC)
 Is a first application in *SAF* branch apps. 
-SAFC is a converter which can merge midis with different **PPQ**s and specify some unusual ones (like 17), override tempo, override instruments of midis, fix headers (if possible) and events (if possible). And all that SAFC does *without loading it midi in memory. Wow!* 
+
+SAFC is a converter which can merge midis with different **PPQ**s and specify some unusual ones (like 17);
+override tempo, override instruments of midis, fix headers (if possible) and events (if possible). And all that SAFC does *without loading it midi in memory. Wow!* 
+
 If you're still not amazed, The Launcher made on pure C++ without any frameworks. ***It's a console app which you can control with mouse!***
+
 There's also discord server, where SAFC were publishing all that time since July/August of 2018: https://discord.gg/CsgEW4P
 
 Includes:
