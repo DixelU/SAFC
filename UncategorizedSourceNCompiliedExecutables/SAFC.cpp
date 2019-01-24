@@ -253,10 +253,10 @@ int PPQNch(string link,double mult,int offset,int otemp){//returns tracks count/
 				if( true || ((unsigned char)IO)!=0xB0 ){
 					TRACK.push_back(IO);
 					_in.get(IO);
-					if((unsigned char)IO&0x80)printf("Corruption in 8x-Bx|Ex-Fx event: 1st parameter (%x)\n",(unsigned char)IO);
+					if((unsigned char)IO&0x80)printf("Corruption in 8x-Bx|Ex-Fx event: 1st parameter (%x) at %x\n",(unsigned char)IO,_in.tellg());
 					TRACK.push_back((unsigned char)IO&0x7F);
 					_in.get(IO);
-					if((unsigned char)IO&0x80)printf("Corruption in 8x-Bx|Ex-Fx event: 2nd parameter (%x)\n",(unsigned char)IO);
+					if((unsigned char)IO&0x80)printf("Corruption in 8x-Bx|Ex-Fx event: 2nd parameter (%x) at %x\n",(unsigned char)IO,_in.tellg());
 					TRACK.push_back((unsigned char)IO&0x7F);
 				}
 			}
@@ -274,14 +274,14 @@ int PPQNch(string link,double mult,int offset,int otemp){//returns tracks count/
 			else if(((unsigned char)IO)>=0xC0 && ((unsigned char)IO)<=0xCF){
 				TRACK.push_back(IO);
 				_in.get(IO);
-				if((unsigned char)IO&0x80)printf("Corruption in Cx event: 1st parameter (%x)\n",(unsigned char)IO);
+				if((unsigned char)IO&0x80)printf("Corruption in Cx event: 1st parameter (%x) at %x\n",(unsigned char)IO,_in.tellg());
 				if(ORDPCHNG)TRACK.push_back(0);//Override program change
 				else TRACK.push_back((unsigned char)IO&0x7F);
 			}
 			else if(((unsigned char)IO)>=0xD0 && ((unsigned char)IO)<=0xDF){
 				TRACK.push_back(IO);
 				_in.get(IO);
-				if((unsigned char)IO&0x80)printf("Corruption in Dx event: 1st parameter (%x)\n",(unsigned char)IO);
+				if((unsigned char)IO&0x80)printf("Corruption in Dx event: 1st parameter (%x) at %x\n",(unsigned char)IO,_in.tellg());
 				TRACK.push_back((unsigned char)IO&0x7F);
 			}
 			else{////RUNNING STATUS PARSER
@@ -289,27 +289,27 @@ int PPQNch(string link,double mult,int offset,int otemp){//returns tracks count/
 				if( (((unsigned char)PEV)>=0x80&&((unsigned char)PEV)<=0xBF) || (((unsigned char)PEV)>=0xE0&&((unsigned char)PEV)<=0xEF) ){
 					TRACK.push_back(PEV);
 					//_in.get(IO);//running status
-					if(IO&0x80)printf("RS: Corruption in 8x-Bx|Ex-Fx event: 1st parameter (%x)\n",(unsigned char)IO);
+					if(IO&0x80)printf("RS: Corruption in 8x-Bx|Ex-Fx event: 1st parameter (%x) at %x\n",(unsigned char)IO,_in.tellg());
 					TRACK.push_back(IO&0x7F);
 					_in.get(IO);
-					if(IO&0x80)printf("RS: Corruption in 8x-Bx|Ex-Fx event: 2nd parameter (%x)\n",(unsigned char)IO);
+					if(IO&0x80)printf("RS: Corruption in 8x-Bx|Ex-Fx event: 2nd parameter (%x) at %x\n",(unsigned char)IO,_in.tellg());
 					TRACK.push_back(IO&0x7F);
 				}
 				else if(((unsigned char)PEV)>=0xC0 && ((unsigned char)PEV)<=0xCF){
 					TRACK.push_back(PEV);
 					//_in.get(IO);//running status
-					if((unsigned char)IO&0x80)printf("RS: Corruption in Cx event: 1st parameter (%x)\n",(unsigned char)IO);
+					if((unsigned char)IO&0x80)printf("RS: Corruption in Cx event: 1st parameter (%x) at %x\n",(unsigned char)IO,_in.tellg());
 					if(ORDPCHNG)TRACK.push_back(0);//Override program change
 					else TRACK.push_back((unsigned char)IO&0x7F);
 				}
 				else if(((unsigned char)PEV)>=0xD0 && ((unsigned char)PEV)<=0xDF){
 					TRACK.push_back(PEV);
 					//_in.get(IO);
-					if((unsigned char)IO&0x80)printf("RS: Corruption in Dx event: 1st parameter (%x)\n",(unsigned char)IO);
+					if((unsigned char)IO&0x80)printf("RS: Corruption in Dx event: 1st parameter (%x) at %x\n",(unsigned char)IO,_in.tellg());
 					TRACK.push_back((unsigned char)IO&0x7F);
 				}
 				else{////
-					printf("Imparsable data sequence. R:%x I:%x at %d\n",(unsigned char)PEV,(unsigned char)IO,TRACK.size());
+					printf("Imparsable data sequence. R:%x I:%x at %d (AbOffset_%x)\n",(unsigned char)PEV,(unsigned char)IO,TRACK.size(),_in.tellg());
 	                char I=1,II=1,III=1;//current IO, previous IO ... etc
 	                while(!(I==0x2F&&(unsigned char)II==0xFF&&III==0)&&!_in.eof()){
 	                    III=II;
