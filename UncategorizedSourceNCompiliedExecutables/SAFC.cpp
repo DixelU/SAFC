@@ -157,12 +157,14 @@ int PPQNch(string link,double mult,int offset,int otemp){//returns tracks count/
 		}
 		TRACK.clear();
 		if(PCLOG)cout<<"Header: "<<_coll<<endl;
-		//_out<<_coll;//
-		for(int y=0;y<4;y++){
-			TRACK.push_back(_coll[_coll.size()+y-4]);
-		}
-		_coll="";
-		for(int i=0;_in.get(IO)&&i<4;i++)TRACK.push_back(IO);//going through the number of events 
+		_coll.clear();
+//		//_out<<_coll;//
+//		for(int y=0;y<4;y++){
+//			TRACK.push_back(_coll[_coll.size()+y-4]);
+//		}
+//		_coll="";
+		TRACK.push_back('M');TRACK.push_back('T');TRACK.push_back('r');TRACK.push_back('k');
+		for(int i=0;i<4&&_in.get(IO);i++)TRACK.push_back(0);//going through the number of events 
 		IO=0;
 		if(otemp>0 && !ORDED){//adding new tempoevent
 			TRACK.push_back(0x00);
@@ -173,13 +175,14 @@ int PPQNch(string link,double mult,int offset,int otemp){//returns tracks count/
 			TRACK.push_back(ORD2);
 			TRACK.push_back(ORD3);
 		}
+		printf("tellg_%x\n",_in.tellg());
+		//_in.get(IO);///////reading first byte of the track which can be nonzeroed
 		while(_in){//here we are iterating through the events in midi track
 			magic=0;
-			for(int i=0;true;i++){//getting current offset
-				magic=(magic<<7)|(((unsigned char)IO)&0x7F);
-				if(((unsigned char)IO)<0x80){ttt=IO;break;}
+			do{//getting current offset//more elegant solution
 				_in.get(IO);
-			}
+				magic=(magic<<7)|(IO&0x7F);
+			}while(IO&0x80);
 			if(PCLOG)cout<<"Event`s offset: "<<magic;
 			tr+=(double)(magic)/(double)mult;
 			magic=tr;
@@ -285,7 +288,7 @@ int PPQNch(string link,double mult,int offset,int otemp){//returns tracks count/
 				TRACK.push_back((unsigned char)IO&0x7F);
 			}
 			else{////RUNNING STATUS PARSER
-				if(PCLOG)printf("Running status byte? %x at %d ",IO,TRACK.size());
+				if(PCLOG)printf("Running status byte? %x at %d\n",IO,TRACK.size());
 				if( (((unsigned char)PEV)>=0x80&&((unsigned char)PEV)<=0xBF) || (((unsigned char)PEV)>=0xE0&&((unsigned char)PEV)<=0xEF) ){
 					TRACK.push_back(PEV);
 					//_in.get(IO);//running status
@@ -316,7 +319,7 @@ int PPQNch(string link,double mult,int offset,int otemp){//returns tracks count/
 	                    II=I;
 	                    _in.get(I);
 	                }
-	                _in.get(IO);
+	                _in.get(IO);//last zero?
 	                TRACK.push_back(0xC0);TRACK.push_back(0x0);TRACK.push_back(0x0);
 	                TRACK.push_back(0xFF);TRACK.push_back(0x2F);TRACK.push_back(0x0);
 	                t.clear();
