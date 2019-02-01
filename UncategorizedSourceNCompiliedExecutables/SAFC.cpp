@@ -77,9 +77,9 @@ vector<string> CONstart(){//parses commands from console
 	}
 	return VIO;
 }
-vector<short> PPQNreader(vector<string> link){//reads ppqs in files
-	short t=12;
-	vector<short> PPQN;
+vector<unsigned short> PPQNreader(vector<string> link){//reads ppqs in files
+	unsigned short t=12;
+	vector<unsigned short> PPQN;
 	for(int z=0;z<link.size();z++){
 		t=0;
 		ifstream fin;
@@ -175,7 +175,7 @@ int PPQNch(string link,double mult,int offset,int otemp){//returns tracks count/
 			TRACK.push_back(ORD2);
 			TRACK.push_back(ORD3);
 		}
-		printf("tellg_%x\n",_in.tellg());
+		//printf("tellg_%x\n",_in.tellg());
 		//_in.get(IO);///////reading first byte of the track which can be nonzeroed
 		while(_in){//here we are iterating through the events in midi track
 			magic=0;
@@ -183,7 +183,7 @@ int PPQNch(string link,double mult,int offset,int otemp){//returns tracks count/
 				_in.get(IO);
 				magic=(magic<<7)|(IO&0x7F);
 			}while(IO&0x80);
-			if(PCLOG)cout<<"Event`s offset: "<<magic;
+			if(PCLOG)cout<<"Event`s offset: "<<magic;//why it works faster than in R-SAFC?
 			tr+=(double)(magic)/(double)mult;
 			magic=tr;
 			tr=tr-magic;//some FL studio-like hacking in switching of ppqn xd
@@ -237,12 +237,18 @@ int PPQNch(string link,double mult,int offset,int otemp){//returns tracks count/
 					IO=0;
 					magic=0;
 					for(int i=0;true;i++){//getting current offset
-						_in.get(IO);
+						IO=_in.get();
 						TRACK.push_back(IO);
-						magic=(magic<<7)+(((unsigned char)IO)&0x7F);
-						if(((unsigned char)IO)<0x80)break;
+						magic = (magic<<7) | (((unsigned char)IO)&0x7F);
+						if(!(IO&0x80))break;
 					}
-					for(int e=0;e<magic && _in.get(IO);e++)TRACK.push_back((IO));
+					//if(PCLOG)printf("Magic%d\n",magic);
+					if(magic)for(int e=0;e<magic && _in.good();e++){
+						_in.get(IO);
+						//if(PCLOG)printf("Magic: %x\n",IO);
+						TRACK.push_back(IO);
+					}
+					else continue;
 				}
 				else{//and if we are replacing tempoevents
 					_in.get(IO);_in.get(IO);_in.get(IO);_in.get(IO);//
@@ -343,7 +349,7 @@ int PPQNch(string link,double mult,int offset,int otemp){//returns tracks count/
 				tsp=PEV;//handling the group of running status bytes
 			}
 			PEV=tsp;
-			_in.get(IO);
+			//_in.get(IO);
 		}
 	}
 	_in.close();
@@ -424,8 +430,8 @@ void OpParser(vector<string> Ip){//lmao
 					cout<<"F:"<<forcer<<endl;
 				break;
 				case 'i':
-					ignorist=1;
-					cout<<"Ignoring mode (WIP)"<<endl;
+					//ignorist=1;
+					cout<<"Ignoring mode is not supported anymore :("<<endl;
 				break;
 				case 'c'://console.log enabling
 					PCLOG=true;
@@ -506,7 +512,7 @@ void OpParser(vector<string> Ip){//lmao
 	if(DEST==""&&filelink.size()){
 		DEST=filelink[0]+"_wasUsedAsMergesBasement.mid";
 	}
-	vector<short> PPQN=PPQNreader(filelink);
+	vector<unsigned short> PPQN=PPQNreader(filelink);
 	vector<int> tracksAM;
 	unsigned short MAXppqn=0;
 	for(int i=0;i<PPQN.size();i++){
