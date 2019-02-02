@@ -39,11 +39,19 @@ bool FStart=true/*,ocr=0*/;
 string wayto="";
 HWND __CNSL = GetConsoleWindow();
 
-void CreateMess(char abc[],string header){
-	MessageBoxA(0,abc,header.c_str(), MB_OK);
+void CreateMess(const char abc[],const char header[]){
+	MessageBoxA(0,abc,header, MB_OK);
+}
+void CreateMess(int number,string header){
+	char t[50];
+	sprintf(t,"%x",number);
+	MessageBoxA(0,t,header.c_str(), MB_OK);
 }
 void CreateMess(string abc,string header){
 	MessageBoxA(0,abc.c_str(),header.c_str(), MB_OK);
+}
+void CreateMess(char abc[],string header){
+	MessageBoxA(0,abc,header.c_str(), MB_OK);
 }
 //////////////////////////////////
 void GSFontsize(){
@@ -343,8 +351,27 @@ void EvalClickPos(int _hdpos){
 			}
 			_tc.GotoXY(1,49);
 			_tc.Out<<"PARAMS: "<<paramsout;
-			if(!is64bit() || 1)ShellExecute(NULL,"open","SAFC.exe",FOUT.c_str(),wayto.c_str(),SW_SHOWNORMAL);
-			else ShellExecute(NULL,"open","SAFC64.exe",FOUT.c_str(),wayto.c_str(),SW_SHOWNORMAL);
+			if(/*!is64bit() ||*/ 1){
+				int abc = static_cast<int>(reinterpret_cast<uintptr_t>(ShellExecuteA(NULL,"open","SAFC.exe",FOUT.c_str(),wayto.c_str(),SW_SHOWNORMAL)));
+				if(abc==0)CreateMess("0","SAFC opening error. (ShellExecuteA)");
+				else if(abc==ERROR_FILE_NOT_FOUND)CreateMess("ERROR_FILE_NOT_FOUND","SAFC opening error. (ShellExecuteA)");
+				else if(abc==ERROR_PATH_NOT_FOUND)CreateMess("ERROR_PATH_NOT_FOUND","SAFC opening error. (ShellExecuteA)");
+				else if(abc==ERROR_BAD_FORMAT)CreateMess("ERROR_BAD_FORMAT","SAFC opening error. (ShellExecuteA)");
+				else if(abc==SE_ERR_ACCESSDENIED)CreateMess("SE_ERR_ACCESSDENIED","SAFC opening error. (ShellExecuteA)");
+				else if(abc==SE_ERR_ASSOCINCOMPLETE)CreateMess("SE_ERR_ASSOCINCOMPLETE","SAFC opening error. (ShellExecuteA)");
+				else if(abc==SE_ERR_DDEBUSY)CreateMess("SE_ERR_DDEBUSY","SAFC opening error. (ShellExecuteA)");
+				else if(abc==SE_ERR_DDEFAIL)CreateMess("SE_ERR_DDEFAIL","SAFC opening error. (ShellExecuteA)");
+				else if(abc==SE_ERR_DDETIMEOUT)CreateMess("SE_ERR_DDETIMEOUT","SAFC opening error. (ShellExecuteA)");
+				else if(abc==SE_ERR_DLLNOTFOUND)CreateMess("SE_ERR_DLLNOTFOUND","SAFC opening error. (ShellExecuteA)");
+				else if(abc==SE_ERR_FNF)CreateMess("SE_ERR_FNF","SAFC opening error. (ShellExecuteA)");
+				else if(abc==SE_ERR_NOASSOC)CreateMess("SE_ERR_NOASSOC","SAFC opening error. (ShellExecuteA)");
+				else if(abc==SE_ERR_OOM)CreateMess("SE_ERR_OOM","SAFC opening error. (ShellExecuteA)");
+				else if(abc==SE_ERR_PNF)CreateMess("SE_ERR_PNF","SAFC opening error. (ShellExecuteA)");
+				else if(abc==SE_ERR_SHARE)CreateMess("SE_ERR_SHARE","SAFC opening error. (ShellExecuteA)");
+			}
+			else{
+				//HINSTANCE abc64 = ShellExecuteA(NULL,"open","SAFC64.exe",FOUT.c_str(),wayto.c_str(),SW_SHOWNORMAL);
+			}
 		}
 	}
 	else if(x>=86&&x<=92&&(y>45&&y<49)){
@@ -561,7 +588,6 @@ int main(int argc, char** argv){
 	cout<<wayto;
 	cout<<(is64bit()?"64bit Detected":"32bit Detected")<<endl;
 	system("color 0F");
-	system("mode CON: COLS=101 LINES=51");
 	_CCC._();//because fuck you
 	SetWindowLong(__CNSL, GWL_STYLE, GetWindowLong(__CNSL, GWL_STYLE) &(~WS_MAXIMIZEBOX) &(~WS_THICKFRAME)/* & (~ WS_CAPTION)*/);// GetWindowLong(__CNSL, GWL_STYLE) & (~ WS_CAPTION) &&
 	HANDLE hConsole = GetStdHandle( STD_OUTPUT_HANDLE );
@@ -569,9 +595,13 @@ int main(int argc, char** argv){
     fontInfo.cbSize = sizeof( fontInfo );
     GetCurrentConsoleFontEx( hConsole, TRUE, &fontInfo );
     wcscpy( fontInfo.FaceName, L"Terminal" );
+    fontInfo.dwFontSize.Y = 8;
+    fontInfo.dwFontSize.X = 6;
+    SetCurrentConsoleFontEx( hConsole, TRUE, &fontInfo );
     fontInfo.dwFontSize.Y = _Fy;
     fontInfo.dwFontSize.X = _Fx;
     SetCurrentConsoleFontEx( hConsole, TRUE, &fontInfo );
+	system("mode CON: COLS=101 LINES=51");
     
     GetCurrentConsoleFontEx( hConsole, TRUE, &fontInfo );//I'll call it Back-Check fix
     _Fy = fontInfo.dwFontSize.Y;
