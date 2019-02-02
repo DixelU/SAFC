@@ -237,9 +237,9 @@ void EvalClickPos(int _hdpos){
 		_CCC.CON=!_CCC.CON;
 		ButtonDraw(_tc,"  LOG  ",88,13,6 + 8*_CCC.CON);
 	}
-	else if(x>=88&&x<=96&&(y>15&&y<19)){//ignorer
-		_CCC.IGN=!_CCC.IGN;
-		ButtonDraw(_tc,"IGNORER",88,16,7 + 8*_CCC.IGN);
+	else if(x>=88&&x<=96&&(y>15&&y<19)){//ignorer//no ignoring anymore
+		//_CCC.IGN=!_CCC.IGN;
+		//ButtonDraw(_cn,"   .   ",88,16,4 + 8*_CCC.IGN);
 	}
 	else if(x>=88&&x<=96&&(y>18&&y<22)){//remnants
 		_CCC.REM=!_CCC.REM;
@@ -259,7 +259,8 @@ void EvalClickPos(int _hdpos){
 			q/=10;
 		}
 		while(t.size()<5)t=" "+t;
-		ButtonDraw(_tc,"T:"+t,88,22,15);
+		if(_CCC.TMP)ButtonDraw(_tc,"T:"+t,88,22,15);
+		else ButtonDraw(_tc,"SETTEMP",88,22,7);
 	}
 	else if(x>=88&&x<=96&&(y>24&&y<28)){//excluder//programm override
 		_tc.GotoXY(1,49);
@@ -353,10 +354,11 @@ void EvalClickPos(int _hdpos){
 				PPQ2="Click on that to enter value and press enter",
 				OFF1="Adds offset (relative to offsetless midis) to selected midi",
 				OFF2="Type here number of ticks!",
+				OFF3="TIP: If you will type in 0 in any input field, it will set value back to default",
 				LOG="Enables logging in SAFC.exe (which is slow)",
 				TMP1="Overrides all tempo events to specified one",
 				TMP2="Gets less accurate on high numbers",
-				IGN="Disables PPQ recalculation (Also disables tempo overrides)",
+				IGN="Disables PPQ recalculation (Disabled)",
 				REM="Remnants of merging (*.mid_.mid) will be removed if checked",
 				SA2="Opens saving dialog",
 				STA="Starts SAFC.exe",
@@ -380,6 +382,8 @@ void EvalClickPos(int _hdpos){
 		_t.Out<<OFF1;
 		_t.GotoXY(86-OFF2.size(),11);
 		_t.Out<<OFF2;
+		_t.GotoXY(86-OFF3.size(),12);
+		_t.Out<<OFF3;
 		_t.GotoXY(87-LOG.size(),14);
 		_t.Out<<LOG;
 		_t.GotoXY(87-IGN.size(),17);
@@ -532,7 +536,7 @@ void UIDraw(){
 	else ButtonDraw(_cn,"PPQ:"+PPQNo,87,7,15);
 	ButtonDraw(_cn,"SetOffset",87,10,14);
 	ButtonDraw(_cn,"  LOG  ",88,13,6 + 8*_CCC.CON);
-	ButtonDraw(_cn,"IGNORER",88,16,7 + 8*_CCC.IGN);
+	ButtonDraw(_cn,"   .   ",88,16,4 + 8*_CCC.IGN);
 	ButtonDraw(_cn,"REMNANT",88,19,3 + 8*_CCC.REM);
 	if(!_CCC.TMP)ButtonDraw(_cn,"SETTEMP",88,22,7);
 	else ButtonDraw(_cn,"T:"+tmpo,88,22,15);

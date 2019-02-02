@@ -10,8 +10,8 @@ A ICON "SAFC.ico"
 // TO CHANGE VERSION INFORMATION, EDIT PROJECT OPTIONS...
 //
 1 VERSIONINFO
-FILEVERSION 0,0,3,159
-PRODUCTVERSION 0,0,3,159
+FILEVERSION 0,0,3,160
+PRODUCTVERSION 0,0,3,160
 FILETYPE VFT_APP
 {
   BLOCK "StringFileInfo"
@@ -19,14 +19,14 @@ FILETYPE VFT_APP
     BLOCK "040904E4"
     {
       VALUE "CompanyName", "DixelU"
-      VALUE "FileVersion", "0.0.3.159"
+      VALUE "FileVersion", "0.0.3.160"
       VALUE "FileDescription", "MIDI Converter + Merger"
       VALUE "InternalName", "SAFC"
       VALUE "LegalCopyright", ""
       VALUE "LegalTrademarks", ""
       VALUE "OriginalFilename", "Simple As F@@k Converter"
       VALUE "ProductName", "Simple AF Converter"
-      VALUE "ProductVersion", "0.0.3.159"
+      VALUE "ProductVersion", "0.0.3.160"
     }
   }
   BLOCK "VarFileInfo"
