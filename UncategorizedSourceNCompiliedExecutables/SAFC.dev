@@ -28,25 +28,25 @@ Folders=
 IncludeVersionInfo=1
 SupportXPThemes=0
 CompilerSet=3
-CompilerSettings=00010cc100000000000000000
+CompilerSettings=000101c100000000000000000
 UnitCount=1
 
 [VersionInfo]
 Major=0
 Minor=0
 Release=3
-Build=160
+Build=163
 LanguageID=1033
 CharsetID=1252
 CompanyName=DixelU
-FileVersion=0.0.3.160
+FileVersion=0.0.3.163
 FileDescription=MIDI Converter + Merger
 InternalName=SAFC
 LegalCopyright=
 LegalTrademarks=
 OriginalFilename=Simple As F@@k Converter
 ProductName=Simple AF Converter
-ProductVersion=0.0.3.160
+ProductVersion=0.0.3.163
 AutoIncBuildNr=1
 SyncProduct=1
 
