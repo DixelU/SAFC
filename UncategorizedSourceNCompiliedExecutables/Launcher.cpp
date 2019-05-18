@@ -26,11 +26,11 @@ struct CS{
 	vector<string> inf;
 	string ouf;
 	int OFF,FOR,TMP;
-	bool IGN,CON,REM,PORD;
+	bool IGN,CON,REM,PORD,EMPTTRCKREM;
 	void _(void){
 		inf.clear();
 		ouf="";
-		PORD=TMP=OFF=FOR=IGN=CON=0;
+		EMPTTRCKREM=PORD=TMP=OFF=FOR=IGN=CON=0;
 		REM=1;
 	}
 };
@@ -246,8 +246,8 @@ void EvalClickPos(int _hdpos){
 		ButtonDraw(_tc,"  LOG  ",88,13,6 + 8*_CCC.CON);
 	}
 	else if(x>=88&&x<=96&&(y>15&&y<19)){//ignorer//no ignoring anymore
-		//_CCC.IGN=!_CCC.IGN;
-		//ButtonDraw(_cn,"   .   ",88,16,4 + 8*_CCC.IGN);
+		_CCC.EMPTTRCKREM=!_CCC.EMPTTRCKREM;
+		ButtonDraw(_tc,"ETR REM",88,16,5 + 8*_CCC.EMPTTRCKREM);
 	}
 	else if(x>=88&&x<=96&&(y>18&&y<22)){//remnants
 		_CCC.REM=!_CCC.REM;
@@ -318,6 +318,7 @@ void EvalClickPos(int _hdpos){
 		if(_CCC.CON)FOUT=FOUT+"\\c ";
 		if(_CCC.IGN)FOUT=FOUT+"\\i ";
 		if(_CCC.PORD)FOUT=FOUT+"\\p ";
+		if(_CCC.EMPTTRCKREM)FOUT=FOUT+"\\m ";
 		//if(ocr)FOUT=FOUT+"\\o ";//disabled
 		if(_CCC.TMP){
 			FOUT=FOUT+"\\t";
@@ -385,7 +386,7 @@ void EvalClickPos(int _hdpos){
 				LOG="Enables logging in SAFC.exe (which is slow)",
 				TMP1="Overrides all tempo events to specified one",
 				TMP2="Gets less accurate on high numbers",
-				IGN="Disables PPQ recalculation (Disabled)",
+				IGN="Enables removing \"empty\" tracks",
 				REM="Remnants of merging (*.mid_.mid) will be removed if checked",
 				SA2="Opens saving dialog",
 				STA="Starts SAFC.exe",
@@ -563,7 +564,7 @@ void UIDraw(){
 	else ButtonDraw(_cn,"PPQ:"+PPQNo,87,7,15);
 	ButtonDraw(_cn,"SetOffset",87,10,14);
 	ButtonDraw(_cn,"  LOG  ",88,13,6 + 8*_CCC.CON);
-	ButtonDraw(_cn,"   .   ",88,16,4 + 8*_CCC.IGN);
+	ButtonDraw(_cn,"ETR REM",88,16,5 + 8*_CCC.EMPTTRCKREM);
 	ButtonDraw(_cn,"REMNANT",88,19,3 + 8*_CCC.REM);
 	if(!_CCC.TMP)ButtonDraw(_cn,"SETTEMP",88,22,7);
 	else ButtonDraw(_cn,"T:"+tmpo,88,22,15);

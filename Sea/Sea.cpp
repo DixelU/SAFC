@@ -721,8 +721,11 @@ struct INTERNALINFO {
 	short SelectedFileID;
 	unsigned short PPQ;
 	unsigned int NewTempo;
-	bool ProgORD, RemRem,Log;
-	void Init() {SelectedFileID = PPQ = NewTempo = ProgORD = RemRem = Log = 0;}
+	bool ProgORD, RemRem, Log, TrackRem;
+	void Init() {
+		SelectedFileID = PPQ = NewTempo = ProgORD = Log = 0;
+		TrackRem = RemRem = 1;
+	}
 	void InsertNewFile(string FileLink) {
 		FILES.push_back(FileLink);
 		OFFSETS.push_back(0);
@@ -1025,12 +1028,13 @@ void onPrgOrd() {
 
 void onRemnantsSCH() {
 	IF.RemRem = !IF.RemRem;
-	if (IF.RemRem) {
-		GF.ChangeButtonLabel("rems", "REMS: ON");
-	}
-	else {
-		GF.ChangeButtonLabel("rems", "REMS: OFF");
-	}
+	GF.ChangeButtonLabel("rems", ((IF.RemRem) ? "REMS: REM" : "REMS: KEEP"));
+}
+
+void onTrackRemCH() {
+	IF.TrackRem = !IF.TrackRem;
+	GF.ChangeButtonLabel("trrem", ((IF.TrackRem) ? "TRCK: REM" : "TRCK: KEEP"));
+
 }
 
 void onSaveTo() {
@@ -1048,7 +1052,8 @@ void onStart() {
 	string params = "";
 	if (IF.Log)params += "\\c ";
 	if (IF.ProgORD)params += "\\p ";
-	if (IF.RemRem)params += "\\r";
+	if (IF.RemRem)params += "\\r ";
+	if (IF.TrackRem)params += "\\m ";
 	if (IF.NewTempo)params += "\\t" + to_string(IF.NewTempo)+" ";
 	if (IF.PPQ)params += "\\f" + to_string(IF.PPQ)+" ";
 	if (IF.SaveTo.size())params += "\"S2:" + IF.SaveTo + "\" ";
@@ -1091,10 +1096,12 @@ void INIT() {
 	GF.TopButtonHoverSettings(0x3FFF3F48, 0xBFBF3CCF, 2);
 	GF.AddButton(onSetTempo, "tempo", "SET TEMPO", 2.75, 2.25, 0, 1.5, 0.125, 0.05, 0.1, 0.15, 2, 0x7FFF003F, 0x7FFF00CF);
 	GF.TopButtonHoverSettings(0x7FFF004F, 0xAFFF7F8F, 2);
-	GF.AddButton(onPrgOrd, "pord", ((IF.ProgORD)? "PIANO ONLY" : "ANY"), 2.75, 1.75, 0, 1.5, 0.125, 0.05, 0.1, 0.15, 2, 0x7FFF7F3F, 0xFFFFFF7F);
+	GF.AddButton(onPrgOrd, "pord", ((IF.ProgORD) ? "PIANO ONLY" : "ANY"), 2.75, 1.75, 0, 1.5, 0.125, 0.05, 0.1, 0.15, 2, 0x7FFF7F3F, 0xFFFFFF7F);
 	GF.TopButtonHoverSettings(0x7FFF7F4F, 0xFFFFFF8F, 2);
-	GF.AddButton(onRemnantsSCH, "rems", "REMS: OFF", 2.75, 1.25, 0, 1.5, 0.125, 0.05, 0.1, 0.15, 2, 0x00FF7F3F, 0x00FF7FFF);
+	GF.AddButton(onRemnantsSCH, "rems", ((IF.RemRem) ? "REMS: REM" : "REMS: KEEP"), 2.75, 1.25, 0, 1.5, 0.125, 0.05, 0.1, 0.15, 2, 0x00FF7F3F, 0x00FF7FFF);
 	GF.TopButtonHoverSettings(0x3FFF7F4F, 0x3FFFFF8F, 2);
+	GF.AddButton(onTrackRemCH, "trrem", ((IF.TrackRem) ? "TRCK: REM" : "TRCK: KEEP"), 2.75, 0.75, 0, 1.5, 0.125, 0.05, 0.1, 0.15, 2, 0x007F7F3F, 0x7FAFAFFF);
+	GF.TopButtonHoverSettings(0x007F7F5F, 0x4FCFCFFF, 2);
 
 
 	GF.AddButton(onStart, "start", "START", 2.75, -3.6, 0, 1.5, 0.125, 0.05, 0.1, 0.15, 2, 0x007FFF3F, 0x3FAFFF7F);

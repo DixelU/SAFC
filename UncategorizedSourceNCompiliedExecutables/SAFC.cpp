@@ -20,7 +20,7 @@ bool is64bit(void){
         return false;
     return true;
 }
-bool FELOG=false,PCLOG=false,dbg=true,ORDPCHNG=false;//File error log//Processing console log//some unused sht
+bool FELOG=false,PCLOG=false,dbg=true,ORDPCHNG=false,EMPTYTRCKREM=false;//File error log//Processing console log//some unused sht
 struct FO{
 	int offset;
 	int filenum;
@@ -119,6 +119,7 @@ vector<int> TRAM(vector<string> link){//reads tracks amount in files
 int PPQNch(string link,double mult,int offset,int otemp){//returns tracks count//because it will help me later .w.
 	ofstream _out;
 	ifstream _in;
+	int EventCounter = 0;
 	string _coll="";
 	otemp=60000000/otemp;
 	bool ORDED=0;
@@ -145,6 +146,7 @@ int PPQNch(string link,double mult,int offset,int otemp){//returns tracks count/
 	_out.put((unsigned char)(magic%256));//here we are finishing this shit with ppqn
 	while(_in){//iterating through tracks
 		tr=offset;
+		EventCounter = 0;
 		for(int i=0;_coll[_coll.size()-1]!='k'&& _coll[_coll.size()-2]!='r' && _coll[_coll.size()-3]!='T' && _coll[_coll.size()-4]!='M' && _in;i++){//collecting mtrk
 			if(PCLOG)if(i>5)cout<<"Weirdly long awaiting for MTrk: "<<i-5<<endl;
 			_in.get(IO);
@@ -215,6 +217,13 @@ int PPQNch(string link,double mult,int offset,int otemp){//returns tracks count/
 				_in.get(IO);//throw away type of data
 				//if((unsigned char)IO&0x80)printf("Corruption in meta event: 1st parameter (%x)\n",IO);
 				TRACK.push_back(IO);
+				switch(IO){
+					case 0x51:
+					//case 0x54:
+					//case 0x58:
+						++EventCounter;
+					break;
+				}
 				if(((unsigned char)IO)==0x2F){//except track's terminating
 					_in.get(IO);
 					TRACK.push_back(IO);
@@ -228,9 +237,14 @@ int PPQNch(string link,double mult,int offset,int otemp){//returns tracks count/
 					TRACK[5]=t[2];
 					TRACK[6]=t[1];
 					TRACK[7]=t[0];
-					printf("\t%d track processed\n",tracksAM);
-					copy(TRACK.begin(),TRACK.end(),ostream_iterator<char>(_out,""));
-					tracksAM++;//just write down that this track has ended
+					if(!(EMPTYTRCKREM && !EventCounter)){
+						printf("\t%d track processed\n",tracksAM++);//just write down that this track has ended
+						copy(TRACK.begin(),TRACK.end(),ostream_iterator<char>(_out,""));
+					}
+					else {
+						TRACK.clear();
+						printf("\t%d track was removed!\n",tracksAM++);
+					}
 					break;
 				}
 				else if(otemp<0||(((unsigned char)IO)!=0x51&&otemp>0)){
@@ -249,7 +263,7 @@ int PPQNch(string link,double mult,int offset,int otemp){//returns tracks count/
 						TRACK.push_back(IO);
 					}
 					else continue;
-				}
+				}//EMPTYTRCKREM
 				else{//and if we are replacing tempoevents
 					_in.get(IO);_in.get(IO);_in.get(IO);_in.get(IO);//
 					TRACK.push_back(3);//r e p l a c e m e n t  s t u f f s 
@@ -259,6 +273,7 @@ int PPQNch(string link,double mult,int offset,int otemp){//returns tracks count/
 				}
 			}
 			else if( (((unsigned char)IO)>=0x80&&((unsigned char)IO)<=0xBF) || (((unsigned char)IO)>=0xE0&&((unsigned char)IO)<0xF0) ){
+				++EventCounter;
 				if( true || ((unsigned char)IO)!=0xB0 ){
 					TRACK.push_back(IO);
 					_in.get(IO);
@@ -270,6 +285,7 @@ int PPQNch(string link,double mult,int offset,int otemp){//returns tracks count/
 				}
 			}
 			else if( ((unsigned char)IO)==0xF7 || ((unsigned char)IO)==0xF0 ){
+				++EventCounter;
 				TRACK.push_back(IO);
 				magic=IO=tsp=PEV=0;
 				for(int i=0;true;i++){//getting current offset
@@ -281,6 +297,7 @@ int PPQNch(string link,double mult,int offset,int otemp){//returns tracks count/
 				for(int e=0;e<magic&&_in.get(IO);e++)TRACK.push_back(IO);
 			}
 			else if(((unsigned char)IO)>=0xC0 && ((unsigned char)IO)<=0xCF){
+				++EventCounter;
 				TRACK.push_back(IO);
 				_in.get(IO);
 				if((unsigned char)IO&0x80)printf("Corruption in Cx event: 1st parameter (%x) at %x\n",(unsigned char)IO,_in.tellg());
@@ -288,6 +305,7 @@ int PPQNch(string link,double mult,int offset,int otemp){//returns tracks count/
 				else TRACK.push_back((unsigned char)IO&0x7F);
 			}
 			else if(((unsigned char)IO)>=0xD0 && ((unsigned char)IO)<=0xDF){
+				++EventCounter;
 				TRACK.push_back(IO);
 				_in.get(IO);
 				if((unsigned char)IO&0x80)printf("Corruption in Dx event: 1st parameter (%x) at %x\n",(unsigned char)IO,_in.tellg());
@@ -296,6 +314,7 @@ int PPQNch(string link,double mult,int offset,int otemp){//returns tracks count/
 			else{////RUNNING STATUS PARSER
 				if(PCLOG)printf("Running status byte? %x at %d\n",IO,TRACK.size());
 				if( (((unsigned char)PEV)>=0x80&&((unsigned char)PEV)<=0xBF) || (((unsigned char)PEV)>=0xE0&&((unsigned char)PEV)<=0xEF) ){
+					++EventCounter;
 					TRACK.push_back(PEV);
 					//_in.get(IO);//running status
 					if(IO&0x80)printf("RS: Corruption in 8x-Bx|Ex-Fx event: 1st parameter (%x) at %x\n",(unsigned char)IO,_in.tellg());
@@ -305,6 +324,7 @@ int PPQNch(string link,double mult,int offset,int otemp){//returns tracks count/
 					TRACK.push_back(IO&0x7F);
 				}
 				else if(((unsigned char)PEV)>=0xC0 && ((unsigned char)PEV)<=0xCF){
+					++EventCounter;
 					TRACK.push_back(PEV);
 					//_in.get(IO);//running status
 					if((unsigned char)IO&0x80)printf("RS: Corruption in Cx event: 1st parameter (%x) at %x\n",(unsigned char)IO,_in.tellg());
@@ -312,12 +332,14 @@ int PPQNch(string link,double mult,int offset,int otemp){//returns tracks count/
 					else TRACK.push_back((unsigned char)IO&0x7F);
 				}
 				else if(((unsigned char)PEV)>=0xD0 && ((unsigned char)PEV)<=0xDF){
+					++EventCounter;
 					TRACK.push_back(PEV);
 					//_in.get(IO);
 					if((unsigned char)IO&0x80)printf("RS: Corruption in Dx event: 1st parameter (%x) at %x\n",(unsigned char)IO,_in.tellg());
 					TRACK.push_back((unsigned char)IO&0x7F);
 				}
 				else{////
+					EventCounter = 0;
 					printf("Imparsable data sequence. R:%x I:%x at %d (AbOffset_%x)\n",(unsigned char)PEV,(unsigned char)IO,TRACK.size(),_in.tellg());
 	                char I=1,II=1,III=1;//current IO, previous IO ... etc
 	                while(!(I==0x2F&&(unsigned char)II==0xFF&&III==0)&&!_in.eof()){
@@ -341,9 +363,14 @@ int PPQNch(string link,double mult,int offset,int otemp){//returns tracks count/
 	                if(0)for(int e=0;e<TRACK.size();e++){
 	                    printf("%x ",(TRACK[e]));
 	                }
-	                printf("\tTermination of processing %d track due to corrupted data\n",tracksAM);
-	                copy(TRACK.begin(),TRACK.end(),ostream_iterator<char>(_out,""));
-	                tracksAM++;//just write down that this track has ended
+	                if(!(EMPTYTRCKREM && !EventCounter)){
+						printf("\tTermination of processing %d track due to corrupted data\n",tracksAM++);
+	                	copy(TRACK.begin(),TRACK.end(),ostream_iterator<char>(_out,""));
+					}
+					else{
+						TRACK.clear();
+						printf("\tTerminated track %d was deleted due to having no significant data in it\n",tracksAM++);
+					}
 	                break;
 				}
 				tsp=PEV;//handling the group of running status bytes
@@ -449,6 +476,10 @@ void OpParser(vector<string> Ip){//lmao
 				case 'p':
 					ORDPCHNG=true;
 					cout<<"Program chage event override: Piano\n";
+				break;
+				case 'm':
+					cout<<"\"Empty\" tracks will be removed!\n";
+					EMPTYTRCKREM = 1;
 				break;
 				default:
 					cout<<Ip[i][1]<<" was not reserved\n";

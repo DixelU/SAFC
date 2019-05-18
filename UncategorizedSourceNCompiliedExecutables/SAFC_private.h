@@ -5,19 +5,19 @@
 #define SAFC_PRIVATE_H
 
 /* VERSION DEFINITIONS */
-#define VER_STRING	"0.0.3.164"
+#define VER_STRING	"0.0.3.168"
 #define VER_MAJOR	0
 #define VER_MINOR	0
 #define VER_RELEASE	3
-#define VER_BUILD	164
+#define VER_BUILD	168
 #define COMPANY_NAME	"DixelU"
-#define FILE_VERSION	"0.0.3.164"
+#define FILE_VERSION	"0.0.3.168"
 #define FILE_DESCRIPTION	"MIDI Converter + Merger"
 #define INTERNAL_NAME	"SAFC"
 #define LEGAL_COPYRIGHT	""
 #define LEGAL_TRADEMARKS	""
 #define ORIGINAL_FILENAME	"Simple As F@@k Converter"
 #define PRODUCT_NAME	"Simple AF Converter"
-#define PRODUCT_VERSION	"0.0.3.164"
+#define PRODUCT_VERSION	"0.0.3.168"
 
 #endif /*SAFC_PRIVATE_H*/
