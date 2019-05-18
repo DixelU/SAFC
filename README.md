@@ -13,7 +13,17 @@ There's also discord server, where SAFC was publishing all that time since July/
 Includes:
 * SAFC.exe (executable which doing all the work) *(works like a compilier, taking a ton of arguments)*
 * Launcher.exe *(You can get what it does from the exectuable's name :D)*
-* *~~OCRer~~* **(Seek for updated one located in repository called SAFOR)**
+* Sea.exe and glut32.dll **~Sea launcher**
+* *~~OCRer~~* **(Search for updated one, located in repository called SAFOR)**
 
 Do not look into the sources of SAF apps. Inside they're a bunch of quite weird functions and global variables.
 But that's just a first attempts, don't blame me for that :D
+
+Sea Launcher for SAFC
+============================
+
+Less impressive but yet not worse! 
+It was written with using deprecated version of GLUT to keep compatibility with older windows versions. 
+Hard use of object-oriented programming made it a lot easier to add new functions to it! 
+
+It has the same functionality as default console launcher.
