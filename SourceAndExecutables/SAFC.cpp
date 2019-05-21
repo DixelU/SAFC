@@ -8,7 +8,7 @@
 #include <windows.h>
 using namespace std;//Sorry for bad english :)
 //I usually write comments on russian with a lot of\
-jkes and stories. 
+jokes and stories. 
 
 bool is64bit(void){
     DWORD flag = GetFileAttributes("C:\\Windows\\SysWOW64");
@@ -20,7 +20,7 @@ bool is64bit(void){
         return false;
     return true;
 }
-bool FELOG=false,PCLOG=false,dbg=true,ORDPCHNG=false,EMPTYTRCKREM=false;//File error log//Processing console log//some unused sht
+bool FELOG=false,PCLOG=false,dbg=true,ORDPCHNG=false,EMPTYTRCKREM=false;//File error log//Processing console log//
 struct FO{
 	int offset;
 	int filenum;
@@ -40,7 +40,7 @@ void LOG(string LG,string file){//because why not
 	}
 }
 
-vector<string> BATstart(int argc, char** arg){//easy af
+vector<string> BATstart(int argc, char** arg){//easy to understand
 	remove("Log.log");
 	vector<string> IO;
 	string t;
@@ -98,7 +98,7 @@ vector<unsigned short> PPQNreader(vector<string> link){//reads ppqs in files
 	}
 	return PPQN;
 }
-vector<int> TRAM(vector<string> link){//reads tracks amount in files
+vector<int> TRAM(vector<string> link){//reads tracks number from midi files
 	int t;
 	vector<int> TRAM;
 	for(int z=0;z<link.size();z++){
@@ -143,7 +143,7 @@ int PPQNch(string link,double mult,int offset,int otemp){//returns tracks count/
 	magic=(double)magic/mult;
 	if(PCLOG)cout<<"Target PPQN: "<<magic<<endl;
 	_out.put((unsigned char)(magic/256));
-	_out.put((unsigned char)(magic%256));//here we are finishing this shit with ppqn
+	_out.put((unsigned char)(magic%256));//here we are finishing this magic with ppqn
 	while(_in){//iterating through tracks
 		tr=offset;
 		EventCounter = 0;
@@ -178,8 +178,8 @@ int PPQNch(string link,double mult,int offset,int otemp){//returns tracks count/
 			TRACK.push_back(ORD3);
 		}
 		//printf("tellg_%x\n",_in.tellg());
-		//_in.get(IO);///////reading first byte of the track which can be nonzeroed
-		while(_in){//here we are iterating through the events in midi track
+		//_in.get(IO);///////reading first byte of the track which can be nonzero'ed
+		while(_in){//here we are iterating through the events in the midi track
 			magic=0;
 			do{//getting current offset//more elegant solution
 				_in.get(IO);
@@ -188,7 +188,7 @@ int PPQNch(string link,double mult,int offset,int otemp){//returns tracks count/
 			if(PCLOG)cout<<"Event`s offset: "<<magic;//why it works faster than in R-SAFC?
 			tr+=(double)(magic)/(double)mult;
 			magic=tr;
-			tr=tr-magic;//some FL studio-like hacking in switching of ppqn xd
+			tr=tr-magic;//some FL studio-like hacking in ppqn switching xd
 			if(PCLOG)cout<<" -> "<<magic<<" + Remnant: "<<tr<<endl;
 			_mc=magic;
 			_coll="";//coll like collector. needed for switching magic
@@ -388,14 +388,14 @@ int PPQNch(string link,double mult,int offset,int otemp){//returns tracks count/
 
 void MAINMERGEALGO(vector<string> filelink, vector<int> tracksAM , bool MRGTEMPOMAPS, bool _IGNORE_,string DEST,bool rrems){
 	/*Technically playing in game "believe me" in midi file parsers someday will cause lots and lots of problems
-	Here we should hope that midi file is pure an smooth as a gold mirrory sphere...*/
+	Here we should hope that midi file is pure an smooth as a gold mirror inside web's telescope...*/
 	char IO;
 	string T=DEST;
 	int PERFtracksAM=0,passThr=0;
 	if(dbg)cout<<"Merging\n";
 	//long long int TMoc=0,ptime=0;//tempomaps merge is too hard for me//set<TEMPOEVENT> TM=MERGETEMPOMAPS(filelink);//TEMPOEVENT TE;
 	for(int i=0;i<filelink.size();i++){
-		if(!_IGNORE_)filelink[i]=filelink[i]+"_.mid";//just making IGNORER working again xd
+		if(!_IGNORE_)filelink[i]=filelink[i]+"_.mid";//just making IGNORER working again xd//well... Ignorer is gone
 		PERFtracksAM+=tracksAM[i]-((i)?1:0);//
 	}
 	ifstream _base(filelink[0].c_str(), std::ios::binary | std::ios::in);
@@ -563,7 +563,7 @@ void OpParser(vector<string> Ip){//lmao
 		//rename(filelink[i].c_str(),( filelink[i]+"_nt.mid" ).c_str());
 		//it's like operator's overload. \
 		You are trying to calculate a summ of two "numbers", \
-		but instead you nuke some nuclear bomb above australia
+		but instead you nuke some nuclear bomb on the moon
 		cout<<tracksAM[i]<<" tracks in "<<filelink[i]<<endl;
 	}
 	MAINMERGEALGO(filelink,tracksAM,m,ignorist,DEST,rrems);

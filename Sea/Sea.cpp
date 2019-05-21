@@ -498,10 +498,11 @@ struct __INPUTALERT {
 	__TEXTLINE _INPUTAREA;
 	__TEXTLINE _AdditionalCommentary;
 	string INPUTVAL;
+	string DEFAULTINPUT;
 	void(*_OnSubmit)();
 	bool NumsOnly;
 	__INPUTALERT(void(*OnSubmit)() = NIL, string Header = "", string DefaultInput = "", bool NumbersOnly = 0) {
-		INPUTVAL = DefaultInput;
+		DEFAULTINPUT = INPUTVAL = DefaultInput;
 		NumsOnly = NumbersOnly;
 		_OnSubmit = OnSubmit;
 		_INPUTAREA = TEXTLINECENTER(INPUTVAL, 0.5, 1, 5, 0xFFFFFFFF);
@@ -608,6 +609,7 @@ struct __MAINFRAME {
 				_input.RemoveOneSymbol();
 			}
 			else if(CH>31 && CH<128) {
+				if (_input.INPUTVAL == _input.DEFAULTINPUT)_input.INPUTVAL = "";
 				if (_input.NumsOnly) {
 					if (CH >= '0' && CH <= '9')_input.AddNewSymbol(CH);
 				}
