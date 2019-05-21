@@ -30,8 +30,8 @@ struct CS{
 	void _(void){
 		inf.clear();
 		ouf="";
-		EMPTTRCKREM=PORD=TMP=OFF=FOR=IGN=CON=0;
-		REM=1;
+		PORD=TMP=OFF=FOR=IGN=CON=0;
+		EMPTTRCKREM=REM=1;
 	}
 };
 CS _CCC;

@@ -243,7 +243,7 @@ int PPQNch(string link,double mult,int offset,int otemp){//returns tracks count/
 					}
 					else {
 						TRACK.clear();
-						printf("\t%d track was removed!\n",tracksAM++);
+						printf("\t%d track was removed!\n",tracksAM);
 					}
 					break;
 				}
@@ -369,7 +369,7 @@ int PPQNch(string link,double mult,int offset,int otemp){//returns tracks count/
 					}
 					else{
 						TRACK.clear();
-						printf("\tTerminated track %d was deleted due to having no significant data in it\n",tracksAM++);
+						printf("\tTerminated track %d was deleted due to having no significant data in it\n",tracksAM);
 					}
 	                break;
 				}
