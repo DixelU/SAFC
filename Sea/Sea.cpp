@@ -1291,7 +1291,7 @@ void mClick(int button, int state, int x, int y) {
 
 int main(int argc, char ** argv) {
 	srand(TIMESEED());
-	if (0)ShowWindow(GetConsoleWindow(), SW_HIDE);
+	if (1)ShowWindow(GetConsoleWindow(), SW_HIDE);
 	else ShowWindow(GetConsoleWindow(), SW_SHOW);
 	dirto = wayto = argv[0];
 	while (dirto.back() != '\\')dirto.pop_back();
