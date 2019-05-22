@@ -1,8 +1,8 @@
 ﻿E:\Локальный диск (F) x64\Программы (x64)\MVisualStudio\Common7\IDE\VC\VCTargets\Platforms\Win32\PlatformToolsets\v141_xp\Toolset.targets(39,5): warning MSB8051: поддержка Windows XP прекращена, ее не будет в последующих выпусках Visual Studio. Дополнительные сведения: https://go.microsoft.com/fwlink/?linkid=2023588.
   Sea.cpp
   Создание кода
-  108 of 1112 functions ( 9.7%) were compiled, the rest were copied from previous compilation.
-    0 functions were new in current compilation
-    21 functions had inline decision re-evaluated but remain unchanged
+  5 of 1326 functions ( 0.4%) were compiled, the rest were copied from previous compilation.
+    1 functions were new in current compilation
+    15 functions had inline decision re-evaluated but remain unchanged
   Создание кода завершено
   Sea.vcxproj -> E:\Git\SAFC\Sea\Release\Sea.exe

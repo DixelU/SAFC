@@ -4,6 +4,8 @@
 #include <cstdlib>
 #include <vector>
 #include <string>
+#include <locale>
+#include <codecvt>
 #include <map>
 #include <cmath>
 #include <list>
@@ -20,6 +22,7 @@
 #define ANGTORAD(a) (0.0174532925*(a))
 #define RADTOANG(a) (57.2957795785*(a))
 #define WINDSIZE 720
+#define GLUTWINDOWNAME "Green sea"
 
 #define RANDFLOAT(range)  ((0 - range) + ((float)rand()/((float)RAND_MAX/(2*range)))) // from -range to range
 #define RANDSIGN ((rand()&0x100)?(1):(-1))
@@ -28,14 +31,18 @@
 bool ANIMATION_IS_ACTIVE = 0, FIRSTBOOT = 1;
 using namespace std;
 
+using convert_type = std::codecvt_utf8<wchar_t>;
+wstring_convert<convert_type, wchar_t> converter;
 default_random_engine ___eng;
 uniform_int_distribution<int> ___dis(0, 32768);
 string wayto,dirto;
+HWND glutHandler = NULL;
 #define DRANDFLOAT(range)  ( (0 - range) + ( (float)___dis(___eng) )/( 16384. / range ) )
 #define SLOWDPROG(a,b,fract) ((a + (fract - 1)*b)/fract)
 
 string StringToDottedString(string Inp);
 string FloatToDottedString(float F);
+void AddFiles(vector<string> &Files);
 void NOP() {}
 void NIL() {}
 
@@ -379,8 +386,8 @@ struct __BUTTONHANDLER {
 			if (_allbutts[i]._HD)HOVERED = 1;
 			//cout << _allbutts[i]._HD << endl;
 		}
-		if (HOVERED)glutSetCursor(GLUT_CURSOR_HELP);
-		else glutSetCursor(GLUT_CURSOR_INHERIT);
+		if (HOVERED)/*glutSetCursor(GLUT_CURSOR_HELP);*/SetCursor(::LoadCursor(NULL, IDC_HAND));
+		else /*glutSetCursor(GLUT_CURSOR_INHERIT);*/SetCursor(::LoadCursor(NULL, IDC_ARROW));
 		CMX = x; CMY = y;
 	}
 	void MouseClick(int ix, int iy) {
@@ -710,6 +717,98 @@ struct __GLOBALFRAME {
 		_stuffs.Draw();
 	}
 };
+struct DradNDropHandler : IDropTarget {
+	ULONG m_refCount;
+	wchar_t m_data[1024];
+	DradNDropHandler() {
+		m_refCount = 1;
+	}
+	HRESULT STDMETHODCALLTYPE QueryInterface(const IID& riid, void** ppvObject) override {
+		if (riid == IID_IUnknown || riid == IID_IDropTarget) {
+			*ppvObject = this;
+			AddRef();
+			return NOERROR;
+		}
+		*ppvObject = nullptr;
+		return ResultFromScode(E_NOINTERFACE);
+	}
+	ULONG STDMETHODCALLTYPE AddRef() override {
+		return ++m_refCount;
+	}
+	ULONG STDMETHODCALLTYPE Release() override {
+		if (--m_refCount == 0) {
+			delete this;
+			return 0;
+		}
+		return m_refCount;
+	}
+	HRESULT STDMETHODCALLTYPE DragEnter(IDataObject* dataObject, DWORD grfKeyState, POINTL mousePos, DWORD* effect) override {
+		//MessageBox(glutHandler, "dragenter", "Drag", MB_ICONINFORMATION);
+		//cout << "a" << endl;
+		*effect = DROPEFFECT_COPY;
+		return NOERROR;
+	}
+	HRESULT STDMETHODCALLTYPE DragOver(DWORD keyState, POINTL mousePos, DWORD* effect) override {
+		//MessageBox(glutHandler, "dragover", "Drag", MB_ICONINFORMATION);
+		*effect = DROPEFFECT_COPY;
+		return NOERROR;
+	}
+	HRESULT STDMETHODCALLTYPE DragLeave() override {
+		//MessageBox(glutHandler, "dragleave", "Drag", MB_ICONINFORMATION);
+		return NOERROR;
+	}
+	HRESULT STDMETHODCALLTYPE Drop(IDataObject* dataObject, DWORD keyState, POINTL mousePos, DWORD* effect) override {
+		//MessageBox(glutHandler, "drop", "Drag", MB_ICONINFORMATION);
+		cout << "drop " << m_refCount << endl;
+		LPOLESTR szFile = 0;
+		FORMATETC fdrop = { CF_HDROP, 0, DVASPECT_CONTENT, -1, TYMED_HGLOBAL };
+		vector<vector<wchar_t>> WC(1,vector<wchar_t>(0));
+		vector<string> Files;
+
+		if (SUCCEEDED(dataObject->QueryGetData(&fdrop))) {
+			STGMEDIUM stgMedium = { 0 };
+			stgMedium.tymed = TYMED_HGLOBAL;
+			HRESULT hr = dataObject->GetData(&fdrop, &stgMedium);
+			if (SUCCEEDED(hr)){
+				PVOID data = GlobalLock(stgMedium.hGlobal);
+				wchar_t *ws=NULL;
+				for (int i = *((BYTE*)(data));; i+=2) {
+					WC.back().push_back(((*((BYTE*)(data) + i + 1)) << 8) | (*((BYTE*)(data)+i)));
+					if (WC.back().back() == 0 && WC.back().size()>1) {
+						WC.back().pop_back();
+						WC.push_back(vector<wchar_t>(0));
+						continue;
+					}
+					else if (WC.back().back() == 0) {
+						WC.pop_back();
+						break;
+					}
+				}
+				for (int i = 0; i < WC.size(); i++) {
+					ws = WC[i].data();
+					char utf8[500];
+					wchar_t wstr[500];
+					char s1251[500];
+					WideCharToMultiByte(CP_UTF8, 0, ws, -1, utf8, 500, NULL, NULL);
+					utf8[WideCharToMultiByte(CP_UTF8, 0, ws, -1, utf8, 0, NULL, NULL)] = '\0';
+					// Подготовили строку UTF8 дальше идет ее преобразование в 1251
+					MultiByteToWideChar(CP_UTF8, 0, utf8, -1, wstr, 500);
+					wstr[MultiByteToWideChar(CP_UTF8, 0, utf8, -1, wstr, 0)];
+					WideCharToMultiByte(1251, 0, wstr, -1, s1251, 500, NULL, NULL);
+					utf8[WideCharToMultiByte(1251, 0, wstr, -1, s1251, 0, NULL, NULL)] = '\0';
+					Files.push_back(s1251);
+					if (Files.back().size() < 6)Files.pop_back();
+					cout << Files.back() << endl;
+				}
+				AddFiles(Files);
+			}
+		}
+
+
+		*effect = DROPEFFECT_COPY;
+		return NOERROR;
+	}
+};
 /////////////////////////////////////////////
 /////////ACTUAL FRAMEWORK USAGE//////////////
 /////////////////////////////////////////////
@@ -919,15 +1018,14 @@ void TrackListClick() {
 	}
 	IF.SelectedFileID = (int)ceil(ay);
 }
-void onAdd() {
-	vector<string> Files=MOFD("Adding MIDIs to the list\0");
+void AddFiles(vector<string> &Files) {
 	string BT;
-	if (!(Files.size() <= 1 && Files[0] == "")){
+	if (!(Files.size() <= 1 && Files[0] == "")) {
 		float ButtOffset;
 		short Flag;
 		for (int i = 0; i < Files.size(); i++) {
-			ButtOffset = (INLISTHEIGTH + INLISTBMARGIN*2 + INLISTADDITIONALDELTA)*IF.FILES.size();
-			IF.InsertNewFile(Files[i]); 
+			ButtOffset = (INLISTHEIGTH + INLISTBMARGIN * 2 + INLISTADDITIONALDELTA)*IF.FILES.size();
+			IF.InsertNewFile(Files[i]);
 			BT = Files[i];
 			Flag = 0;
 			for (int q = BT.size() - 1; q >= 0; q--) {
@@ -940,13 +1038,18 @@ void onAdd() {
 			BT.erase(0, Flag);
 			if (BT.size() > 45)BT.erase(45, BT.size() - 45);
 			if (INLISTTOPSTRINGSTART - ButtOffset >= -4.15) {
-				GF.AddButton(TrackListClick, "B" + to_string((int)IF.FILES.size()), BT, -INLISTTOPSTRINGSTART, INLISTTOPSTRINGSTART - ButtOffset,0,0,
+				GF.AddButton(TrackListClick, "B" + to_string((int)IF.FILES.size()), BT, -INLISTTOPSTRINGSTART, INLISTTOPSTRINGSTART - ButtOffset, 0, 0,
 					INLISTBMARGIN, INLISTTMARGIN, INLISTTMARGIN, INLISTHEIGTH,
-					2,0xCFFCFF1F,0xCFFFCFCF);
+					2, 0xCFFCFF1F, 0xCFFFCFCF);
 				GF.TopButtonHoverSettings(0xCFFFCFCF, 0x000F00CF, 2);
 			}
 		}
 	}
+}
+void onAdd() {
+	vector<string> Files=MOFD("Adding MIDIs to the list\0");
+	if (Files.size())cout << Files.front();
+	AddFiles(Files);
 }
 
 void onEnterInOffsetInputAlert() {
@@ -1085,6 +1188,8 @@ void onStart() {
 	}
 }
 
+DradNDropHandler DNDH_Global;
+
 void INIT() {
 	IF.Init();
 	GF.InitNewTextFrame(-RES + 0.5, RES - 0.5, RES * 2 - 1, RES * 2 - 1, 0x000F033F);
@@ -1110,7 +1215,10 @@ void INIT() {
 	GF.TopButtonHoverSettings(0x3F7FFF4F, 0x7FCFFF9F, 2);
 	GF.AddButton(onSaveTo, "save", "SAVE TO", 2.75, -4.1, 0, 1.5, 0.125, 0.05, 0.1, 0.15, 2, 0x00FF7F3F, 0x3FFFCF7F);
 	GF.TopButtonHoverSettings(0x3FFF7F4F, 0x7FCFFF9F, 2);
-
+	glutHandler = FindWindowA(NULL,GLUTWINDOWNAME);
+	DragAcceptFiles(glutHandler, TRUE);
+	OleInitialize(nullptr);
+	cout << "RDD " << (RegisterDragDrop(glutHandler, &DNDH_Global)) << endl;
 }
 
 /////////////////////////////////////////////
@@ -1121,21 +1229,24 @@ string FloatToDottedString(float F) {
 	for (int i = 0; i < temp.length(); i++) {
 		if (temp[i] <= 127)out += ASCII[temp[i]];
 		else out += ASCII[1];
-		if (i != temp.length() - 1)out += "+";
+		if (i != temp.length() - 1)out.push_back('+');
 	}
 	return out;
 }
 string StringToDottedString(string Inp) {
 	string out = "";
+	//cout << Inp << endl;
 	for (int i = 0; i < Inp.length(); i++) {
-		if (Inp[i] <= 127)out += ASCII[Inp[i]];
-		else out += ASCII[1];
-		if (i != Inp.length() - 1)out += "+";
+		//cout << Inp[i] << "_";
+		out += ASCII[(Inp[i])&0x7F];
+		if (i != Inp.size() - 1)out.push_back('+');
 	}
+	//cout << endl;
 	return out;
 }
 void onTimer(int v);
 void mDisplay() {
+	glutHandler = FindWindowA(NULL, GLUTWINDOWNAME);
 	glClear(GL_COLOR_BUFFER_BIT);
 	if (FIRSTBOOT) {
 		INIT();
@@ -1180,7 +1291,7 @@ void mClick(int button, int state, int x, int y) {
 
 int main(int argc, char ** argv) {
 	srand(TIMESEED());
-	if (1)ShowWindow(GetConsoleWindow(), SW_HIDE);
+	if (0)ShowWindow(GetConsoleWindow(), SW_HIDE);
 	else ShowWindow(GetConsoleWindow(), SW_SHOW);
 	dirto = wayto = argv[0];
 	while (dirto.back() != '\\')dirto.pop_back();
@@ -1190,7 +1301,7 @@ int main(int argc, char ** argv) {
 	glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGBA);
 	glutInitWindowSize(720, 720);
 	glutInitWindowPosition(50, 50);
-	glutCreateWindow("Green sea");
+	glutCreateWindow(GLUTWINDOWNAME);
 
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);//_MINUS_SRC_ALPHA
 	glEnable(GL_BLEND);//GL_POLYGON_SMOOTH
