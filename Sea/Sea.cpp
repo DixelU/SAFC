@@ -772,6 +772,7 @@ struct DradNDropHandler : IDropTarget {
 			if (SUCCEEDED(hr)){
 				PVOID data = GlobalLock(stgMedium.hGlobal);
 				wchar_t *ws=NULL;
+				size_t sz;
 				for (int i = *((BYTE*)(data));; i+=2) {
 					WC.back().push_back(((*((BYTE*)(data) + i + 1)) << 8) | (*((BYTE*)(data)+i)));
 					if (WC.back().back() == 0 && WC.back().size()>1) {
@@ -797,8 +798,9 @@ struct DradNDropHandler : IDropTarget {
 					WideCharToMultiByte(1251, 0, wstr, -1, s1251, 500, NULL, NULL);
 					utf8[WideCharToMultiByte(1251, 0, wstr, -1, s1251, 0, NULL, NULL)] = '\0';
 					Files.push_back(s1251);
-					if (Files.back().size() < 6)Files.pop_back();
-					cout << Files.back() << endl;
+					if (Files.back().size() < 6 || ((sz = Files.back().rfind(".mid")) < Files.back().size()-5))Files.pop_back();
+					else if(sz == string::npos)Files.pop_back();
+					if(!Files.empty())cout << Files.back() << endl;
 				}
 				AddFiles(Files);
 			}
