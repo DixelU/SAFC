@@ -1,8 +1,8 @@
 ﻿E:\Локальный диск (F) x64\Программы (x64)\MVisualStudio\Common7\IDE\VC\VCTargets\Platforms\Win32\PlatformToolsets\v141_xp\Toolset.targets(39,5): warning MSB8051: поддержка Windows XP прекращена, ее не будет в последующих выпусках Visual Studio. Дополнительные сведения: https://go.microsoft.com/fwlink/?linkid=2023588.
+  stdafx.cpp
   Sea.cpp
   Создание кода
-  1 of 1326 functions (<0.1%) were compiled, the rest were copied from previous compilation.
-    0 functions were new in current compilation
-    1 functions had inline decision re-evaluated but remain unchanged
+e:\git\safc\sea\sea.cpp(595): warning C4715: __MAINFRAME::GetAccessToButton: значение возвращается не при всех путях выполнения
+  All 1326 functions were compiled because no usable IPDB/IOBJ from previous compilation was found.
   Создание кода завершено
   Sea.vcxproj -> E:\Git\SAFC\Sea\Release\Sea.exe
