@@ -1,3 +1,8 @@
 
 OWVSbuild/Launcher.exe
 OWVSbuild/SAFC.exe
+*.7z
+*.pdb
+*.tlog
+*.ipch
+*.db

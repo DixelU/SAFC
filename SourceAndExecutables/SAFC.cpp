@@ -20,7 +20,7 @@ bool is64bit(void){
         return false;
     return true;
 }
-bool FELOG=false,PCLOG=false,dbg=true,ORDPCHNG=false,EMPTYTRCKREM=false;//File error log//Processing console log//
+bool PCLOG=false,dbg=true,ORDPCHNG=false,EMPTYTRCKREM=false;//File error log//Processing console log//
 struct FO{
 	int offset;
 	int filenum;
@@ -32,13 +32,6 @@ bool operator>=(FO a,FO b){return a.filenum>=b.filenum;}
 bool operator==(FO a,FO b){return a.filenum==b.filenum;}
 set<FO> Fileoffset;
 string exF="";
-void LOG(string LG,string file){//because why not
-	cout<<LG<<endl;
-	if(FELOG){
-		ofstream logout("Log.log", std::ios::app);
-		logout<<"["<<file<<"]: "<<LG<<endl;
-	}
-}
 
 vector<string> BATstart(int argc, char** arg){//easy to understand
 	remove("Log.log");
@@ -49,33 +42,6 @@ vector<string> BATstart(int argc, char** arg){//easy to understand
 		IO.push_back(t);
 	}
 	return IO;
-}
-vector<string> CONstart(){//parses commands from console
-	vector<string> VIO;
-	string SI="",t="";
-	getline(cin,SI);
-	bool BRACK=false;
-	//char IO;
-	for(int i=0;i<SI.size();i++){//i don't think it's hard to understand it
-		if(SI[i]!='"' && !BRACK && SI[i]!=' '){
-			t.push_back(SI[i]);
-		}
-		else if(SI[i]=='"' && !BRACK){
-			i++;
-			while(i<SI.size() && SI[i]!='"'){
-				t.push_back(SI[i]);
-				i++;
-			}
-			VIO.push_back(t);
-			t="";
-			i++;
-		}
-		else{
-			VIO.push_back(t);
-			t="";
-		}
-	}
-	return VIO;
 }
 vector<unsigned short> PPQNreader(vector<string> link){//reads ppqs in files
 	unsigned short t=12;
@@ -277,11 +243,9 @@ int PPQNch(string link,double mult,int offset,int otemp){//returns tracks count/
 				if( true || ((unsigned char)IO)!=0xB0 ){
 					TRACK.push_back(IO);
 					_in.get(IO);
-					if((unsigned char)IO&0x80)printf("Corruption in 8x-Bx|Ex-Fx event: 1st parameter (%x) at %x\n",(unsigned char)IO,_in.tellg());
-					TRACK.push_back((unsigned char)IO&0x7F);
+					TRACK.push_back(IO);
 					_in.get(IO);
-					if((unsigned char)IO&0x80)printf("Corruption in 8x-Bx|Ex-Fx event: 2nd parameter (%x) at %x\n",(unsigned char)IO,_in.tellg());
-					TRACK.push_back((unsigned char)IO&0x7F);
+					TRACK.push_back(IO);
 				}
 			}
 			else if( ((unsigned char)IO)==0xF7 || ((unsigned char)IO)==0xF0 ){
@@ -291,7 +255,7 @@ int PPQNch(string link,double mult,int offset,int otemp){//returns tracks count/
 				for(int i=0;true;i++){//getting current offset
 					_in.get(IO);
 					TRACK.push_back(IO);
-					magic=(magic<<7)+(((unsigned char)IO)&0x7F);
+					magic=(magic<<7)|(((unsigned char)IO)&0x7F);
 					if(((unsigned char)IO)<0x80)break;
 				}
 				for(int e=0;e<magic&&_in.get(IO);e++)TRACK.push_back(IO);
@@ -532,7 +496,6 @@ void OpParser(vector<string> Ip){//lmao
 					}
 					else{
 						cout<<"Couldn`t find file: "<<Ip[i]<<endl;
-						if(FELOG)LOG("Couln`t find file.",Ip[i]);
 						err=1;
 					}
 				}
@@ -582,8 +545,8 @@ int main(int argc, char** argv) {
 	vector<string> ARGS;
 	ARGS=BATstart(argc,argv);
 	if(ARGS.empty()){
-		cout<<"I'm Simple AF Converter created to help mortals with merging midis"<<endl;
-		ARGS=CONstart();
+		cout<<"I'm Simple AF Converter created to help mortals with merging midis\nConsole input is disabled :(\n"<<endl;
+		system("pause");
 	}
 	cout<<(is64bit()?"64bit Detected":"32bit Detected")<<endl;
 	//copy(ARGS.begin(),ARGS.end(),ostream_iterator<string>(cout,":"));
