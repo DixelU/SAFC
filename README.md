@@ -9,4 +9,5 @@ It has a big story. First version was literally compilier-like application and d
 You can download and read manual right here (it png, so anyone anywhere can read it): https://github.com/DixelU/SAFC/blob/master/Manual.png It will get updated *only* on major updates, adding new features.
 The app is compilied for Windows XP 32bit (because there's still people using it, meanwhile being a part of BMC)
 
-Also i need help with adding 64bit version of libraries to it.
+Also i need help with adding 64bit version of libraries to it. I think that's all :)
+Thanks to all beta testers on SAF server! 
