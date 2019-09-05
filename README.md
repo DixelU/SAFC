@@ -1,8 +1,6 @@
 Simple AF Converter (SAFC)
 ==========================
 
-Is a first application in *SAF* branch apps. *Specifically for Black MIDIS*
-
 **Merging completely different midis by completely different ways!**
 
 It has a big story. First version was literally compilier-like application and dos-like interactive launcher. Then it got a simple OpenGL launcher, yet having the same old basement in the entity of *SAFC.exe*. Now i got it burned, and there's now single app with 2 DLL files with it :)
