@@ -4093,7 +4093,7 @@ struct FileSettings {////per file settings
 		SwitchBoolSetting(SMP_BoolSetting);
 	}
 	SingleMIDIReProcessor* BuildSMRP() {
-		SingleMIDIReProcessor *SMRP = new SingleMIDIReProcessor(this->Filename, this->BoolSettings, this->NewTempo, this->OffsetTicks, this->NewPPQN, this->GroupID, this->VolumeRecalculator, this->PitchReBender, this->KeyTranspose, L"_.mid", this->InplaceMergeEnabled, this->FileSize);
+		SingleMIDIReProcessor *SMRP = new SingleMIDIReProcessor(this->Filename, this->BoolSettings, this->NewTempo, this->OffsetTicks, this->NewPPQN, this->GroupID, this->VolumeRecalculator, this->PitchReBender, this->KeyTranspose, this->WFileNamePostfix, this->InplaceMergeEnabled, this->FileSize);
 		SMRP->AppearanceFilename = this->AppearanceFilename;
 		return SMRP;
 	}
@@ -4318,12 +4318,13 @@ void AddFiles(vector<wstring> Filenames) {
 			_Data.Files.back().NewTempo = _Data.GlobalNewTempo;
 			_Data.Files.back().OffsetTicks = _Data.GlobalOffset;
 			_Data.Files.back().InplaceMergeEnabled = _Data.InplaceMergeFlag;
-			for (int q = 0; q < _Data.Files.size()-1; q++)
-				if (_Data[i].Filename == Filenames[i]) {
+			for (int q = 0; q < _Data.Files.size(); q++) {
+				if (_Data[q].Filename == _Data.Files.back().Filename) {
+					_Data[q].FileNamePostfix = to_string(Counter) + "_.mid";
+					_Data[q].WFileNamePostfix = to_wstring(Counter) + L"_.mid";
 					Counter++;
-					_Data[i].FileNamePostfix = to_string(Counter) + "_.mid";
-					_Data[i].WFileNamePostfix = to_wstring(Counter) + L"_.mid";
 				}
+			}
 		}
 		else {
 			_Data.Files.pop_back();
