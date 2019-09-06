@@ -17,13 +17,24 @@
 #include <map>
 #include <deque>
 #include <thread>
-#include <Windows.h>
-#include <wchar.h>
+//#include <>
+
+//#define WIN32_LEAN_AND_MEAN
 
 #include "glew.h"
-#pragma comment (lib, "glew32.lib")
+#ifndef __X64
+	#pragma comment (lib, "glew32.lib")
+#else
+	#pragma comment (lib, "x64\\glew32.lib")
+#endif
 
 #include "glut.h"
+#include "freeglut.h"
+#ifndef __X64
+	#pragma comment (lib, "freeglut.lib")
+#else
+	#pragma comment (lib, "x64\\freeglut.lib")
+#endif
 
 #include "shader_smpclass.h"
 
@@ -306,7 +317,7 @@ struct SingleMIDIReProcessor {
 				}
 				///Deltatime recalculation
 				DWORD vlv = 0, tvlv;
-				INT32 size = 0;
+				DWORD size = 0;
 				IO = 0;
 				do {
 					IO = fi.get();
@@ -2456,6 +2467,18 @@ struct SelectablePropertedList : HandleableUIPart {
 	BIT MouseHandler(float mx, float my, CHAR Button/*-1 left, 1 right, 0 move*/, CHAR State /*-1 down, 1 up*/)  override {
 		if (Lock)return 0;
 		TopArrowHovered = BottomArrowHovered = 0;
+		if (fabsf(mx - HeaderCXPos) < 0.5*Width && my < HeaderYPos && my > HeaderYPos - CalculatedHeight) {
+			if (Button == 2 /*UP*/) {
+				if (State == -1) {
+					SafeRotateList(-3);
+				}
+			}
+			else if (Button == 3 /*DOWN*/) {
+				if (State == -1) {
+					SafeRotateList(3);
+				}
+			}
+		}
 		if (MaxVisibleLines && Selectors.size()<SelectorsText.size()) {
 			if (fabsf(mx - HeaderCXPos) < 0.5*Width) {
 				if (my>HeaderYPos && my<HeaderYPos + ARROW_STICK_HEIGHT) {
@@ -2771,7 +2794,7 @@ struct SpecialSigns {
 		//printf("%x\n", CurStage_TotalStages);
 		glLineWidth(ceil(SZParam / 1.5));
 		glBegin(GL_LINES);
-		for (float a = 0; a < 360.5; a += (180. / (TotalStages))) {
+		for (float a = 0; a < 360.5f; a += (180. / (TotalStages))) {
 			t = a / 360.;
 			glColor4ub(
 				255 * (t) + R * (1 - t),
@@ -3177,6 +3200,7 @@ struct WindowsHandler {
 	}
 	void MouseHandler(float mx,float my, CHAR Button, CHAR State) {
 		if (!InterfaceIsActive)return;
+		//printf("%X\n", Button);
 		list<map<string, MoveableWindow*>::iterator>::iterator AWIterator = ActiveWindows.begin(),CurrentAW;
 		CurrentAW = AWIterator;
 		BIT flag=0;
@@ -5151,7 +5175,6 @@ void mClick(int butt, int state, int x, int y) {
 	Button = butt - 1;
 	if (state == GLUT_DOWN)State = -1;
 	else if (state == GLUT_UP)State = 1;
-
 	if (WH)WH->MouseHandler(fx, fy, Button, State);
 }
 void mSpecialKey(int Key,int x, int y) {
@@ -5171,7 +5194,7 @@ void mExit(int a) {
 
 int main(int argc, char ** argv) {
 	if (1)
-		ShowWindow(GetConsoleWindow(), SW_HIDE); 
+		ShowWindow(GetConsoleWindow(), SW_SHOW); 
 	SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS);
 	//srand(1);
 	//srand(clock());
