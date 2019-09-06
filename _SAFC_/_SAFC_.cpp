@@ -960,10 +960,19 @@ struct MIDICollectionThreadedMerger {
 					cout << "TrackSize overflow!!!\n";
 				else if (Track.empty())continue;
 				fo << "MTrk";
-				fo.put(Track.size() >> 24);
-				fo.put(Track.size() >> 16);
-				fo.put(Track.size() >> 8);
-				fo.put(Track.size());
+				if (Track.size() > 0xFFFFFFFFu) {
+					ThrowAlert_Error("Inplace merge:\nTrackSize overflow!!!\n" + to_string(Track.size()) + " bytes");
+					fo.put(0xFF);
+					fo.put(0xFF);
+					fo.put(0xFF);
+					fo.put(0xFF);
+				}
+				else {
+					fo.put(Track.size() >> 24);
+					fo.put(Track.size() >> 16);
+					fo.put(Track.size() >> 8);
+					fo.put(Track.size());
+				}
 				copy(Track.begin(), Track.end(), ostream_iterator<BYTE>(fo));
 				Track.clear();
 				(*TrackCount)++;
@@ -5194,7 +5203,7 @@ void mExit(int a) {
 
 int main(int argc, char ** argv) {
 	if (1)
-		ShowWindow(GetConsoleWindow(), SW_SHOW); 
+		ShowWindow(GetConsoleWindow(), SW_HIDE); 
 	SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS);
 	//srand(1);
 	//srand(clock());
