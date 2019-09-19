@@ -47,10 +47,10 @@ typedef bool BIT;
 
 FLOAT RANGE=200,MXPOS=0.,MYPOS=0.;
 
-#define WINDOWTITLE "Beta SAFC"
+#define WINDOWTITLE "Gamma SAFC"
 
 //#define ROT_ANGLE 0.7
-float ROT_ANGLE = 0.7;
+float ROT_ANGLE = 0.;
 #define ROT_RAD ANGTORAD(ROT_ANGLE)
 //#define RANGE 200
 #define WINDXSIZE 720
@@ -296,7 +296,7 @@ struct SingleMIDIReProcessor {
 		}
 		///Tracks 
 
-		while (fi.good()) {
+		while (fi.good() && !fi.eof()) {
 			Header = 0;
 			while (Header != MTrk && fi.good() && !fi.eof()) {//MTrk = 1297379947
 				Header = (Header << 8) | fi.get();
@@ -309,7 +309,7 @@ struct SingleMIDIReProcessor {
 
 			DeltaTimeTranq += GlobalOffset;
 			///Parsing events
-			while (fi.good()) {
+			while (fi.good() && !fi.eof()) {
 				if (KeyConverter) {
 
 					Header = 0;
@@ -5022,13 +5022,13 @@ const GLchar *fragment_shader[] = { //uniform float time;
 	"}\n",
 	"vec4 spirals(float Time, vec2 p){\n",
 	"	float col;\n",
-	"	for(float i = 1.0; i < 20.0; i++){\n",
-	"		p.x -= 0.1 / (i) * sin(i * 4.0 * p.y + Time + cos(Time / (20. * i) * i));\n",
-	"     	p.y += 0.1 / (i)* cos(i * 10.0 * p.x + Time + sin((Time / (15. * i)) * i));\n",
-	"   }\n",
-	"   col = abs(p.x + p.y);\n",
+	"        for(float i = 0.25; i < 15.0; i++){\n",
+	"		p.x += 0.25 / (i) * sin(i * 4.0 * p.y + Time + cos(Time / (15. * i + SinewaveWidth*tan(i)) * i));\n",
+	"     		p.y -= 0.1 / (i)* cos(i * 8.0 * p.x + Time + sin((Time / (30. * i) + SinewaveWidth*atan(i)) * i));\n",
+	"     	}\n",
+	"     	col = abs(p.y * p.x)/(max(abs(Basewave),0.1)*sign(Basewave)*10.);\n",
 	"	return vec4(palette(col, vec3(0.5, 0.5, 0.5), vec3(0.5, 0.5, 0.5), vec3(1.0, 1.0, 1.0), vec3(0.00, 0.10, 0.20)), 1.0) + vec4(0.2,0.1,0.1,0.1);\n",
-	"}",
+	"}"
 	"vec4 flare(float Time, vec2 p, float y, float param1 , float param2){\n",
 	"	p = ( p / resolution.xy ) - y;\n",
 	"	float sx = param2 * (p.x + 1.) * sin(cos( 5.0 * p.x - 1. * Time));\n",
