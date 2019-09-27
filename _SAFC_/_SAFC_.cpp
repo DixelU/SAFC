@@ -84,6 +84,40 @@ int TIMESEED() {
 void ThrowAlert_Error(string AlertText); 
 void AddFiles(vector<wstring> Filenames);
 
+size_t getAvailableRAM(){
+	size_t ret = 0;
+	DWORD v = GetVersion();
+	DWORD major = (DWORD)(LOBYTE(LOWORD(v)));
+	DWORD minor = (DWORD)(HIBYTE(LOWORD(v)));
+	DWORD build;
+	if (v < 0x80000000) build = (DWORD)(HIWORD(v));
+	else build = 0;
+
+	// because compiler static links the function...
+	BOOL(__stdcall*GMSEx)(LPMEMORYSTATUSEX) = 0;
+
+	HINSTANCE hIL = LoadLibrary(L"kernel32.dll");
+	GMSEx = (BOOL(__stdcall*)(LPMEMORYSTATUSEX))GetProcAddress(hIL, "GlobalMemoryStatusEx");
+
+	if (GMSEx)
+	{
+		MEMORYSTATUSEX m;
+		m.dwLength = sizeof(m);
+		if (GMSEx(&m))
+		{
+			ret = (int)(m.ullAvailPhys >> 20);
+		}
+	}
+	else
+	{
+		MEMORYSTATUS m;
+		m.dwLength = sizeof(m);
+		GlobalMemoryStatus(&m);
+		ret = (int)(m.dwAvailPhys >> 20);
+	}
+	return ret;
+}
+
 template<typename typekey, typename typevalue>
 struct PLC {
 	map<typekey, typevalue> ConversionMap;
@@ -4849,7 +4883,7 @@ void OnSaveTo() {
 }
 
 void Init() {
-	_Data.DetectedThreads = thread::hardware_concurrency()-1;
+	_Data.DetectedThreads = min(thread::hardware_concurrency() - 1,(int)(ceil(getAvailableRAM() / 4096.)));
 
 	MoveableWindow *T = new MoveableWindow("Main window", STLS_WhiteSmall, -200, 200, 400, 400, 0x3F3F3FAF, 0x7F7F7F7F);
 	SelectablePropertedList *SPL = new SelectablePropertedList(BS_List_Black_Small, NULL, PropsAndSets::OGPInMIDIList, -50, 172, 300, 12, 65, 30);
