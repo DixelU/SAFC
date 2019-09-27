@@ -4883,7 +4883,7 @@ void OnSaveTo() {
 }
 
 void Init() {
-	_Data.DetectedThreads = min(thread::hardware_concurrency() - 1,(int)(ceil(getAvailableRAM() / 4096.)));
+	_Data.DetectedThreads = min(thread::hardware_concurrency() - 1,(int)(ceil(getAvailableRAM() / 2048.)));
 
 	MoveableWindow *T = new MoveableWindow("Main window", STLS_WhiteSmall, -200, 200, 400, 400, 0x3F3F3FAF, 0x7F7F7F7F);
 	SelectablePropertedList *SPL = new SelectablePropertedList(BS_List_Black_Small, NULL, PropsAndSets::OGPInMIDIList, -50, 172, 300, 12, 65, 30);
