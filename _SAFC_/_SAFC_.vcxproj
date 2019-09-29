@@ -206,7 +206,6 @@
     <ClCompile Include="_SAFC_.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ResourceCompile Include="res.rc" />
     <ResourceCompile Include="_SAFC_.rc" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

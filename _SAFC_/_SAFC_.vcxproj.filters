@@ -40,8 +40,5 @@
     <ResourceCompile Include="_SAFC_.rc">
       <Filter>Исходные файлы</Filter>
     </ResourceCompile>
-    <ResourceCompile Include="res.rc">
-      <Filter>Файлы ресурсов</Filter>
-    </ResourceCompile>
   </ItemGroup>
 </Project>

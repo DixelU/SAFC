@@ -1868,7 +1868,7 @@ struct InputField : HandleableUIPart {
 	string *OutputSource;
 	DWORD MaxChars,BorderRGBAColor;
 	float Xpos, Ypos, Height, Width;
-	BIT Focused;
+	BIT Focused,FirstInput;
 	SingleTextLine *STL;
 	SingleTextLine *Tip;
 	InputField(string DefaultString ,float Xpos, float Ypos, float Height, float Width, SingleTextLineSettings* DefaultStringSettings, string *OutputSource, DWORD BorderRGBAColor, SingleTextLineSettings* TipLineSettings = NULL, string TipLineText = " ",  DWORD MaxChars = 0, _Align InputAlign = _Align::left,_Align TipAlign= _Align::center, Type InputType = Type::Text) {
@@ -1890,8 +1890,8 @@ struct InputField : HandleableUIPart {
 		this->Ypos = Ypos;
 		this->Height = (DefaultStringSettings->YUnitSize * 2 > Height) ? DefaultStringSettings->YUnitSize * 2 : Height;
 		this->Width = Width;
-		this->CurrentString = "";
-		this->Focused = 0;
+		this->CurrentString = DefaultString;
+		this->FirstInput = this->Focused = 0;
 		this->Lock = 0;
 		this->OutputSource = OutputSource;
 	}
@@ -1936,6 +1936,7 @@ struct InputField : HandleableUIPart {
 	}
 	void BackSpace() {
 		if (Lock)return;
+		ProcessFirstInput();
 		if (CurrentString.size()) {
 			CurrentString.pop_back();
 			UpdateInputString();
@@ -1948,6 +1949,12 @@ struct InputField : HandleableUIPart {
 		if (Lock)return;
 		if(OutputSource)*OutputSource = CurrentString;
 		else if (AnotherSource)*AnotherSource = CurrentString;
+	}
+	void ProcessFirstInput() {
+		if (FirstInput) {
+			FirstInput = 0;
+			CurrentString = "";
+		}
 	}
 	void KeyboardHandler(char CH) {
 		if (Lock)return;
@@ -1980,6 +1987,7 @@ struct InputField : HandleableUIPart {
 	}
 	void Input(char CH) {
 		if (Lock)return;
+		ProcessFirstInput();
 		if (!MaxChars || CurrentString.size()<MaxChars) {
 			CurrentString.push_back(CH);
 			UpdateInputString();
@@ -2001,6 +2009,7 @@ struct InputField : HandleableUIPart {
 		if (Lock)return;
 		CurrentString = NewString.substr(0, this->MaxChars);
 		UpdateInputString(NewString);
+		FirstInput = 1;
 	}
 	void Draw() override {
 		if (Lock)return;
@@ -4187,7 +4196,9 @@ struct SAFCData {////overall settings and storing perfile settings....
 		}
 	}
 	void SetGlobalPPQN(WORD NewPPQN=0,BIT ForceGlobalPPQNOverride=false) {
-		if (IncrementalPPQN && !ForceGlobalPPQNOverride)
+		if (!NewPPQN && ForceGlobalPPQNOverride)
+			return;
+		if (!ForceGlobalPPQNOverride)
 			NewPPQN = GlobalPPQN;
 		if (!ForceGlobalPPQNOverride && (!NewPPQN || IncrementalPPQN)) {
 			for (int i = 0; i < Files.size(); i++)
@@ -4633,7 +4644,7 @@ void OnRemAll() {
 void OnSubmitGlobalPPQN() {
 	auto pptr = (*WH)["PROMPT"];
 	string t = ((InputField*)(*pptr)["FLD"])->CurrentString;
-	WORD PPQN = (t.size())?stoi(t):0;
+	WORD PPQN = (t.size())?stoi(t):_Data.GlobalPPQN;
 	_Data.SetGlobalPPQN(PPQN, true);
 	WH->DisableWindow("PROMPT");
 	//PropsAndSets::OGPInMIDIList(PropsAndSets::currentID);
@@ -4645,7 +4656,7 @@ void OnGlobalPPQN() {
 void OnSubmitGlobalOffset() {
 	auto pptr = (*WH)["PROMPT"];
 	string t = ((InputField*)(*pptr)["FLD"])->CurrentString;
-	DWORD O = (t.size()) ? stoi(t) : 0;
+	DWORD O = (t.size()) ? stoi(t) : _Data.GlobalOffset;
 	_Data.SetGlobalOffset(O);
 	WH->DisableWindow("PROMPT");
 	//PropsAndSets::OGPInMIDIList(PropsAndSets::currentID);
@@ -4658,7 +4669,7 @@ void OnGlobalOffset() {
 void OnSubmitGlobalTempo() {
 	auto pptr = (*WH)["PROMPT"];
 	string t = ((InputField*)(*pptr)["FLD"])->CurrentString;
-	INT32 Tempo = (t.size()) ? stoi(t) : 0;
+	INT32 Tempo = (t.size()) ? stoi(t) : _Data.GlobalNewTempo;
 	_Data.SetGlobalTempo(Tempo);
 	WH->DisableWindow("PROMPT");
 	//PropsAndSets::OGPInMIDIList(PropsAndSets::currentID);
@@ -4909,7 +4920,7 @@ void Init() {
 		0x5F5F5FAF, 0xFFFFFFFF, 0x5F5F5FAF, 0xFFFFFFFF, 0x7F7F7F7FF, NULL, " ");
 	(*T)["SAVE_AS"] = new Button("Save as...", STLS_WhiteSmall, OnSaveTo, 150, -152.5, 75, 12, 1,
 		0x3FAF00AF, 0xFFFFFFFF, 0x3FAF00AF, 0xFFFFFFFF, 0x7F7F7F7FF, NULL, " ");
-	(*T)["START"] = Butt = new Button("Start _incomp", STLS_WhiteSmall, OnStart, 150, -177.5, 75, 12, 1,
+	(*T)["START"] = Butt = new Button("Start merging", STLS_WhiteSmall, OnStart, 150, -177.5, 75, 12, 1,
 		0x000000AF, 0xFFFFFFFF, 0x000000AF, 0xFFFFFFFF, 0x7F7F7F7FF, NULL, " ");//177.5
 
 	(*WH)["MAIN"] = T;
