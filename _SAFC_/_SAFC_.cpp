@@ -45,18 +45,18 @@ using namespace std;
 typedef unsigned char BYTE;
 typedef bool BIT;
 
-FLOAT RANGE=200,MXPOS=0.,MYPOS=0.;
+FLOAT RANGE=200,MXPOS=0.f,MYPOS=0.f;
 
-#define WINDOWTITLE "Gamma SAFC"
+constexpr char* WINDOWTITLE = "Gamma SAFC";
 
 //#define ROT_ANGLE 0.7
-float ROT_ANGLE = 0.;
+float ROT_ANGLE = 0.f;
 #define ROT_RAD ANGTORAD(ROT_ANGLE)
 //#define RANGE 200
 #define WINDXSIZE 720
 #define WINDYSIZE 720
 
-#define ANGTORAD(a) (0.0174532925*(a))
+#define ANGTORAD(a) (0.0174532925f*(a))
 #define RANDFLOAT(range)  ((0 - range) + ((float)rand()/((float)RAND_MAX/(2*range))))
 #define RANDSGN ((rand()&1)?-1:1)
 #define SLOWDPROG(a,b,progressrate) ((a + (fract - 1)*b)/progressrate)
@@ -73,7 +73,7 @@ auto HandCursor = ::LoadCursor(NULL, IDC_HAND), AllDirectCursor = ::LoadCursor(N
 //const float singlepixwidth = (float)RANGE / WINDXSIZE;
 
 void absoluteToActualCoords(int ix, int iy, float &x, float &y);
-float CONSTZERO(float x, float y) { return 0.; }
+float CONSTZERO(float x, float y) { return 0.f; }
 int TIMESEED() {
 	SYSTEMTIME t;
 	GetLocalTime(&t);
@@ -99,8 +99,7 @@ size_t getAvailableRAM(){
 	HINSTANCE hIL = LoadLibrary(L"kernel32.dll");
 	GMSEx = (BOOL(__stdcall*)(LPMEMORYSTATUSEX))GetProcAddress(hIL, "GlobalMemoryStatusEx");
 
-	if (GMSEx)
-	{
+	if (GMSEx) {
 		MEMORYSTATUSEX m;
 		m.dwLength = sizeof(m);
 		if (GMSEx(&m))
@@ -108,8 +107,7 @@ size_t getAvailableRAM(){
 			ret = (int)(m.ullAvailPhys >> 20);
 		}
 	}
-	else
-	{
+	else {
 		MEMORYSTATUS m;
 		m.dwLength = sizeof(m);
 		GlobalMemoryStatus(&m);
@@ -1351,7 +1349,7 @@ struct DottedSymbol {
 	}
 	void virtual Draw() {
 		if (RenderWay == " ")return;
-		float VerticalFlag = 0.;
+		float VerticalFlag = 0.f;
 		CHAR BACK=0;
 		if (RenderWay.back() == '#' || RenderWay.back() == '~') {
 			BACK = RenderWay.back();
@@ -1444,15 +1442,15 @@ struct BiColoredDottedSymbol : DottedSymbol {
 	void RefillGradient(BYTE Red = 255, BYTE Green = 255, BYTE Blue = 255, BYTE Alpha = 255,
 		BYTE gRed = 255, BYTE gGreen = 255, BYTE gBlue = 255, BYTE gAlpha = 255,
 		BYTE BaseColorPoint = 5, BYTE GradColorPoint = 8) override {
-		float xbase = (((float)(BaseColorPoint % 3)) - 1.), ybase = (((float)(BaseColorPoint / 3)) - 1.),
-			xgrad = (((float)(GradColorPoint % 3)) - 1.), ygrad = (((float)(GradColorPoint / 3)) - 1.);
+		float xbase = (((float)(BaseColorPoint % 3)) - 1.f), ybase = (((float)(BaseColorPoint / 3)) - 1.f),
+			xgrad = (((float)(GradColorPoint % 3)) - 1.f), ygrad = (((float)(GradColorPoint / 3)) - 1.f);
 		float ax = xgrad - xbase, ay = ygrad - ybase, t;
-		float ial = 1. / (ax*ax + ay * ay);
+		float ial = 1.f / (ax*ax + ay * ay);
 		///R
 		for (int x = -1; x <= 1; x++) {
 			for (int y = -1; y <= 1; y++) {
 				t = (ax * (x - xbase) + ay * (y - ybase)) * ial;
-				t = (Red * t + (1. - t)*gRed);
+				t = (Red * t + (1.f - t)*gRed);
 				if (t < 0)t = 0;
 				if (t > 255)t = 255;
 				gR[(x + 1) + (3 * (y + 1))] = round(t);
@@ -1462,7 +1460,7 @@ struct BiColoredDottedSymbol : DottedSymbol {
 		for (int x = -1; x <= 1; x++) {
 			for (int y = -1; y <= 1; y++) {
 				t = (ax * (x - xbase) + ay * (y - ybase)) * ial;
-				t = (Green * t + (1. - t)*gGreen);
+				t = (Green * t + (1.f - t)*gGreen);
 				if (t < 0)t = 0;
 				if (t > 255)t = 255;
 				gG[(x + 1) + (3 * (y + 1))] = round(t);
@@ -1472,7 +1470,7 @@ struct BiColoredDottedSymbol : DottedSymbol {
 		for (int x = -1; x <= 1; x++) {
 			for (int y = -1; y <= 1; y++) {
 				t = (ax * (x - xbase) + ay * (y - ybase)) * ial;
-				t = (Blue * t + (1. - t)*gBlue);
+				t = (Blue * t + (1.f - t)*gBlue);
 				if (t < 0)t = 0;
 				if (t > 255)t = 255;
 				gB[(x + 1) + (3 * (y + 1))] = round(t);
@@ -1482,7 +1480,7 @@ struct BiColoredDottedSymbol : DottedSymbol {
 		for (int x = -1; x <= 1; x++) {
 			for (int y = -1; y <= 1; y++) {
 				t = (ax * (x - xbase) + ay * (y - ybase)) * ial;
-				t = (Alpha * t + (1. - t)*gAlpha);
+				t = (Alpha * t + (1.f - t)*gAlpha);
 				if (t < 0)t = 0;
 				if (t > 255)t = 255;
 				gA[(x + 1) + (3 * (y + 1))] = round(t);
@@ -1558,14 +1556,14 @@ struct SingleTextLine {
 		if (!Text.size())Text = " ";
 		this->_CurrentText = Text;
 		CalculatedHeight = 2 * YUnitSize;
-		CalculatedWidth = Text.size()*2.*XUnitSize + (Text.size() - 1)*SpaceWidth;
+		CalculatedWidth = Text.size()*2.f*XUnitSize + (Text.size() - 1)*SpaceWidth;
 		this->CXpos = CXpos;
 		this->CYpos = CYpos;
 		this->RGBAColor = RGBAColor;
 		this->SpaceWidth = SpaceWidth;
 		this->_XUnitSize = XUnitSize;
 		this->_YUnitSize = YUnitSize;
-		float CharXPosition = CXpos - (CalculatedWidth*0.5) + XUnitSize, CharXPosIncrement = 2.*XUnitSize + SpaceWidth;
+		float CharXPosition = CXpos - (CalculatedWidth*0.5) + XUnitSize, CharXPosIncrement = 2.f*XUnitSize + SpaceWidth;
 		for (int i = 0; i < Text.size(); i++) {
 			if(RGBAGradColor==NULL)Chars.push_back(new DottedSymbol(Text[i], CharXPosition, CYpos, XUnitSize, YUnitSize,LineWidth, new DWORD(RGBAColor)));
 			else Chars.push_back(new BiColoredDottedSymbol(Text[i], CharXPosition, CYpos, XUnitSize, YUnitSize,LineWidth,new DWORD(RGBAColor), new DWORD(*RGBAGradColor),(BYTE)(OrigNGradPoints >> 4), (BYTE)(OrigNGradPoints&0xF)));
@@ -1631,8 +1629,8 @@ struct SingleTextLine {
 		return 1;
 	}
 	void RecalculateWidth() {
-		CalculatedWidth = Chars.size()*(2.*_XUnitSize) + (Chars.size() - 1)*SpaceWidth;
-		float CharXPosition = CXpos - (CalculatedWidth*0.5) + _XUnitSize, CharXPosIncrement = 2.*_XUnitSize + SpaceWidth;
+		CalculatedWidth = Chars.size()*(2.f*_XUnitSize) + (Chars.size() - 1)*SpaceWidth;
+		float CharXPosition = CXpos - (CalculatedWidth*0.5f) + _XUnitSize, CharXPosIncrement = 2.f*_XUnitSize + SpaceWidth;
 		for (int i = 0; i < Chars.size(); i++) {
 			Chars[i]->Xpos = CharXPosition;
 			CharXPosition += CharXPosIncrement;
@@ -1640,11 +1638,11 @@ struct SingleTextLine {
 	}
 	void SafeChangePosition_Argumented(BYTE Arg,float newX,float newY) {
 		///STL_CHANGE_POSITION_ARGUMENT_LEFT
-		float CW = 0.5*(
+		float CW = 0.5f*(
 				(INT32)((BIT)(GLOBAL_LEFT&Arg))
 			-	(INT32)((BIT)(GLOBAL_RIGHT&Arg))
 			)*CalculatedWidth,
-			CH = 0.5*(
+			CH = 0.5f*(
 				(INT32)((BIT)(GLOBAL_BOTTOM&Arg))
 			-	(INT32)((BIT)(GLOBAL_TOP&Arg))
 			)*CalculatedHeight;
@@ -1670,9 +1668,9 @@ struct SingleTextLine {
 		}
 	}
 };
-#define CharWidthPerHeight 0.5
-#define CharSpaceBetween(CharHeight) CharHeight/2.
-#define CharLineWidth(CharHeight) ceil(CharHeight/7.5)
+#define CharWidthPerHeight 0.5f
+#define CharSpaceBetween(CharHeight) CharHeight/2.f
+#define CharLineWidth(CharHeight) ceil(CharHeight/7.5f)
 struct SingleTextLineSettings {
 	string STLstring;
 	float CXpos, CYpos, XUnitSize, YUnitSize;
@@ -1756,12 +1754,12 @@ struct CheckBox : HandleableUIPart {///NeedsTest
 		this->Lock = 0;
 		if (TipSettings) {
 			this->Tip = TipSettings->CreateOne(TipText);
-			this->Tip->SafeChangePosition_Argumented(TipAlign, Xpos - ((TipAlign == _Align::left) ? 0.5 : ((TipAlign == _Align::right) ? -0.5 : 0))*SideSize, Ypos - SideSize);
+			this->Tip->SafeChangePosition_Argumented(TipAlign, Xpos - ((TipAlign == _Align::left) ? 0.5f : ((TipAlign == _Align::right) ? -0.5f : 0))*SideSize, Ypos - SideSize);
 		}
 	}
 	void Draw() override {
 		if (Lock)return;
-		float hSideSize = 0.5*SideSize;
+		float hSideSize = 0.5f*SideSize;
 		if (State)
 			GLCOLOR(CheckedRGBABackground);
 		else
@@ -1805,11 +1803,11 @@ struct CheckBox : HandleableUIPart {///NeedsTest
 	}
 	void SafeChangePosition_Argumented(BYTE Arg, float NewX, float NewY) override {
 		if (Lock)return;
-		float CW = 0.5*(
+		float CW = 0.5f*(
 			(INT32)((BIT)(GLOBAL_LEFT&Arg))
 			- (INT32)((BIT)(GLOBAL_RIGHT&Arg))
 			)*SideSize,
-			CH = 0.5*(
+			CH = 0.5f*(
 			(INT32)((BIT)(GLOBAL_BOTTOM&Arg))
 				- (INT32)((BIT)(GLOBAL_TOP&Arg))
 				)*SideSize;
@@ -1879,7 +1877,7 @@ struct InputField : HandleableUIPart {
 		this->STL = DefaultStringSettings->CreateOne(DefaultString); 
 		if (TipLineSettings) {
 			this->Tip = TipLineSettings->CreateOne(TipLineText);
-			this->Tip->SafeChangePosition_Argumented(TipAlign, Xpos - ((TipAlign == _Align::left) ? 0.5 : ((TipAlign == _Align::right) ? -0.5 : 0))*Width, Ypos - Height);
+			this->Tip->SafeChangePosition_Argumented(TipAlign, Xpos - ((TipAlign == _Align::left) ? 0.5f : ((TipAlign == _Align::right) ? -0.5f : 0))*Width, Ypos - Height);
 		}
 		else this->Tip = NULL;
 		this->InputAlign = InputAlign;
@@ -1932,7 +1930,7 @@ struct InputField : HandleableUIPart {
 	void UpdateInputString(string NewString="") {
 		if (Lock)return;
 		if(NewString.size())CurrentString = "";
-		float x = Xpos - ((InputAlign == _Align::left) ? 1 : ((InputAlign == _Align::right) ? -1 : 0))*(0.5*Width - STL->_XUnitSize);
+		float x = Xpos - ((InputAlign == _Align::left) ? 1 : ((InputAlign == _Align::right) ? -1 : 0))*(0.5f*Width - STL->_XUnitSize);
 		this->STL->SafeStringReplace((NewString.size())?NewString.substr(0,this->MaxChars):CurrentString);
 		this->STL->SafeChangePosition_Argumented(InputAlign, x, Ypos);
 	}
@@ -1989,11 +1987,11 @@ struct InputField : HandleableUIPart {
 	}
 	void SafeChangePosition_Argumented(BYTE Arg, float NewX, float NewY) {
 		if (Lock)return;
-		float CW = 0.5*(
+		float CW = 0.5f*(
 			(INT32)((BIT)(GLOBAL_LEFT&Arg))
 			- (INT32)((BIT)(GLOBAL_RIGHT&Arg))
 			)*Width,
-			CH = 0.5*(
+			CH = 0.5f*(
 			(INT32)((BIT)(GLOBAL_BOTTOM&Arg))
 				- (INT32)((BIT)(GLOBAL_TOP&Arg))
 				)*Height;
@@ -2009,10 +2007,10 @@ struct InputField : HandleableUIPart {
 		GLCOLOR(BorderRGBAColor);
 		glLineWidth(1);
 		glBegin(GL_LINE_LOOP);
-		glVertex2f(Xpos + 0.5*Width, Ypos + 0.5*Height);
-		glVertex2f(Xpos - 0.5*Width, Ypos + 0.5*Height);
-		glVertex2f(Xpos - 0.5*Width, Ypos - 0.5*Height);
-		glVertex2f(Xpos + 0.5*Width, Ypos - 0.5*Height);
+		glVertex2f(Xpos + 0.5f*Width, Ypos + 0.5f*Height);
+		glVertex2f(Xpos - 0.5f*Width, Ypos + 0.5f*Height);
+		glVertex2f(Xpos - 0.5f*Width, Ypos - 0.5f*Height);
+		glVertex2f(Xpos + 0.5f*Width, Ypos - 0.5f*Height);
 		glEnd();
 		this->STL->Draw();
 		if (Focused && Tip)Tip->Draw();
@@ -2131,11 +2129,11 @@ struct Button : HandleableUIPart {
 	}
 	void SafeChangePosition_Argumented(BYTE Arg, float NewX, float NewY) {
 		if (Lock)return;
-		float CW = 0.5*(
+		float CW = 0.5f*(
 				(INT32)((BIT)(GLOBAL_LEFT&Arg))
 			-	(INT32)((BIT)(GLOBAL_RIGHT&Arg))
 			)*Width,
-			CH = 0.5*(
+			CH = 0.5f*(
 				(INT32)((BIT)(GLOBAL_BOTTOM&Arg))
 			-	(INT32)((BIT)(GLOBAL_TOP&Arg))
 			)*Height;
@@ -2147,20 +2145,20 @@ struct Button : HandleableUIPart {
 			if ((BYTE)HoveredRGBABackground) {
 				GLCOLOR(HoveredRGBABackground);
 				glBegin(GL_QUADS);
-				glVertex2f(Xpos - Width * 0.5, Ypos + 0.5*Height);
-				glVertex2f(Xpos + Width * 0.5, Ypos + 0.5*Height);
-				glVertex2f(Xpos + Width * 0.5, Ypos - 0.5*Height);
-				glVertex2f(Xpos - Width * 0.5, Ypos - 0.5*Height);
+				glVertex2f(Xpos - Width * 0.5f, Ypos + 0.5f*Height);
+				glVertex2f(Xpos + Width * 0.5f, Ypos + 0.5f*Height);
+				glVertex2f(Xpos + Width * 0.5f, Ypos - 0.5f*Height);
+				glVertex2f(Xpos - Width * 0.5f, Ypos - 0.5f*Height);
 				glEnd();
 			}
 			if ((BYTE)HoveredRGBABorder) {
 				GLCOLOR(HoveredRGBABorder);
 				glLineWidth(BorderWidth);
 				glBegin(GL_LINE_LOOP);
-				glVertex2f(Xpos - Width * 0.5, Ypos + 0.5*Height);
-				glVertex2f(Xpos + Width * 0.5, Ypos + 0.5*Height);
-				glVertex2f(Xpos + Width * 0.5, Ypos - 0.5*Height);
-				glVertex2f(Xpos - Width * 0.5, Ypos - 0.5*Height);
+				glVertex2f(Xpos - Width * 0.5f, Ypos + 0.5f*Height);
+				glVertex2f(Xpos + Width * 0.5f, Ypos + 0.5f*Height);
+				glVertex2f(Xpos + Width * 0.5f, Ypos - 0.5f*Height);
+				glVertex2f(Xpos - Width * 0.5f, Ypos - 0.5f*Height);
 				glEnd();
 			}
 		}
@@ -2168,20 +2166,20 @@ struct Button : HandleableUIPart {
 			if ((BYTE)RGBABackground) {
 				GLCOLOR(RGBABackground);
 				glBegin(GL_QUADS);
-				glVertex2f(Xpos - Width * 0.5, Ypos + 0.5*Height);
-				glVertex2f(Xpos + Width * 0.5, Ypos + 0.5*Height);
-				glVertex2f(Xpos + Width * 0.5, Ypos - 0.5*Height);
-				glVertex2f(Xpos - Width * 0.5, Ypos - 0.5*Height);
+				glVertex2f(Xpos - Width * 0.5f, Ypos + 0.5f*Height);
+				glVertex2f(Xpos + Width * 0.5f, Ypos + 0.5f*Height);
+				glVertex2f(Xpos + Width * 0.5f, Ypos - 0.5f*Height);
+				glVertex2f(Xpos - Width * 0.5f, Ypos - 0.5f*Height);
 				glEnd();
 			}
 			if ((BYTE)RGBABorder) {
 				GLCOLOR(RGBABorder);
 				glLineWidth(BorderWidth);
 				glBegin(GL_LINE_LOOP);
-				glVertex2f(Xpos - Width * 0.5, Ypos + 0.5*Height);
-				glVertex2f(Xpos + Width * 0.5, Ypos + 0.5*Height);
-				glVertex2f(Xpos + Width * 0.5, Ypos - 0.5*Height);
-				glVertex2f(Xpos - Width * 0.5, Ypos - 0.5*Height);
+				glVertex2f(Xpos - Width * 0.5f, Ypos + 0.5f*Height);
+				glVertex2f(Xpos + Width * 0.5f, Ypos + 0.5f*Height);
+				glVertex2f(Xpos + Width * 0.5f, Ypos - 0.5f*Height);
+				glVertex2f(Xpos - Width * 0.5f, Ypos - 0.5f*Height);
 				glEnd();
 			}
 		}
@@ -2334,7 +2332,7 @@ struct TextBox : HandleableUIPart {
 		vector<vector<string>>SplittedText;
 		vector<string> Paragraph;
 		string Line;
-		STLS->SetNewPos(Xpos, Ypos + 0.5*Height + 0.5*VerticalOffset);
+		STLS->SetNewPos(Xpos, Ypos + 0.5f*Height + 0.5f*VerticalOffset);
 		////OOOOOF... Someone help me with these please :d
 		for (int i = 0; i < Text.size(); i++) {
 			if (Text[i] == ' ') {
@@ -2381,14 +2379,14 @@ struct TextBox : HandleableUIPart {
 			//cout << Paragraph[i] << endl;
 			if (VOverflow == VerticalOverflow::cut && STLS->CYpos < Ypos - Height)break;
 			Lines.push_back( STLS->CreateOne(Paragraph[i]));
-			if (TextAlign == _Align::right)Lines.back()->SafeChangePosition_Argumented(GLOBAL_RIGHT, ((this->Xpos) + (0.5*Width) - this->STLS->XUnitSize), Lines.back()->CYpos);
-			else if (TextAlign == _Align::left)Lines.back()->SafeChangePosition_Argumented(GLOBAL_LEFT, ((this->Xpos) - (0.5*Width) + this->STLS->XUnitSize), Lines.back()->CYpos);
+			if (TextAlign == _Align::right)Lines.back()->SafeChangePosition_Argumented(GLOBAL_RIGHT, ((this->Xpos) + (0.5f*Width) - this->STLS->XUnitSize), Lines.back()->CYpos);
+			else if (TextAlign == _Align::left)Lines.back()->SafeChangePosition_Argumented(GLOBAL_LEFT, ((this->Xpos) - (0.5f*Width) + this->STLS->XUnitSize), Lines.back()->CYpos);
 		}
 		CalculatedTextHeight = (Lines.front()->CYpos - Lines.back()->CYpos) + Lines.front()->CalculatedHeight;
 		if (VOverflow == VerticalOverflow::recalibrate) {
 			float dy = (CalculatedTextHeight - this->Height);
 			for (auto Y = Lines.begin(); Y != Lines.end(); Y++) {
-				(*Y)->SafeMove(0, (dy + Lines.front()->CalculatedHeight)*0.5);
+				(*Y)->SafeMove(0, (dy + Lines.front()->CalculatedHeight)*0.5f);
 			}
 		}
 	}
@@ -2432,11 +2430,11 @@ struct TextBox : HandleableUIPart {
 	}
 	void SafeChangePosition_Argumented(BYTE Arg, float NewX, float NewY) {
 		if (Lock)return;
-		float CW = 0.5*(
+		float CW = 0.5f*(
 				(INT32)((BIT)(GLOBAL_LEFT&Arg))
 			-	(INT32)((BIT)(GLOBAL_RIGHT&Arg))
 			)*Width,
-			CH = 0.5*(
+			CH = 0.5f*(
 				(INT32)((BIT)(GLOBAL_BOTTOM&Arg))
 			-	(INT32)((BIT)(GLOBAL_TOP&Arg))
 				)*Height;
@@ -2447,20 +2445,20 @@ struct TextBox : HandleableUIPart {
 		if ((BYTE)RGBABackground) {
 			GLCOLOR(RGBABackground);
 			glBegin(GL_QUADS);
-			glVertex2f(Xpos - (Width * 0.5), Ypos + (0.5*Height));
-			glVertex2f(Xpos + (Width * 0.5), Ypos + (0.5*Height));
-			glVertex2f(Xpos + (Width * 0.5), Ypos - (0.5*Height));
-			glVertex2f(Xpos - (Width * 0.5), Ypos - (0.5*Height));
+			glVertex2f(Xpos - (Width * 0.5f), Ypos + (0.5f*Height));
+			glVertex2f(Xpos + (Width * 0.5f), Ypos + (0.5f*Height));
+			glVertex2f(Xpos + (Width * 0.5f), Ypos - (0.5f*Height));
+			glVertex2f(Xpos - (Width * 0.5f), Ypos - (0.5f*Height));
 			glEnd();
 		}
 		if ((BYTE)RGBABorder) {
 			GLCOLOR(RGBABorder);
 			glLineWidth(BorderWidth);
 			glBegin(GL_LINE_LOOP);
-			glVertex2f(Xpos - (Width * 0.5), Ypos + (0.5*Height));
-			glVertex2f(Xpos + (Width * 0.5), Ypos + (0.5*Height));
-			glVertex2f(Xpos + (Width * 0.5), Ypos - (0.5*Height));
-			glVertex2f(Xpos - (Width * 0.5), Ypos - (0.5*Height));
+			glVertex2f(Xpos - (Width * 0.5f), Ypos + (0.5f*Height));
+			glVertex2f(Xpos + (Width * 0.5f), Ypos + (0.5f*Height));
+			glVertex2f(Xpos + (Width * 0.5f), Ypos - (0.5f*Height));
+			glVertex2f(Xpos - (Width * 0.5f), Ypos - (0.5f*Height));
 			glEnd();
 		}
 		for (int i = 0; i < Lines.size(); i++) Lines[i]->Draw();
@@ -2629,13 +2627,13 @@ struct SelectablePropertedList : HandleableUIPart {
 	void ReSetAlignFor(DWORD ID, _Align Align) {
 		if (Lock)return;
 		if (ID>=Selectors.size())return;
-		float nx = HeaderCXPos - ((Align == _Align::left) ? 0.5 : ((Align == _Align::right)? 0 - 0.5 :0))*(Width - SpaceBetween);
+		float nx = HeaderCXPos - ((Align == _Align::left) ? 0.5f : ((Align == _Align::right)? 0 - 0.5f :0))*(Width - SpaceBetween);
 		Selectors[ID]->STL->SafeChangePosition_Argumented(Align, nx, Selectors[ID]->Ypos);
 	}
 	void ReSetAlign_All(_Align Align) {
 		if (Lock)return;
 		if (!Align)return;
-		float nx = HeaderCXPos - ((Align == _Align::left) ? 0.5 : ((Align == _Align::right) ? 0 - 0.5 : 0))*(Width - SpaceBetween);
+		float nx = HeaderCXPos - ((Align == _Align::left) ? 0.5f : ((Align == _Align::right) ? 0 - 0.5f : 0))*(Width - SpaceBetween);
 		for (int i = 0; i < Selectors.size(); i++)
 			Selectors[i]->STL->SafeChangePosition_Argumented(Align, nx, Selectors[i]->Ypos);
 	}
@@ -2647,7 +2645,7 @@ struct SelectablePropertedList : HandleableUIPart {
 			SafeUpdateLines();
 			return;
 		}
-		ButtSettings->ChangePosition(HeaderCXPos, HeaderYPos - (SelectorsText.size() - 0.5)*SpaceBetween);
+		ButtSettings->ChangePosition(HeaderCXPos, HeaderYPos - (SelectorsText.size() - 0.5f)*SpaceBetween);
 		ButtSettings->Height = SpaceBetween;
 		ButtSettings->Width = Width;
 		ButtSettings->OnClick = NULL;
@@ -2674,15 +2672,15 @@ struct SelectablePropertedList : HandleableUIPart {
 	}
 	void SafeChangePosition_Argumented(BYTE Arg, float NewX, float NewY) {
 		if (Lock)return;
-		float CW = 0.5*(
+		float CW = 0.5f*(
 				(INT32)((BIT)(GLOBAL_LEFT&Arg))
 			-	(INT32)((BIT)(GLOBAL_RIGHT&Arg))
 			)*Width,
-			CH = 0.5*(
+			CH = 0.5f*(
 				(INT32)((BIT)(GLOBAL_BOTTOM&Arg))
 			-	(INT32)((BIT)(GLOBAL_TOP&Arg))
 			)*CalculatedHeight;
-		SafeChangePosition(NewX + CW, NewY - 0.5*CalculatedHeight + CH);
+		SafeChangePosition(NewX + CW, NewY - 0.5f*CalculatedHeight + CH);
 	}
 	void KeyboardHandler(CHAR CH) override {
 		return;
@@ -2707,17 +2705,17 @@ struct SelectablePropertedList : HandleableUIPart {
 			if (TopArrowHovered)GLCOLOR(ButtSettings->HoveredRGBABorder);
 			else GLCOLOR(ButtSettings->RGBABorder);
 			glBegin(GL_QUADS);
-			glVertex2f(HeaderCXPos - 0.5*Width, HeaderYPos);
-			glVertex2f(HeaderCXPos + 0.5*Width, HeaderYPos);
-			glVertex2f(HeaderCXPos + 0.5*Width, HeaderYPos + ARROW_STICK_HEIGHT);
-			glVertex2f(HeaderCXPos - 0.5*Width, HeaderYPos + ARROW_STICK_HEIGHT);
+			glVertex2f(HeaderCXPos - 0.5f*Width, HeaderYPos);
+			glVertex2f(HeaderCXPos + 0.5f*Width, HeaderYPos);
+			glVertex2f(HeaderCXPos + 0.5f*Width, HeaderYPos + ARROW_STICK_HEIGHT);
+			glVertex2f(HeaderCXPos - 0.5f*Width, HeaderYPos + ARROW_STICK_HEIGHT);
 			///BOTTOM BAR
 			if (BottomArrowHovered)GLCOLOR(ButtSettings->HoveredRGBABorder);
 			else GLCOLOR(ButtSettings->RGBABorder);
-			glVertex2f(HeaderCXPos - 0.5*Width, HeaderYPos - CalculatedHeight);
-			glVertex2f(HeaderCXPos + 0.5*Width, HeaderYPos - CalculatedHeight);
-			glVertex2f(HeaderCXPos + 0.5*Width, HeaderYPos - CalculatedHeight - ARROW_STICK_HEIGHT);
-			glVertex2f(HeaderCXPos - 0.5*Width, HeaderYPos - CalculatedHeight - ARROW_STICK_HEIGHT);
+			glVertex2f(HeaderCXPos - 0.5f*Width, HeaderYPos - CalculatedHeight);
+			glVertex2f(HeaderCXPos + 0.5f*Width, HeaderYPos - CalculatedHeight);
+			glVertex2f(HeaderCXPos + 0.5f*Width, HeaderYPos - CalculatedHeight - ARROW_STICK_HEIGHT);
+			glVertex2f(HeaderCXPos - 0.5f*Width, HeaderYPos - CalculatedHeight - ARROW_STICK_HEIGHT);
 			glEnd();
 			///TOP ARROW
 			if (TopArrowHovered)
@@ -2726,16 +2724,16 @@ struct SelectablePropertedList : HandleableUIPart {
 			else GLCOLOR(ButtSettings->RGBAColor);
 			glBegin(GL_TRIANGLES);
 			glVertex2f(HeaderCXPos, HeaderYPos + 9 * ARROW_STICK_HEIGHT / 10);
-			glVertex2f(HeaderCXPos + ARROW_STICK_HEIGHT * 0.5, HeaderYPos + ARROW_STICK_HEIGHT / 10);
-			glVertex2f(HeaderCXPos - ARROW_STICK_HEIGHT * 0.5, HeaderYPos + ARROW_STICK_HEIGHT / 10);
+			glVertex2f(HeaderCXPos + ARROW_STICK_HEIGHT * 0.5f, HeaderYPos + ARROW_STICK_HEIGHT / 10);
+			glVertex2f(HeaderCXPos - ARROW_STICK_HEIGHT * 0.5f, HeaderYPos + ARROW_STICK_HEIGHT / 10);
 			///BOTTOM ARROW
 			if (BottomArrowHovered)
 				if (ButtSettings->HoveredRGBAColor & 0xFF)GLCOLOR(ButtSettings->HoveredRGBAColor);
 				else GLCOLOR(ButtSettings->RGBAColor);
 			else GLCOLOR(ButtSettings->RGBAColor);
 			glVertex2f(HeaderCXPos, HeaderYPos - CalculatedHeight - 9 * ARROW_STICK_HEIGHT / 10);
-			glVertex2f(HeaderCXPos + ARROW_STICK_HEIGHT * 0.5, HeaderYPos - CalculatedHeight - ARROW_STICK_HEIGHT / 10);
-			glVertex2f(HeaderCXPos - ARROW_STICK_HEIGHT * 0.5, HeaderYPos - CalculatedHeight - ARROW_STICK_HEIGHT / 10);
+			glVertex2f(HeaderCXPos + ARROW_STICK_HEIGHT * 0.5f, HeaderYPos - CalculatedHeight - ARROW_STICK_HEIGHT / 10);
+			glVertex2f(HeaderCXPos - ARROW_STICK_HEIGHT * 0.5f, HeaderYPos - CalculatedHeight - ARROW_STICK_HEIGHT / 10);
 			glEnd();
 		}
 		for (auto Y = Selectors.begin(); Y != Selectors.end(); Y++) 
@@ -2751,13 +2749,13 @@ struct SpecialSigns {
 		GLCOLOR(RGBAColor);
 		glLineWidth(ceil(SZParam / 2));
 		glBegin(GL_LINE_STRIP);
-		glVertex2f(x - SZParam*0.766, y + SZParam*0.916);
-		glVertex2f(x - SZParam * 0.1, y + SZParam * 0.25);
-		glVertex2f(x + SZParam*0.9, y + SZParam*1.25);
+		glVertex2f(x - SZParam*0.766f, y + SZParam*0.916f);
+		glVertex2f(x - SZParam * 0.1f, y + SZParam * 0.25f);
+		glVertex2f(x + SZParam*0.9f, y + SZParam*1.25f);
 		glEnd();
 		glPointSize(ceil(SZParam / 2));
 		glBegin(GL_POINTS);
-		glVertex2f(x - SZParam * 0.1, y + SZParam * 0.25);
+		glVertex2f(x - SZParam * 0.1f, y + SZParam * 0.25f);
 		glEnd();
 	}
 	static void DrawExTriangle(float x, float y, float SZParam, DWORD RGBAColor, DWORD SecondaryRGBAColor) {
@@ -2776,10 +2774,10 @@ struct SpecialSigns {
 		glEnd();
 		glLineWidth(ceil(SZParam / 4));
 		glBegin(GL_LINES);
-		glVertex2f(x, y + SZParam * 0.6);
-		glVertex2f(x, y + SZParam * 1.40);
-		glVertex2f(x, y + SZParam * 0.2);
-		glVertex2f(x, y + SZParam * 0.4);
+		glVertex2f(x, y + SZParam * 0.6f);
+		glVertex2f(x, y + SZParam * 1.40f);
+		glVertex2f(x, y + SZParam * 0.2f);
+		glVertex2f(x, y + SZParam * 0.4f);
 		glEnd();
 	}
 	static void DrawFileSign(float x, float y, float SZParam, DWORD RGBAColor, DWORD SecondaryRGBAColor) {
@@ -2812,40 +2810,40 @@ struct SpecialSigns {
 		GLCOLOR(SecondaryRGBAColor);
 		glBegin(GL_POLYGON);
 		for (float a = -90; a < 270; a += 5) 
-			glVertex2f(SZParam*1.25*(cos(ANGTORAD(a))) + x, SZParam*1.25*(sin(ANGTORAD(a))) + y + SZParam*0.75);
+			glVertex2f(SZParam*1.25f*(cos(ANGTORAD(a))) + x, SZParam*1.25f*(sin(ANGTORAD(a))) + y + SZParam*0.75f);
 		glEnd();
 		GLCOLOR(RGBAColor);
 		glLineWidth(ceil(SZParam / 10));
 		glBegin(GL_LINE_LOOP);
 		for (float a = -90; a < 270; a += 5)
-			glVertex2f(SZParam*1.25*(cos(ANGTORAD(a))) + x, SZParam*1.25*(sin(ANGTORAD(a))) + y + SZParam*0.75);
+			glVertex2f(SZParam*1.25f*(cos(ANGTORAD(a))) + x, SZParam*1.25f*(sin(ANGTORAD(a))) + y + SZParam*0.75f);
 		glEnd();
 	}
 	static void DrawNo(float x, float y, float SZParam, DWORD RGBAColor, DWORD NOARGUMENT=0) {
 		GLCOLOR(RGBAColor);
 		glLineWidth(ceil(SZParam / 2));
 		glBegin(GL_LINES);
-		glVertex2f(x - SZParam*0.5, y + SZParam*0.25);
-		glVertex2f(x + SZParam*0.5, y + SZParam*1.25);
-		glVertex2f(x + SZParam*0.5, y + SZParam*0.25);
-		glVertex2f(x - SZParam*0.5, y + SZParam*1.25);
+		glVertex2f(x - SZParam*0.5f, y + SZParam*0.25f);
+		glVertex2f(x + SZParam*0.5f, y + SZParam*1.25f);
+		glVertex2f(x + SZParam*0.5f, y + SZParam*0.25f);
+		glVertex2f(x - SZParam*0.5f, y + SZParam*1.25f);
 		glEnd();
 	}
 	static void DrawWait(float x, float y, float SZParam, DWORD RGBAColor, DWORD TotalStages) {
 		float Start = ((float)((TimerV%TotalStages) * 360))/(float)(TotalStages),t;
 		BYTE R = (RGBAColor >> 24), G = (RGBAColor >> 16) & 0xFF, B = (RGBAColor >> 8) & 0xFF, A = (RGBAColor) & 0xFF;
 		//printf("%x\n", CurStage_TotalStages);
-		glLineWidth(ceil(SZParam / 1.5));
+		glLineWidth(ceil(SZParam / 1.5f));
 		glBegin(GL_LINES);
-		for (float a = 0; a < 360.5f; a += (180. / (TotalStages))) {
-			t = a / 360.;
+		for (float a = 0; a < 360.5f; a += (180.f / (TotalStages))) {
+			t = a / 360.f;
 			glColor4ub(
 				255 * (t) + R * (1 - t),
 				255 * (t) + G * (1 - t),
 				255 * (t) + B * (1 - t),
 				255 * (t) + A * (1 - t)
 			);
-			glVertex2f(SZParam*1.25*(cos(ANGTORAD(a+Start))) + x, SZParam*1.25*(sin(ANGTORAD(a+Start))) + y + SZParam * 0.75);
+			glVertex2f(SZParam*1.25f*(cos(ANGTORAD(a+Start))) + x, SZParam*1.25f*(sin(ANGTORAD(a+Start))) + y + SZParam * 0.75f);
 		}
 		glEnd();
 	}
@@ -2957,7 +2955,7 @@ struct MoveableWindow:HandleableUIPart {
 		if (WindowNameSettings) {
 			WindowNameSettings->SetNewPos(XPos, YPos);
 			this->WindowName = WindowNameSettings->CreateOne(WindowName);
-			this->WindowName->SafeMove(this->WindowName->CalculatedWidth*0.5 + WindowHeapSize * 0.5, 0 - WindowHeapSize * 0.5);
+			this->WindowName->SafeMove(this->WindowName->CalculatedWidth*0.5 + WindowHeapSize * 0.5f, 0 - WindowHeapSize * 0.5f);
 		}
 		this->XWindowPos = XPos;
 		this->YWindowPos = YPos;
@@ -3093,11 +3091,11 @@ struct MoveableWindow:HandleableUIPart {
 			ProcessingLock = 0;
 			return;
 		}
-		float CW = 0.5*(
+		float CW = 0.5f*(
 				(INT32)(!!(GLOBAL_LEFT&Arg))
 			-	(INT32)(!!(GLOBAL_RIGHT&Arg))
 			-	1)*Width,
-			CH = 0.5*(
+			CH = 0.5f*(
 				(INT32)(!!(GLOBAL_BOTTOM&Arg))
 			-	(INT32)(!!(GLOBAL_TOP&Arg))
 			+	1)*Height;
@@ -3169,8 +3167,8 @@ struct MoveableWindow:HandleableUIPart {
 			return;
 		}
 		float dx, dy;
-		XWindowPos += (dx = -0.5*(NewWidth - Width));
-		YWindowPos += (dy = 0.5*(NewHeight - Height));
+		XWindowPos += (dx = -0.5f*(NewWidth - Width));
+		YWindowPos += (dy = 0.5f*(NewHeight - Height));
 		WindowName->SafeMove(dx, dy);
 		Width = NewWidth;
 		Height = NewHeight;
@@ -3193,7 +3191,7 @@ struct MoveableWindow:HandleableUIPart {
 		}
 		if (WindowName) { 
 			WindowName->SafeStringReplace(NewWindowTitle); 
-			WindowName->SafeChangePosition_Argumented(GLOBAL_LEFT, XWindowPos + WindowHeapSize * 0.5, WindowName->CYpos);
+			WindowName->SafeChangePosition_Argumented(GLOBAL_LEFT, XWindowPos + WindowHeapSize * 0.5f, WindowName->CYpos);
 		}
 		ProcessingLock = 0;
 	}
@@ -3492,9 +3490,9 @@ struct CAT_Piano :HandleableUIPart {
 		this->CalculatedWidth = KeyWidth * (128 * 3);
 		this->PianoTransform = PianoTransform;
 		this->Focused = 0;
-		STLS_WhiteSmall->SetNewPos(BaseXPos + KeyWidth * (128*1.25), BaseYPos - 0.75*PianoHeight);
+		STLS_WhiteSmall->SetNewPos(BaseXPos + KeyWidth * (128 * 1.25f), BaseYPos - 0.75f*PianoHeight);
 		this->MinCont = STLS_WhiteSmall->CreateOne("_");
-		STLS_WhiteSmall->SetNewPos(BaseXPos - KeyWidth * (128 * 1.25), BaseYPos - 0.75*PianoHeight);
+		STLS_WhiteSmall->SetNewPos(BaseXPos - KeyWidth * (128 * 1.25f), BaseYPos - 0.75f*PianoHeight);
 		this->MaxCont = STLS_WhiteSmall->CreateOne("_");
 		this->Transp = STLS_WhiteSmall->CreateOne("_");
 		UpdateInfo();
@@ -3505,7 +3503,7 @@ struct CAT_Piano :HandleableUIPart {
 		MinCont->SafeStringReplace("Min: " + to_string(PianoTransform->Min));
 		MaxCont->SafeStringReplace("Max: " + to_string(PianoTransform->Max));
 		Transp->SafeStringReplace("Transp: " + to_string(PianoTransform->TransposeVal));
-		Transp->SafeChangePosition(BaseXPos + ((PianoTransform->TransposeVal >= 0)?1:-1)* KeyWidth * (128 * 1.25), BaseYPos +
+		Transp->SafeChangePosition(BaseXPos + ((PianoTransform->TransposeVal >= 0)?1:-1)* KeyWidth * (128 * 1.25f), BaseYPos +
 			0.75*PianoHeight
 		);
 	}
@@ -3519,63 +3517,63 @@ struct CAT_Piano :HandleableUIPart {
 		Transp->Draw();
 		if (!PianoTransform)return;
 
-		glLineWidth(0.5*KeyWidth / pixsz);
+		glLineWidth(0.5f*KeyWidth / pixsz);
 		glBegin(GL_LINES);
 		for (int i = 0; i < 256; i++, x += KeyWidth) {//Main piano
 			Inside = ((i >= (PianoTransform->Min)) && (i <= (PianoTransform->Max)));
 			if (IsWhiteKey(i)) {
-				glColor4f(1, 1, 1, (Inside ? 0.9 : 0.25));
-				glVertex2f(x, BaseYPos - 1.25*PianoHeight);
-				glVertex2f(x, BaseYPos - 0.25*PianoHeight);
+				glColor4f(1, 1, 1, (Inside ? 0.9f : 0.25f));
+				glVertex2f(x, BaseYPos - 1.25f*PianoHeight);
+				glVertex2f(x, BaseYPos - 0.25f*PianoHeight);
 				continue;
 			}
 			else {
-				glColor4f(0, 0, 0, (Inside ? 0.9 : 0.25));
-				glVertex2f(x, BaseYPos - 0.75*PianoHeight);
-				glVertex2f(x, BaseYPos - 0.25*PianoHeight);
+				glColor4f(0, 0, 0, (Inside ? 0.9f : 0.25f));
+				glVertex2f(x, BaseYPos - 0.75f*PianoHeight);
+				glVertex2f(x, BaseYPos - 0.25f*PianoHeight);
 			}
-			glColor4f(1, 1, 1, (Inside ? 0.9 : 0.25));
-			glVertex2f(x, BaseYPos - 0.75*PianoHeight);
-			glVertex2f(x, BaseYPos - 1.25*PianoHeight);
+			glColor4f(1, 1, 1, (Inside ? 0.9f : 0.25f));
+			glVertex2f(x, BaseYPos - 0.75f*PianoHeight);
+			glVertex2f(x, BaseYPos - 1.25f*PianoHeight);
 		}
 		x = BaseXPos - (128 + PianoTransform->TransposeVal)*KeyWidth;
 		for (int i = 0; i < 256; i++, x += KeyWidth) {//CAT Piano
 			if (fabs(x - BaseXPos) >= 0.5*CalculatedWidth)continue;
 			Inside = ((i - (PianoTransform->TransposeVal) >= (PianoTransform->Min)) && (i - (PianoTransform->TransposeVal) <= (PianoTransform->Max)));
 			if (IsWhiteKey(i)) {
-				glColor4f(1, 1, 1, (Inside ? 0.9 : 0.25));
-				glVertex2f(x, BaseYPos + 1.25*PianoHeight);
-				glVertex2f(x, BaseYPos + 0.25*PianoHeight);
+				glColor4f(1, 1, 1, (Inside ? 0.9f : 0.25f));
+				glVertex2f(x, BaseYPos + 1.25f*PianoHeight);
+				glVertex2f(x, BaseYPos + 0.25f*PianoHeight);
 				continue;
 			}
 			else {
-				glColor4f(0, 0, 0, (Inside ? 0.9 : 0.25));
-				glVertex2f(x, BaseYPos + 0.75*PianoHeight);
-				glVertex2f(x, BaseYPos + 0.25*PianoHeight);
+				glColor4f(0, 0, 0, (Inside ? 0.9f : 0.25f));
+				glVertex2f(x, BaseYPos + 0.75f*PianoHeight);
+				glVertex2f(x, BaseYPos + 0.25f*PianoHeight);
 			}
-			glColor4f(1, 1, 1, (Inside ? 0.9 : 0.25));
-			glVertex2f(x, BaseYPos + 1.25*PianoHeight);
-			glVertex2f(x, BaseYPos + 0.75*PianoHeight);
+			glColor4f(1, 1, 1, (Inside ? 0.9f : 0.25f));
+			glVertex2f(x, BaseYPos + 1.25f*PianoHeight);
+			glVertex2f(x, BaseYPos + 0.75f*PianoHeight);
 		}
 		glEnd();
 		
-		x = BaseXPos - (128 - PianoTransform->Min + 0.5)*KeyWidth;//Square
+		x = BaseXPos - (128 - PianoTransform->Min + 0.5f)*KeyWidth;//Square
 		glLineWidth(1);
-		glColor4f(0, 1, 0, 0.75);
+		glColor4f(0, 1, 0, 0.75f);
 		glBegin(GL_LINE_LOOP);
-		glVertex2f(x, BaseYPos - 1.5 * PianoHeight);
-		glVertex2f(x, BaseYPos + 1.5 * PianoHeight);
+		glVertex2f(x, BaseYPos - 1.5f * PianoHeight);
+		glVertex2f(x, BaseYPos + 1.5f * PianoHeight);
 		x += KeyWidth * (PianoTransform->Max - PianoTransform->Min + 1);
-		glVertex2f(x, BaseYPos + 1.5 * PianoHeight);
-		glVertex2f(x, BaseYPos - 1.5 * PianoHeight);
+		glVertex2f(x, BaseYPos + 1.5f * PianoHeight);
+		glVertex2f(x, BaseYPos - 1.5f * PianoHeight);
 		glEnd();
 		if (!Focused)return;
 		glColor4f(1, 0.5, 0, 1);
 		glBegin(GL_LINE_LOOP);
-		glVertex2f(BaseXPos - 0.5*CalculatedWidth, BaseYPos - 0.5*CalculatedHeight);
-		glVertex2f(BaseXPos - 0.5*CalculatedWidth, BaseYPos + 0.5*CalculatedHeight);
-		glVertex2f(BaseXPos + 0.5*CalculatedWidth, BaseYPos + 0.5*CalculatedHeight);
-		glVertex2f(BaseXPos + 0.5*CalculatedWidth, BaseYPos - 0.5*CalculatedHeight);
+		glVertex2f(BaseXPos - 0.5f*CalculatedWidth, BaseYPos - 0.5f*CalculatedHeight);
+		glVertex2f(BaseXPos - 0.5f*CalculatedWidth, BaseYPos + 0.5f*CalculatedHeight);
+		glVertex2f(BaseXPos + 0.5f*CalculatedWidth, BaseYPos + 0.5f*CalculatedHeight);
+		glVertex2f(BaseXPos + 0.5f*CalculatedWidth, BaseYPos - 0.5f*CalculatedHeight);
 		glEnd();
 	}
 	void SafeMove(float dx, float dy) override {
@@ -3594,11 +3592,11 @@ struct CAT_Piano :HandleableUIPart {
 	}
 	void SafeChangePosition_Argumented(BYTE Arg, float NewX, float NewY) override {
 		if (Lock)return;
-		float CW = 0.5*(
+		float CW = 0.5f*(
 				(INT32)((BIT)(GLOBAL_LEFT&Arg))
 			-	(INT32)((BIT)(GLOBAL_RIGHT&Arg))
 		)*CalculatedWidth,
-			  CH = 0.5*(
+			  CH = 0.5f*(
 				(INT32)((BIT)(GLOBAL_BOTTOM&Arg))
 			-	(INT32)((BIT)(GLOBAL_TOP&Arg))
 		)*CalculatedHeight;
@@ -3708,9 +3706,9 @@ struct PLC_VolumeWorker:HandleableUIPart {
 		glColor4f(0.5, 1, 0.5, 0.05);//showing "safe" for volumes square 
 		glBegin(GL_QUADS);
 		glVertex2f(begx, begy);
-		glVertex2f(begx, begy + 0.5*VerticalSidesSize);
-		glVertex2f(begx + 0.5*HorizontalSidesSize, begy + 0.5*VerticalSidesSize);
-		glVertex2f(begx + 0.5*HorizontalSidesSize, begy);
+		glVertex2f(begx, begy + 0.5f*VerticalSidesSize);
+		glVertex2f(begx + 0.5f*HorizontalSidesSize, begy + 0.5f*VerticalSidesSize);
+		glVertex2f(begx + 0.5f*HorizontalSidesSize, begy);
 		glEnd();
 
 		if (Hovered) {
@@ -3728,51 +3726,51 @@ struct PLC_VolumeWorker:HandleableUIPart {
 		}
 		if (PLC_bb && PLC_bb->ConversionMap.size()) {
 			glLineWidth(3);
-			glColor4f(1, 0.75, 1, 0.5);
+			glColor4f(1, 0.75f, 1, 0.5f);
 			glBegin(GL_LINE_STRIP);
-			glVertex2f(begx, begy + _ysqsz * (PLC_bb->AskForValue(0) + 0.5));
+			glVertex2f(begx, begy + _ysqsz * (PLC_bb->AskForValue(0) + 0.5f));
 
 			for (auto Y = PLC_bb->ConversionMap.begin(); Y != PLC_bb->ConversionMap.end(); Y++)
-				glVertex2f(begx + (Y->first + 0.5)*_xsqsz, begy + (Y->second + 0.5)*_ysqsz);
+				glVertex2f(begx + (Y->first + 0.5f)*_xsqsz, begy + (Y->second + 0.5f)*_ysqsz);
 
-			glVertex2f(begx + 255.5*_xsqsz, begy + _ysqsz * (PLC_bb->AskForValue(255) + 0.5));
+			glVertex2f(begx + 255.5f*_xsqsz, begy + _ysqsz * (PLC_bb->AskForValue(255) + 0.5f));
 			glEnd();
-			glColor4f(1, 1, 1, 0.75);
+			glColor4f(1, 1, 1, 0.75f);
 			glPointSize(5);
 			glBegin(GL_POINTS);
 			for (auto Y = PLC_bb->ConversionMap.begin(); Y != PLC_bb->ConversionMap.end(); Y++)
-				glVertex2f(begx + (Y->first + 0.5)*_xsqsz, begy + (Y->second + 0.5)*_ysqsz);
+				glVertex2f(begx + (Y->first + 0.5f)*_xsqsz, begy + (Y->second + 0.5f)*_ysqsz);
 			glEnd();
 		}
 		if (ActiveSetting) {
 			map<BYTE, BYTE>::iterator Y;
 			glBegin(GL_LINES);
-			glVertex2f(begx + (FPX + 0.5) * _xsqsz, begy + (FPY + 0.5) * _ysqsz);
-			glVertex2f(begx + (XCP + 0.5) * _xsqsz, begy + (YCP + 0.5) * _ysqsz);
+			glVertex2f(begx + (FPX + 0.5f) * _xsqsz, begy + (FPY + 0.5f) * _ysqsz);
+			glVertex2f(begx + (XCP + 0.5f) * _xsqsz, begy + (YCP + 0.5f) * _ysqsz);
 			if (FPX < XCP) {
 				Y = PLC_bb->ConversionMap.upper_bound(XCP);
 				if (Y != PLC_bb->ConversionMap.end()) {
-					glVertex2f(begx + (Y->first + 0.5) * _xsqsz, begy + (Y->second + 0.5) * _ysqsz);
-					glVertex2f(begx + (XCP + 0.5) * _xsqsz, begy + (YCP + 0.5) * _ysqsz);
+					glVertex2f(begx + (Y->first + 0.5f) * _xsqsz, begy + (Y->second + 0.5f) * _ysqsz);
+					glVertex2f(begx + (XCP + 0.5f) * _xsqsz, begy + (YCP + 0.5f) * _ysqsz);
 				}
 				Y = PLC_bb->ConversionMap.lower_bound(FPX);
 				if (Y != PLC_bb->ConversionMap.end() && Y != PLC_bb->ConversionMap.begin()) {
 					Y--;
-					glVertex2f(begx + (Y->first + 0.5) * _xsqsz, begy + (Y->second + 0.5) * _ysqsz);
-					glVertex2f(begx + (FPX + 0.5) * _xsqsz, begy + (FPY + 0.5) * _ysqsz);
+					glVertex2f(begx + (Y->first + 0.5f) * _xsqsz, begy + (Y->second + 0.5f) * _ysqsz);
+					glVertex2f(begx + (FPX + 0.5f) * _xsqsz, begy + (FPY + 0.5f) * _ysqsz);
 				}
 			}
 			else {
 				Y = PLC_bb->ConversionMap.upper_bound(FPX);
 				if (Y != PLC_bb->ConversionMap.end()) {
-					glVertex2f(begx + (Y->first + 0.5) * _xsqsz, begy + (Y->second + 0.5) * _ysqsz);
-					glVertex2f(begx + (FPX + 0.5) * _xsqsz, begy + (FPY + 0.5) * _ysqsz);
+					glVertex2f(begx + (Y->first + 0.5f) * _xsqsz, begy + (Y->second + 0.5f) * _ysqsz);
+					glVertex2f(begx + (FPX + 0.5f) * _xsqsz, begy + (FPY + 0.5f) * _ysqsz);
 				}
 				Y = PLC_bb->ConversionMap.lower_bound(XCP);
 				if (Y != PLC_bb->ConversionMap.end() && Y != PLC_bb->ConversionMap.begin()) {
 					Y--;
-					glVertex2f(begx + (Y->first + 0.5) * _xsqsz, begy + (Y->second + 0.5) * _ysqsz);
-					glVertex2f(begx + (XCP + 0.5) * _xsqsz, begy + (YCP + 0.5) * _ysqsz);
+					glVertex2f(begx + (Y->first + 0.5f) * _xsqsz, begy + (Y->second + 0.5f) * _ysqsz);
+					glVertex2f(begx + (XCP + 0.5f) * _xsqsz, begy + (YCP + 0.5f) * _ysqsz);
 				}
 			}
 			glEnd();
@@ -3822,11 +3820,11 @@ struct PLC_VolumeWorker:HandleableUIPart {
 	}
 	void SafeChangePosition_Argumented(BYTE Arg, float NewX, float NewY) override {
 		if (Lock)return;
-		float CW = 0.5*(
+		float CW = 0.5f*(
 				(INT32)((BIT)(GLOBAL_LEFT&Arg))
 			-	(INT32)((BIT)(GLOBAL_RIGHT&Arg))
 			)*HorizontalSidesSize,
-			CH = 0.5*(
+			CH = 0.5f*(
 				(INT32)((BIT)(GLOBAL_BOTTOM&Arg))
 			-	(INT32)((BIT)(GLOBAL_TOP&Arg))
 			)*VerticalSidesSize;
@@ -4788,8 +4786,8 @@ namespace Settings {
 pair<float, float> GetPositionForOneOf(INT32 Position, INT32 Amount, float UnitSize) {
 	pair<float, float> T(0,0);
 	INT32 SideAmount = ceil(sqrt(Amount));
-	T.first = (0 - (Position%SideAmount) + ((SideAmount - 1) / 2.))*UnitSize;
-	T.second = (0 - (Position / SideAmount) + ((SideAmount - 1) / 2.))*UnitSize;
+	T.first = (0 - (Position%SideAmount) + ((SideAmount - 1) / 2.f))*UnitSize;
+	T.second = (0 - (Position / SideAmount) + ((SideAmount - 1) / 2.f))*UnitSize;
 	return T;
 }
 
@@ -5113,7 +5111,7 @@ void mDisplay() {
 		onTimer(0);
 	}
 	if (SP) {
-		glUniform1f(glGetUniformLocation(SP->prog, "Time"), TimerV / 100.);
+		glUniform1f(glGetUniformLocation(SP->prog, "Time"), TimerV / 100.f);
 		glUniform1i(glGetUniformLocation(SP->prog, "Mode"), Settings::ShaderMode);
 		glUniform1f(glGetUniformLocation(SP->prog, "SinewaveWidth"), Settings::SinewaveWidth);
 		glUniform1f(glGetUniformLocation(SP->prog, "Basewave"), Settings::Basewave);
@@ -5124,31 +5122,31 @@ void mDisplay() {
 	}
 	if (APRIL_FOOL) {
 		Settings::ShaderMode = 1;
-		Settings::Basewave = 3.5;
+		Settings::Basewave = 3.5f;
 		glBegin(GL_QUADS);
-		glColor4f(1, 0, 1, (DRAG_OVER) ? 0.25 : 1);
+		glColor4f(1, 0, 1, (DRAG_OVER) ? 0.25f : 1);
 		glVertex2f(0 - RANGE * (WindX / WINDXSIZE), 0 - RANGE * (WindY / WINDYSIZE));
-		glColor4f(0, 1, 0, (DRAG_OVER) ? 0.25 : 1);
+		glColor4f(0, 1, 0, (DRAG_OVER) ? 0.25f : 1);
 		glVertex2f(0 - RANGE * (WindX / WINDXSIZE), RANGE * (WindY / WINDYSIZE));
-		glColor4f(1, 0.5, 0, (DRAG_OVER) ? 0.25 : 1);
+		glColor4f(1, 0.5f, 0, (DRAG_OVER) ? 0.25f : 1);
 		glVertex2f(RANGE * (WindX / WINDXSIZE), RANGE * (WindY / WINDYSIZE));
-		glColor4f(0, 0.5, 1, (DRAG_OVER) ? 0.25 : 1);
+		glColor4f(0, 0.5f, 1, (DRAG_OVER) ? 0.25f : 1);
 		glVertex2f(RANGE * (WindX / WINDXSIZE), 0 - RANGE * (WindY / WINDYSIZE));
 		glEnd();
 	}
 	else if (Settings::ShaderMode < 4) {
 		glBegin(GL_QUADS);
-		glColor4f(1, 0.5, 0, (DRAG_OVER) ? 0.25 : 1);
+		glColor4f(1, 0.5f, 0, (DRAG_OVER) ? 0.25f : 1);
 		glVertex2f(0 - RANGE * (WindX / WINDXSIZE), 0 - RANGE * (WindY / WINDYSIZE));
 		glVertex2f(0 - RANGE * (WindX / WINDXSIZE), RANGE * (WindY / WINDYSIZE));
-		glColor4f(0, 0.5, 1, (DRAG_OVER) ? 0.25 : 1);
+		glColor4f(0, 0.5f, 1, (DRAG_OVER) ? 0.25f : 1);
 		glVertex2f(RANGE * (WindX / WINDXSIZE), RANGE * (WindY / WINDYSIZE));
 		glVertex2f(RANGE * (WindX / WINDXSIZE), 0 - RANGE * (WindY / WINDYSIZE));
 		glEnd();
 	}
 	else {
 		glBegin(GL_QUADS);
-		glColor4f(0.25, 0.25, 0.25, (DRAG_OVER) ? 0.25 : 1);
+		glColor4f(0.25f, 0.25f, 0.25f, (DRAG_OVER) ? 0.25f : 1);
 		glVertex2f(0 - RANGE * (WindX / WINDXSIZE), 0 - RANGE * (WindY / WINDYSIZE));
 		glVertex2f(0 - RANGE * (WindX / WINDXSIZE), RANGE * (WindY / WINDYSIZE));
 		glVertex2f(RANGE * (WindX / WINDXSIZE), RANGE * (WindY / WINDYSIZE));

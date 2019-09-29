@@ -1,4 +1,4 @@
-
+#pragma once
 
 struct shader_prog {
     GLuint vertex_shader, fragment_shader, prog;
