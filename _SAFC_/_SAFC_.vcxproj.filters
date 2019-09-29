@@ -24,6 +24,9 @@
     <ClInclude Include="shader_smpclass.h">
       <Filter>Исходные файлы</Filter>
     </ClInclude>
+    <ClInclude Include="resource.h">
+      <Filter>Файлы заголовков</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="pch.cpp">
@@ -36,6 +39,9 @@
   <ItemGroup>
     <ResourceCompile Include="_SAFC_.rc">
       <Filter>Исходные файлы</Filter>
+    </ResourceCompile>
+    <ResourceCompile Include="res.rc">
+      <Filter>Файлы ресурсов</Filter>
     </ResourceCompile>
   </ItemGroup>
 </Project>
