@@ -4705,12 +4705,6 @@ void OnRemAllModules() {
 namespace Settings {
 	INT ShaderMode = 0;
 	float SinewaveWidth=0., Basewave=1., Param3=1.;
-	void ApplyToAll() {
-		for (auto Y = _Data.Files.begin(); Y != _Data.Files.end(); Y++) {
-			Y->BoolSettings = DefaultBoolSettings;
-			Y->InplaceMergeEnabled = _Data.InplaceMergeFlag;
-		}
-	}
 	void OnSettings() {
 		WH->EnableWindow("APP_SETTINGS");//_Data.DetectedThreads
 		//WH->ThrowAlert("Please read the docs! Changing some of these settings might cause graphics driver failure!","Warning!",SpecialSigns::DrawExTriangle,1,0x007FFFFF,0x7F7F7FFF);
@@ -4781,6 +4775,13 @@ namespace Settings {
 		DefaultBoolSettings = (DefaultBoolSettings&(~_BoolSettings::ignore_all_but_tempos_notes_and_pitch)) | (_BoolSettings::ignore_all_but_tempos_notes_and_pitch * (!!((CheckBox*)(*pptr)["BOOL_IGN_ALL_EX_TPS"])->State));
 
 		_Data.InplaceMergeFlag = (((CheckBox*)(*pptr)["INPLACE_MERGE"])->State);
+	}
+	void ApplyToAll() {
+		OnSetApply();
+		for (auto Y = _Data.Files.begin(); Y != _Data.Files.end(); Y++) {
+			Y->BoolSettings = DefaultBoolSettings;
+			Y->InplaceMergeEnabled = _Data.InplaceMergeFlag;
+		}
 	}
 }
 
