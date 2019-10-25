@@ -4167,7 +4167,7 @@ struct SAFCData {////overall settings and storing perfile settings....
 		SaveDirectory = L"";
 	}
 	void ResolveSubdivisionProblem_GroupIDAssign(DWORD ThreadsCount=0) {
-		if (!ThreadsCount)ThreadsCount = DetectedThreads;
+		//if (!ThreadsCount)ThreadsCount = DetectedThreads;
 		if (Files.empty()) {
 			SaveDirectory = L"";
 			return;
