@@ -7,7 +7,7 @@ struct shader_prog {
     GLuint compile(GLuint type, char const *(&source)[N]) {
 
         GLuint shader = glCreateShader(type);
-        glShaderSource(shader, N, source, NULL);
+        glShaderSource(shader, N, source, nullptr);
         glCompileShader(shader);
         GLint compiled;
         glGetShaderiv(shader, GL_COMPILE_STATUS, &compiled);
@@ -16,7 +16,7 @@ struct shader_prog {
             glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &length);
             std::string log(length, ' ');
             glGetShaderInfoLog(shader, length, &length, &log[0]);
-			MessageBoxA(NULL, log.c_str(), "Shader compilation error!", MB_OK);
+			MessageBoxA(nullptr, log.c_str(), "Shader compilation error!", MB_OK);
             //throw std::logic_error(log);
             return false;
         }

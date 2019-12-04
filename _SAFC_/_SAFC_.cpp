@@ -1,5 +1,6 @@
 ﻿#include "pch.h"
 #include <ctime>
+#include <mutex>
 #include <iostream>
 #include <cstdlib>
 #include <cmath>
@@ -17,15 +18,18 @@
 #include <map>
 #include <deque>
 #include <thread>
+#include <dwmapi.h>
 //#include <>
 
 //#define WIN32_LEAN_AND_MEAN
+
+#pragma comment (lib, "dwmapi.lib")
 
 #include "glew.h"
 #ifndef __X64
 	#pragma comment (lib, "glew32.lib")
 #else
-	#pragma comment (lib, "x64\\glew32.lib")
+	#pragma comment (lib, "lib_x64\\glew32.lib")
 #endif
 
 #include "glut.h"
@@ -33,12 +37,14 @@
 #ifndef __X64
 	#pragma comment (lib, "freeglut.lib")
 #else
-	#pragma comment (lib, "x64\\freeglut.lib")
+	#pragma comment (lib, "lib_x64\\freeglut.lib")
 #endif
 
 #include "shader_smpclass.h"
 
 #include "consts.h"
+
+#define NULL nullptr
 
 using namespace std;
 
@@ -83,6 +89,7 @@ int TIMESEED() {
 
 void ThrowAlert_Error(string AlertText); 
 void AddFiles(vector<wstring> Filenames);
+#pragma warning(disable : 4996)
 
 size_t getAvailableRAM(){
 	size_t ret = 0;
@@ -345,7 +352,7 @@ struct SingleMIDIReProcessor {
 				if (KeyConverter) {
 
 					Header = 0;
-					nullptr;
+					NULL;
 				}
 				///Deltatime recalculation
 				DWORD vlv = 0, tvlv;
@@ -3405,7 +3412,7 @@ struct DragNDropHandler : IDropTarget {
 			AddRef();
 			return NOERROR;
 		}
-		*ppvObject = nullptr;
+		*ppvObject = NULL;
 		return ResultFromScode(E_NOINTERFACE);
 	}
 	ULONG STDMETHODCALLTYPE AddRef() override {
@@ -3910,6 +3917,7 @@ struct PLC_VolumeWorker:HandleableUIPart {
 
 struct SMRP_Vis: HandleableUIPart {
 	SingleMIDIReProcessor *SMRP;
+	
 	float XPos, YPos;
 	BIT Processing, Finished, Hovered, Lock;
 	SingleTextLine *STL_Log,*STL_War,*STL_Err,*STL_Info;
@@ -3934,7 +3942,7 @@ struct SMRP_Vis: HandleableUIPart {
 		this->STL_Info = STLS->CreateOne("_");
 		STLS->RGBAColor = BASERGBA;
 	}
-	void SafeMove(float dx, float dy) override {if (Lock)return;
+	void SafeMove(float dx, float dy) override {
 		if (Lock)return;
 		XPos += dx;
 		YPos += dy;
@@ -4803,6 +4811,8 @@ pair<float, float> GetPositionForOneOf(INT32 Position, INT32 Amount, float UnitS
 }
 
 void OnStart() {
+	if (_Data.Files.empty())
+		return;
 	WH->MainWindow_ID = "SMRP_CONTAINER";
 	WH->DisableAllWindows();
 	WH->EnableWindow("SMRP_CONTAINER");
@@ -5021,10 +5031,20 @@ void Init() {
 	//WH->EnableWindow("CAT");
 	//WH->EnableWindow("SMPAS");//Debug line
 	//WH->EnableWindow("PROMPT");////DEBUUUUG
-
-	glutHandler = FindWindowA(NULL, WINDOWTITLE);
+	
+	/*DWM_BLURBEHIND BB = {0};
+	BB.dwFlags = DWM_BB_ENABLE | DWM_BB_BLURREGION;
+	BB.fEnable = true;
+	BB.hRgnBlur = CreateRectRgn(0, 0, 1, 1);
+	BB.fTransitionOnMaximized = false;*/
+	glutHandler = FindWindowA(NULL, WINDOWTITLE); 
+	/*DWORD WindLong = ::GetWindowLong(glutHandler, GWL_STYLE);
+	//WindLong ^= WS_BORDER;
+	WindLong |= WS_POPUP;
+	::SetWindowLong(glutHandler, GWL_STYLE, WindLong);
+	DwmEnableBlurBehindWindow(glutHandler, &BB); */
 	DragAcceptFiles(glutHandler, TRUE);
-	OleInitialize(nullptr);
+	OleInitialize(NULL);
 	cout << "RDD " << (RegisterDragDrop(glutHandler, &DNDH_Global)) << endl;
 }
 
@@ -5101,6 +5121,7 @@ SMRP_Vis atb(0,0,STLS_WhiteSmall);
 void onTimer(int v);
 void mDisplay() {
 	glClear(GL_COLOR_BUFFER_BIT);
+	glClearColor(0.0f, 0.0f, 0.0f, 0.1f);
 	if (FIRSTBOOT) {
 		FIRSTBOOT = 0;
 		//Settings::ShaderMode = rand() & 3;
