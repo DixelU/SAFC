@@ -41,6 +41,7 @@
 #endif
 
 #include "shader_smpclass.h"
+#include "OR.h"
 
 #include "consts.h"
 
@@ -53,7 +54,7 @@ typedef bool BIT;
 
 FLOAT RANGE=200,MXPOS=0.f,MYPOS=0.f;
 
-constexpr char* WINDOWTITLE = "Gamma SAFC";
+constexpr char* WINDOWTITLE = "SAFC   ";
 
 //#define ROT_ANGLE 0.7
 float ROT_ANGLE = 0.f;
@@ -4425,6 +4426,37 @@ namespace PropsAndSets {
 			currentID = -1;
 		}
 	}
+	void OR() {
+		if (currentID > -1) {
+			auto Win = (*WH)["OR"];
+			OR::OverlapsRemover *_OR = new OR::OverlapsRemover(_Data[currentID].FileSize);
+			thread th([&](OR::OverlapsRemover *OR, DWORD id) {
+				OR->Load(_Data[id].Filename);
+			}, _OR, currentID);
+			th.detach();
+			thread _th([&](OR::OverlapsRemover *OR, MoveableWindow *MW) {
+				while (true) {
+					Sleep(33);
+					((TextBox*)(*MW)["TEXT"])->SafeStringReplace(OR->s_out);
+					if (OR->Finished)
+						break;
+				}
+				delete OR;
+				}, _OR, Win);
+			_th.detach();
+			Win->SafeWindowRename(
+				_Data[currentID].AppearanceFilename.size() <= 40 ? 
+					_Data[currentID].AppearanceFilename :
+					_Data[currentID].AppearanceFilename.substr(40)
+			);
+			WH->EnableWindow("OR");
+		}
+	}
+	void SR() {
+		if (currentID > -1) {
+
+		}
+	}
 	void OnApplySettings() {
 		if (currentID < 0 && currentID >= _Data.Files.size()) {
 			ThrowAlert_Error("You cannot apply current settings to file with ID " + to_string(currentID));
@@ -4955,11 +4987,14 @@ void Init() {
 
 	(*T)["GROUPID"] = new InputField(" ", 92.5 - WindowHeapSize, 75 - WindowHeapSize, 10, 20, STLS_WhiteSmall, PropsAndSets::PPQN, 0x007FFFFF, STLS_WhiteSmall, "Group ID...", 2, _Align::center, _Align::right, InputField::Type::NaturalNumbers);
 
+	(*T)["OR"] = Butt = new Button("OR", STLS_WhiteSmall, PropsAndSets::OR, 37.5, 15 - WindowHeapSize, 20, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, STLS_WhiteSmall, "Overlaps remover");
+	(*T)["SR"] = new Button("SR", STLS_WhiteSmall, PropsAndSets::SR, 12.5, 15 - WindowHeapSize, 20, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, STLS_WhiteSmall, "Sustains remover");
+
 	(*T)["APPLY"] = new Button("Apply", STLS_WhiteSmall, PropsAndSets::OnApplySettings, 87.5 - WindowHeapSize, 15 - WindowHeapSize, 30, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, NULL, " ");
 
 	(*T)["CUT_AND_TRANSPOSE"] = (Butt = new Button("Cut & Transpose...", STLS_WhiteSmall, PropsAndSets::CutAndTranspose::OnCaT, 52.5 - WindowHeapSize, 35 - WindowHeapSize, 100, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, STLS_WhiteSmall, "Cut and Transpose tool"));
 	Butt->Tip->SafeChangePosition_Argumented(_Align::right, 100 - WindowHeapSize, Butt->Tip->CYpos);
-	(*T)["PITCH_MAP"] = (Butt = new Button("Pitch map ...", STLS_WhiteSmall, PropsAndSets::OnPitchMap, -37.5 - WindowHeapSize, 15 - WindowHeapSize, 70, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, STLS_WhiteSmall, "Allows to transform pitches"));
+	(*T)["PITCH_MAP"] = (Butt = new Button("Pitch map ...", STLS_WhiteSmall, PropsAndSets::OnPitchMap, -37.5 - WindowHeapSize, 15 - WindowHeapSize, 70, 10, 1, 0x7F7F7F3F, 0x7F7F7FFF, 0xFFFFFFFF, 0xFFFFFF3F, 0xFFFFFFFF, STLS_WhiteSmall, "Allows to transform pitches"));
 	Butt->Tip->SafeChangePosition_Argumented(_Align::right, 100 - WindowHeapSize, Butt->Tip->CYpos);
 	(*T)["VOLUME_MAP"] = (Butt = new Button("Volume map ...", STLS_WhiteSmall, PropsAndSets::VolumeMap::OnVolMap, -37.5 - WindowHeapSize, 35 - WindowHeapSize, 70, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, STLS_WhiteSmall, "Allows to transform volumes of notes"));
 	Butt->Tip->SafeChangePosition_Argumented(_Align::right, 100 - WindowHeapSize, Butt->Tip->CYpos);
@@ -5024,7 +5059,13 @@ void Init() {
 	
 	(*WH)["SMRP_CONTAINER"] = T;
 
+	T = new MoveableWindow("Sustains/Overlaps remover", STLS_WhiteSmall, -100, 25, 200, 45, 0x3F3F3FCF, 0x7F7F7F7F);
+	(*T)["TEXT"] = new TextBox("sdokflsdkflk", STLS_WhiteSmall, 0, -WindowHeapSize + 15, 15, 180, 10, 0, 0, 0, _Align::center);
+
+	(*WH)["OR"] = T;
+
 	WH->EnableWindow("MAIN");
+	//WH->EnableWindow("OR");
 	//WH->EnableWindow("SMRP_CONTAINER");
 	//WH->EnableWindow("APP_SETTINGS");
 	//WH->EnableWindow("VM");
@@ -5269,7 +5310,7 @@ void mExit(int a) {
 
 int main(int argc, char ** argv) {
 	if (1)
-		ShowWindow(GetConsoleWindow(), SW_HIDE); 
+		ShowWindow(GetConsoleWindow(), SW_SHOW); 
 	SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS);
 	//srand(1);
 	//srand(clock());
