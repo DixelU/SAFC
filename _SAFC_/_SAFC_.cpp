@@ -1,4 +1,4 @@
-﻿#include "pch.h"
+﻿#include <wchar.h>
 #include <ctime>
 #include <mutex>
 #include <iostream>
@@ -75,7 +75,7 @@ float WindX = WINDXSIZE, WindY = WINDYSIZE;
 BIT ANIMATION_IS_ACTIVE = 0, FIRSTBOOT = 1, DRAG_OVER = 0, 
 	APRIL_FOOL = 0;
 DWORD TimerV = 0;
-HWND glutHandler;
+HWND hWnd;
 auto HandCursor = ::LoadCursor(NULL, IDC_HAND), AllDirectCursor = ::LoadCursor(NULL, IDC_CROSS);///AAAAAAAAAAA
 //const float singlepixwidth = (float)RANGE / WINDXSIZE;
 
@@ -91,6 +91,13 @@ int TIMESEED() {
 void ThrowAlert_Error(string AlertText); 
 void AddFiles(vector<wstring> Filenames);
 #pragma warning(disable : 4996)
+
+struct font_extractor {
+
+	font_extractor(string FontName, float Size) {
+
+	}
+};
 
 size_t getAvailableRAM(){
 	size_t ret = 0;
@@ -1405,6 +1412,13 @@ struct DottedSymbol {
 		BYTE gRed = 255, BYTE gGreen = 255, BYTE gBlue = 255, BYTE gAlpha = 255,
 		BYTE BaseColorPoint = 5, BYTE GradColorPoint = 8) {
 		return;
+	}
+};
+struct wFontSymbol : DottedSymbol {
+	wchar_t Symb;
+	wFontSymbol(wchar_t Symb, float CXpos, float CYpos, float XUnitSize, float YUnitSize, DWORD RGBA) :
+		DottedSymbol(" ",CXpos, CYpos,XUnitSize, YUnitSize, 1, RGBA>>24,(RGBA >> 16) & 0xFF, (RGBA >> 8) & 0xFF,RGBA & 0xFF) {
+		this->Symb = Symb;
 	}
 };
 struct BiColoredDottedSymbol : DottedSymbol {
@@ -3427,24 +3441,24 @@ struct DragNDropHandler : IDropTarget {
 		return m_refCount;
 	}
 	HRESULT STDMETHODCALLTYPE DragEnter(IDataObject* dataObject, DWORD grfKeyState, POINTL mousePos, DWORD* effect) override {
-		//MessageBox(glutHandler, "dragenter", "Drag", MB_ICONINFORMATION);
+		//MessageBox(hWnd, "dragenter", "Drag", MB_ICONINFORMATION);
 		//cout << "a" << endl;
 		DRAG_OVER = 1;
 		*effect = DROPEFFECT_COPY;
 		return NOERROR;
 	}
 	HRESULT STDMETHODCALLTYPE DragOver(DWORD keyState, POINTL mousePos, DWORD* effect) override {
-		//MessageBox(glutHandler, "dragover", "Drag", MB_ICONINFORMATION);
+		//MessageBox(hWnd, "dragover", "Drag", MB_ICONINFORMATION);
 		*effect = DROPEFFECT_COPY;
 		return NOERROR;
 	}
 	HRESULT STDMETHODCALLTYPE DragLeave() override {
-		//MessageBox(glutHandler, "dragleave", "Drag", MB_ICONINFORMATION);
+		//MessageBox(hWnd, "dragleave", "Drag", MB_ICONINFORMATION);
 		DRAG_OVER = 0;
 		return NOERROR;
 	}
 	HRESULT STDMETHODCALLTYPE Drop(IDataObject* dataObject, DWORD keyState, POINTL mousePos, DWORD* effect) override {
-		//MessageBox(glutHandler, "drop", "Drag", MB_ICONINFORMATION);
+		//MessageBox(hWnd, "drop", "Drag", MB_ICONINFORMATION);
 		//cout << "drop " << m_refCount << endl;
 		LPOLESTR szFile = 0;
 		FORMATETC fdrop = { CF_HDROP, 0, DVASPECT_CONTENT, -1, TYMED_HGLOBAL };
@@ -5073,20 +5087,11 @@ void Init() {
 	//WH->EnableWindow("SMPAS");//Debug line
 	//WH->EnableWindow("PROMPT");////DEBUUUUG
 	
-	/*DWM_BLURBEHIND BB = {0};
-	BB.dwFlags = DWM_BB_ENABLE | DWM_BB_BLURREGION;
-	BB.fEnable = true;
-	BB.hRgnBlur = CreateRectRgn(0, 0, 1, 1);
-	BB.fTransitionOnMaximized = false;*/
-	glutHandler = FindWindowA(NULL, WINDOWTITLE); 
-	/*DWORD WindLong = ::GetWindowLong(glutHandler, GWL_STYLE);
-	//WindLong ^= WS_BORDER;
-	WindLong |= WS_POPUP;
-	::SetWindowLong(glutHandler, GWL_STYLE, WindLong);
-	DwmEnableBlurBehindWindow(glutHandler, &BB); */
-	DragAcceptFiles(glutHandler, TRUE);
+	hWnd = FindWindowA(NULL, WINDOWTITLE); 
+
+	DragAcceptFiles(hWnd, TRUE);
 	OleInitialize(NULL);
-	cout << "RDD " << (RegisterDragDrop(glutHandler, &DNDH_Global)) << endl;
+	cout << "RDD " << (RegisterDragDrop(hWnd, &DNDH_Global)) << endl;
 }
 
 
@@ -5161,8 +5166,8 @@ SMRP_Vis atb(0,0,STLS_WhiteSmall);
 
 void onTimer(int v);
 void mDisplay() {
-	glClear(GL_COLOR_BUFFER_BIT);
-	glClearColor(0.0f, 0.0f, 0.0f, 0.1f);
+	glClear(GL_COLOR_BUFFER_BIT | GL_ACCUM_BUFFER_BIT);
+	glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 	if (FIRSTBOOT) {
 		FIRSTBOOT = 0;
 		//Settings::ShaderMode = rand() & 3;
@@ -5209,10 +5214,10 @@ void mDisplay() {
 	}
 	else if (Settings::ShaderMode < 4) {
 		glBegin(GL_QUADS);
-		glColor4f(1, 0.5f, 0, (DRAG_OVER) ? 0.25f : 1);
+		glColor4f(1, 0.5f, 0, (DRAG_OVER) ? 0.25f : 0);
 		glVertex2f(0 - RANGE * (WindX / WINDXSIZE), 0 - RANGE * (WindY / WINDYSIZE));
 		glVertex2f(0 - RANGE * (WindX / WINDXSIZE), RANGE * (WindY / WINDYSIZE));
-		glColor4f(0, 0.5f, 1, (DRAG_OVER) ? 0.25f : 1);
+		glColor4f(0, 0.5f, 1, (DRAG_OVER) ? 0.25f : 0);
 		glVertex2f(RANGE * (WindX / WINDXSIZE), RANGE * (WindY / WINDYSIZE));
 		glVertex2f(RANGE * (WindX / WINDXSIZE), 0 - RANGE * (WindY / WINDYSIZE));
 		glEnd();
@@ -5232,6 +5237,24 @@ void mDisplay() {
 	if (WH)WH->Draw();
 	if (DRAG_OVER)SpecialSigns::DrawFileSign(0, 0, 50, 0xFFFFFFCF,0);
 	glRotatef(-ROT_ANGLE, 0, 0, 1);
+
+	////font experiment
+
+	glRasterPos2f(0, 0);
+	auto base = glGenLists(255);
+	HFONT hf = CreateFontW(20, 10, 0, 0, FALSE, FALSE, FALSE, FALSE, ANSI_CHARSET, OUT_TT_PRECIS, CLIP_DEFAULT_PRECIS, ANTIALIASED_QUALITY, FF_DONTCARE | DEFAULT_PITCH, L"Arial");
+	wglUseFontBitmaps(GetDC(hWnd), 32, 255, base);
+	SelectObject(GetDC(hWnd), hf);
+
+	glPushAttrib(GL_LIST_BIT);
+	glListBase(base - 32);
+	glCallLists(10, GL_UNSIGNED_BYTE, "012wW56789");
+	glPopAttrib();
+	//
+	//glutBitmapCharacter(GLUT_BITMAP_TIMES_ROMAN_24, 'w');
+	
+
+
 
 	glutSwapBuffers();
 }
@@ -5323,12 +5346,13 @@ int main(int argc, char ** argv) {
 	glutInitWindowSize(WINDXSIZE, WINDYSIZE);
 	//glutInitWindowPosition(50, 0);
 	glutCreateWindow(WINDOWTITLE);
-
+	
 	if(APRIL_FOOL)
 		glBlendFunc(GL_SRC_ALPHA, GL_ONE);//_MINUS_SRC_ALPHA
 	else
 		glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);//_MINUS_SRC_ALPHA
-	glEnable(GL_BLEND);
+	glEnable(GL_BLEND); 
+	
 	//glEnable(GL_POLYGON_SMOOTH);//laggy af
 	glEnable(GL_LINE_SMOOTH);//GL_POLYGON_SMOOTH
 	glEnable(GL_POINT_SMOOTH);

@@ -15,9 +15,6 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="pch.h">
-      <Filter>Файлы заголовков</Filter>
-    </ClInclude>
     <ClInclude Include="consts.h">
       <Filter>Исходные файлы</Filter>
     </ClInclude>
@@ -33,11 +30,11 @@
     <ClInclude Include="OR.h">
       <Filter>Файлы заголовков</Filter>
     </ClInclude>
+    <ClInclude Include="font_extractor.h">
+      <Filter>Файлы заголовков</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="pch.cpp">
-      <Filter>Исходные файлы</Filter>
-    </ClCompile>
     <ClCompile Include="_SAFC_.cpp">
       <Filter>Исходные файлы</Filter>
     </ClCompile>
