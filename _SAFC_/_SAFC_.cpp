@@ -57,7 +57,7 @@ typedef bool BIT;
 FLOAT RANGE = BEG_RANGE,MXPOS=0.f,MYPOS=0.f;
 
 constexpr char* WINDOWTITLE = "SAFC   ";
-wstring FONTNAME = L"Arial";
+string FONTNAME = "Arial";
 BIT is_fonted = 1;
 
 //#define ROT_ANGLE 0.7
@@ -97,10 +97,6 @@ int TIMESEED() {
 void ThrowAlert_Error(string AlertText); 
 void AddFiles(vector<wstring> Filenames);
 #pragma warning(disable : 4996)
-
-vector<string> GetFonts() {
-
-}
 
 size_t getAvailableRAM(){
 	size_t ret = 0;
@@ -1422,12 +1418,12 @@ struct DottedSymbol {
 		return;
 	}
 };
-FLOAT lFONT_HEIGHT_TO_WIDTH = 2.33;
+FLOAT lFONT_HEIGHT_TO_WIDTH = 2.5;
 namespace lFontSymbolsInfo {
 	bool IsInitialised = false;
 	GLuint CurrentFont = 0; 
 	HFONT SelectedFont;
-	INT32 Size = 15;
+	INT32 Size = 16;
 	struct lFontSymbInfosListDestructor {
 		bool abc;
 		~lFontSymbInfosListDestructor() {
@@ -1435,13 +1431,27 @@ namespace lFontSymbolsInfo {
 		}
 	};
 	lFontSymbInfosListDestructor __wFSILD = { 0 };
-	void InitialiseFont(wstring FontName) {
+	void InitialiseFont(string FontName) {
 		if (!IsInitialised) {
 			CurrentFont = glGenLists(256);
 			IsInitialised = true;
 		}
 		wglUseFontBitmaps(hDc, 0, 255, CurrentFont);
-		SelectedFont = CreateFontW(Size*(BEG_RANGE/RANGE), Size * (BEG_RANGE / RANGE)/ lFONT_HEIGHT_TO_WIDTH, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_TT_PRECIS, CLIP_DEFAULT_PRECIS, ANTIALIASED_QUALITY, FF_DONTCARE | DEFAULT_PITCH, FontName.c_str());
+		SelectedFont = CreateFontA(
+			Size*(BEG_RANGE/RANGE), 
+			(Size>0)? Size * (BEG_RANGE / RANGE) / lFONT_HEIGHT_TO_WIDTH: 0,
+			0, 0,
+			FW_NORMAL,
+			FALSE,
+			FALSE, 
+			FALSE, 
+			DEFAULT_CHARSET, 
+			OUT_TT_PRECIS, 
+			CLIP_DEFAULT_PRECIS,
+			ANTIALIASED_QUALITY, 
+			FF_DONTCARE | DEFAULT_PITCH, 
+			FontName.c_str()
+		);
 		if (SelectedFont)
 			SelectObject(hDc, SelectedFont);
 		else
@@ -5065,8 +5075,11 @@ namespace Settings {
 			Y->InplaceMergeEnabled = _Data.InplaceMergeFlag;
 		}
 	}
-	void ApplyWheel(double new_val) {
+	void ApplyFSWheel(double new_val) {
 		lFontSymbolsInfo::Size = new_val;
+	}
+	void ApplyRelWheel(double new_val) {
+		lFONT_HEIGHT_TO_WIDTH = new_val;
 	}
 }
 
@@ -5262,17 +5275,19 @@ void Init() {
 
 	(*WH)["VM"] = T;
 
-	T = new MoveableWindow("App settings", System_White, -100, 100, 200, 200, 0x3F3F3FCF, 0x7F7F7F7F);
+	T = new MoveableWindow("App settings", System_White, -100, 100, 200, 220, 0x3F3F3FCF, 0x7F7F7F7F);
 
 	(*T)["AS_SHADERMODE"] = new InputField(to_string(Settings::ShaderMode), -87.5 + WindowHeapSize, 85 - WindowHeapSize, 10, 30, System_White, NULL, 0x007FFFFF, System_White, "Shader ID", 2, _Align::center, _Align::left, InputField::Type::NaturalNumbers);
 	(*T)["AS_SWW"] = new InputField(to_string(Settings::SinewaveWidth), -47.5 + WindowHeapSize, 85 - WindowHeapSize, 10, 40, System_White, NULL, 0x007FFFFF, System_White, "Wave \"height\"", 8, _Align::center, _Align::left, InputField::Type::FP_Any);
 	(*T)["AS_BW"] = new InputField(to_string(Settings::Basewave), -2.5 + WindowHeapSize, 85 - WindowHeapSize, 10, 40, System_White, NULL, 0x007FFFFF, System_White, "Base level", 8, _Align::center, _Align::center, InputField::Type::FP_Any);
 	(*T)["AS_P3"] = new InputField(to_string(Settings::Basewave), 42.5 + WindowHeapSize, 85 - WindowHeapSize, 10, 40, System_White, NULL, 0x007FFFFF, System_White, "3rd parameter", 8, _Align::center, _Align::right, InputField::Type::FP_Any);
-	(*T)["AS_APPLY"] = Butt = new Button("Apply", System_White, Settings::OnSetApply, 85 - WindowHeapSize, -67.5 - WindowHeapSize, 40, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, NULL, "_");
 	(*T)["AS_SHADERWARNING"] = new TextBox("Shader settings", System_White, 0, 85 - WindowHeapSize, 30, 200, 12, 0xFF7F001F, 0xFF7F007F, 1, _Align::center);
+	(*T)["AS_APPLY"] = Butt = new Button("Apply", System_White, Settings::OnSetApply, 85 - WindowHeapSize, -87.5 - WindowHeapSize, 40, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, NULL, "_");
 	(*T)["AS_ROT_ANGLE"] = new InputField(to_string(ROT_ANGLE), -87.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 30, System_White, NULL, 0x007FFFFF, System_White, "Rotation angle", 6, _Align::center, _Align::left, InputField::Type::FP_Any);
 	(*T)["AS_THREADS_COUNT"] = new InputField(to_string(_Data.DetectedThreads), -57.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 20, System_White, NULL, 0x007FFFFF, System_White, "Threads count", 2, _Align::center, _Align::left, InputField::Type::NaturalNumbers);
-	(*T)["AS_FONT_SIZE"] = new WheelVariableChanger(Settings::ApplyWheel, -37.5, -62.5, 15, 1, System_White, "Font size", "Delta", WheelVariableChanger::Type::addictable);
+	(*T)["AS_FONT_SIZE"] = new WheelVariableChanger(Settings::ApplyFSWheel, -37.5, -82.5, lFontSymbolsInfo::Size, 1, System_White, "Font size", "Delta", WheelVariableChanger::Type::addictable);
+	(*T)["AS_FONT_P"] = new WheelVariableChanger(Settings::ApplyRelWheel, -37.5, -22.5, lFONT_HEIGHT_TO_WIDTH, 0.01, System_White, "Font rel.", "Delta", WheelVariableChanger::Type::addictable);
+	(*T)["AS_FONT_NAME"] = new InputField(FONTNAME, 52.5 - WindowHeapSize, 55 - WindowHeapSize, 10, 100, _STLS_WhiteSmall, &FONTNAME, 0x007FFFFF, System_White, "Font name", 32, _Align::center, _Align::left, InputField::Type::Text);
 
 	(*T)["BOOL_REM_TRCKS"] = new CheckBox(-97.5 + WindowHeapSize, 35 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, System_White, _Align::left, "DV: Remove empty tracks");
 	(*T)["BOOL_REM_REM"] = new CheckBox(-82.5 + WindowHeapSize, 35 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, System_White, _Align::left, "DV: Remove merge \"remnants\"");
@@ -5564,7 +5579,7 @@ int main(int argc, char ** argv) {
 	glEnable(GL_LINE_SMOOTH);//GL_POLYGON_SMOOTH
 	glEnable(GL_POINT_SMOOTH);
 
-	//glShadeModel(GL_SMOOTH);
+	glShadeModel(GL_SMOOTH);
 
 	glHint(GL_LINE_SMOOTH_HINT, GL_NICEST);//GL_FASTEST//GL_NICEST
 	glHint(GL_POINT_SMOOTH_HINT, GL_NICEST);
