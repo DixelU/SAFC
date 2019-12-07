@@ -18,6 +18,7 @@
 #include <map>
 #include <deque>
 #include <thread>
+#include <boost/container/flat_map.hpp>
 #include <dwmapi.h>
 //#include <>
 
@@ -52,9 +53,12 @@ using namespace std;
 typedef unsigned char BYTE;
 typedef bool BIT;
 
-FLOAT RANGE=200,MXPOS=0.f,MYPOS=0.f;
+#define BEG_RANGE 200
+FLOAT RANGE = BEG_RANGE,MXPOS=0.f,MYPOS=0.f;
 
 constexpr char* WINDOWTITLE = "SAFC   ";
+wstring FONTNAME = L"Arial";
+BIT is_fonted = 1;
 
 //#define ROT_ANGLE 0.7
 float ROT_ANGLE = 0.f;
@@ -76,10 +80,12 @@ BIT ANIMATION_IS_ACTIVE = 0, FIRSTBOOT = 1, DRAG_OVER = 0,
 	APRIL_FOOL = 0;
 DWORD TimerV = 0;
 HWND hWnd;
+HDC hDc;
 auto HandCursor = ::LoadCursor(NULL, IDC_HAND), AllDirectCursor = ::LoadCursor(NULL, IDC_CROSS);///AAAAAAAAAAA
 //const float singlepixwidth = (float)RANGE / WINDXSIZE;
 
 void absoluteToActualCoords(int ix, int iy, float &x, float &y);
+void inline rotate(float& x, float& y);
 float CONSTZERO(float x, float y) { return 0.f; }
 int TIMESEED() {
 	SYSTEMTIME t;
@@ -91,13 +97,6 @@ int TIMESEED() {
 void ThrowAlert_Error(string AlertText); 
 void AddFiles(vector<wstring> Filenames);
 #pragma warning(disable : 4996)
-
-struct font_extractor {
-
-	font_extractor(string FontName, float Size) {
-
-	}
-};
 
 size_t getAvailableRAM(){
 	size_t ret = 0;
@@ -1335,7 +1334,6 @@ struct DottedSymbol {
 		DottedSymbol(RenderWay, Xpos, Ypos, XUnitSize, YUnitSize, LineWidth, *RGBAColor >> 24, (*RGBAColor >> 16) & 0xFF, (*RGBAColor >> 8) & 0xFF, (*RGBAColor) & 0xFF) {
 		delete RGBAColor;
 	}
-
 	DottedSymbol(char Symbol, float Xpos, float Ypos, float XUnitSize, float YUnitSize, BYTE LineWidth, DWORD *RGBAColor) : 
 		DottedSymbol(ASCII[Symbol], Xpos, Ypos, XUnitSize, YUnitSize, LineWidth, *RGBAColor >> 24, (*RGBAColor >> 16) & 0xFF, (*RGBAColor >> 8) & 0xFF, (*RGBAColor) & 0xFF) {
 		delete RGBAColor;
@@ -1405,6 +1403,12 @@ struct DottedSymbol {
 	void SafeCharMove(float dx, float dy) {
 		Xpos += dx; Ypos += dy;
 	}
+	inline float _XUnitSize() const {
+		return Points[1].x - Points[0].x;
+	}
+	inline float _YUnitSize() const {
+		return Points[3].y - Points[0].y;
+	}
 	void virtual RefillGradient(DWORD *RGBAColor, DWORD *gRGBAColor, BYTE BaseColorPoint, BYTE GradColorPoint) {
 		return;
 	}
@@ -1414,11 +1418,68 @@ struct DottedSymbol {
 		return;
 	}
 };
-struct wFontSymbol : DottedSymbol {
-	wchar_t Symb;
-	wFontSymbol(wchar_t Symb, float CXpos, float CYpos, float XUnitSize, float YUnitSize, DWORD RGBA) :
-		DottedSymbol(" ",CXpos, CYpos,XUnitSize, YUnitSize, 1, RGBA>>24,(RGBA >> 16) & 0xFF, (RGBA >> 8) & 0xFF,RGBA & 0xFF) {
+FLOAT lFONT_HEIGHT_TO_WIDTH = 2.33;
+namespace lFontSymbolsInfo {
+	bool IsInitialised = false;
+	GLuint CurrentFont = 0; 
+	HFONT SelectedFont;
+	INT32 Size = 15;
+	struct lFontSymbInfosListDestructor {
+		bool abc;
+		~lFontSymbInfosListDestructor() {
+			glDeleteLists(CurrentFont, 256);
+		}
+	};
+	lFontSymbInfosListDestructor __wFSILD = { 0 };
+	void InitialiseFont(wstring FontName) {
+		if (!IsInitialised) {
+			CurrentFont = glGenLists(256);
+			IsInitialised = true;
+		}
+		wglUseFontBitmaps(hDc, 0, 255, CurrentFont);
+		SelectedFont = CreateFontW(Size*(BEG_RANGE/RANGE), Size * (BEG_RANGE / RANGE)/ lFONT_HEIGHT_TO_WIDTH, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_TT_PRECIS, CLIP_DEFAULT_PRECIS, ANTIALIASED_QUALITY, FF_DONTCARE | DEFAULT_PITCH, FontName.c_str());
+		if (SelectedFont)
+			SelectObject(hDc, SelectedFont);
+		else
+			throw "nope";
+	}
+	inline void CallListOnChar(char C) {
+		if (IsInitialised) {
+			const char PsChStr[2] = {C,0};
+			glPushAttrib(GL_LIST_BIT);
+			glListBase(CurrentFont);
+			glCallLists(1, GL_UNSIGNED_BYTE, (const char*)(PsChStr));
+			glPopAttrib();
+		}
+	}
+	inline void CallListOnString(const string &S) {
+		if (IsInitialised) {
+			glPushAttrib(GL_LIST_BIT);
+			glListBase(CurrentFont);
+			glCallLists(1, GL_UNSIGNED_BYTE, S.c_str());
+			glPopAttrib();
+		}
+	}
+	const _MAT2 MT = { {0, 1}, {0, 0}, {0, 0}, {0, 1} };;
+}
+struct lFontSymbol : DottedSymbol {
+	char Symb;
+	GLYPHMETRICS GM;
+	lFontSymbol(char Symb, float CXpos, float CYpos, float XUnitSize, float YUnitSize, DWORD RGBA) :
+		DottedSymbol(" ", CXpos, CYpos, XUnitSize, YUnitSize, 1, RGBA >> 24, (RGBA >> 16) & 0xFF, (RGBA >> 8) & 0xFF, RGBA & 0xFF) {
 		this->Symb = Symb;
+	}
+	void Draw() override {
+		float PixelSize = (RANGE * 2) / WINDXSIZE;
+		float rotX = Xpos, rotY = Ypos;
+		//rotate(rotX, rotY);
+		if (fabsf(rotX) + 2.5 > PixelSize* WindX / 2 || fabsf(rotY) + 2.5 > PixelSize* WindY / 2)
+			return;
+		SelectObject(hDc, lFontSymbolsInfo::SelectedFont);
+		GetGlyphOutline(hDc, Symb, GGO_METRICS, &GM, 0, NULL, &lFontSymbolsInfo::MT);
+		glColor4ub(R, G, B, A);
+		glRasterPos2f(Xpos - PixelSize*GM.gmBlackBoxX*0.5, Ypos - _YUnitSize()*0.5);
+		lFontSymbolsInfo::CallListOnChar(Symb);
 	}
 };
 struct BiColoredDottedSymbol : DottedSymbol {
@@ -1566,7 +1627,7 @@ struct SingleTextLine {
 	float SpaceWidth;
 	DWORD RGBAColor,gRGBAColor;
 	float CalculatedWidth, CalculatedHeight;
-	BIT isBicolored;
+	BIT isBicolored, isListedFont;
 	float _XUnitSize,_YUnitSize;
 	vector<DottedSymbol*> Chars;
 	~SingleTextLine() {
@@ -1574,7 +1635,7 @@ struct SingleTextLine {
 			if(*i)delete *i;
 		Chars.clear();
 	}
-	SingleTextLine(string Text, float CXpos, float CYpos, float XUnitSize, float YUnitSize, float SpaceWidth, BYTE LineWidth = 2, DWORD RGBAColor=0xFFFFFFFF,DWORD *RGBAGradColor=NULL, BYTE OrigNGradPoints=((5<<4)|5)) {
+	SingleTextLine(string Text, float CXpos, float CYpos, float XUnitSize, float YUnitSize, float SpaceWidth, BYTE LineWidth = 2, DWORD RGBAColor=0xFFFFFFFF,DWORD *RGBAGradColor=NULL, BYTE OrigNGradPoints=((5<<4)|5), bool isListedFont = false) {
 		if (!Text.size())Text = " ";
 		this->_CurrentText = Text;
 		CalculatedHeight = 2 * YUnitSize;
@@ -1585,10 +1646,18 @@ struct SingleTextLine {
 		this->SpaceWidth = SpaceWidth;
 		this->_XUnitSize = XUnitSize;
 		this->_YUnitSize = YUnitSize;
+		this->isListedFont = isListedFont;
 		float CharXPosition = CXpos - (CalculatedWidth*0.5) + XUnitSize, CharXPosIncrement = 2.f*XUnitSize + SpaceWidth;
 		for (int i = 0; i < Text.size(); i++) {
-			if(RGBAGradColor==NULL)Chars.push_back(new DottedSymbol(Text[i], CharXPosition, CYpos, XUnitSize, YUnitSize,LineWidth, new DWORD(RGBAColor)));
-			else Chars.push_back(new BiColoredDottedSymbol(Text[i], CharXPosition, CYpos, XUnitSize, YUnitSize,LineWidth,new DWORD(RGBAColor), new DWORD(*RGBAGradColor),(BYTE)(OrigNGradPoints >> 4), (BYTE)(OrigNGradPoints&0xF)));
+			if (!RGBAGradColor && !isListedFont)Chars.push_back(
+				new DottedSymbol(Text[i], CharXPosition, CYpos, XUnitSize, YUnitSize, LineWidth, new DWORD(RGBAColor))
+			);
+			else if (!isListedFont) Chars.push_back(
+				new BiColoredDottedSymbol(Text[i], CharXPosition, CYpos, XUnitSize, YUnitSize, LineWidth, new DWORD(RGBAColor), new DWORD(*RGBAGradColor), (BYTE)(OrigNGradPoints >> 4), (BYTE)(OrigNGradPoints & 0xF))
+			);
+			else Chars.push_back(
+				new lFontSymbol(Text[i], CharXPosition, CYpos, XUnitSize, YUnitSize, RGBAColor)
+			);
 			CharXPosition += CharXPosIncrement;
 		}
 		if (RGBAGradColor) {
@@ -1596,9 +1665,8 @@ struct SingleTextLine {
 			this->gRGBAColor = *RGBAGradColor;
 			delete RGBAGradColor;
 		}
-		else 
+		else
 			this->isBicolored = false;
-		//cout << Text << '\t' << Text.size() << endl;
 	}
 	void SafeColorChange(DWORD NewRGBAColor) {
 		if (isBicolored) {
@@ -1608,7 +1676,6 @@ struct SingleTextLine {
 			);
 			return;
 		}
-
 		BYTE R = (NewRGBAColor >> 24), G = (NewRGBAColor >> 16) & 0xFF, B = (NewRGBAColor >> 8) & 0xFF, A = (NewRGBAColor) & 0xFF;
 		RGBAColor = NewRGBAColor;
 		for (int i = 0; i < Chars.size(); i++) {
@@ -1640,12 +1707,18 @@ struct SingleTextLine {
 	}
 	BIT SafeReplaceChar(int i,char CH) {
 		if (i >= Chars.size())return 0;
-		Chars[i]->RenderWay = ASCII[CH];
-		Chars[i]->UpdatePointPlacementPositions();
+		if (isListedFont) {
+			((lFontSymbol*)Chars[i])->Symb = CH;
+		}
+		else {
+			Chars[i]->RenderWay = ASCII[CH];
+			Chars[i]->UpdatePointPlacementPositions();
+		}
 		return 1;
 	}
 	BIT SafeReplaceChar(int i,string CHrenderway) {
 		if (i >= Chars.size())return 0;
+		if (isListedFont) return 0;
 		Chars[i]->RenderWay = CHrenderway;
 		Chars[i]->UpdatePointPlacementPositions();
 		return 1;
@@ -1674,14 +1747,16 @@ struct SingleTextLine {
 		if (!NewString.size()) NewString = " ";
 		_CurrentText = NewString;
 		while (NewString.size() > Chars.size()) {
-			if (isBicolored)Chars.push_back(new BiColoredDottedSymbol((*(BiColoredDottedSymbol*)(Chars.back()))));
-			else Chars.push_back(new DottedSymbol(*(Chars.back())));
+			if (isBicolored)
+				Chars.push_back(new BiColoredDottedSymbol((*((BiColoredDottedSymbol*)(Chars.front())))));
+			else if (isListedFont)
+				Chars.push_back(new lFontSymbol(*((lFontSymbol*)(Chars.front()))));
+			else
+				Chars.push_back(new DottedSymbol(*(Chars.front())));
 		}
 		while (NewString.size() < Chars.size()) Chars.pop_back();
-		for (int i = 0; i < Chars.size();i++) {
-			Chars[i]->RenderWay = ASCII[NewString[i]];
-			Chars[i]->UpdatePointPlacementPositions();
-		}
+		for (int i = 0; i < Chars.size(); i++)
+			SafeReplaceChar(i, NewString[i]);
 		RecalculateWidth();
 	}
 	void Draw() {
@@ -1696,7 +1771,8 @@ struct SingleTextLine {
 struct SingleTextLineSettings {
 	string STLstring;
 	float CXpos, CYpos, XUnitSize, YUnitSize;
-	BYTE BasePoint, GradPoint, LineWidth,SpaceWidth;
+	BYTE BasePoint, GradPoint, LineWidth, SpaceWidth;
+	BIT isFonted;
 	DWORD RGBAColor, gRGBAColor;
 	SingleTextLineSettings(string Text, float CXpos, float CYpos, float XUnitSize, float YUnitSize, BYTE LineWidth, BYTE SpaceWidth, DWORD RGBAColor, DWORD gRGBAColor, BYTE BasePoint, BYTE GradPoint) {
 		this->STLstring = Text;
@@ -1710,23 +1786,41 @@ struct SingleTextLineSettings {
 		this->SpaceWidth = SpaceWidth;
 		this->BasePoint = BasePoint;
 		this->GradPoint = GradPoint;
+		this->isFonted = 0;
 	}
-	SingleTextLineSettings(string Text, float CXpos, float CYpos, float XUnitSize, float YUnitSize, BYTE LineWidth, BYTE SpaceWidth, DWORD RGBAColor) :SingleTextLineSettings(Text, CXpos, CYpos, XUnitSize, YUnitSize, LineWidth, SpaceWidth, RGBAColor, 0, 255, 255) {}
-	SingleTextLineSettings(string Text, float CXpos, float CYpos, float CharHeight, DWORD RGBAColor, DWORD gRGBAColor, BYTE BasePoint, BYTE GradPoint) :SingleTextLineSettings(Text, CXpos, CYpos, CharHeight * CharWidthPerHeight / 2, CharHeight / 2, CharLineWidth(CharHeight), CharSpaceBetween(CharHeight), RGBAColor, gRGBAColor, BasePoint, GradPoint) {}
-	SingleTextLineSettings(string Text, float CXpos, float CYpos, float CharHeight, DWORD RGBAColor) :SingleTextLineSettings(Text,CXpos,CYpos,CharHeight,RGBAColor,0,255,255) {}
-	SingleTextLineSettings(SingleTextLine* Example, BIT KeepText = false) : SingleTextLineSettings(
+	SingleTextLineSettings(string Text, float CXpos, float CYpos, float XUnitSize, float YUnitSize, BYTE LineWidth, BYTE SpaceWidth, DWORD RGBAColor) :
+		SingleTextLineSettings(Text, CXpos, CYpos, XUnitSize, YUnitSize, LineWidth, SpaceWidth, RGBAColor, 0, 255, 255) {}
+	SingleTextLineSettings(string Text, float CXpos, float CYpos, float CharHeight, DWORD RGBAColor, DWORD gRGBAColor, BYTE BasePoint, BYTE GradPoint) :
+		SingleTextLineSettings(Text, CXpos, CYpos, CharHeight* CharWidthPerHeight / 2, CharHeight / 2, CharLineWidth(CharHeight), CharSpaceBetween(CharHeight), RGBAColor, gRGBAColor, BasePoint, GradPoint) {}
+	SingleTextLineSettings(string Text, float CXpos, float CYpos, float CharHeight, DWORD RGBAColor) :
+		SingleTextLineSettings(Text, CXpos, CYpos, CharHeight, RGBAColor, 0, 255, 255) {}
+	SingleTextLineSettings(float XUnitSize, float YUnitSize, DWORD RGBAColor) :
+		SingleTextLineSettings("_", 0, 0, YUnitSize, RGBAColor) {
+		this->isFonted = 1;
+		this->XUnitSize = XUnitSize;
+		this->YUnitSize = YUnitSize;
+		this->RGBAColor = RGBAColor;
+	}
+	SingleTextLineSettings(float CharHeight, DWORD RGBAColor) :
+		SingleTextLineSettings(CharHeight* CharWidthPerHeight / 4, CharHeight / 2, RGBAColor) {}
+	SingleTextLineSettings(SingleTextLine* Example, BIT KeepText = false) :
+		SingleTextLineSettings(
 		((KeepText) ? Example->_CurrentText : " "), Example->CXpos, Example->CYpos, Example->_XUnitSize, Example->_YUnitSize, Example->Chars.front()->LineWidth, Example->SpaceWidth, Example->RGBAColor, Example->gRGBAColor,
-		((Example->isBicolored) ? (((BiColoredDottedSymbol*)(Example->Chars.front()))->_PointData&0xF0) >> 4: 0xF), ((Example->isBicolored) ? (((BiColoredDottedSymbol*)(Example->Chars.front()))->_PointData) & 0xF : 0xF)
-	) {}
+			((Example->isBicolored) ? (((BiColoredDottedSymbol*)(Example->Chars.front()))->_PointData & 0xF0) >> 4 : 0xF), ((Example->isBicolored) ? (((BiColoredDottedSymbol*)(Example->Chars.front()))->_PointData) & 0xF : 0xF)
+	) {
+		this->isFonted = Example->isListedFont;
+	}
 	SingleTextLine* CreateOne() {
-		if (GradPoint & 0xF0)
+		if (GradPoint & 0xF0 && !isFonted)
 			return new SingleTextLine(STLstring, CXpos, CYpos, XUnitSize, YUnitSize, SpaceWidth, LineWidth, RGBAColor);
-		return new SingleTextLine(STLstring, CXpos, CYpos, XUnitSize, YUnitSize, SpaceWidth, LineWidth, RGBAColor, new DWORD(gRGBAColor), ((BasePoint & 0xF) << 4) | (GradPoint & 0xF));
+		if(!isFonted) return new SingleTextLine(STLstring, CXpos, CYpos, XUnitSize, YUnitSize, SpaceWidth, LineWidth, RGBAColor, new DWORD(gRGBAColor), ((BasePoint & 0xF) << 4) | (GradPoint & 0xF));
+		return new SingleTextLine(STLstring, CXpos, CYpos, XUnitSize, YUnitSize, SpaceWidth, LineWidth, RGBAColor, nullptr, 0xF, true);
 	}
 	SingleTextLine* CreateOne(string TextOverride) {
-		if (GradPoint & 0xF0)
+		if (GradPoint & 0xF0 && !isFonted)
 			return new SingleTextLine(TextOverride, CXpos, CYpos, XUnitSize, YUnitSize, SpaceWidth, LineWidth, RGBAColor);
-		return new SingleTextLine(TextOverride, CXpos, CYpos, XUnitSize, YUnitSize, SpaceWidth, LineWidth, RGBAColor, new DWORD(gRGBAColor), ((BasePoint & 0xF) << 4) | (GradPoint & 0xF));
+		if (!isFonted) return new SingleTextLine(TextOverride, CXpos, CYpos, XUnitSize, YUnitSize, SpaceWidth, LineWidth, RGBAColor, new DWORD(gRGBAColor), ((BasePoint & 0xF) << 4) | (GradPoint & 0xF));
+		return new SingleTextLine(TextOverride, CXpos, CYpos, XUnitSize, YUnitSize, SpaceWidth, LineWidth, RGBAColor, nullptr, 0xF, true);
 	}
 	void SetNewPos(float NewXPos, float NewYPos) {
 		this->CXpos = NewXPos;
@@ -1738,9 +1832,9 @@ struct SingleTextLineSettings {
 	}
 };
 struct HandleableUIPart {
-	BIT Lock=0;
-	~HandleableUIPart() {Lock = 1;}
-	HandleableUIPart() {Lock = 0;}
+	recursive_mutex Lock;
+	~HandleableUIPart() {}
+	HandleableUIPart() {}
 	BIT virtual MouseHandler(float mx, float my, CHAR Button/*-1 left, 1 right*/,CHAR State /*-1 down, 1 up*/) = 0;
 	void virtual Draw() = 0;
 	void virtual SafeMove(float, float) = 0;
@@ -1760,8 +1854,9 @@ struct CheckBox : HandleableUIPart {///NeedsTest
 	BIT State,Focused;
 	BYTE BorderWidth;
 	~CheckBox() {
-		Lock = 1;
+		Lock.lock();
 		if (Tip)delete Tip;
+		Lock.unlock();
 	}
 	CheckBox(float Xpos,float Ypos,float SideSize, DWORD BorderRGBAColor,DWORD UncheckedRGBABackground, DWORD CheckedRGBABackground, BYTE BorderWidth, BIT StartState=false, SingleTextLineSettings *TipSettings=NULL, _Align TipAlign = _Align::left, string TipText=" ") {
 		this->Xpos = Xpos;
@@ -1773,14 +1868,13 @@ struct CheckBox : HandleableUIPart {///NeedsTest
 		this->State = StartState;
 		this->Focused = 0;
 		this->BorderWidth = BorderWidth; 
-		this->Lock = 0;
 		if (TipSettings) {
 			this->Tip = TipSettings->CreateOne(TipText);
 			this->Tip->SafeChangePosition_Argumented(TipAlign, Xpos - ((TipAlign == _Align::left) ? 0.5f : ((TipAlign == _Align::right) ? -0.5f : 0))*SideSize, Ypos - SideSize);
 		}
 	}
 	void Draw() override {
-		if (Lock)return;
+		Lock.lock();
 		float hSideSize = 0.5f*SideSize;
 		if (State)
 			GLCOLOR(CheckedRGBABackground);
@@ -1810,21 +1904,24 @@ struct CheckBox : HandleableUIPart {///NeedsTest
 			glEnd();
 		}
 		if (Focused && Tip)Tip->Draw();
+		Lock.unlock();
 	}
 	void SafeMove(float dx, float dy) override {
-		if (Lock)return;
+		Lock.lock();
 		Xpos += dx;
 		Ypos += dy;
 		if (Tip)Tip->SafeMove(dx, dy);
+		Lock.unlock();
 	}
 	void SafeChangePosition(float NewX, float NewY) override {
-		if (Lock)return;
+		Lock.lock();
 		NewX -= Xpos;
 		NewY -= Ypos;
 		SafeMove(NewX, NewY);
+		Lock.unlock();
 	}
 	void SafeChangePosition_Argumented(BYTE Arg, float NewX, float NewY) override {
-		if (Lock)return;
+		Lock.lock();
 		float CW = 0.5f*(
 			(INT32)((BIT)(GLOBAL_LEFT&Arg))
 			- (INT32)((BIT)(GLOBAL_RIGHT&Arg))
@@ -1834,21 +1931,24 @@ struct CheckBox : HandleableUIPart {///NeedsTest
 				- (INT32)((BIT)(GLOBAL_TOP&Arg))
 				)*SideSize;
 		SafeChangePosition(NewX + CW, NewY + CH);
+		Lock.unlock();
 	}
 	void KeyboardHandler(CHAR CH) override {
 		return;
 	}
 	void SafeStringReplace(string TipString) override {
-		if (Lock)return;
+		Lock.lock();
 		if (Tip)Tip->SafeStringReplace(TipString);
+		Lock.unlock();
 	}
 	void FocusChange() {
-		if (Lock)return;
+		Lock.lock();
 		this->Focused = !this->Focused;
 		BorderRGBAColor = (((~(BorderRGBAColor >> 8)) << 8) | (BorderRGBAColor & 0xFF));
+		Lock.unlock();
 	}
 	BIT MouseHandler(float mx, float my, CHAR Button, CHAR State) override {
-		if (Lock)return 0;
+		Lock.lock();
 		if (fabsf(mx - Xpos) < 0.5*SideSize && fabsf(my - Ypos) < 0.5*SideSize) {
 			if (!Focused)
 				FocusChange();
@@ -1865,6 +1965,7 @@ struct CheckBox : HandleableUIPart {///NeedsTest
 				FocusChange();
 			return 0;
 		}
+		Lock.unlock();
 	}
 	inline DWORD TellType() override {
 		return _TellType::checkbox;
@@ -1914,11 +2015,9 @@ struct InputField : HandleableUIPart {
 		this->Width = Width;
 		this->CurrentString = DefaultString;
 		this->FirstInput = this->Focused = 0;
-		this->Lock = 0;
 		this->OutputSource = OutputSource;
 	}
 	BIT MouseHandler(float mx, float my, CHAR Button/*-1 left, 1 right, 0 move*/, CHAR State /*-1 down, 1 up*/) override {
-		if (Lock)return 0;
 		if (abs(mx - Xpos) < 0.5*Width && abs(my - Ypos) < 0.5*Height) {
 			if (!Focused) 
 				FocusChange();
@@ -1932,32 +2031,36 @@ struct InputField : HandleableUIPart {
 		}
 	}
 	void SafeMove(float dx, float dy) {
-		if (Lock)return;
+		Lock.lock();
 		STL->SafeMove(dx,dy);
 		if (Tip)Tip->SafeMove(dx, dy);
 		Xpos += dx;
 		Ypos += dy;
+		Lock.unlock();
 	}
 	void SafeChangePosition(float NewX,float NewY) {
-		if (Lock)return;
+		Lock.lock();
 		NewX = Xpos - NewX;
 		NewY = Ypos - NewY;
 		SafeMove(NewX, NewY);
+		Lock.unlock();
 	}
 	void FocusChange() {
-		if (Lock)return;
+		Lock.lock();
 		this->Focused = !this->Focused;
 		BorderRGBAColor = (((~(BorderRGBAColor >> 8)) << 8) | (BorderRGBAColor & 0xFF));
+		Lock.unlock();
 	}
 	void UpdateInputString(string NewString="") {
-		if (Lock)return;
+		Lock.lock();
 		if(NewString.size())CurrentString = "";
 		float x = Xpos - ((InputAlign == _Align::left) ? 1 : ((InputAlign == _Align::right) ? -1 : 0))*(0.5f*Width - STL->_XUnitSize);
 		this->STL->SafeStringReplace((NewString.size())?NewString.substr(0,this->MaxChars):CurrentString);
 		this->STL->SafeChangePosition_Argumented(InputAlign, x, Ypos);
+		Lock.unlock();
 	}
 	void BackSpace() {
-		if (Lock)return;
+		Lock.lock();
 		ProcessFirstInput();
 		if (CurrentString.size()) {
 			CurrentString.pop_back();
@@ -1966,20 +2069,24 @@ struct InputField : HandleableUIPart {
 		else {
 			this->STL->SafeStringReplace(" ");
 		}
+		Lock.unlock();
 	}
 	void PutIntoSource(string *AnotherSource=NULL) {
-		if (Lock)return;
+		Lock.lock();
 		if(OutputSource)*OutputSource = CurrentString;
 		else if (AnotherSource)*AnotherSource = CurrentString;
+		Lock.unlock();
 	}
 	void ProcessFirstInput() {
+		Lock.lock();
 		if (FirstInput) {
 			FirstInput = 0;
 			CurrentString = "";
 		}
+		Lock.unlock();
 	}
 	void KeyboardHandler(char CH) {
-		if (Lock)return;
+		Lock.lock();
 		if (Focused) {
 			if (CH >= 32) {
 				if (InputType & PassCharsType::PassNumbers) {
@@ -2006,17 +2113,19 @@ struct InputField : HandleableUIPart {
 			else if (CH == 13)PutIntoSource();
 			else if (CH == 8)BackSpace();
 		}
+		Lock.unlock();
 	}
 	void Input(char CH) {
-		if (Lock)return;
+		Lock.lock();
 		ProcessFirstInput();
 		if (!MaxChars || CurrentString.size()<MaxChars) {
 			CurrentString.push_back(CH);
 			UpdateInputString();
 		}
+		Lock.unlock();
 	}
 	void SafeChangePosition_Argumented(BYTE Arg, float NewX, float NewY) {
-		if (Lock)return;
+		Lock.lock();
 		float CW = 0.5f*(
 			(INT32)((BIT)(GLOBAL_LEFT&Arg))
 			- (INT32)((BIT)(GLOBAL_RIGHT&Arg))
@@ -2026,15 +2135,17 @@ struct InputField : HandleableUIPart {
 				- (INT32)((BIT)(GLOBAL_TOP&Arg))
 				)*Height;
 		SafeChangePosition(NewX + CW, NewY + CH);
+		Lock.unlock();
 	}
 	void SafeStringReplace(string NewString) override {
-		if (Lock)return;
+		Lock.lock();
 		CurrentString = NewString.substr(0, this->MaxChars);
 		UpdateInputString(NewString);
 		FirstInput = 1;
+		Lock.unlock();
 	}
 	void Draw() override {
-		if (Lock)return;
+		Lock.lock();
 		GLCOLOR(BorderRGBAColor);
 		glLineWidth(1);
 		glBegin(GL_LINE_LOOP);
@@ -2045,6 +2156,7 @@ struct InputField : HandleableUIPart {
 		glEnd();
 		this->STL->Draw();
 		if (Focused && Tip)Tip->Draw();
+		Lock.unlock();
 	}
 	inline DWORD TellType() override {
 		return TT_INPUT_FIELD;
@@ -2060,13 +2172,11 @@ struct Button : HandleableUIPart {
 	BIT Hovered;
 	void(*OnClick)();
 	~Button() {
-		Lock = 1;
 		delete STL;
 		if (Tip)delete Tip;
 	}
 	Button(string ButtonText, void(*OnClick)(), float Xpos, float Ypos, float Width, float Height, float CharHeight, DWORD RGBAColor, DWORD gRGBAColor, BYTE BasePoint/*15 if gradient is disabled*/, BYTE GradPoint, BYTE BorderWidth,DWORD RGBABackground, DWORD RGBABorder, DWORD HoveredRGBAColor, DWORD HoveredRGBABackground, DWORD HoveredRGBABorder, SingleTextLineSettings *Tip, string TipText=" ") {
 		SingleTextLineSettings STLS(ButtonText, Xpos, Ypos, CharHeight, RGBAColor, gRGBAColor, BasePoint, GradPoint);
-		this->Lock = 0;
 		this->STL = STLS.CreateOne();
 		if (Tip) {
 			Tip->SetNewPos(Xpos, Ypos - Height);
@@ -2088,7 +2198,6 @@ struct Button : HandleableUIPart {
 		this->OnClick = OnClick;
 	}
 	Button(string ButtonText,SingleTextLineSettings *ButtonTextSTLS, void(*OnClick)(), float Xpos, float Ypos, float Width, float Height, BYTE BorderWidth, DWORD RGBABackground, DWORD RGBABorder, DWORD HoveredRGBAColor, DWORD HoveredRGBABackground, DWORD HoveredRGBABorder, SingleTextLineSettings *Tip,string TipText = " ") {
-		this->Lock = 0;
 		ButtonTextSTLS->SetNewPos(Xpos, Ypos);
 		this->STL = ButtonTextSTLS->CreateOne(ButtonText);
 		if (Tip) {
@@ -2111,7 +2220,7 @@ struct Button : HandleableUIPart {
 		this->OnClick = OnClick;
 	}
 	BIT MouseHandler(float mx, float my, CHAR Button/*-1 left, 1 right, 0 move*/, CHAR State /*-1 down, 1 up*/)  override {
-		if (Lock)return 0;
+		Lock.lock();
 		mx = Xpos - mx;
 		my = Ypos - my;
 		if (Hovered) {
@@ -2125,6 +2234,7 @@ struct Button : HandleableUIPart {
 				if (Button && State==1) {
 
 					if(Button == -1 && OnClick)OnClick();
+					Lock.unlock();
 					return 1;
 				}
 
@@ -2136,30 +2246,34 @@ struct Button : HandleableUIPart {
 				STL->SafeColorChange(HoveredRGBAColor);
 			}
 		}
+		Lock.unlock();
 		return 0;
 	}
 	void SafeMove(float dx, float dy) {
-		if (Lock)return;
+		Lock.lock();
 		if (Tip)Tip->SafeMove(dx, dy);
 		STL->SafeMove(dx, dy);
 		Xpos += dx;
 		Ypos += dy;
+		Lock.unlock();
 	}
 	void KeyboardHandler(char CH) override {
 		return;
 	}
 	void SafeStringReplace(string NewString) override {
-		if (Lock)return;
+		Lock.lock();
 		this->STL->SafeStringReplace(NewString);
+		Lock.unlock();
 	}
 	void SafeChangePosition(float NewX, float NewY) {
-		if (Lock)return;
+		Lock.lock();
 		NewX -= Xpos;
 		NewY -= Ypos;
 		SafeMove(NewX, NewY);
+		Lock.unlock();
 	}
 	void SafeChangePosition_Argumented(BYTE Arg, float NewX, float NewY) {
-		if (Lock)return;
+		Lock.lock();
 		float CW = 0.5f*(
 				(INT32)((BIT)(GLOBAL_LEFT&Arg))
 			-	(INT32)((BIT)(GLOBAL_RIGHT&Arg))
@@ -2169,9 +2283,10 @@ struct Button : HandleableUIPart {
 			-	(INT32)((BIT)(GLOBAL_TOP&Arg))
 			)*Height;
 		SafeChangePosition(NewX + CW, NewY + CH);
+		Lock.unlock();
 	}
 	void Draw() {
-		if (Lock)return;
+		Lock.lock();
 		if (Hovered) {
 			if ((BYTE)HoveredRGBABackground) {
 				GLCOLOR(HoveredRGBABackground);
@@ -2216,6 +2331,7 @@ struct Button : HandleableUIPart {
 		}
 		if (Tip && Hovered)Tip->Draw();
 		STL->Draw();
+		Lock.unlock();
 	}
 	inline DWORD TellType() override {
 		return TT_BUTTON;
@@ -2336,13 +2452,13 @@ struct TextBox : HandleableUIPart {
 	BYTE BorderWidth;
 	DWORD RGBABorder, RGBABackground, SymbolsPerLine;
 	~TextBox() {
-		Lock = 1;
+		Lock.lock();
 		for (auto i = Lines.begin(); i != Lines.end(); i++)
 			if(*i)delete *i;
 		Lines.clear();
+		Lock.unlock();
 	}
 	TextBox(string Text, SingleTextLineSettings *STLS, float Xpos, float Ypos, float Height, float Width, float VerticalOffset,DWORD RGBABackground,DWORD RGBABorder,BYTE BorderWidth,_Align TextAlign=_Align::left,VerticalOverflow VOverflow = VerticalOverflow::cut) {
-		this->Lock = 0;
 		this->TextAlign = TextAlign;
 		this->VOverflow = VOverflow;
 		this->BorderWidth = BorderWidth;
@@ -2359,7 +2475,7 @@ struct TextBox : HandleableUIPart {
 		TextReformat();
 	}
 	void TextReformat() {
-		if (Lock)return;
+		Lock.lock();
 		vector<vector<string>>SplittedText;
 		vector<string> Paragraph;
 		string Line;
@@ -2420,47 +2536,53 @@ struct TextBox : HandleableUIPart {
 				(*Y)->SafeMove(0, (dy + Lines.front()->CalculatedHeight)*0.5f);
 			}
 		}
+		Lock.unlock();
 	}
 	void SafeTextColorChange(DWORD NewColor) {
-		if (Lock)return;
+		Lock.lock();
 		for (auto i = Lines.begin(); i != Lines.end(); i++) {
 			(*i)->SafeColorChange(NewColor);
 		}
+		Lock.unlock();
 	}
 	BIT MouseHandler(float mx, float my, CHAR Button/*-1 left, 1 right, 0 move*/, CHAR State /*-1 down, 1 up*/)  override {
 		return 0;
 	}
 	void SafeStringReplace(string NewString) override {
-		if (Lock)return;
+		Lock.lock();
 		this->Text = NewString;
 		Lines.clear();
 		RecalculateAvailableSpaceForText();
 		TextReformat();
+		Lock.unlock();
 	}
 	void KeyboardHandler(char CH) {
 		return;
 	}
 	void RecalculateAvailableSpaceForText() {
-		if (Lock)return;
+		Lock.lock();
 		SymbolsPerLine = floor((Width + STLS->XUnitSize * 2) / (STLS->XUnitSize * 2 + STLS->SpaceWidth));
+		Lock.unlock();
 	}
 	void SafeMove(float dx, float dy) {
-		if (Lock)return;
+		Lock.lock();
 		Xpos += dx;
 		Ypos += dy;
 		STLS->Move(dx, dy);
 		for (int i = 0; i < Lines.size(); i++) {
 			Lines[i]->SafeMove(dx, dy);
 		}
+		Lock.unlock();
 	}
 	void SafeChangePosition(float NewX, float NewY) {
-		if (Lock)return;
+		Lock.lock();
 		NewX -= Xpos;
 		NewY -= Ypos;
 		SafeMove(NewX, NewY);
+		Lock.unlock();
 	}
 	void SafeChangePosition_Argumented(BYTE Arg, float NewX, float NewY) {
-		if (Lock)return;
+		Lock.lock();
 		float CW = 0.5f*(
 				(INT32)((BIT)(GLOBAL_LEFT&Arg))
 			-	(INT32)((BIT)(GLOBAL_RIGHT&Arg))
@@ -2470,9 +2592,10 @@ struct TextBox : HandleableUIPart {
 			-	(INT32)((BIT)(GLOBAL_TOP&Arg))
 				)*Height;
 		SafeChangePosition(NewX + CW, NewY + CH);
+		Lock.unlock();
 	}
 	void Draw() override {
-		if (Lock)return;
+		Lock.lock();
 		if ((BYTE)RGBABackground) {
 			GLCOLOR(RGBABackground);
 			glBegin(GL_QUADS);
@@ -2493,6 +2616,7 @@ struct TextBox : HandleableUIPart {
 			glEnd();
 		}
 		for (int i = 0; i < Lines.size(); i++) Lines[i]->Draw();
+		Lock.unlock();
 	}
 	inline DWORD TellType() override {
 		return TT_TEXTBOX;
@@ -2512,12 +2636,12 @@ struct SelectablePropertedList : HandleableUIPart {
 	DWORD MaxVisibleLines,CurrentTopLineID,MaxCharsInLine;
 	BYTE TopArrowHovered,BottomArrowHovered;
 	~SelectablePropertedList() {
-		Lock = 1;
+		Lock.lock();
 		for (auto Y = Selectors.begin(); Y != Selectors.end(); Y++)
 			delete (*Y);
+		Lock.unlock();
 	}
 	SelectablePropertedList(ButtonSettings* ButtSettings, void(*OnSelect)(int SelectedID), void(*OnGetProperties)(int ID),float HeaderCXPos,float HeaderYPos,float Width, float SpaceBetween,DWORD MaxCharsInLine=0,DWORD MaxVisibleLines=0,_Align TextInButtonsAlign = _Align::left) {
-		this->Lock = 0;
 		this->MaxCharsInLine = MaxCharsInLine;
 		this->MaxVisibleLines = MaxVisibleLines;
 		this->ButtSettings = ButtSettings;
@@ -2533,11 +2657,12 @@ struct SelectablePropertedList : HandleableUIPart {
 		SelectedID = 0xFFFFFFFF;
 	}
 	void RecalculateCurrentHeight() {
-		if (Lock)return;
+		Lock.lock();
 		CalculatedHeight = SpaceBetween * Selectors.size();
+		Lock.unlock();
 	}
 	BIT MouseHandler(float mx, float my, CHAR Button/*-1 left, 1 right, 0 move*/, CHAR State /*-1 down, 1 up*/)  override {
-		if (Lock)return 0;
+		Lock.lock();
 		TopArrowHovered = BottomArrowHovered = 0;
 		if (fabsf(mx - HeaderCXPos) < 0.5*Width && my < HeaderYPos && my > HeaderYPos - CalculatedHeight) {
 			if (Button == 2 /*UP*/) {
@@ -2557,6 +2682,7 @@ struct SelectablePropertedList : HandleableUIPart {
 					TopArrowHovered = 1;
 					if (Button == -1 && State==-1) {
 						SafeRotateList(-1);
+						Lock.unlock();
 						return 1;
 					}
 				}
@@ -2564,6 +2690,7 @@ struct SelectablePropertedList : HandleableUIPart {
 					BottomArrowHovered = 1;
 					if (Button == -1 && State == -1) {
 						SafeRotateList(1);
+						Lock.unlock();
 						return 1;
 					}
 				}
@@ -2582,6 +2709,7 @@ struct SelectablePropertedList : HandleableUIPart {
 						if (OnGetProperties)OnGetProperties(i + CurrentTopLineID);
 					}
 					flag = 0;
+					Lock.unlock();
 					return 1;
 				}
 			}
@@ -2593,14 +2721,16 @@ struct SelectablePropertedList : HandleableUIPart {
 		if (SelectedID < SelectorsText.size())
 			if (SelectedID >= CurrentTopLineID && SelectedID < CurrentTopLineID + MaxVisibleLines)
 				Selectors[SelectedID - CurrentTopLineID]->MouseHandler(Selectors[SelectedID - CurrentTopLineID]->Xpos, Selectors[SelectedID - CurrentTopLineID]->Ypos, 0, 0);
+		Lock.unlock();
 		return 0;
 	}
 	void SafeStringReplace(string NewString) override {
-		if (Lock)return;
+		Lock.lock();
 		this->SafeStringReplace(NewString, 0xFFFFFFFF);
+		Lock.unlock();
 	}
 	void SafeStringReplace(string NewString,DWORD LineID) {
-		if (Lock)return;
+		Lock.lock();
 		if (LineID == 0xFFFFFFFF) {
 			SelectorsText[SelectedID] = NewString;
 			if (SelectedID < SelectorsText.size() && MaxVisibleLines)
@@ -2612,9 +2742,10 @@ struct SelectablePropertedList : HandleableUIPart {
 			if (LineID > CurrentTopLineID && LineID - CurrentTopLineID < MaxVisibleLines)
 				Selectors[LineID - CurrentTopLineID]->SafeStringReplace(NewString);
 		}
+		Lock.unlock();
 	}
 	void SafeUpdateLines() {
-		if (Lock)return;
+		Lock.lock();
 		while (SelectorsText.size() < Selectors.size())Selectors.pop_back();
 		if (CurrentTopLineID + MaxVisibleLines > SelectorsText.size()) {
 			if(SelectorsText.size()>=MaxVisibleLines)CurrentTopLineID = SelectorsText.size() - MaxVisibleLines;
@@ -2629,18 +2760,20 @@ struct SelectablePropertedList : HandleableUIPart {
 					(SelectorsText[i + CurrentTopLineID])
 				);
 		ReSetAlign_All(TextInButtonsAlign);
+		Lock.unlock();
 	}
 	void SafeRotateList(INT32 Delta) {
-		if (Lock)return;
+		Lock.lock();
 		if (!MaxVisibleLines)return;
 		if (Delta < 0 && CurrentTopLineID < 0-Delta)CurrentTopLineID = 0;
 		else if (Delta > 0 && CurrentTopLineID + Delta + MaxVisibleLines > SelectorsText.size())
 			CurrentTopLineID = SelectorsText.size() - MaxVisibleLines;
 		else CurrentTopLineID += Delta;
 		SafeUpdateLines();
+		Lock.unlock();
 	}
 	void SafeRemoveStringByID(DWORD ID) {
-		if (Lock)return;
+		Lock.lock();
 		if (ID >= SelectorsText.size())return;
 		if (SelectorsText.empty())return;
 		if (MaxVisibleLines) {
@@ -2654,22 +2787,25 @@ struct SelectablePropertedList : HandleableUIPart {
 		SelectorsText.erase(SelectorsText.begin() + ID);
 		SafeUpdateLines();
 		SelectedID = 0xFFFFFFFF;
+		Lock.unlock();
 	}
 	void ReSetAlignFor(DWORD ID, _Align Align) {
-		if (Lock)return;
+		Lock.lock();
 		if (ID>=Selectors.size())return;
 		float nx = HeaderCXPos - ((Align == _Align::left) ? 0.5f : ((Align == _Align::right)? 0 - 0.5f :0))*(Width - SpaceBetween);
 		Selectors[ID]->STL->SafeChangePosition_Argumented(Align, nx, Selectors[ID]->Ypos);
+		Lock.unlock();
 	}
 	void ReSetAlign_All(_Align Align) {
-		if (Lock)return;
+		Lock.lock();
 		if (!Align)return;
 		float nx = HeaderCXPos - ((Align == _Align::left) ? 0.5f : ((Align == _Align::right) ? 0 - 0.5f : 0))*(Width - SpaceBetween);
 		for (int i = 0; i < Selectors.size(); i++)
 			Selectors[i]->STL->SafeChangePosition_Argumented(Align, nx, Selectors[i]->Ypos);
+		Lock.unlock();
 	}
 	void SafePushBackNewString(string ButtonText) {
-		if (Lock)return;
+		Lock.lock();
 		if (MaxCharsInLine)ButtonText = ButtonText.substr(0, MaxCharsInLine);
 		SelectorsText.push_back(ButtonText);
 		if (MaxVisibleLines && SelectorsText.size() > MaxVisibleLines) {
@@ -2685,24 +2821,28 @@ struct SelectablePropertedList : HandleableUIPart {
 		//free(ptr);
 		RecalculateCurrentHeight();
 		ReSetAlignFor(SelectorsText.size()-1,this->TextInButtonsAlign);
+		Lock.unlock();
 	}
 	void PushStrings(list<string> LStrings) {
-		if (Lock)return;
+		Lock.lock();
 		for (auto Y = LStrings.begin(); Y != LStrings.end(); Y++)
 			SafePushBackNewString(*Y);
+		Lock.unlock();
 	}
 	void PushStrings(vector<string> LStrings) {
-		if (Lock)return;
+		Lock.lock();
 		for (auto Y = LStrings.begin(); Y != LStrings.end(); Y++)
 			SafePushBackNewString(*Y);
+		Lock.unlock();
 	}
 	void PushStrings(initializer_list<string> LStrings) {
-		if (Lock)return;
+		Lock.lock();
 		for (auto Y = LStrings.begin(); Y != LStrings.end(); Y++)
 			SafePushBackNewString(*Y);
+		Lock.unlock();
 	}
 	void SafeChangePosition_Argumented(BYTE Arg, float NewX, float NewY) {
-		if (Lock)return;
+		Lock.lock();
 		float CW = 0.5f*(
 				(INT32)((BIT)(GLOBAL_LEFT&Arg))
 			-	(INT32)((BIT)(GLOBAL_RIGHT&Arg))
@@ -2712,25 +2852,28 @@ struct SelectablePropertedList : HandleableUIPart {
 			-	(INT32)((BIT)(GLOBAL_TOP&Arg))
 			)*CalculatedHeight;
 		SafeChangePosition(NewX + CW, NewY - 0.5f*CalculatedHeight + CH);
+		Lock.unlock();
 	}
 	void KeyboardHandler(CHAR CH) override {
 		return;
 	}
 	void SafeChangePosition(float NewCXPos, float NewHeaderYPos) override {
-		if (Lock)return;
+		Lock.lock();
 		NewCXPos -= HeaderCXPos;
 		NewHeaderYPos -= HeaderYPos;
 		SafeMove(NewCXPos, NewHeaderYPos);
+		Lock.unlock();
 	}
 	void SafeMove(float dx, float dy) override {
-		if (Lock)return;
+		Lock.lock();
 		HeaderCXPos += dx;
 		HeaderYPos += dy;
 		for (auto Y = Selectors.begin(); Y != Selectors.end(); Y++)
 			(*Y)->SafeMove(dx, dy);
+		Lock.unlock();
 	}
 	void Draw() override {
-		if (Lock)return;
+		Lock.lock();
 		if (Selectors.size() < SelectorsText.size()) {
 			///TOP BAR
 			if (TopArrowHovered)GLCOLOR(ButtSettings->HoveredRGBABorder);
@@ -2769,6 +2912,7 @@ struct SelectablePropertedList : HandleableUIPart {
 		}
 		for (auto Y = Selectors.begin(); Y != Selectors.end(); Y++) 
 			(*Y)->Draw();
+		Lock.unlock();
 	}
 	inline DWORD TellType() override {
 		return TT_SELPROPLIST;
@@ -2885,7 +3029,6 @@ struct SpecialSignHandler : HandleableUIPart {
 	DWORD FRGBA, SRGBA;
 	void(*DrawFunc)(float, float, float, DWORD, DWORD);
 	SpecialSignHandler(void(*DrawFunc)(float,float,float,DWORD,DWORD),float x, float y, float SZParam, DWORD FRGBA, DWORD SRGBA){
-		this->Lock = 0;
 		this->DrawFunc = DrawFunc;
 		this->x = x;
 		this->y = y;
@@ -2894,22 +3037,26 @@ struct SpecialSignHandler : HandleableUIPart {
 		this->SRGBA = SRGBA;
 	}
 	void Draw() override {
-		if (Lock)return;
+		Lock.lock();
 		if(this->DrawFunc)this->DrawFunc(x, y, SZParam, FRGBA, SRGBA);
+		Lock.unlock();
 	}
 	void SafeMove(float dx, float dy) override {
-		if (Lock)return;
+		Lock.lock();
 		x += dx;
 		y += dy;
+		Lock.unlock();
 	}
 	void SafeChangePosition(float NewX, float NewY) override {
-		if (Lock)return;
+		Lock.lock();
 		x = NewX;
 		y = NewY;
+		Lock.unlock();
 	}
 	void _ReplaceVoidFunc(void(*NewDrawFunc)(float, float, float, DWORD, DWORD) ) {
-		if (Lock)return;
+		Lock.lock();
 		this->DrawFunc = NewDrawFunc;
+		Lock.unlock();
 	}
 	void SafeChangePosition_Argumented(BYTE Arg, float NewX, float NewY) override {
 
@@ -2925,43 +3072,146 @@ struct SpecialSignHandler : HandleableUIPart {
 	}
 };
 
-struct Slider :HandleableUIPart {
-	enum class SliderType { Point, Rectangle, BoldLine };
-	_Positioning SliderPos;
-	SliderType Type;
-	BYTE GLOBAL_SliderNamePos;
-	SingleTextLine *SliderName;
-	DWORD SliderColor, SliderLineColor;
-	float Percentage, Xpos, Ypos, Height, SliderThickness;
-	void(*OnChange)(float);
-	~Slider() {
-		delete SliderName;
+struct WheelVariableChanger :HandleableUIPart {
+	enum class Type { exponential, addictable };
+	enum class Sensitivity { on_enter, on_click, on_wheel };
+	Type type;
+	Sensitivity Sen;
+	InputField* var_if, * fac_if;
+	float Width, Height;
+	float Xpos, Ypos;
+	string var_s, fact_s;
+	double variable;
+	double factor;
+	bool IsHovered, WheelFieldHovered;
+	void(*OnApply)(double);
+	~WheelVariableChanger() {
+		if (var_if)
+			delete var_if;
+		if (var_if)
+			delete fac_if;
 	}
-	Slider(SliderType Type, void(*OnChange)(float), _Positioning SliderPos, float Xpos, float Ypos, float Height, float SliderThickness) {
-
+	WheelVariableChanger(void(*OnApply)(double), float Xpos, float Ypos, double default_var, double default_fact, SingleTextLineSettings* STLS, string var_string = " ", string fac_string = " ", Type type = Type::exponential) : Width(100), Height(50) {
+		this->OnApply = OnApply;
+		this->Xpos = Xpos;
+		this->Ypos = Ypos;
+		this->variable = default_var;
+		this->factor = default_fact;
+		this->IsHovered = WheelFieldHovered = false;
+		this->type = type;
+		this->Sen = Sensitivity::on_wheel;
+		var_if = new InputField(to_string(default_var).substr(0, 8), Xpos - 25., Ypos + 15, 10, 40, STLS, nullptr, 0x007FFFFF, STLS, var_string, 8, _Align::center, _Align::center, InputField::Type::FP_PositiveNumbers);
+		fac_if = new InputField(to_string(default_fact).substr(0, 8), Xpos - 25., Ypos - 5, 10, 40, STLS, nullptr, 0x007FFFFF, STLS, fac_string, 8, _Align::center, _Align::center, InputField::Type::FP_PositiveNumbers);
 	}
 	void Draw() override {
-
+		GLCOLOR(0xFFFFFF3F + WheelFieldHovered * 0x3F);
+		glBegin(GL_QUADS);
+		glVertex2f(Xpos, Ypos + 25);
+		glVertex2f(Xpos, Ypos - 25);
+		glVertex2f(Xpos + 50, Ypos - 25);
+		glVertex2f(Xpos + 50, Ypos + 25);
+		glEnd();
+		GLCOLOR((0x007FFF3F + WheelFieldHovered * 0x3F));
+		glBegin(GL_LINE_LOOP);
+		glVertex2f(Xpos, Ypos + 25);
+		glVertex2f(Xpos, Ypos - 25);
+		glVertex2f(Xpos + 50, Ypos - 25);
+		glVertex2f(Xpos + 50, Ypos + 25);
+		glEnd();
+		glBegin(GL_LINE_LOOP);
+		glVertex2f(Xpos - 50, Ypos + 25);
+		glVertex2f(Xpos - 50, Ypos - 25);
+		glVertex2f(Xpos + 50, Ypos - 25);
+		glVertex2f(Xpos + 50, Ypos + 25);
+		glEnd();
+		var_if->Draw();
+		fac_if->Draw();
 	}
 	void SafeMove(float dx, float dy) override {
-
+		Xpos += dx;
+		Ypos += dy;
+		var_if->SafeMove(dx, dy);
+		fac_if->SafeMove(dx, dy);
 	}
 	void SafeChangePosition(float NewX, float NewY) override {
-
+		NewX -= Xpos;
+		NewY -= Ypos;
+		SafeMove(NewX, NewY);
 	}
 	void SafeChangePosition_Argumented(BYTE Arg, float NewX, float NewY) override {
-
+		float CW = 0.5f * (
+			(INT32)((BIT)(GLOBAL_LEFT & Arg))
+			- (INT32)((BIT)(GLOBAL_RIGHT & Arg))
+			) * Width,
+			CH = 0.5f * (
+			(INT32)((BIT)(GLOBAL_BOTTOM & Arg))
+				- (INT32)((BIT)(GLOBAL_TOP & Arg))
+				) * Height;
+		SafeChangePosition(NewX + CW, NewY + CH);
 	}
 	void KeyboardHandler(CHAR CH) override {
-
+		fac_if->KeyboardHandler(CH);
+		var_if->KeyboardHandler(CH);
+		if (IsHovered) {
+			if (CH == 13) {
+				variable = stod(var_if->STL->_CurrentText);
+				factor = stod(fac_if->STL->_CurrentText);
+				if (OnApply)
+					OnApply(variable);
+			}
+		}
 	}
 	void SafeStringReplace(string Meaningless) override {
 
 	}
 	BIT MouseHandler(float mx, float my, CHAR Button, CHAR State) override {
+		this->fac_if->MouseHandler(mx, my, Button, State);
+		this->var_if->MouseHandler(mx, my, Button, State);
+		mx -= Xpos;
+		my -= Ypos;
+		if (fabsf(mx) < Width * 0.5 && fabsf(my) < Height * 0.5) {
+			IsHovered = true;
+			if (mx >= 0 && mx <= Width * 0.5 && fabsf(my) < Height * 0.5) {
+				if (Sen == Sensitivity::on_click && State == 1)
+					if (OnApply)
+						OnApply(variable);
+				WheelFieldHovered = true;
+				if (Button) {
+					if (Button == 2 /*UP*/) {
+						if (State == -1) {
+							switch (type) {
+							case WheelVariableChanger::Type::exponential: {variable *= factor; break; }
+							case WheelVariableChanger::Type::addictable: {variable += factor;	break; }
+							}
+							var_if->UpdateInputString(to_string(variable));
+							if (Sen == Sensitivity::on_wheel)
+								if (OnApply)
+									OnApply(variable);
+						}
+					}
+					else if (Button == 3 /*DOWN*/) {
+						if (State == -1) {
+							switch (type) {
+							case WheelVariableChanger::Type::exponential: {variable /= factor; break; }
+							case WheelVariableChanger::Type::addictable: {variable -= factor;	break; }
+							}
+							var_if->UpdateInputString(to_string(variable));
+							if (Sen == Sensitivity::on_wheel)
+								if (OnApply)
+									OnApply(variable);
+						}
+					}
+				}
+			}
+		}
+		else {
+			IsHovered = false;
+			WheelFieldHovered = false;
+		}
 		return 0;
 	}
 };
+
 
 #define WindowHeapSize 15
 struct MoveableWindow:HandleableUIPart {
@@ -2970,19 +3220,19 @@ struct MoveableWindow:HandleableUIPart {
 	DWORD RGBABackground,RGBAThemeColor,RGBAGradBackground;
 	SingleTextLine* WindowName;
 	map<string, HandleableUIPart*> WindowActivities;
-	BIT Drawable, ActivitiesLock, ProcessingLock;
+	BIT Drawable;
 	BIT HoveredCloseButton;
 	BIT CursorFollowMode;
 	float PCurX, PCurY;
 	~MoveableWindow() {
-		Lock = 1;
+		Lock.lock();
 		delete WindowName;
 		for (auto i = WindowActivities.begin(); i != WindowActivities.end(); i++)
 			delete i->second;
 		WindowActivities.clear();
+		Lock.unlock();
 	}
 	MoveableWindow(string WindowName, SingleTextLineSettings *WindowNameSettings,float XPos,float YPos,float Width, float Height,DWORD RGBABackground,DWORD RGBAThemeColor,DWORD RGBAGradBackground=0) {
-		this->Lock = 0;
 		if (WindowNameSettings) {
 			WindowNameSettings->SetNewPos(XPos, YPos);
 			this->WindowName = WindowNameSettings->CreateOne(WindowName);
@@ -2998,34 +3248,26 @@ struct MoveableWindow:HandleableUIPart {
 		this->CursorFollowMode = 0;
 		this->HoveredCloseButton = 0;
 		this->Drawable = 1;
-		this->ActivitiesLock = this->ProcessingLock = 0;
 		this->PCurX = 0.;
 		this->PCurY = 0.;
 	}
 	void KeyboardHandler(char CH) {
-		ProcessingLock = 1;
-		if (Lock) {
-			ProcessingLock = 0;
-			return;
-		}
-		if (ActivitiesLock) {
-			ProcessingLock = 0;
-			return;
-		}
+		Lock.lock();
 		for (auto i = WindowActivities.begin(); i != WindowActivities.end(); i++)
 			i->second->KeyboardHandler(CH);
-		ProcessingLock = 0;
+		Lock.unlock();
 	}
 	BIT MouseHandler(float mx, float my, CHAR Button/*-1 left, 1 right, 0 move*/, CHAR State /*-1 down, 1 up*/) override {
-		ProcessingLock = 1;
-		if (Lock)return 0;
-		if (!Drawable || ActivitiesLock)return 0; 
+		Lock.lock();
+		if (!Drawable) {
+			Lock.unlock(); 
+			return 0; 
+		}
 		HoveredCloseButton = 0;
 		if (mx > XWindowPos + Width - WindowHeapSize && mx < XWindowPos + Width && my < YWindowPos && my > YWindowPos - WindowHeapSize) {///close button
 			if (Button && State==1) {
 				Drawable = 0;
 				CursorFollowMode = 0;
-				ProcessingLock = 0;
 				return 1;
 			}
 			else if(!Button) {
@@ -3039,7 +3281,7 @@ struct MoveableWindow:HandleableUIPart {
 					PCurX = mx;
 					PCurY = my;
 				}
-				ProcessingLock = 0;
+				Lock.unlock();
 				return 1;
 			}
 		} 
@@ -3047,7 +3289,7 @@ struct MoveableWindow:HandleableUIPart {
 			SafeMove(mx - PCurX, my - PCurY);
 			PCurX = mx;
 			PCurY = my;
-			ProcessingLock = 0;
+			Lock.unlock();
 			return 1;
 		}
 
@@ -3060,68 +3302,51 @@ struct MoveableWindow:HandleableUIPart {
 
 		if (mx - XWindowPos < Width && mx - XWindowPos > 0 && YWindowPos - my > 0 && YWindowPos - my < Height)
 			if (Button) {
-				ProcessingLock = 0;
+				Lock.unlock();
 				return 1;
 			}
 			else {
-				ProcessingLock = 0;
+				Lock.unlock();
 				return flag;
 			}
 		else {
-			ProcessingLock = 0;
+			Lock.unlock();
 			return flag;
 		}
 			//return 1;
 
 	}
 	void SafeChangePosition(float NewXpos, float NewYpos) override {
-		ProcessingLock = 1;
-		if (Lock) {
-			ProcessingLock = 0;
-			return;
-		}
+		Lock.lock();
 		NewXpos -= XWindowPos;
 		NewYpos -= YWindowPos;
 		SafeMove(NewXpos,NewYpos);
-		ProcessingLock = 0;
+		Lock.unlock();
 	}
 	BIT DeleteUIElementByName(string ElementName) {
-		//if (Lock)return 0;
-		ProcessingLock = 1;
-		ActivitiesLock = 1;
+		Lock.lock();
 		auto ptr = WindowActivities.find(ElementName);
 		if (ptr == WindowActivities.end()) {
-			ActivitiesLock = 0;
+			Lock.unlock();
 			return 0;
 		}
 		auto deletable = ptr->second;
-		deletable->Lock = 1;
 		WindowActivities.erase(ElementName);
 		delete deletable;
-		ActivitiesLock = 0;
-		ProcessingLock = 0;
+		Lock.unlock();
 		return 1;
 	}
 	void SafeMove(float dx, float dy) override {
-		ProcessingLock = 1;
-		if (Lock) {
-			ProcessingLock = 0;
-			return;
-		}
+		Lock.lock();
 		XWindowPos += dx;
 		YWindowPos += dy;
 		WindowName->SafeMove(dx, dy);
-		if (ActivitiesLock)return;
 		for (auto Y = WindowActivities.begin(); Y != WindowActivities.end(); Y++)
 			Y->second->SafeMove(dx, dy);
-		ProcessingLock = 0;
+		Lock.unlock();
 	}
 	void SafeChangePosition_Argumented(BYTE Arg, float NewX, float NewY) {
-		ProcessingLock = 1;
-		if (Lock) {
-			ProcessingLock = 0;
-			return;
-		}
+		Lock.lock();
 		float CW = 0.5f*(
 				(INT32)(!!(GLOBAL_LEFT&Arg))
 			-	(INT32)(!!(GLOBAL_RIGHT&Arg))
@@ -3131,16 +3356,12 @@ struct MoveableWindow:HandleableUIPart {
 			-	(INT32)(!!(GLOBAL_TOP&Arg))
 			+	1)*Height;
 		SafeChangePosition(NewX + CW, NewY + CH);
-		ProcessingLock = 0;
+		Lock.unlock();
 	}
 	void Draw() override {
-		ProcessingLock = 1;
-		if (Lock) {
-			ProcessingLock = 0;
-			return;
-		}
+		Lock.lock();
 		if (!Drawable) {
-			ProcessingLock = 0;
+			Lock.unlock();
 			return;
 		}
 		GLCOLOR(RGBABackground);
@@ -3173,58 +3394,38 @@ struct MoveableWindow:HandleableUIPart {
 
 		if (WindowName)WindowName->Draw();
 
-		if (ActivitiesLock) {
-			ProcessingLock = 0;
-			return;
-		}
 		for (auto Y = WindowActivities.begin(); Y != WindowActivities.end(); Y++)
 			Y->second->Draw();
-		ProcessingLock = 0;
+		Lock.unlock();
 	}
 	void _NotSafeResize(float NewHeight, float NewWidth) {
-		ProcessingLock = 1;
-		if (Lock) {
-			ProcessingLock = 0;
-			return;
-		}
+		Lock.lock();
 		this->Height = NewHeight;
 		this->Width = NewWidth;
-		ProcessingLock = 0;
+		Lock.unlock();
 	}
 	void _NotSafeResize_Centered(float NewHeight, float NewWidth) {
-		ProcessingLock = 1;
-		if (Lock) {
-			ProcessingLock = 0;
-			return;
-		}
+		Lock.lock();
 		float dx, dy;
 		XWindowPos += (dx = -0.5f*(NewWidth - Width));
 		YWindowPos += (dy = 0.5f*(NewHeight - Height));
 		WindowName->SafeMove(dx, dy);
 		Width = NewWidth;
 		Height = NewHeight;
-		ProcessingLock = 0;
+		Lock.unlock();
 	}
 	void SafeStringReplace(string NewWindowTitle) override {
-		ProcessingLock = 1;
-		if (Lock) {
-			ProcessingLock = 0;
-			return;
-		}
+		Lock.lock();
 		SafeWindowRename(NewWindowTitle);
-		ProcessingLock = 0;
+		Lock.unlock();
 	}
 	void SafeWindowRename(string NewWindowTitle) {
-		ProcessingLock = 1;
-		if (Lock) {
-			ProcessingLock = 0;
-			return;
-		}
+		Lock.lock();
 		if (WindowName) { 
 			WindowName->SafeStringReplace(NewWindowTitle); 
 			WindowName->SafeChangePosition_Argumented(GLOBAL_LEFT, XWindowPos + WindowHeapSize * 0.5f, WindowName->CYpos);
 		}
-		ProcessingLock = 0;
+		Lock.unlock();
 	}
 	HandleableUIPart*& operator[](string ID) {
 		return WindowActivities[ID];
@@ -3234,20 +3435,13 @@ struct MoveableWindow:HandleableUIPart {
 	}
 };
 
-SingleTextLineSettings	*STLS_WhiteSystem = new SingleTextLineSettings("_", 0, 0, 2., 3.75, (BYTE)2, (BYTE)2.5, 0xFFFFFFFFu),
-						*STLS_BlackSystem = new SingleTextLineSettings("_", 0, 0, 2., 3.75, (BYTE)2, (BYTE)2.5, 0x000000FFu);///Why i can't mae them static?
 
 SingleTextLineSettings
-						*STLS_WhiteTiny = new SingleTextLineSettings("_", 0, 0, 2.5, 0xFFFFFFFF),
-						*STLS_WhiteSmall = new SingleTextLineSettings("_", 0, 0, 5, 0xFFFFFFFF),
-						*STLS_WhiteBig = new SingleTextLineSettings("_", 0, 0, 20, 0xFFFFFFFF),
-						*STLS_BlackTiny = new SingleTextLineSettings("_", 0, 0, 2.5, 0x000000FF),
-						*STLS_BlackSmall = new SingleTextLineSettings("_", 0, 0, 5, 0x000000FF),
-						*STLS_BlackBig = new SingleTextLineSettings("_", 0, 0, 20, 0x000000FF);
+						* _STLS_WhiteSmall = new SingleTextLineSettings("_", 0, 0, 5, 0xFFFFFFFF),
+						* _STLS_BlackSmall = new SingleTextLineSettings("_", 0, 0, 5, 0x000000FF),
 
-
-ButtonSettings	*BS_List_White = new ButtonSettings(STLS_BlackSystem, 0, 0, 100, 10, 1, 0, 0, 0x00003FFF, 0xCFCFFF7F, 0x7F7F7FFF),
-				*BS_List_Black = new ButtonSettings(STLS_WhiteSystem, 0, 0, 100, 11, 1, 0, 0, 0xFF7F00FF, 0x00003F7F, 0x7F7F7FFF);
+						* System_Black = (is_fonted)? new SingleTextLineSettings(10, 0x000000FF) : new SingleTextLineSettings("_", 0, 0, 5, 0x000000FF),
+						* System_White = (is_fonted) ? new SingleTextLineSettings(10, 0xFFFFFFFF) : new SingleTextLineSettings("_", 0, 0, 5, 0xFFFFFFFF);
 
 struct WindowsHandler {
 	map<string, MoveableWindow*> Map;
@@ -3261,14 +3455,14 @@ struct WindowsHandler {
 		InterfaceIsActive = 1;
 		WindowWasDisabledDuringMouseHandling = 0;
 		MoveableWindow* ptr;
-		Map["ALERT"] = ptr = new MoveableWindow("Alert window", STLS_WhiteSmall, -100, 25, 200, 50, 0xFFFFFFAF, 0x3F3F3F7F);
-		(*ptr)["AlertText"] = new TextBox("_", STLS_BlackSmall, 17.5, -7.5, 37, 160, 10, 0, 0, 0, _Align::left, TextBox::VerticalOverflow::recalibrate);
+		Map["ALERT"] = ptr = new MoveableWindow("Alert window", System_White, -100, 25, 200, 50, 0xFFFFFFAF, 0x3F3F3F7F);
+		(*ptr)["AlertText"] = new TextBox("_", System_Black, 17.5, -7.5, 37, 160, 7.5, 0, 0, 0, _Align::left, TextBox::VerticalOverflow::recalibrate);
 		(*ptr)["AlertSign"] = new SpecialSignHandler(SpecialSigns::DrawACircle,-80,-12.5,7.5,0x000000FF,0x001FFFFF);
 
-		Map["PROMPT"] = ptr = new MoveableWindow("prompt", STLS_WhiteSmall, -50, 50, 100, 100, 0x3F3F3FCF, 0x7F7F7F7F);
-		(*ptr)["FLD"] = new InputField("", 0, 35 - WindowHeapSize, 10, 80, STLS_WhiteSmall, NULL, 0x007FFFFF, NULL, "", 0, _Align::center);
-		(*ptr)["TXT"] = new TextBox("_abc_", STLS_WhiteSmall, 0, 7.5-WindowHeapSize, 10, 80, 10, 0, 0, 2,_Align::center,TextBox::VerticalOverflow::recalibrate);
-		(*ptr)["BUTT"] = new Button("Submit", STLS_WhiteSmall, NULL, -0, -20 - WindowHeapSize, 80, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFF7F00FF, 0xFFFFFFFF, 0xFF7F00FF, NULL, " ");
+		Map["PROMPT"] = ptr = new MoveableWindow("prompt", System_White, -50, 50, 100, 100, 0x3F3F3FCF, 0x7F7F7F7F);
+		(*ptr)["FLD"] = new InputField("", 0, 35 - WindowHeapSize, 10, 80, System_White, NULL, 0x007FFFFF, NULL, "", 0, _Align::center);
+		(*ptr)["TXT"] = new TextBox("_abc_", System_White, 0, 7.5-WindowHeapSize, 10, 80, 7.5, 0, 0, 2,_Align::center,TextBox::VerticalOverflow::recalibrate); 
+		(*ptr)["BUTT"] = new Button("Submit", System_White, NULL, -0, -20 - WindowHeapSize, 80, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFF7F00FF, 0xFFFFFFFF, 0xFF7F00FF, NULL, " ");
 	}
 	void MouseHandler(float mx,float my, CHAR Button, CHAR State) {
 		if (!InterfaceIsActive)return;
@@ -3512,7 +3706,6 @@ struct CAT_Piano :HandleableUIPart {
 		delete Transp;
 	}
 	CAT_Piano(float BaseXPos, float BaseYPos, float KeyWidth, float PianoHeight, CutAndTransposeKeys *PianoTransform) {
-		this->Lock = 0;
 		this->BaseXPos = BaseXPos;
 		this->BaseYPos = BaseYPos;
 		this->KeyWidth = KeyWidth;
@@ -3521,15 +3714,15 @@ struct CAT_Piano :HandleableUIPart {
 		this->CalculatedWidth = KeyWidth * (128 * 3);
 		this->PianoTransform = PianoTransform;
 		this->Focused = 0;
-		STLS_WhiteSmall->SetNewPos(BaseXPos + KeyWidth * (128 * 1.25f), BaseYPos - 0.75f*PianoHeight);
-		this->MinCont = STLS_WhiteSmall->CreateOne("_");
-		STLS_WhiteSmall->SetNewPos(BaseXPos - KeyWidth * (128 * 1.25f), BaseYPos - 0.75f*PianoHeight);
-		this->MaxCont = STLS_WhiteSmall->CreateOne("_");
-		this->Transp = STLS_WhiteSmall->CreateOne("_");
+		System_White->SetNewPos(BaseXPos + KeyWidth * (128 * 1.25f), BaseYPos - 0.75f*PianoHeight);
+		this->MinCont = System_White->CreateOne("_");
+		System_White->SetNewPos(BaseXPos - KeyWidth * (128 * 1.25f), BaseYPos - 0.75f*PianoHeight);
+		this->MaxCont = System_White->CreateOne("_");
+		this->Transp = System_White->CreateOne("_");
 		UpdateInfo();
 	}
 	void UpdateInfo() {
-		if (Lock)return;
+		Lock.lock();
 		if (!PianoTransform)return;
 		MinCont->SafeStringReplace("Min: " + to_string(PianoTransform->Min));
 		MaxCont->SafeStringReplace("Max: " + to_string(PianoTransform->Max));
@@ -3537,9 +3730,10 @@ struct CAT_Piano :HandleableUIPart {
 		Transp->SafeChangePosition(BaseXPos + ((PianoTransform->TransposeVal >= 0)?1:-1)* KeyWidth * (128 * 1.25f), BaseYPos +
 			0.75*PianoHeight
 		);
+		Lock.unlock();
 	}
 	void Draw() override {
-		if (Lock)return;
+		Lock.lock();
 		float x = BaseXPos - 128 * KeyWidth, pixsz = RANGE / WINDXSIZE;
 		BIT Inside = 0;
 
@@ -3606,23 +3800,26 @@ struct CAT_Piano :HandleableUIPart {
 		glVertex2f(BaseXPos + 0.5f*CalculatedWidth, BaseYPos + 0.5f*CalculatedHeight);
 		glVertex2f(BaseXPos + 0.5f*CalculatedWidth, BaseYPos - 0.5f*CalculatedHeight);
 		glEnd();
+		Lock.unlock();
 	}
 	void SafeMove(float dx, float dy) override {
-		if (Lock)return;
+		Lock.lock();
 		BaseXPos += dx;
 		BaseYPos += dy;
 		this->MaxCont->SafeMove(dx, dy);
 		this->MinCont->SafeMove(dx, dy);
 		this->Transp->SafeMove(dx, dy);
+		Lock.unlock();
 	}
 	void SafeChangePosition(float NewX, float NewY) override {
-		if (Lock)return;
+		Lock.lock();
 		NewX -= BaseXPos;
 		NewY -= BaseYPos;
 		SafeMove(NewX, NewY);
+		Lock.unlock();
 	}
 	void SafeChangePosition_Argumented(BYTE Arg, float NewX, float NewY) override {
-		if (Lock)return;
+		Lock.lock();
 		float CW = 0.5f*(
 				(INT32)((BIT)(GLOBAL_LEFT&Arg))
 			-	(INT32)((BIT)(GLOBAL_RIGHT&Arg))
@@ -3632,9 +3829,10 @@ struct CAT_Piano :HandleableUIPart {
 			-	(INT32)((BIT)(GLOBAL_TOP&Arg))
 		)*CalculatedHeight;
 		SafeChangePosition(NewX + CW, NewY + CH);
+		Lock.unlock();
 	}
 	void KeyboardHandler(CHAR CH) override {
-		if (Lock)return;
+		Lock.lock();
 		if (Focused) {
 			if (!PianoTransform)return;
 			switch (CH) {
@@ -3682,17 +3880,19 @@ struct CAT_Piano :HandleableUIPart {
 				break;
 			}
 		}
+		Lock.unlock();
 	}
 	void SafeStringReplace(string Meaningless) override {
 		return;
 	}
 	BIT MouseHandler(float mx, float my, CHAR Button, CHAR State) override {
-		if (Lock)return 0;
+		Lock.lock();
 		mx -= BaseXPos;
 		my -= BaseYPos;
 		if (fabsf(mx) <= CalculatedWidth * 0.5f && fabsf(my) <= CalculatedHeight * 0.5)
 			Focused = 1;
 		else Focused = 0;
+		Lock.unlock();
 		return 0;
 	}
 };
@@ -3710,7 +3910,6 @@ struct PLC_VolumeWorker:HandleableUIPart {
 		delete STL_MSG;
 	}
 	PLC_VolumeWorker(float CXPos,float CYPos,float Width,float Height,PLC<BYTE,BYTE> *PLC_bb =NULL) {
-		this->Lock = 0;
 		this->PLC_bb = PLC_bb;
 		this->CXPos = CXPos;
 		this->CYPos = CYPos;
@@ -3718,13 +3917,14 @@ struct PLC_VolumeWorker:HandleableUIPart {
 		this->_ysqsz = Height/256;
 		this->HorizontalSidesSize = Width;
 		this->VerticalSidesSize = Height;
-		this->STL_MSG = new SingleTextLine("_", CXPos, CYPos, STLS_WhiteSystem->XUnitSize, STLS_WhiteSystem->YUnitSize, STLS_WhiteSystem->SpaceWidth, 2, 0xFFAFFFCF, new DWORD(0xAFFFAFCF), (7 << 4) | 3);
+
+		this->STL_MSG = new SingleTextLine("_", CXPos, CYPos, System_White->XUnitSize, System_White->YUnitSize, System_White->SpaceWidth, 2, 0xFFAFFFCF, new DWORD(0xAFFFAFCF), (7 << 4) | 3);
 		this->MouseX = this->MouseY = 0.f;
 		this->_HoveredPoint = pair<BYTE, BYTE>(0, 0);
 		ActiveSetting = Hovered = FPX = FPY = XCP = YCP = 0;
 	}
 	void Draw() override {
-		if (Lock)return;
+		Lock.lock();
 		float begx = CXPos - 0.5f*HorizontalSidesSize, begy = CYPos - 0.5f*VerticalSidesSize;
 		glColor4f(1, 1, 1, (Hovered)? 0.85f : 0.5f);
 		glLineWidth(1);
@@ -3807,9 +4007,10 @@ struct PLC_VolumeWorker:HandleableUIPart {
 			glEnd();
 		}
 		STL_MSG->Draw();
+		Lock.unlock();
 	}
 	void UpdateInfo() {
-		if (Lock)return;
+		Lock.lock();
 		SHORT tx = (128. + floor(255 * (MouseX - CXPos) / HorizontalSidesSize)),
 			  ty = (128. + floor(255 * (MouseY - CYPos) / VerticalSidesSize));
 		if (tx < 0 || tx>255 || ty < 0 || ty>255) {
@@ -3822,9 +4023,10 @@ struct PLC_VolumeWorker:HandleableUIPart {
 			Hovered = 1;
 			STL_MSG->SafeStringReplace(to_string(XCP = tx) + ":" + to_string(YCP = ty));
 		}
+		Lock.unlock();
 	}
 	void _MakeMapMoreSimple(){
-		if (Lock)return;
+		Lock.lock();
 		if (PLC_bb) {
 			BYTE TF, TS;
 			for (auto Y = PLC_bb->ConversionMap.begin(); Y != PLC_bb->ConversionMap.end();) {
@@ -3836,21 +4038,24 @@ struct PLC_VolumeWorker:HandleableUIPart {
 				}
 			}
 		}
+		Lock.unlock();
 	}
 	void SafeMove(float dx, float dy) override {
-		if (Lock)return;
+		Lock.lock();
 		CXPos += dx;
 		CYPos += dy;
 		this->STL_MSG->SafeMove(dx, dy);
+		Lock.unlock();
 	}
 	void SafeChangePosition(float NewX, float NewY) override {
-		if (Lock)return;
+		Lock.lock();
 		NewX -= CXPos;
 		NewY -= CYPos;
 		SafeMove(NewX, NewY);
+		Lock.unlock();
 	}
 	void SafeChangePosition_Argumented(BYTE Arg, float NewX, float NewY) override {
-		if (Lock)return;
+		Lock.lock();
 		float CW = 0.5f*(
 				(INT32)((BIT)(GLOBAL_LEFT&Arg))
 			-	(INT32)((BIT)(GLOBAL_RIGHT&Arg))
@@ -3860,6 +4065,7 @@ struct PLC_VolumeWorker:HandleableUIPart {
 			-	(INT32)((BIT)(GLOBAL_TOP&Arg))
 			)*VerticalSidesSize;
 		SafeChangePosition(NewX + CW, NewY + CH);
+		Lock.unlock();
 	}
 	void KeyboardHandler(CHAR CH) override {
 		///hmmmm ... should i... meh...
@@ -3868,7 +4074,7 @@ struct PLC_VolumeWorker:HandleableUIPart {
 		/// ... ///
 	}
 	void RePutFromAtoB(BYTE A, BYTE B, BYTE ValA, BYTE ValB) {
-		if (Lock)return;
+		Lock.lock();
 		if (PLC_bb) {
 			if (B < A) {
 				swap(A, B);
@@ -3881,14 +4087,16 @@ struct PLC_VolumeWorker:HandleableUIPart {
 			PLC_bb->InsertNewPoint(A, ValA);
 			PLC_bb->InsertNewPoint(B, ValB);
 		}
+		Lock.unlock();
 	}
 	void JustPutNewValue(BYTE A, BYTE ValA) {
-		if (Lock)return;
+		Lock.lock();
 		if (PLC_bb)
 			PLC_bb->InsertNewPoint(A, ValA);
+		Lock.unlock();
 	}
 	BIT MouseHandler(float mx, float my, CHAR Button, CHAR State) override {
-		if (Lock)return 0;
+		Lock.lock();
 		this->MouseX = mx;
 		this->MouseY = my;
 		UpdateInfo();
@@ -3926,6 +4134,7 @@ struct PLC_VolumeWorker:HandleableUIPart {
 				}
 			}
 		}
+		Lock.unlock();
 		return 0;
 	}
 };
@@ -4050,7 +4259,6 @@ struct BoolAndWORDChecker : HandleableUIPart {
 	WORD *Number;
 	SingleTextLine *STL_Info;
 	BoolAndWORDChecker(float XPos, float YPos, SingleTextLineSettings *STLS, BIT *Flag, WORD *Number) {
-		Lock = 0;
 		this->XPos = XPos;
 		this->YPos = YPos;
 		this->Flag = Flag;
@@ -4059,16 +4267,18 @@ struct BoolAndWORDChecker : HandleableUIPart {
 		this->STL_Info = STLS->CreateOne("_");
 	}
 	void SafeMove(float dx, float dy) override {
-		if (Lock)return;
+		Lock.lock();
 		XPos += dx;
 		YPos += dy;
 		STL_Info->SafeMove(dx, dy);
+		Lock.unlock();
 	}
 	void SafeChangePosition(float NewX, float NewY) override {
-		if (Lock)return;
+		Lock.lock();
 		NewX -= XPos;
 		NewY -= YPos;
 		SafeMove(NewX, NewY);
+		Lock.unlock();
 	}
 	void SafeChangePosition_Argumented(BYTE Arg, float NewX, float NewY) override {
 		return;
@@ -4083,14 +4293,15 @@ struct BoolAndWORDChecker : HandleableUIPart {
 		return;
 	}
 	void UpdateInfo() {
-		if (Lock)return;
+		Lock.lock();
 		if (Number) {
 			string T = to_string(*Number);
 			if(T!=STL_Info->_CurrentText)STL_Info->SafeStringReplace(T);
 		}
+		Lock.unlock();
 	}
 	void Draw() override {
-		if (Lock)return;
+		Lock.lock();
 		UpdateInfo();
 		if (Flag) {
 			if (*Flag)SpecialSigns::DrawOK(XPos, YPos, 15, 0x00FFFFFF);
@@ -4098,6 +4309,7 @@ struct BoolAndWORDChecker : HandleableUIPart {
 		}
 		else SpecialSigns::DrawNo(XPos, YPos, 15, 0xFF0000FF);
 		STL_Info->Draw();
+		Lock.unlock();
 	}
 	BIT MouseHandler(float mx, float my, CHAR Button, CHAR State) override {
 		return 0;
@@ -4105,7 +4317,8 @@ struct BoolAndWORDChecker : HandleableUIPart {
 };
 
 ButtonSettings 
-						*BS_List_Black_Small = new ButtonSettings(STLS_WhiteSmall, 0, 0, 100, 10, 1, 0, 0, 0xFFEFDFFF, 0x00003F7F, 0x7F7F7FFF);
+					*BS_List_Black_Small = new ButtonSettings(System_White, 0, 0, 100, 10, 1, 0, 0, 0xFFEFDFFF, 0x00003F7F, 0x7F7F7FFF);
+
 DWORD DefaultBoolSettings = _BoolSettings::remove_remnants | /*_BoolSettings::remove_empty_tracks*/ 0 | _BoolSettings::all_instruments_to_piano;
 
 struct FileSettings {////per file settings
@@ -4821,6 +5034,7 @@ namespace Settings {
 		cout << "ROT_ANGLE " << T << endl;
 		if (T.size())
 			ROT_ANGLE = stof(T);
+		if (fabsf(ROT_ANGLE) > 30)ROT_ANGLE = 30 * (ROT_ANGLE>0)?1:-1;
 		cout << ROT_ANGLE << endl;
 
 		T = ((InputField*)(*pptr)["AS_THREADS_COUNT"])->CurrentString;
@@ -4845,6 +5059,9 @@ namespace Settings {
 			Y->BoolSettings = DefaultBoolSettings;
 			Y->InplaceMergeEnabled = _Data.InplaceMergeFlag;
 		}
+	}
+	void ApplyWheel(double new_val) {
+		lFontSymbolsInfo::Size = new_val;
 	}
 }
 
@@ -4879,7 +5096,7 @@ void OnStart() {
 			else
 				MW->DeleteUIElementByName("SMRP_C" + to_string(ID));
 			auto Q = GetPositionForOneOf(ID, GlobalMCTM->Cur_Processing.size(),112.5);
-			(*MW)["SMRP_C" + to_string(ID)] = new SMRP_Vis(Q.first, Q.second, STLS_WhiteSmall);
+			(*MW)["SMRP_C" + to_string(ID)] = new SMRP_Vis(Q.first, Q.second, System_White);
 			thread TH([](MIDICollectionThreadedMerger *pMCTM, MoveableWindow *MW, DWORD ID) {
 				string SID = "SMRP_C" + to_string(ID);
 				cout << SID << " Processing started" << endl;
@@ -4899,24 +5116,20 @@ void OnStart() {
 			}
 			cout << "SMRP: Out from sleep\n";
 			for (int i = 0; i <= SD->DetectedThreads; i++) {
-				while (MW->ProcessingLock);
 				MW->DeleteUIElementByName("SMRP_C" + to_string(i));
 			}
 			MW->SafeChangePosition_Argumented(0, 0, 0);
-			(*MW)["IM"] = new BoolAndWORDChecker(-100., 0., STLS_WhiteSmall, &(pMCTM->IntermediateInplaceFlag), &(pMCTM->IITrackCount));
-			(*MW)["RM"] = new BoolAndWORDChecker(100., 0., STLS_WhiteSmall, &(pMCTM->IntermediateRegularFlag), &(pMCTM->IRTrackCount));
+			(*MW)["IM"] = new BoolAndWORDChecker(-100., 0., System_White, &(pMCTM->IntermediateInplaceFlag), &(pMCTM->IITrackCount));
+			(*MW)["RM"] = new BoolAndWORDChecker(100., 0., System_White, &(pMCTM->IntermediateRegularFlag), &(pMCTM->IRTrackCount));
 			thread ILO([](MIDICollectionThreadedMerger *pMCTM, SAFCData *SD, MoveableWindow *MW) {
 				while (!pMCTM->CheckRIMerge()) {
 					Sleep(100);
 				}
 				cout << "RI: Out from sleep!\n";
-				while (MW->ProcessingLock);
 				MW->DeleteUIElementByName("IM");
-				while (MW->ProcessingLock);
 				MW->DeleteUIElementByName("RM");
-				while (MW->ProcessingLock);
 				MW->SafeChangePosition_Argumented(0, 0, 0);
-				(*MW)["FM"] = new BoolAndWORDChecker(0., 0., STLS_WhiteSmall, &(pMCTM->CompleteFlag), NULL);
+				(*MW)["FM"] = new BoolAndWORDChecker(0., 0., System_White, &(pMCTM->CompleteFlag), NULL);
 			}, pMCTM, SD, MW);
 			ILO.detach();
 		}, GlobalMCTM, &_Data, MW);
@@ -4927,7 +5140,6 @@ void OnStart() {
 				Sleep(100);
 			}
 			cout << "F: Out from sleep!!!\n";
-			while (MW->ProcessingLock);
 			MW->DeleteUIElementByName("FM");
 
 			WH->MainWindow_ID = "MAIN";
@@ -4948,133 +5160,136 @@ void OnSaveTo() {
 	}
 }
 
+
 void Init() {
+	hDc = GetDC(hWnd);
 	_Data.DetectedThreads = min(thread::hardware_concurrency() - 1,(int)(ceil(getAvailableRAM() / 2048.)));
 
-	MoveableWindow *T = new MoveableWindow("Main window", STLS_WhiteSmall, -200, 200, 400, 400, 0x3F3F3FAF, 0x7F7F7F7F);
+	MoveableWindow *T = new MoveableWindow("Main window", System_White, -200, 200, 400, 400, 0x3F3F3FAF, 0x7F7F7F7F);
 	SelectablePropertedList *SPL = new SelectablePropertedList(BS_List_Black_Small, NULL, PropsAndSets::OGPInMIDIList, -50, 172, 300, 12, 65, 30);
 	Button *Butt;
 	(*T)["List"] = SPL;
 
-	(*T)["ADD_Butt"] = new Button("Add MIDIs", STLS_WhiteSmall, OnAdd, 150, 172.5, 75, 12, 1, 0x00003FAF, 0xFFFFFFFF, 0x00003FFF, 0xFFFFFFFF, 0x7F7F7F7FF,NULL," ");
-	(*T)["REM_Butt"] = new Button("Remove selected", STLS_WhiteSmall, OnRem, 150, 160, 75, 12, 1, 0x3F0000AF, 0xFFFFFFFF, 0x3F0000FF, 0xFFFFFFFF, 0x7F7F7F7FF, NULL, " ");
-	(*T)["REM_ALL_Butt"] = new Button("Remove all", STLS_WhiteSmall, OnRemAll, 150, 147.5, 75, 12, 1, 0xAF0000AF, 0xFFFFFFFF, 0xAF0000AF, 0xFFFFFFFF, 0x7F7F7F7FF, STLS_WhiteSmall, "May cause lag");
-	(*T)["GLOBAL_PPQN_Butt"] = new Button("Global PPQN", STLS_WhiteSmall, OnGlobalPPQN, 150, 122.5, 75, 12, 1, 0xFF3F00AF, 0xFFFFFFFF, 0xFF3F00AF, 0xFFFFFFFF, 0x7F7F7F7FF, NULL, " ");
-	(*T)["GLOBAL_OFFSET_Butt"] = new Button("Global offset", STLS_WhiteSmall, OnGlobalOffset, 150, 110, 75, 12, 1, 0xFF7F00AF, 0xFFFFFFFF, 0xFF7F00FF, 0xFFFFFFFF, 0x7F7F7F7FF, NULL, " ");
-	(*T)["GLOBAL_TEMPO_Butt"] = new Button("Global tempo", STLS_WhiteSmall, OnGlobalTempo, 150, 97.5, 75, 12, 1, 0xFFAF00AF, 0xFFFFFFFF, 0xFFAF00AF, 0xFFFFFFFF, 0x7F7F7F7FF, NULL, " ");
-	//(*T)["_FRESOLVE"] = new Button("_ForceResolve", STLS_WhiteSmall, _OnResolve, 150, 0, 75, 12, 1, 0x7F007F3F, 0xFFFFFF3F, 0x000000FF, 0xFFFFFF3F, 0x7F7F7F73F, NULL, " ");
-	(*T)["DELETE_ALL_VM"] = new Button("Remove vol. maps", STLS_WhiteSmall, OnRemVolMaps, 150, 72.5, 75, 12, 1,
+	(*T)["ADD_Butt"] = new Button("Add MIDIs", System_White, OnAdd, 150, 172.5, 75, 12, 1, 0x00003FAF, 0xFFFFFFFF, 0x00003FFF, 0xFFFFFFFF, 0x7F7F7F7FF,NULL," ");
+	(*T)["REM_Butt"] = new Button("Remove selected", System_White, OnRem, 150, 160, 75, 12, 1, 0x3F0000AF, 0xFFFFFFFF, 0x3F0000FF, 0xFFFFFFFF, 0x7F7F7F7FF, NULL, " ");
+	(*T)["REM_ALL_Butt"] = new Button("Remove all", System_White, OnRemAll, 150, 147.5, 75, 12, 1, 0xAF0000AF, 0xFFFFFFFF, 0xAF0000AF, 0xFFFFFFFF, 0x7F7F7F7FF, System_White, "May cause lag");
+	(*T)["GLOBAL_PPQN_Butt"] = new Button("Global PPQN", System_White, OnGlobalPPQN, 150, 122.5, 75, 12, 1, 0xFF3F00AF, 0xFFFFFFFF, 0xFF3F00AF, 0xFFFFFFFF, 0x7F7F7F7FF, NULL, " ");
+	(*T)["GLOBAL_OFFSET_Butt"] = new Button("Global offset", System_White, OnGlobalOffset, 150, 110, 75, 12, 1, 0xFF7F00AF, 0xFFFFFFFF, 0xFF7F00FF, 0xFFFFFFFF, 0x7F7F7F7FF, NULL, " ");
+	(*T)["GLOBAL_TEMPO_Butt"] = new Button("Global tempo", System_White, OnGlobalTempo, 150, 97.5, 75, 12, 1, 0xFFAF00AF, 0xFFFFFFFF, 0xFFAF00AF, 0xFFFFFFFF, 0x7F7F7F7FF, NULL, " ");
+	//(*T)["_FRESOLVE"] = new Button("_ForceResolve", System_White, _OnResolve, 150, 0, 75, 12, 1, 0x7F007F3F, 0xFFFFFF3F, 0x000000FF, 0xFFFFFF3F, 0x7F7F7F73F, NULL, " ");
+	(*T)["DELETE_ALL_VM"] = new Button("Remove vol. maps", System_White, OnRemVolMaps, 150, 72.5, 75, 12, 1,
 		0x7F7F7FAF, 0xFFFFFFFF, 0x7F7F7FAF, 0xFFFFFFFF, 0x7F7F7F7FF, NULL, " ");//0xFF007FAF
-	(*T)["DELETE_ALL_CAT"] = new Button("Remove C&Ts", STLS_WhiteSmall, OnRemCATs, 150, 60, 75, 12, 1, 
+	(*T)["DELETE_ALL_CAT"] = new Button("Remove C&Ts", System_White, OnRemCATs, 150, 60, 75, 12, 1, 
 		0x7F7F7FAF, 0xFFFFFFFF, 0x7F7F7FAF, 0xFFFFFFFF, 0x7F7F7F7FF, NULL, " ");
-	(*T)["DELETE_ALL_PITCHES"] = new Button("Remove p. maps", STLS_WhiteSmall, OnRemPitchMaps, 150, 47.5, 75, 12, 1, 
+	(*T)["DELETE_ALL_PITCHES"] = new Button("Remove p. maps", System_White, OnRemPitchMaps, 150, 47.5, 75, 12, 1, 
 		0x7F7F7FAF, 0xFFFFFFFF, 0x7F7F7FAF, 0xFFFFFFFF, 0x7F7F7F7FF, NULL, " ");
-	(*T)["DELETE_ALL_MODULES"] = new Button("Remove modules", STLS_WhiteSmall, OnRemAllModules, 150, 35, 75, 12, 1, 
+	(*T)["DELETE_ALL_MODULES"] = new Button("Remove modules", System_White, OnRemAllModules, 150, 35, 75, 12, 1, 
 		0x7F7F7FAF, 0xFFFFFFFF, 0x7F7F7FAF, 0xFFFFFFFF, 0x7F7F7F7FF, NULL, " ");
 
-	(*T)["SETTINGS"] = new Button("Settings...", STLS_WhiteSmall, Settings::OnSettings, 150, -140, 75, 12, 1,
+	(*T)["SETTINGS"] = new Button("Settings...", System_White, Settings::OnSettings, 150, -140, 75, 12, 1,
 		0x5F5F5FAF, 0xFFFFFFFF, 0x5F5F5FAF, 0xFFFFFFFF, 0x7F7F7F7FF, NULL, " ");
-	(*T)["SAVE_AS"] = new Button("Save as...", STLS_WhiteSmall, OnSaveTo, 150, -152.5, 75, 12, 1,
+	(*T)["SAVE_AS"] = new Button("Save as...", System_White, OnSaveTo, 150, -152.5, 75, 12, 1,
 		0x3FAF00AF, 0xFFFFFFFF, 0x3FAF00AF, 0xFFFFFFFF, 0x7F7F7F7FF, NULL, " ");
-	(*T)["START"] = Butt = new Button("Start merging", STLS_WhiteSmall, OnStart, 150, -177.5, 75, 12, 1,
+	(*T)["START"] = Butt = new Button("Start merging", System_White, OnStart, 150, -177.5, 75, 12, 1,
 		0x000000AF, 0xFFFFFFFF, 0x000000AF, 0xFFFFFFFF, 0x7F7F7F7FF, NULL, " ");//177.5
 
 	(*WH)["MAIN"] = T;
 
-	T = new MoveableWindow("Props. and sets.", STLS_WhiteSmall, -100, 100, 200, 200, 0x3F3F3FCF, 0x7F7F7F7F);
-	(*T)["FileName"] = new TextBox("_", STLS_WhiteSmall, 0, 88.5 - WindowHeapSize, 6, 200 - 1.5*WindowHeapSize, 7.5, 0, 0, 0, _Align::left, TextBox::VerticalOverflow::cut); 
-	(*T)["PPQN"] = new InputField(" ", -90 + WindowHeapSize, 75 - WindowHeapSize, 10, 25, STLS_WhiteSmall, PropsAndSets::PPQN, 0x007FFFFF, STLS_WhiteSmall, "PPQN is lesser than 65536.", 5, _Align::center, _Align::left, InputField::Type::NaturalNumbers);
-	(*T)["TEMPO"] = new InputField(" ", -45 + WindowHeapSize, 75 - WindowHeapSize, 10, 55, STLS_WhiteSmall, PropsAndSets::TEMPO, 0x007FFFFF, STLS_WhiteSmall, "Specific tempo override field", 7, _Align::center, _Align::left, InputField::Type::NaturalNumbers);
-	(*T)["OFFSET"] = new InputField(" ", 17.5 + WindowHeapSize, 75 - WindowHeapSize, 10, 60, STLS_WhiteSmall, PropsAndSets::OFFSET, 0x007FFFFF, STLS_WhiteSmall, "Offset from begining in ticks", 10, _Align::center, _Align::right, InputField::Type::NaturalNumbers);
+	T = new MoveableWindow("Props. and sets.", System_White, -100, 100, 200, 200, 0x3F3F3FCF, 0x7F7F7F7F);
+	(*T)["FileName"] = new TextBox("_", System_White, 0, 88.5 - WindowHeapSize, 6, 200 - 1.5*WindowHeapSize, 7.5, 0, 0, 0, _Align::left, TextBox::VerticalOverflow::cut); 
+	(*T)["PPQN"] = new InputField(" ", -90 + WindowHeapSize, 75 - WindowHeapSize, 10, 25, System_White, PropsAndSets::PPQN, 0x007FFFFF, System_White, "PPQN is lesser than 65536.", 5, _Align::center, _Align::left, InputField::Type::NaturalNumbers);
+	(*T)["TEMPO"] = new InputField(" ", -45 + WindowHeapSize, 75 - WindowHeapSize, 10, 55, System_White, PropsAndSets::TEMPO, 0x007FFFFF, System_White, "Specific tempo override field", 7, _Align::center, _Align::left, InputField::Type::NaturalNumbers);
+	(*T)["OFFSET"] = new InputField(" ", 17.5 + WindowHeapSize, 75 - WindowHeapSize, 10, 60, System_White, PropsAndSets::OFFSET, 0x007FFFFF, System_White, "Offset from begining in ticks", 10, _Align::center, _Align::right, InputField::Type::NaturalNumbers);
 
-	(*T)["BOOL_REM_TRCKS"] = new CheckBox(-97.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, STLS_WhiteSmall, _Align::left, "Remove empty tracks");
-	(*T)["BOOL_REM_REM"] = new CheckBox(-82.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, STLS_WhiteSmall, _Align::left, "Remove merge \"remnants\"");
-	(*T)["BOOL_PIANO_ONLY"] = new CheckBox(-67.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, STLS_WhiteSmall, _Align::left, "Replace all instruments with piano");
-	(*T)["BOOL_IGN_TEMPO"] = new CheckBox(-52.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, STLS_WhiteSmall, _Align::left, "Ignore tempo events");
-	(*T)["BOOL_IGN_PITCH"] = new CheckBox(-37.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, STLS_WhiteSmall, _Align::center, "Ignore pitch bending events");
-	(*T)["BOOL_IGN_NOTES"] = new CheckBox(-22.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, STLS_WhiteSmall, _Align::center, "Ignore note events");
-	(*T)["BOOL_IGN_ALL_EX_TPS"] = new CheckBox(-7.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, STLS_WhiteSmall, _Align::center, "Ignore everything except specified");
-	(*T)["BOOL_APPLY_TO_ALL_MIDIS"] = Butt = new Button("A2A", STLS_WhiteSmall, PropsAndSets::OnApplyBS2A, 80 - WindowHeapSize, 55 - WindowHeapSize, 15, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, STLS_WhiteSmall, "Sets \"bool settings\" to all midis");
+	(*T)["BOOL_REM_TRCKS"] = new CheckBox(-97.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, System_White, _Align::left, "Remove empty tracks");
+	(*T)["BOOL_REM_REM"] = new CheckBox(-82.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, System_White, _Align::left, "Remove merge \"remnants\"");
+	(*T)["BOOL_PIANO_ONLY"] = new CheckBox(-67.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, System_White, _Align::left, "Replace all instruments with piano");
+	(*T)["BOOL_IGN_TEMPO"] = new CheckBox(-52.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::left, "Ignore tempo events");
+	(*T)["BOOL_IGN_PITCH"] = new CheckBox(-37.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::center, "Ignore pitch bending events");
+	(*T)["BOOL_IGN_NOTES"] = new CheckBox(-22.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::center, "Ignore note events");
+	(*T)["BOOL_IGN_ALL_EX_TPS"] = new CheckBox(-7.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::center, "Ignore everything except specified");
+	(*T)["BOOL_APPLY_TO_ALL_MIDIS"] = Butt = new Button("A2A", System_White, PropsAndSets::OnApplyBS2A, 80 - WindowHeapSize, 55 - WindowHeapSize, 15, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, System_White, "Sets \"bool settings\" to all midis");
 	Butt->Tip->SafeChangePosition_Argumented(_Align::right, 87.5 - WindowHeapSize, Butt->Tip->CYpos);
 
-	(*T)["INPLACE_MERGE"] = new CheckBox(97.5 - WindowHeapSize, 55 - WindowHeapSize, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, 0, STLS_WhiteSmall, _Align::right, "Enables/disables inplace merge");
+	(*T)["INPLACE_MERGE"] = new CheckBox(97.5 - WindowHeapSize, 55 - WindowHeapSize, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, 0, System_White, _Align::right, "Enables/disables inplace merge");
 
-	(*T)["GROUPID"] = new InputField(" ", 92.5 - WindowHeapSize, 75 - WindowHeapSize, 10, 20, STLS_WhiteSmall, PropsAndSets::PPQN, 0x007FFFFF, STLS_WhiteSmall, "Group ID...", 2, _Align::center, _Align::right, InputField::Type::NaturalNumbers);
+	(*T)["GROUPID"] = new InputField(" ", 92.5 - WindowHeapSize, 75 - WindowHeapSize, 10, 20, System_White, PropsAndSets::PPQN, 0x007FFFFF, System_White, "Group ID...", 2, _Align::center, _Align::right, InputField::Type::NaturalNumbers);
 
-	(*T)["OR"] = Butt = new Button("OR", STLS_WhiteSmall, PropsAndSets::OR, 37.5, 15 - WindowHeapSize, 20, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, STLS_WhiteSmall, "Overlaps remover");
-	(*T)["SR"] = new Button("SR", STLS_WhiteSmall, PropsAndSets::SR, 12.5, 15 - WindowHeapSize, 20, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, STLS_WhiteSmall, "Sustains remover");
+	(*T)["OR"] = Butt = new Button("OR", System_White, PropsAndSets::OR, 37.5, 15 - WindowHeapSize, 20, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, System_White, "Overlaps remover");
+	(*T)["SR"] = new Button("SR", System_White, PropsAndSets::SR, 12.5, 15 - WindowHeapSize, 20, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, System_White, "Sustains remover");
 
-	(*T)["APPLY"] = new Button("Apply", STLS_WhiteSmall, PropsAndSets::OnApplySettings, 87.5 - WindowHeapSize, 15 - WindowHeapSize, 30, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, NULL, " ");
+	(*T)["APPLY"] = new Button("Apply", System_White, PropsAndSets::OnApplySettings, 87.5 - WindowHeapSize, 15 - WindowHeapSize, 30, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, NULL, " ");
 
-	(*T)["CUT_AND_TRANSPOSE"] = (Butt = new Button("Cut & Transpose...", STLS_WhiteSmall, PropsAndSets::CutAndTranspose::OnCaT, 52.5 - WindowHeapSize, 35 - WindowHeapSize, 100, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, STLS_WhiteSmall, "Cut and Transpose tool"));
+	(*T)["CUT_AND_TRANSPOSE"] = (Butt = new Button("Cut & Transpose...", System_White, PropsAndSets::CutAndTranspose::OnCaT, 52.5 - WindowHeapSize, 35 - WindowHeapSize, 100, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, System_White, "Cut and Transpose tool"));
 	Butt->Tip->SafeChangePosition_Argumented(_Align::right, 100 - WindowHeapSize, Butt->Tip->CYpos);
-	(*T)["PITCH_MAP"] = (Butt = new Button("Pitch map ...", STLS_WhiteSmall, PropsAndSets::OnPitchMap, -37.5 - WindowHeapSize, 15 - WindowHeapSize, 70, 10, 1, 0x7F7F7F3F, 0x7F7F7FFF, 0xFFFFFFFF, 0xFFFFFF3F, 0xFFFFFFFF, STLS_WhiteSmall, "Allows to transform pitches"));
+	(*T)["PITCH_MAP"] = (Butt = new Button("Pitch map ...", System_White, PropsAndSets::OnPitchMap, -37.5 - WindowHeapSize, 15 - WindowHeapSize, 70, 10, 1, 0x7F7F7F3F, 0x7F7F7FFF, 0xFFFFFFFF, 0xFFFFFF3F, 0xFFFFFFFF, System_White, "Allows to transform pitches"));
 	Butt->Tip->SafeChangePosition_Argumented(_Align::right, 100 - WindowHeapSize, Butt->Tip->CYpos);
-	(*T)["VOLUME_MAP"] = (Butt = new Button("Volume map ...", STLS_WhiteSmall, PropsAndSets::VolumeMap::OnVolMap, -37.5 - WindowHeapSize, 35 - WindowHeapSize, 70, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, STLS_WhiteSmall, "Allows to transform volumes of notes"));
+	(*T)["VOLUME_MAP"] = (Butt = new Button("Volume map ...", System_White, PropsAndSets::VolumeMap::OnVolMap, -37.5 - WindowHeapSize, 35 - WindowHeapSize, 70, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, System_White, "Allows to transform volumes of notes"));
 	Butt->Tip->SafeChangePosition_Argumented(_Align::right, 100 - WindowHeapSize, Butt->Tip->CYpos);
 
-	(*T)["CONSTANT_PROPS"] = new TextBox("_Props text example_", STLS_WhiteSmall, 0, -42.5 - WindowHeapSize, 80 - WindowHeapSize, 200 - 1.5*WindowHeapSize, 7.5, 0, 0, 1);
+	(*T)["CONSTANT_PROPS"] = new TextBox("_Props text example_", System_White, 0, -42.5 - WindowHeapSize, 80 - WindowHeapSize, 200 - 1.5*WindowHeapSize, 7.5, 0, 0, 1);
 
 	(*WH)["SMPAS"] = T;//Selected midi properties and settings
 
-	T = new MoveableWindow("Cut and Transpose.", STLS_WhiteSmall, -200, 50, 400, 100, 0x3F3F3FCF, 0x7F7F7F7F);
+	T = new MoveableWindow("Cut and Transpose.", System_White, -200, 50, 400, 100, 0x3F3F3FCF, 0x7F7F7F7F);
 	(*T)["CAT_ITSELF"] = new CAT_Piano(0, 25-WindowHeapSize, 1, 10, NULL);
-	(*T)["CAT_SET_DEFAULT"] = new Button("Reset", STLS_WhiteSmall, PropsAndSets::CutAndTranspose::OnReset, -150, -10 - WindowHeapSize, 40, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, NULL, " ");
-	(*T)["CAT_+128"] = new Button("0-127 -> 128-255", STLS_WhiteSmall, PropsAndSets::CutAndTranspose::On0_127to128_255, -85, -10 - WindowHeapSize, 80, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, NULL, " ");
-	(*T)["CAT_CDT128"] = new Button("Cut down to 128", STLS_WhiteSmall, PropsAndSets::CutAndTranspose::OnCDT128, 0, -10 - WindowHeapSize, 80, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, NULL, " ");
-	(*T)["CAT_COPY"] = new Button("Copy", STLS_WhiteSmall, PropsAndSets::CutAndTranspose::OnCopy, 65, -10 - WindowHeapSize, 40, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, NULL, " ");
-	(*T)["CAT_PASTE"] = new Button("Paste", STLS_WhiteSmall, PropsAndSets::CutAndTranspose::OnPaste, 110, -10 - WindowHeapSize, 40, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, NULL, " ");
-	(*T)["CAT_DELETE"] = new Button("Delete", STLS_WhiteSmall, PropsAndSets::CutAndTranspose::OnDelete, 155, -10 - WindowHeapSize, 40, 10, 1, 0xFF00FF3F, 0xFF00FFFF, 0xFFFFFFFF, 0xFF003F3F, 0xFF003FFF, NULL, " ");
+	(*T)["CAT_SET_DEFAULT"] = new Button("Reset", System_White, PropsAndSets::CutAndTranspose::OnReset, -150, -10 - WindowHeapSize, 40, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, NULL, " ");
+	(*T)["CAT_+128"] = new Button("0-127 -> 128-255", System_White, PropsAndSets::CutAndTranspose::On0_127to128_255, -85, -10 - WindowHeapSize, 80, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, NULL, " ");
+	(*T)["CAT_CDT128"] = new Button("Cut down to 128", System_White, PropsAndSets::CutAndTranspose::OnCDT128, 0, -10 - WindowHeapSize, 80, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, NULL, " ");
+	(*T)["CAT_COPY"] = new Button("Copy", System_White, PropsAndSets::CutAndTranspose::OnCopy, 65, -10 - WindowHeapSize, 40, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, NULL, " ");
+	(*T)["CAT_PASTE"] = new Button("Paste", System_White, PropsAndSets::CutAndTranspose::OnPaste, 110, -10 - WindowHeapSize, 40, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, NULL, " ");
+	(*T)["CAT_DELETE"] = new Button("Delete", System_White, PropsAndSets::CutAndTranspose::OnDelete, 155, -10 - WindowHeapSize, 40, 10, 1, 0xFF00FF3F, 0xFF00FFFF, 0xFFFFFFFF, 0xFF003F3F, 0xFF003FFF, NULL, " ");
 
 	(*WH)["CAT"] = T;
 
-	T = new MoveableWindow("Volume map.", STLS_WhiteSmall, -150, 150, 300, 350, 0x3F3F3FCF, 0x7F7F7F7F,0x7F6F8FCF);
+	T = new MoveableWindow("Volume map.", System_White, -150, 150, 300, 350, 0x3F3F3FCF, 0x7F7F7F7F,0x7F6F8FCF);
 	(*T)["VM_PLC"] = new PLC_VolumeWorker(0, 0 - WindowHeapSize, 300 - WindowHeapSize * 2, 300 - WindowHeapSize * 2, new PLC<BYTE, BYTE>());///todo: interface
-	(*T)["VM_SSBDIIF"] = Butt = new Button("Shape alike x^y", STLS_WhiteSmall, PropsAndSets::VolumeMap::OnDegreeShape, -110 + WindowHeapSize, -150 - WindowHeapSize, 80, 10, 1, 0xFFFFFF3F, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFAFFF3F, 0xFFAFFFFF, STLS_WhiteSmall, "Where y is from frame bellow");///Set shape by degree in input field;
+	(*T)["VM_SSBDIIF"] = Butt = new Button("Shape alike x^y", System_White, PropsAndSets::VolumeMap::OnDegreeShape, -110 + WindowHeapSize, -150 - WindowHeapSize, 80, 10, 1, 0xFFFFFF3F, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFAFFF3F, 0xFFAFFFFF, System_White, "Where y is from frame bellow");///Set shape by degree in input field;
 	Butt->Tip->SafeChangePosition_Argumented(_Align::left, -150 + WindowHeapSize, -160 - WindowHeapSize);
-	(*T)["VM_DEGREE"] = new InputField("1", -140 + WindowHeapSize, -170 - WindowHeapSize, 10, 20, STLS_WhiteSmall, NULL, 0x007FFFFF, NULL, " ", 4, _Align::center, _Align::center, InputField::Type::FP_PositiveNumbers);
-	(*T)["VM_ERASE"] = Butt = new Button("Erase points", STLS_WhiteSmall, PropsAndSets::VolumeMap::OnErase, -35 + WindowHeapSize, -150 - WindowHeapSize, 60, 10, 1, 0xFFFFFF3F, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFAFFF3F, 0xFFAFFFFF, NULL, "_");
-	(*T)["VM_DELETE"] = new Button("Delete map", STLS_WhiteSmall, PropsAndSets::VolumeMap::OnDelete, 30 + WindowHeapSize, -150 - WindowHeapSize, 60, 10, 1, 0xFFAFAF3F, 0xFFAFAFFF, 0xFFEFEFFF, 0xFF7F3F7F, 0xFF1F1FFF, NULL, "_");
-	(*T)["VM_SIMP"] = Butt = new Button("Simplify map", STLS_WhiteSmall, PropsAndSets::VolumeMap::OnSimplify, -70 - WindowHeapSize, -170 - WindowHeapSize, 60, 10, 1, 0xFFFFFF3F, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFAFFF3F, 0xFFAFFFFF, STLS_WhiteSmall, "Reduces amount of \"repeating\" points");
+	(*T)["VM_DEGREE"] = new InputField("1", -140 + WindowHeapSize, -170 - WindowHeapSize, 10, 20, System_White, NULL, 0x007FFFFF, NULL, " ", 4, _Align::center, _Align::center, InputField::Type::FP_PositiveNumbers);
+	(*T)["VM_ERASE"] = Butt = new Button("Erase points", System_White, PropsAndSets::VolumeMap::OnErase, -35 + WindowHeapSize, -150 - WindowHeapSize, 60, 10, 1, 0xFFFFFF3F, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFAFFF3F, 0xFFAFFFFF, NULL, "_");
+	(*T)["VM_DELETE"] = new Button("Delete map", System_White, PropsAndSets::VolumeMap::OnDelete, 30 + WindowHeapSize, -150 - WindowHeapSize, 60, 10, 1, 0xFFAFAF3F, 0xFFAFAFFF, 0xFFEFEFFF, 0xFF7F3F7F, 0xFF1F1FFF, NULL, "_");
+	(*T)["VM_SIMP"] = Butt = new Button("Simplify map", System_White, PropsAndSets::VolumeMap::OnSimplify, -70 - WindowHeapSize, -170 - WindowHeapSize, 60, 10, 1, 0xFFFFFF3F, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFAFFF3F, 0xFFAFFFFF, System_White, "Reduces amount of \"repeating\" points");
 	Butt->Tip->SafeChangePosition_Argumented(_Align::left, -100 - WindowHeapSize, -160 - WindowHeapSize);
-	(*T)["VM_TRACE"] = Butt = new Button("Trace map", STLS_WhiteSmall, PropsAndSets::VolumeMap::OnTrace, -35 + WindowHeapSize, -170 - WindowHeapSize, 60, 10, 1, 0xFFFFFF3F, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFAFAF3F, 0xFFAFAFFF, STLS_WhiteSmall, "Puts every point onto map");
+	(*T)["VM_TRACE"] = Butt = new Button("Trace map", System_White, PropsAndSets::VolumeMap::OnTrace, -35 + WindowHeapSize, -170 - WindowHeapSize, 60, 10, 1, 0xFFFFFF3F, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFAFAF3F, 0xFFAFAFFF, System_White, "Puts every point onto map");
 	Butt->Tip->SafeChangePosition_Argumented(_Align::left, -65 + WindowHeapSize, -160 - WindowHeapSize);
-	(*T)["VM_SETMODE"] = Butt = new Button("Single", STLS_WhiteSmall, PropsAndSets::VolumeMap::OnSetModeChange, 30 + WindowHeapSize, -170 - WindowHeapSize, 40, 10, 1, 0xFFFFFF3F, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFAFAF3F, 0xFFAFAFFF, NULL, "_");
+	(*T)["VM_SETMODE"] = Butt = new Button("Single", System_White, PropsAndSets::VolumeMap::OnSetModeChange, 30 + WindowHeapSize, -170 - WindowHeapSize, 40, 10, 1, 0xFFFFFF3F, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFAFAF3F, 0xFFAFAFFF, NULL, "_");
 
 	(*WH)["VM"] = T;
 
-	T = new MoveableWindow("App settings", STLS_WhiteSmall, -100, 100, 200, 200, 0x3F3F3FCF, 0x7F7F7F7F);
+	T = new MoveableWindow("App settings", System_White, -100, 100, 200, 200, 0x3F3F3FCF, 0x7F7F7F7F);
 
-	(*T)["AS_SHADERMODE"] = new InputField(to_string(Settings::ShaderMode), -87.5 + WindowHeapSize, 85 - WindowHeapSize, 10, 30, STLS_WhiteSmall, NULL, 0x007FFFFF, STLS_WhiteSmall, "Shader ID", 2, _Align::center, _Align::left, InputField::Type::NaturalNumbers);
-	(*T)["AS_SWW"] = new InputField(to_string(Settings::SinewaveWidth), -47.5 + WindowHeapSize, 85 - WindowHeapSize, 10, 40, STLS_WhiteSmall, NULL, 0x007FFFFF, STLS_WhiteSmall, "Wave \"height\"", 8, _Align::center, _Align::left, InputField::Type::FP_Any);
-	(*T)["AS_BW"] = new InputField(to_string(Settings::Basewave), -2.5 + WindowHeapSize, 85 - WindowHeapSize, 10, 40, STLS_WhiteSmall, NULL, 0x007FFFFF, STLS_WhiteSmall, "Base level", 8, _Align::center, _Align::center, InputField::Type::FP_Any);
-	(*T)["AS_P3"] = new InputField(to_string(Settings::Basewave), 42.5 + WindowHeapSize, 85 - WindowHeapSize, 10, 40, STLS_WhiteSmall, NULL, 0x007FFFFF, STLS_WhiteSmall, "3rd parameter", 8, _Align::center, _Align::right, InputField::Type::FP_Any);
-	(*T)["AS_APPLY"] = Butt = new Button("Apply", STLS_WhiteSmall, Settings::OnSetApply, 85 - WindowHeapSize, -67.5 - WindowHeapSize, 40, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, NULL, "_");
-	(*T)["AS_SHADERWARNING"] = new TextBox("Shader settings", STLS_WhiteSmall, 0, 85 - WindowHeapSize, 30, 200, 12, 0xFF7F001F, 0xFF7F007F, 1, _Align::center);
-	(*T)["AS_ROT_ANGLE"] = new InputField(to_string(ROT_ANGLE), -87.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 30, STLS_WhiteSmall, NULL, 0x007FFFFF, STLS_WhiteSmall, "Rotation angle", 6, _Align::center, _Align::left, InputField::Type::FP_Any);
-	(*T)["AS_THREADS_COUNT"] = new InputField(to_string(_Data.DetectedThreads), -57.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 20, STLS_WhiteSmall, NULL, 0x007FFFFF, STLS_WhiteSmall, "Threads count", 2, _Align::center, _Align::left, InputField::Type::NaturalNumbers);
+	(*T)["AS_SHADERMODE"] = new InputField(to_string(Settings::ShaderMode), -87.5 + WindowHeapSize, 85 - WindowHeapSize, 10, 30, System_White, NULL, 0x007FFFFF, System_White, "Shader ID", 2, _Align::center, _Align::left, InputField::Type::NaturalNumbers);
+	(*T)["AS_SWW"] = new InputField(to_string(Settings::SinewaveWidth), -47.5 + WindowHeapSize, 85 - WindowHeapSize, 10, 40, System_White, NULL, 0x007FFFFF, System_White, "Wave \"height\"", 8, _Align::center, _Align::left, InputField::Type::FP_Any);
+	(*T)["AS_BW"] = new InputField(to_string(Settings::Basewave), -2.5 + WindowHeapSize, 85 - WindowHeapSize, 10, 40, System_White, NULL, 0x007FFFFF, System_White, "Base level", 8, _Align::center, _Align::center, InputField::Type::FP_Any);
+	(*T)["AS_P3"] = new InputField(to_string(Settings::Basewave), 42.5 + WindowHeapSize, 85 - WindowHeapSize, 10, 40, System_White, NULL, 0x007FFFFF, System_White, "3rd parameter", 8, _Align::center, _Align::right, InputField::Type::FP_Any);
+	(*T)["AS_APPLY"] = Butt = new Button("Apply", System_White, Settings::OnSetApply, 85 - WindowHeapSize, -67.5 - WindowHeapSize, 40, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, NULL, "_");
+	(*T)["AS_SHADERWARNING"] = new TextBox("Shader settings", System_White, 0, 85 - WindowHeapSize, 30, 200, 12, 0xFF7F001F, 0xFF7F007F, 1, _Align::center);
+	(*T)["AS_ROT_ANGLE"] = new InputField(to_string(ROT_ANGLE), -87.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 30, System_White, NULL, 0x007FFFFF, System_White, "Rotation angle", 6, _Align::center, _Align::left, InputField::Type::FP_Any);
+	(*T)["AS_THREADS_COUNT"] = new InputField(to_string(_Data.DetectedThreads), -57.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 20, System_White, NULL, 0x007FFFFF, System_White, "Threads count", 2, _Align::center, _Align::left, InputField::Type::NaturalNumbers);
+	//(*T)["AS_FONT_SIZE"] = new WheelVariableChanger(Settings::ApplyWheel,-40,-62.5,-15,1,System_White," ", " ", WheelVariableChanger::Type::addictable);
 
-	(*T)["BOOL_REM_TRCKS"] = new CheckBox(-97.5 + WindowHeapSize, 35 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, STLS_WhiteSmall, _Align::left, "DV: Remove empty tracks");
-	(*T)["BOOL_REM_REM"] = new CheckBox(-82.5 + WindowHeapSize, 35 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, STLS_WhiteSmall, _Align::left, "DV: Remove merge \"remnants\"");
-	(*T)["BOOL_PIANO_ONLY"] = new CheckBox(-67.5 + WindowHeapSize, 35 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, STLS_WhiteSmall, _Align::left, "DV: All instuments to piano");
-	(*T)["BOOL_IGN_TEMPO"] = new CheckBox(-52.5 + WindowHeapSize, 35 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, STLS_WhiteSmall, _Align::left, "DV: Ignore tempo events");
-	(*T)["BOOL_IGN_PITCH"] = new CheckBox(-37.5 + WindowHeapSize, 35 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, STLS_WhiteSmall, _Align::center, "DV: Ignore pitch bending events");
-	(*T)["BOOL_IGN_NOTES"] = new CheckBox(-22.5 + WindowHeapSize, 35 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, STLS_WhiteSmall, _Align::center, "DV: Ignore note events");
-	(*T)["BOOL_IGN_ALL_EX_TPS"] = new CheckBox(-7.5 + WindowHeapSize, 35 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, STLS_WhiteSmall, _Align::center, "DV: Ignore everything except specified");
+	(*T)["BOOL_REM_TRCKS"] = new CheckBox(-97.5 + WindowHeapSize, 35 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, System_White, _Align::left, "DV: Remove empty tracks");
+	(*T)["BOOL_REM_REM"] = new CheckBox(-82.5 + WindowHeapSize, 35 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, System_White, _Align::left, "DV: Remove merge \"remnants\"");
+	(*T)["BOOL_PIANO_ONLY"] = new CheckBox(-67.5 + WindowHeapSize, 35 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, System_White, _Align::left, "DV: All instuments to piano");
+	(*T)["BOOL_IGN_TEMPO"] = new CheckBox(-52.5 + WindowHeapSize, 35 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::left, "DV: Ignore tempo events");
+	(*T)["BOOL_IGN_PITCH"] = new CheckBox(-37.5 + WindowHeapSize, 35 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::center, "DV: Ignore pitch bending events");
+	(*T)["BOOL_IGN_NOTES"] = new CheckBox(-22.5 + WindowHeapSize, 35 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::center, "DV: Ignore note events");
+	(*T)["BOOL_IGN_ALL_EX_TPS"] = new CheckBox(-7.5 + WindowHeapSize, 35 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::center, "DV: Ignore everything except specified");
 
-	(*T)["BOOL_APPLY_TO_ALL_MIDIS"] = Butt = new Button("A2A", STLS_WhiteSmall, Settings::ApplyToAll, 80 - WindowHeapSize, 35 - WindowHeapSize, 15, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, STLS_WhiteSmall, "The same as A2A in MIDI's props.");
+	(*T)["BOOL_APPLY_TO_ALL_MIDIS"] = Butt = new Button("A2A", System_White, Settings::ApplyToAll, 80 - WindowHeapSize, 35 - WindowHeapSize, 15, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, System_White, "The same as A2A in MIDI's props.");
 	Butt->Tip->SafeChangePosition_Argumented(_Align::right, 87.5 - WindowHeapSize, Butt->Tip->CYpos);
 
-	(*T)["INPLACE_MERGE"] = new CheckBox(97.5 - WindowHeapSize, 35 - WindowHeapSize, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, 0, STLS_WhiteSmall, _Align::right, "DV: Enable/disable inplace merge");
+	(*T)["INPLACE_MERGE"] = new CheckBox(97.5 - WindowHeapSize, 35 - WindowHeapSize, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, 0, System_White, _Align::right, "DV: Enable/disable inplace merge");
 
 	(*WH)["APP_SETTINGS"] = T;
 
-	T = new MoveableWindow("SMRP Container", STLS_WhiteSmall, -300, 300, 600, 600, 0x000000CF, 0xFFFFFF7F);
+	T = new MoveableWindow("SMRP Container", System_White, -300, 300, 600, 600, 0x000000CF, 0xFFFFFF7F);
 	
 	(*WH)["SMRP_CONTAINER"] = T;
 
-	T = new MoveableWindow("Sustains/Overlaps remover", STLS_WhiteSmall, -100, 25, 200, 45, 0x3F3F3FCF, 0x7F7F7F7F);
-	(*T)["TEXT"] = new TextBox("sdokflsdkflk", STLS_WhiteSmall, 0, -WindowHeapSize + 15, 15, 180, 10, 0, 0, 0, _Align::center);
+	T = new MoveableWindow("Sustains/Overlaps remover", System_White, -100, 25, 200, 45, 0x3F3F3FCF, 0x7F7F7F7F);
+	(*T)["TEXT"] = new TextBox("sdokflsdkflk", System_White, 0, -WindowHeapSize + 15, 15, 180, 10, 0, 0, 0, _Align::center);
 
 	(*WH)["OR"] = T;
 
@@ -5087,8 +5302,6 @@ void Init() {
 	//WH->EnableWindow("SMPAS");//Debug line
 	//WH->EnableWindow("PROMPT");////DEBUUUUG
 	
-	hWnd = FindWindowA(NULL, WINDOWTITLE); 
-
 	DragAcceptFiles(hWnd, TRUE);
 	OleInitialize(NULL);
 	cout << "RDD " << (RegisterDragDrop(hWnd, &DNDH_Global)) << endl;
@@ -5162,14 +5375,16 @@ const GLchar *fragment_shader[] = { //uniform float time;
 };
 
 shader_prog *SP;
-SMRP_Vis atb(0,0,STLS_WhiteSmall);
+SMRP_Vis atb(0,0,System_White);
 
 void onTimer(int v);
 void mDisplay() {
+	lFontSymbolsInfo::InitialiseFont(FONTNAME);
 	glClear(GL_COLOR_BUFFER_BIT | GL_ACCUM_BUFFER_BIT);
 	glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 	if (FIRSTBOOT) {
 		FIRSTBOOT = 0;
+
 		//Settings::ShaderMode = rand() & 3;
 		if (glCreateShader) {
 			SP = new shader_prog(vertex_shader, fragment_shader);
@@ -5214,10 +5429,10 @@ void mDisplay() {
 	}
 	else if (Settings::ShaderMode < 4) {
 		glBegin(GL_QUADS);
-		glColor4f(1, 0.5f, 0, (DRAG_OVER) ? 0.25f : 0);
+		glColor4f(1, 0.5f, 0, (DRAG_OVER) ? 0.25f : 1);
 		glVertex2f(0 - RANGE * (WindX / WINDXSIZE), 0 - RANGE * (WindY / WINDYSIZE));
 		glVertex2f(0 - RANGE * (WindX / WINDXSIZE), RANGE * (WindY / WINDYSIZE));
-		glColor4f(0, 0.5f, 1, (DRAG_OVER) ? 0.25f : 0);
+		glColor4f(0, 0.5f, 1, (DRAG_OVER) ? 0.25f : 1);
 		glVertex2f(RANGE * (WindX / WINDXSIZE), RANGE * (WindY / WINDYSIZE));
 		glVertex2f(RANGE * (WindX / WINDXSIZE), 0 - RANGE * (WindY / WINDYSIZE));
 		glEnd();
@@ -5237,24 +5452,6 @@ void mDisplay() {
 	if (WH)WH->Draw();
 	if (DRAG_OVER)SpecialSigns::DrawFileSign(0, 0, 50, 0xFFFFFFCF,0);
 	glRotatef(-ROT_ANGLE, 0, 0, 1);
-
-	////font experiment
-
-	glRasterPos2f(0, 0);
-	auto base = glGenLists(255);
-	HFONT hf = CreateFontW(20, 10, 0, 0, FALSE, FALSE, FALSE, FALSE, ANSI_CHARSET, OUT_TT_PRECIS, CLIP_DEFAULT_PRECIS, ANTIALIASED_QUALITY, FF_DONTCARE | DEFAULT_PITCH, L"Arial");
-	wglUseFontBitmaps(GetDC(hWnd), 32, 255, base);
-	SelectObject(GetDC(hWnd), hf);
-
-	glPushAttrib(GL_LIST_BIT);
-	glListBase(base - 32);
-	glCallLists(10, GL_UNSIGNED_BYTE, "012wW56789");
-	glPopAttrib();
-	//
-	//glutBitmapCharacter(GLUT_BITMAP_TIMES_ROMAN_24, 'w');
-	
-
-
 
 	glutSwapBuffers();
 }
@@ -5283,13 +5480,16 @@ void OnResize(int x, int y) {
 		SMRP->_NotSafeResize_Centered(RANGE * 3 *(WindY / WINDYSIZE), RANGE * 3 *(WindX / WINDXSIZE));
 	}
 }
+void inline rotate(float& x, float& y) {
+	float t = x * cos(ROT_RAD) + y * sin(ROT_RAD);
+	y = 0 - x * sin(ROT_RAD) + y * cos(ROT_RAD);
+	x = t;
+}
 void inline absoluteToActualCoords(int ix, int iy, float &x, float &y) {
 	float wx = WindX, wy = WindY,t;
 	x = ((float)(ix - wx * 0.5)) / (0.5*(wx / (RANGE*(WindX / WINDXSIZE))));
 	y = ((float)(0 - iy + wy * 0.5)) / (0.5*(wy / (RANGE*(WindY / WINDYSIZE))));
-	t = x * cos(ROT_RAD) + y * sin(ROT_RAD);
-	y = 0 - x * sin(ROT_RAD) + y * cos(ROT_RAD);
-	x = t;
+	rotate(x, y);
 }
 void mMotion(int ix, int iy) {
 	float fx, fy;
@@ -5346,7 +5546,9 @@ int main(int argc, char ** argv) {
 	glutInitWindowSize(WINDXSIZE, WINDYSIZE);
 	//glutInitWindowPosition(50, 0);
 	glutCreateWindow(WINDOWTITLE);
-	
+
+	hWnd = FindWindowA(NULL, WINDOWTITLE);
+
 	if(APRIL_FOOL)
 		glBlendFunc(GL_SRC_ALPHA, GL_ONE);//_MINUS_SRC_ALPHA
 	else
