@@ -98,6 +98,10 @@ void ThrowAlert_Error(string AlertText);
 void AddFiles(vector<wstring> Filenames);
 #pragma warning(disable : 4996)
 
+vector<string> GetFonts() {
+
+}
+
 size_t getAvailableRAM(){
 	size_t ret = 0;
 	DWORD v = GetVersion();
@@ -3475,7 +3479,7 @@ struct WindowsHandler {
 			while (AWIterator != ActiveWindows.end() && !((*AWIterator)->second->MouseHandler(mx, my, Button, State)) && !WindowWasDisabledDuringMouseHandling)
 				AWIterator++;
 			if (!WindowWasDisabledDuringMouseHandling && ActiveWindows.size() > 1 && AWIterator != ActiveWindows.end() && AWIterator != ActiveWindows.begin())
-				if(CurrentAW == ActiveWindows.begin())EnableWindow(*AWIterator);
+				if (CurrentAW == ActiveWindows.begin())EnableWindow(*AWIterator);
 			if (WindowWasDisabledDuringMouseHandling)
 				WindowWasDisabledDuringMouseHandling = 0;
 		}
@@ -4325,7 +4329,8 @@ struct FileSettings {////per file settings
 	wstring Filename;
 	wstring PostprocessedFile_Name, WFileNamePostfix;;
 	string AppearanceFilename,AppearancePath,FileNamePostfix;
-	WORD NewPPQN,OldPPQN,OldTrackNumber,MergeMultiplier,GroupID;
+	WORD NewPPQN,OldPPQN,OldTrackNumber,MergeMultiplier;
+	INT16 GroupID;
 	INT32 NewTempo;
 	UINT64 FileSize;
 	BIT IsMIDI, InplaceMergeEnabled;
@@ -4376,9 +4381,9 @@ struct FileSettings {////per file settings
 	}
 };
 struct _SFD_RSP {
-	DWORD ID;
-	UINT64 FileSize;
-	_SFD_RSP(DWORD ID,UINT64 FileSize) {
+	INT32 ID;
+	INT64 FileSize;
+	_SFD_RSP(INT32 ID, INT64 FileSize) {
 		this->ID = ID;
 		this->FileSize = FileSize;
 	}
@@ -4394,7 +4399,7 @@ struct SAFCData {////overall settings and storing perfile settings....
 	DWORD GlobalNewTempo;
 	BIT IncrementalPPQN;
 	BIT InplaceMergeFlag;
-	BYTE DetectedThreads;
+	WORD DetectedThreads;
 	SAFCData() {
 		GlobalPPQN = GlobalOffset = GlobalNewTempo = 0;
 		IncrementalPPQN = 1;
@@ -4402,8 +4407,8 @@ struct SAFCData {////overall settings and storing perfile settings....
 		InplaceMergeFlag = 0;
 		SaveDirectory = L"";
 	}
-	void ResolveSubdivisionProblem_GroupIDAssign(DWORD ThreadsCount=0) {
-		//if (!ThreadsCount)ThreadsCount = DetectedThreads;
+	void ResolveSubdivisionProblem_GroupIDAssign(INT32 ThreadsCount=0) {
+		if (!ThreadsCount)ThreadsCount = DetectedThreads;
 		if (Files.empty()) {
 			SaveDirectory = L"";
 			return;
@@ -4416,8 +4421,8 @@ struct SAFCData {////overall settings and storing perfile settings....
 			return;
 		}
 		vector<_SFD_RSP> Sizes;
-		vector<UINT64> SumSize;
-		UINT64 T=0;
+		vector<INT64> SumSize;
+		INT64 T=0;
 		for (int i = 0; i < Files.size(); i++) {
 			Sizes.push_back(_SFD_RSP(i, Files[i].FileSize));
 		}
@@ -5040,7 +5045,7 @@ namespace Settings {
 		T = ((InputField*)(*pptr)["AS_THREADS_COUNT"])->CurrentString;
 		cout << "AS_THREADS_COUNT " << T << endl;
 		if (T.size())
-			_Data.DetectedThreads = stof(T);
+			_Data.DetectedThreads = stoi(T);
 		cout << _Data.DetectedThreads << endl;
 
 		DefaultBoolSettings = (DefaultBoolSettings&(~_BoolSettings::remove_empty_tracks)) | (_BoolSettings::remove_empty_tracks * (!!((CheckBox*)(*pptr)["BOOL_REM_TRCKS"])->State));
@@ -5267,7 +5272,7 @@ void Init() {
 	(*T)["AS_SHADERWARNING"] = new TextBox("Shader settings", System_White, 0, 85 - WindowHeapSize, 30, 200, 12, 0xFF7F001F, 0xFF7F007F, 1, _Align::center);
 	(*T)["AS_ROT_ANGLE"] = new InputField(to_string(ROT_ANGLE), -87.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 30, System_White, NULL, 0x007FFFFF, System_White, "Rotation angle", 6, _Align::center, _Align::left, InputField::Type::FP_Any);
 	(*T)["AS_THREADS_COUNT"] = new InputField(to_string(_Data.DetectedThreads), -57.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 20, System_White, NULL, 0x007FFFFF, System_White, "Threads count", 2, _Align::center, _Align::left, InputField::Type::NaturalNumbers);
-	//(*T)["AS_FONT_SIZE"] = new WheelVariableChanger(Settings::ApplyWheel,-40,-62.5,-15,1,System_White," ", " ", WheelVariableChanger::Type::addictable);
+	(*T)["AS_FONT_SIZE"] = new WheelVariableChanger(Settings::ApplyWheel, -37.5, -62.5, 15, 1, System_White, "Font size", "Delta", WheelVariableChanger::Type::addictable);
 
 	(*T)["BOOL_REM_TRCKS"] = new CheckBox(-97.5 + WindowHeapSize, 35 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, System_White, _Align::left, "DV: Remove empty tracks");
 	(*T)["BOOL_REM_REM"] = new CheckBox(-82.5 + WindowHeapSize, 35 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, System_White, _Align::left, "DV: Remove merge \"remnants\"");
