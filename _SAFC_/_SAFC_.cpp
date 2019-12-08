@@ -1780,6 +1780,7 @@ struct SingleTextLine {
 		}
 	}
 };
+#define CharWidthPerHeight_Fonted 0.666f
 #define CharWidthPerHeight 0.5f
 #define CharSpaceBetween(CharHeight) CharHeight/2.f
 #define CharLineWidth(CharHeight) ceil(CharHeight/7.5f)
@@ -5087,11 +5088,13 @@ namespace Settings {
 		DefaultBoolSettings = (DefaultBoolSettings & (~_BoolSettings::ignore_pitches)) | (_BoolSettings::ignore_pitches * (!!((CheckBox*)(*pptr)["BOOL_IGN_PITCH"])->State));
 		DefaultBoolSettings = (DefaultBoolSettings & (~_BoolSettings::ignore_notes)) | (_BoolSettings::ignore_notes * (!!((CheckBox*)(*pptr)["BOOL_IGN_NOTES"])->State));
 		DefaultBoolSettings = (DefaultBoolSettings & (~_BoolSettings::ignore_all_but_tempos_notes_and_pitch)) | (_BoolSettings::ignore_all_but_tempos_notes_and_pitch * (!!((CheckBox*)(*pptr)["BOOL_IGN_ALL_EX_TPS"])->State));
-		if (RK_OP)TRY_CATCH(RK_Access.SetDwordValue(L"DEFAULT_BOOL_SETTINGS", DefaultBoolSettings); , "Failed on setting DEFAULT_BOOL_SETTINGS")
-		
+		if (RK_OP) {TRY_CATCH(RK_Access.SetDwordValue(L"DEFAULT_BOOL_SETTINGS", DefaultBoolSettings);, "Failed on setting DEFAULT_BOOL_SETTINGS")}
+
+		if (RK_OP) { TRY_CATCH(RK_Access.SetDwordValue(L"FONTSIZE", lFontSymbolsInfo::Size); , "Failed on setting FONTSIZE") }
+		if (RK_OP) { TRY_CATCH(RK_Access.SetDwordValue(L"FLOAT_FONTHTW", *(DWORD*)(&lFONT_HEIGHT_TO_WIDTH)); , "Failed on setting FLOAT_FONTHTW") }
 
 		_Data.InplaceMergeFlag = (((CheckBox*)(*pptr)["INPLACE_MERGE"])->State);
-		if (RK_OP)TRY_CATCH(RK_Access.SetDwordValue(L"AS_INPLACE_FLAG", _Data.InplaceMergeFlag);, "Failed on setting AS_INPLACE_FLAG")
+		if (RK_OP)TRY_CATCH(RK_Access.SetDwordValue(L"AS_INPLACE_FLAG", _Data.InplaceMergeFlag); , "Failed on setting AS_INPLACE_FLAG")
 
 		((InputField*)(*pptr)["AS_FONT_NAME"])->PutIntoSource();
 		wstring ws(FONTNAME.begin(), FONTNAME.end());
@@ -5211,6 +5214,10 @@ void OnSaveTo() {
 
 void RestoreRegSettings() {
 	bool Opened = false;
+	try{
+		Settings::RK_Access.Create(HKEY_CURRENT_USER, Settings::RegPath);
+	}
+	catch(...){ cout << "Exception thrown while creating registry key\n"; }
 	try {
 		Settings::RK_Access.Open(HKEY_CURRENT_USER, Settings::RegPath);
 		Opened = true;
@@ -5222,15 +5229,18 @@ void RestoreRegSettings() {
 		}
 		catch (...) { cout << "Exception thrown while restoring AS_SHADERMODE from registry\n"; }
 		try {
-			Settings::SinewaveWidth = Settings::RK_Access.GetDwordValue(L"AS_SWW");
+			DWORD B = Settings::RK_Access.GetDwordValue(L"AS_SWW");
+			Settings::SinewaveWidth = *(float*)&B;
 		}
 		catch (...) { cout << "Exception thrown while restoring AS_SWW from registry\n"; }
 		try {
-			Settings::Basewave = Settings::RK_Access.GetDwordValue(L"AS_BW");
+			DWORD B = Settings::RK_Access.GetDwordValue(L"AS_BW");
+			Settings::Basewave = *(float*)&B;
 		}
 		catch (...) { cout << "Exception thrown while restoring AS_BW from registry\n"; }
 		try {
-			Settings::Param3 = Settings::RK_Access.GetDwordValue(L"AS_P3");
+			DWORD B = Settings::RK_Access.GetDwordValue(L"AS_P3");
+			Settings::Param3 = *(float*)&B;
 		}
 		catch (...) { cout << "Exception thrown while restoring AS_P3 from registry\n"; }
 		try {
@@ -5240,14 +5250,28 @@ void RestoreRegSettings() {
 		try {
 			DefaultBoolSettings = Settings::RK_Access.GetDwordValue(L"DEFAULT_BOOL_SETTINGS");
 		}
-		catch (...) { cout << "Exception thrown while restoring DEFAULT_BOOL_SETTINGS from registry\n"; }
+		catch (...) { cout << "Exception thrown while restoring AS_INPLACE_FLAG from registry\n"; }
 		try {
-			_Data.InplaceMergeFlag = Settings::RK_Access.GetDwordValue(L"INPLACE_MERGE");
+			_Data.InplaceMergeFlag = Settings::RK_Access.GetDwordValue(L"AS_INPLACE_FLAG");
 		}
 		catch (...) { cout << "Exception thrown while restoring INPLACE_MERGE from registry\n"; }
 		try {
 			wstring ws = Settings::RK_Access.GetStringValue(L"COLLAPSEDFONTNAME");//COLLAPSEDFONTNAME
 			FONTNAME = string(ws.begin(), ws.end());
+		}
+		catch (...) { cout << "Exception thrown while restoring COLLAPSEDFONTNAME from registry\n"; }
+		try {
+			wstring ws = Settings::RK_Access.GetStringValue(L"COLLAPSEDFONTNAME");//COLLAPSEDFONTNAME
+			FONTNAME = string(ws.begin(), ws.end());
+		}
+		catch (...) { cout << "Exception thrown while restoring COLLAPSEDFONTNAME from registry\n"; }
+		try {
+			lFontSymbolsInfo::Size = Settings::RK_Access.GetDwordValue(L"FONTSIZE");//COLLAPSEDFONTNAME
+		}
+		catch (...) { cout << "Exception thrown while restoring COLLAPSEDFONTNAME from registry\n"; }
+		try {
+			DWORD B = Settings::RK_Access.GetDwordValue(L"FLOAT_FONTHTW");//COLLAPSEDFONTNAME
+			lFONT_HEIGHT_TO_WIDTH = *(float*)&B;
 		}
 		catch (...) { cout << "Exception thrown while restoring COLLAPSEDFONTNAME from registry\n"; }
 		Settings::RK_Access.Close();
