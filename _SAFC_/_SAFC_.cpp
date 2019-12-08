@@ -5499,7 +5499,7 @@ SMRP_Vis atb(0,0,System_White);
 
 void onTimer(int v);
 void mDisplay() {
-	lFontSymbolsInfo::InitialiseFont(FONTNAME);
+	if(!(TimerV&0xF))lFontSymbolsInfo::InitialiseFont(FONTNAME);
 	glClear(GL_COLOR_BUFFER_BIT | GL_ACCUM_BUFFER_BIT);
 	glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 	if (FIRSTBOOT) {
