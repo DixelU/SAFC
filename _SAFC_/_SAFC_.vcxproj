@@ -219,6 +219,7 @@
     <ClInclude Include="OR.h" />
     <ClInclude Include="resource.h" />
     <ClInclude Include="shader_smpclass.h" />
+    <ClInclude Include="WinReg.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="_SAFC_.cpp" />

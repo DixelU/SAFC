@@ -33,6 +33,9 @@
     <ClInclude Include="font_extractor.h">
       <Filter>Файлы заголовков</Filter>
     </ClInclude>
+    <ClInclude Include="WinReg.h">
+      <Filter>Файлы заголовков</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="_SAFC_.cpp">
