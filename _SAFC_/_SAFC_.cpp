@@ -59,7 +59,7 @@ FLOAT RANGE = BEG_RANGE,MXPOS=0.f,MYPOS=0.f;
 
 constexpr char* WINDOWTITLE = "SAFC";
 string FONTNAME = "Arial";
-BIT is_fonted = 1;
+constexpr BIT is_fonted = 0;
 
 //#define ROT_ANGLE 0.7
 #define TRY_CATCH(code,msg) try{code}catch(...){cout<<msg<<endl;}
