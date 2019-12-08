@@ -42,7 +42,7 @@
 #endif
 
 #include "shader_smpclass.h"
-//#include "OR.h"
+#include "OR.h"
 #include "WinReg.h"
 
 #include "consts.h"
@@ -62,6 +62,8 @@ string FONTNAME = "Arial";
 BIT is_fonted = 1;
 
 //#define ROT_ANGLE 0.7
+#define TRY_CATCH(code,msg) try{code}catch(...){cout<<msg<<endl;}
+
 float ROT_ANGLE = 0.f;
 #define ROT_RAD ANGTORAD(ROT_ANGLE)
 //#define RANGE 200
@@ -4669,7 +4671,7 @@ namespace PropsAndSets {
 	}
 	void OR() {
 		if (currentID > -1) {
-			/*auto Win = (*WH)["OR"];
+			auto Win = (*WH)["OR"];
 			OR::OverlapsRemover *_OR = new OR::OverlapsRemover(_Data[currentID].FileSize);
 			thread th([&](OR::OverlapsRemover *OR, DWORD id) {
 				OR->Load(_Data[id].Filename);
@@ -4690,7 +4692,7 @@ namespace PropsAndSets {
 					_Data[currentID].AppearanceFilename :
 					_Data[currentID].AppearanceFilename.substr(40)
 			);
-			WH->EnableWindow("OR");*/
+			WH->EnableWindow("OR");
 		}
 	}
 	void SR() {
@@ -5019,7 +5021,14 @@ namespace Settings {
 		((CheckBox*)((*pptr)["INPLACE_MERGE"]))->State = _Data.InplaceMergeFlag;
 	}
 	void OnSetApply() {
-		Settings::RK_Access.Open(HKEY_CURRENT_USER, RegPath);
+		bool RK_OP = false;
+		try {
+			Settings::RK_Access.Open(HKEY_CURRENT_USER, RegPath);
+			RK_OP = true;
+		}
+		catch (...) {
+			cout << "RK opening failed\n";
+		}
 		auto pptr = (*WH)["APP_SETTINGS"];
 		string T;
 
@@ -5027,7 +5036,7 @@ namespace Settings {
 		cout << "AS_SHADERMODE " << T << endl;
 		if (T.size()) {
 			ShaderMode = stoi(T); 
-			RK_Access.SetDwordValue(L"AS_SHADERMODE",ShaderMode);
+			if (RK_OP)TRY_CATCH(RK_Access.SetDwordValue(L"AS_SHADERMODE",ShaderMode);,"Failed on setting AS_SHADERMODE")
 		}
 		cout << ShaderMode << endl;
 
@@ -5035,7 +5044,7 @@ namespace Settings {
 		cout << "AS_SWW " << T << endl;
 		if (T.size()){
 			SinewaveWidth = stof(T);
-			RK_Access.SetDwordValue(L"AS_SWW", *((DWORD*)&SinewaveWidth));
+			if (RK_OP)TRY_CATCH(RK_Access.SetDwordValue(L"AS_SWW", *((DWORD*)&SinewaveWidth)); , "Failed on setting AS_SHADERMODE")
 		}
 		cout << SinewaveWidth << endl;
 
@@ -5043,7 +5052,7 @@ namespace Settings {
 		cout << "AS_BW " << T << endl;
 		if (T.size()) {
 			Basewave = stof(T);
-			RK_Access.SetDwordValue(L"AS_BW", *((DWORD*)&Basewave));
+			if (RK_OP)TRY_CATCH(RK_Access.SetDwordValue(L"AS_BW", *((DWORD*)&Basewave));, "Failed on setting AS_SHADERMODE")
 		}
 		cout << Basewave << endl;
 
@@ -5051,7 +5060,7 @@ namespace Settings {
 		cout << "AS_P3 " << T << endl;
 		if (T.size()) {
 			Param3 = stof(T);
-			RK_Access.SetDwordValue(L"AS_P3", *((DWORD*)&Param3));
+			if (RK_OP)TRY_CATCH(RK_Access.SetDwordValue(L"AS_P3", *((DWORD*)&Param3));, "Failed on setting AS_SHADERMODE")
 		}
 		cout << Param3 << endl;
 
@@ -5067,7 +5076,7 @@ namespace Settings {
 		cout << "AS_THREADS_COUNT " << T << endl;
 		if (T.size()) {
 			_Data.DetectedThreads = stoi(T);
-			RK_Access.SetDwordValue(L"AS_THREADS_COUNT", _Data.DetectedThreads);
+			if (RK_OP)TRY_CATCH(RK_Access.SetDwordValue(L"AS_THREADS_COUNT", _Data.DetectedThreads);, "Failed on setting AS_SHADERMODE")
 		}
 		cout << _Data.DetectedThreads << endl;
 
@@ -5078,14 +5087,16 @@ namespace Settings {
 		DefaultBoolSettings = (DefaultBoolSettings & (~_BoolSettings::ignore_pitches)) | (_BoolSettings::ignore_pitches * (!!((CheckBox*)(*pptr)["BOOL_IGN_PITCH"])->State));
 		DefaultBoolSettings = (DefaultBoolSettings & (~_BoolSettings::ignore_notes)) | (_BoolSettings::ignore_notes * (!!((CheckBox*)(*pptr)["BOOL_IGN_NOTES"])->State));
 		DefaultBoolSettings = (DefaultBoolSettings & (~_BoolSettings::ignore_all_but_tempos_notes_and_pitch)) | (_BoolSettings::ignore_all_but_tempos_notes_and_pitch * (!!((CheckBox*)(*pptr)["BOOL_IGN_ALL_EX_TPS"])->State));
-		RK_Access.SetDwordValue(L"DEFAULT_BOOL_SETTINGS", DefaultBoolSettings);
+		if (RK_OP)TRY_CATCH(RK_Access.SetDwordValue(L"DEFAULT_BOOL_SETTINGS", DefaultBoolSettings); , "Failed on setting AS_SHADERMODE")
+		
 
 		_Data.InplaceMergeFlag = (((CheckBox*)(*pptr)["INPLACE_MERGE"])->State);
-		RK_Access.SetDwordValue(L"AS_INPLACE_FLAG", _Data.InplaceMergeFlag);
+		if (RK_OP)TRY_CATCH(RK_Access.SetDwordValue(L"AS_INPLACE_FLAG", _Data.InplaceMergeFlag);, "Failed on setting AS_SHADERMODE")
 
 		wstring ws(FONTNAME.begin(), FONTNAME.end());
-		RK_Access.SetStringValue(L"COLLAPSEDFONTNAME", ws.c_str());
-		Settings::RK_Access.Close();
+		if (RK_OP)TRY_CATCH(RK_Access.SetStringValue(L"COLLAPSEDFONTNAME", ws.c_str());, "Failed on setting AS_SHADERMODE")
+		if(RK_OP)
+			Settings::RK_Access.Close();
 	}
 	void ApplyToAll() {
 		OnSetApply();
@@ -5198,41 +5209,48 @@ void OnSaveTo() {
 }
 
 void RestoreRegSettings() {
-	Settings::RK_Access.Open(HKEY_CURRENT_USER, Settings::RegPath);
+	bool Opened = false;
 	try {
-		Settings::ShaderMode = Settings::RK_Access.GetDwordValue(L"AS_SHADERMODE");
+		Settings::RK_Access.Open(HKEY_CURRENT_USER, Settings::RegPath);
+		Opened = true;
 	}
-	catch (...) {cout << "Exception thrown while restoring AS_SHADERMODE from registry\n";}
-	try {
-		Settings::SinewaveWidth = Settings::RK_Access.GetDwordValue(L"AS_SWW");
+	catch (...) { cout << "Exception thrown while opening RK\n"; }
+	if (Opened) {
+		try {
+			Settings::ShaderMode = Settings::RK_Access.GetDwordValue(L"AS_SHADERMODE");
+		}
+		catch (...) { cout << "Exception thrown while restoring AS_SHADERMODE from registry\n"; }
+		try {
+			Settings::SinewaveWidth = Settings::RK_Access.GetDwordValue(L"AS_SWW");
+		}
+		catch (...) { cout << "Exception thrown while restoring AS_SWW from registry\n"; }
+		try {
+			Settings::Basewave = Settings::RK_Access.GetDwordValue(L"AS_BW");
+		}
+		catch (...) { cout << "Exception thrown while restoring AS_BW from registry\n"; }
+		try {
+			Settings::Param3 = Settings::RK_Access.GetDwordValue(L"AS_P3");
+		}
+		catch (...) { cout << "Exception thrown while restoring AS_P3 from registry\n"; }
+		try {
+			_Data.DetectedThreads = Settings::RK_Access.GetDwordValue(L"AS_THREADS_COUNT");
+		}
+		catch (...) { cout << "Exception thrown while restoring AS_THREADS_COUNT from registry\n"; }
+		try {
+			DefaultBoolSettings = Settings::RK_Access.GetDwordValue(L"DEFAULT_BOOL_SETTINGS");
+		}
+		catch (...) { cout << "Exception thrown while restoring DEFAULT_BOOL_SETTINGS from registry\n"; }
+		try {
+			_Data.InplaceMergeFlag = Settings::RK_Access.GetDwordValue(L"INPLACE_MERGE");
+		}
+		catch (...) { cout << "Exception thrown while restoring INPLACE_MERGE from registry\n"; }
+		try {
+			wstring ws = Settings::RK_Access.GetStringValue(L"COLLAPSEDFONTNAME");//COLLAPSEDFONTNAME
+			FONTNAME = string(ws.begin(), ws.end());
+		}
+		catch (...) { cout << "Exception thrown while restoring COLLAPSEDFONTNAME from registry\n"; }
+		Settings::RK_Access.Close();
 	}
-	catch (...) { cout << "Exception thrown while restoring AS_SWW from registry\n"; }
-	try {
-		Settings::Basewave = Settings::RK_Access.GetDwordValue(L"AS_BW");
-	}
-	catch (...) { cout << "Exception thrown while restoring AS_BW from registry\n"; }
-	try {
-		Settings::Param3 = Settings::RK_Access.GetDwordValue(L"AS_P3");
-	}
-	catch (...) { cout << "Exception thrown while restoring AS_P3 from registry\n"; }
-	try {
-		_Data.DetectedThreads = Settings::RK_Access.GetDwordValue(L"AS_THREADS_COUNT");
-	}
-	catch (...) { cout << "Exception thrown while restoring AS_THREADS_COUNT from registry\n"; }
-	try {
-		DefaultBoolSettings = Settings::RK_Access.GetDwordValue(L"DEFAULT_BOOL_SETTINGS");
-	}
-	catch (...) { cout << "Exception thrown while restoring DEFAULT_BOOL_SETTINGS from registry\n"; }
-	try {
-		_Data.InplaceMergeFlag = Settings::RK_Access.GetDwordValue(L"INPLACE_MERGE");
-	}
-	catch (...) { cout << "Exception thrown while restoring INPLACE_MERGE from registry\n"; }
-	try {
-		wstring ws = Settings::RK_Access.GetStringValue(L"COLLAPSEDFONTNAME");//COLLAPSEDFONTNAME
-		FONTNAME = string(ws.begin(), ws.end());
-	}
-	catch (...) { cout << "Exception thrown while restoring COLLAPSEDFONTNAME from registry\n"; }
-	Settings::RK_Access.Close();
 }
 
 void Init() {
