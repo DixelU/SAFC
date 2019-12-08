@@ -5044,7 +5044,7 @@ namespace Settings {
 		cout << "AS_SWW " << T << endl;
 		if (T.size()){
 			SinewaveWidth = stof(T);
-			if (RK_OP)TRY_CATCH(RK_Access.SetDwordValue(L"AS_SWW", *((DWORD*)&SinewaveWidth)); , "Failed on setting AS_SHADERMODE")
+			if (RK_OP)TRY_CATCH(RK_Access.SetDwordValue(L"AS_SWW", *((DWORD*)&SinewaveWidth)); , "Failed on setting AS_SWW")
 		}
 		cout << SinewaveWidth << endl;
 
@@ -5052,7 +5052,7 @@ namespace Settings {
 		cout << "AS_BW " << T << endl;
 		if (T.size()) {
 			Basewave = stof(T);
-			if (RK_OP)TRY_CATCH(RK_Access.SetDwordValue(L"AS_BW", *((DWORD*)&Basewave));, "Failed on setting AS_SHADERMODE")
+			if (RK_OP)TRY_CATCH(RK_Access.SetDwordValue(L"AS_BW", *((DWORD*)&Basewave));, "Failed on setting AS_BW")
 		}
 		cout << Basewave << endl;
 
@@ -5060,7 +5060,7 @@ namespace Settings {
 		cout << "AS_P3 " << T << endl;
 		if (T.size()) {
 			Param3 = stof(T);
-			if (RK_OP)TRY_CATCH(RK_Access.SetDwordValue(L"AS_P3", *((DWORD*)&Param3));, "Failed on setting AS_SHADERMODE")
+			if (RK_OP)TRY_CATCH(RK_Access.SetDwordValue(L"AS_P3", *((DWORD*)&Param3));, "Failed on setting AS_P3")
 		}
 		cout << Param3 << endl;
 
@@ -5076,7 +5076,7 @@ namespace Settings {
 		cout << "AS_THREADS_COUNT " << T << endl;
 		if (T.size()) {
 			_Data.DetectedThreads = stoi(T);
-			if (RK_OP)TRY_CATCH(RK_Access.SetDwordValue(L"AS_THREADS_COUNT", _Data.DetectedThreads);, "Failed on setting AS_SHADERMODE")
+			if (RK_OP)TRY_CATCH(RK_Access.SetDwordValue(L"AS_THREADS_COUNT", _Data.DetectedThreads);, "Failed on setting AS_THREADS_COUNT")
 		}
 		cout << _Data.DetectedThreads << endl;
 
@@ -5087,12 +5087,13 @@ namespace Settings {
 		DefaultBoolSettings = (DefaultBoolSettings & (~_BoolSettings::ignore_pitches)) | (_BoolSettings::ignore_pitches * (!!((CheckBox*)(*pptr)["BOOL_IGN_PITCH"])->State));
 		DefaultBoolSettings = (DefaultBoolSettings & (~_BoolSettings::ignore_notes)) | (_BoolSettings::ignore_notes * (!!((CheckBox*)(*pptr)["BOOL_IGN_NOTES"])->State));
 		DefaultBoolSettings = (DefaultBoolSettings & (~_BoolSettings::ignore_all_but_tempos_notes_and_pitch)) | (_BoolSettings::ignore_all_but_tempos_notes_and_pitch * (!!((CheckBox*)(*pptr)["BOOL_IGN_ALL_EX_TPS"])->State));
-		if (RK_OP)TRY_CATCH(RK_Access.SetDwordValue(L"DEFAULT_BOOL_SETTINGS", DefaultBoolSettings); , "Failed on setting AS_SHADERMODE")
+		if (RK_OP)TRY_CATCH(RK_Access.SetDwordValue(L"DEFAULT_BOOL_SETTINGS", DefaultBoolSettings); , "Failed on setting DEFAULT_BOOL_SETTINGS")
 		
 
 		_Data.InplaceMergeFlag = (((CheckBox*)(*pptr)["INPLACE_MERGE"])->State);
-		if (RK_OP)TRY_CATCH(RK_Access.SetDwordValue(L"AS_INPLACE_FLAG", _Data.InplaceMergeFlag);, "Failed on setting AS_SHADERMODE")
+		if (RK_OP)TRY_CATCH(RK_Access.SetDwordValue(L"AS_INPLACE_FLAG", _Data.InplaceMergeFlag);, "Failed on setting AS_INPLACE_FLAG")
 
+		((InputField*)(*pptr)["AS_FONT_NAME"])->PutIntoSource();
 		wstring ws(FONTNAME.begin(), FONTNAME.end());
 		if (RK_OP)TRY_CATCH(RK_Access.SetStringValue(L"COLLAPSEDFONTNAME", ws.c_str());, "Failed on setting AS_SHADERMODE")
 		if(RK_OP)
@@ -5629,7 +5630,7 @@ void mExit(int a) {
 
 int main(int argc, char ** argv) {
 	if (1)
-		ShowWindow(GetConsoleWindow(), SW_HIDE); 
+		ShowWindow(GetConsoleWindow(), SW_SHOW); 
 	SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS);
 	//srand(1);
 	//srand(clock());
