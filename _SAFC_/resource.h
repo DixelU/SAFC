@@ -1,6 +1,7 @@
 //{{NO_DEPENDENCIES}}
 // Microsoft Visual C++ generated include file.
-// Used by res.rc
+// Used by _SAFC_.rc
+//
 
 // Next default values for new objects
 // 
