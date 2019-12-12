@@ -18,7 +18,6 @@
 #include <map>
 #include <deque>
 #include <thread>
-#include <boost/container/flat_map.hpp>
 #include <dwmapi.h>
 //#include <>
 
@@ -42,7 +41,7 @@
 #endif
 
 #include "shader_smpclass.h"
-#include "OR.h"
+//#include "OR.h"
 #include "WinReg.h"
 
 #include "consts.h"
@@ -59,7 +58,7 @@ FLOAT RANGE = BEG_RANGE,MXPOS=0.f,MYPOS=0.f;
 
 constexpr char* WINDOWTITLE = "SAFC";
 string FONTNAME = "Arial";
-constexpr BIT is_fonted = 0;
+BIT is_fonted = 0;
 
 //#define ROT_ANGLE 0.7
 #define TRY_CATCH(code,msg) try{code}catch(...){cout<<msg<<endl;}
@@ -4672,7 +4671,7 @@ namespace PropsAndSets {
 	}
 	void OR() {
 		if (currentID > -1) {
-			auto Win = (*WH)["OR"];
+			/*auto Win = (*WH)["OR"];
 			OR::OverlapsRemover *_OR = new OR::OverlapsRemover(_Data[currentID].FileSize);
 			thread th([&](OR::OverlapsRemover *OR, DWORD id) {
 				OR->Load(_Data[id].Filename);
@@ -4693,7 +4692,7 @@ namespace PropsAndSets {
 					_Data[currentID].AppearanceFilename :
 					_Data[currentID].AppearanceFilename.substr(40)
 			);
-			WH->EnableWindow("OR");
+			WH->EnableWindow("OR");*/
 		}
 	}
 	void SR() {
