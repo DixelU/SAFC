@@ -8,6 +8,6 @@ SAFC is a converter which can merge midis with different PPQs and specify some u
 It has a big story. First version was literally compilier-like application and dos-like interactive launcher. Then it got a simple OpenGL launcher, yet having the same old basement in the entity of *SAFC.exe*. Now i got it burned, and there's now single app with 2 DLL files with it :)
 There's also discord server, where SAF apps were publishing all that time since July/August of 2018: https://discord.gg/CsgEW4P
 You can download and read manual right here *(it's just a png file, so anyone anywhere can read it)*: https://github.com/DixelU/SAFC/blob/master/Manual.png It will get updated **only** on major updates, adding new features.
-The app is compilied for Windows XP 32bit (because there's still people using it, meanwhile being a part of BMC)
+**Support of Windows XP is dropped**
 
 Thanks to all beta testers on SAF server!  
