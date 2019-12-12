@@ -57,6 +57,7 @@ typedef bool BIT;
 FLOAT RANGE = BEG_RANGE,MXPOS=0.f,MYPOS=0.f;
 
 constexpr char* WINDOWTITLE = "SAFC";
+wstring RegPath = L"Software\\SAFC\\";
 string FONTNAME = "Arial";
 BIT is_fonted = 0;
 
@@ -131,6 +132,48 @@ size_t getAvailableRAM(){
 	}
 	return ret;
 }
+
+BIT RestoreIsFontedVar() {
+	bool RK_OP = false;
+	WinReg::RegKey RK;
+	try {
+		RK.Open(HKEY_CURRENT_USER, RegPath);
+		RK_OP = true;
+	}
+	catch (...) {
+		cout << "RK opening failed\n";
+	}
+	if (RK_OP) {
+		try {
+			is_fonted = RK.GetDwordValue(L"FONTS_ENABLED");
+		}
+		catch (...) { cout << "Exception thrown while restoring FONTS_ENABLED from registry\n"; }
+	}
+	if (RK_OP)
+		RK.Close();
+	return false;
+}
+void SetIsFontedVar(BIT VAL) {
+	bool RK_OP = false;
+	WinReg::RegKey RK;
+	try {
+		RK.Open(HKEY_CURRENT_USER, RegPath);
+		RK_OP = true;
+	}
+	catch (...) {
+		cout << "RK opening failed\n";
+	}
+	if (RK_OP) {
+		try {
+			RK.SetDwordValue(L"FONTS_ENABLED", VAL);
+		}
+		catch (...) { cout << "Exception thrown while saving FONTS_ENABLED from registry\n"; }
+	}
+	if (RK_OP)
+		RK.Close();
+}
+
+BIT _______unused = RestoreIsFontedVar();
 
 template<typename typekey, typename typevalue>
 struct PLC {
@@ -4997,7 +5040,6 @@ void OnRemAllModules() {
 namespace Settings {
 	INT ShaderMode = 0;
 	float SinewaveWidth=0., Basewave=1., Param3=1.;
-	wstring RegPath = L"Software\\SAFC\\";
 	WinReg::RegKey RK_Access;
 	void OnSettings() {
 		WH->EnableWindow("APP_SETTINGS");//_Data.DetectedThreads
@@ -5100,6 +5142,11 @@ namespace Settings {
 		if (RK_OP)TRY_CATCH(RK_Access.SetStringValue(L"COLLAPSEDFONTNAME", ws.c_str());, "Failed on setting AS_SHADERMODE")
 		if(RK_OP)
 			Settings::RK_Access.Close();
+	}
+	void ChangeIsFontedVar() {
+		is_fonted = !is_fonted;
+		SetIsFontedVar(is_fonted);
+		exit(1);
 	}
 	void ApplyToAll() {
 		OnSetApply();
@@ -5214,11 +5261,11 @@ void OnSaveTo() {
 void RestoreRegSettings() {
 	bool Opened = false;
 	try{
-		Settings::RK_Access.Create(HKEY_CURRENT_USER, Settings::RegPath);
+		Settings::RK_Access.Create(HKEY_CURRENT_USER, RegPath);
 	}
 	catch(...){ cout << "Exception thrown while creating registry key\n"; }
 	try {
-		Settings::RK_Access.Open(HKEY_CURRENT_USER, Settings::RegPath);
+		Settings::RK_Access.Open(HKEY_CURRENT_USER, RegPath);
 		Opened = true;
 	}
 	catch (...) { cout << "Exception thrown while opening RK\n"; }
@@ -5277,7 +5324,7 @@ void RestoreRegSettings() {
 	}
 }
 
-void Init() {
+void Init() {///SetIsFontedVar
 	RestoreRegSettings();
 	hDc = GetDC(hWnd);
 	_Data.DetectedThreads = min(thread::hardware_concurrency() - 1,(int)(ceil(getAvailableRAM() / 2048.)));
@@ -5382,6 +5429,7 @@ void Init() {
 	(*T)["AS_P3"] = new InputField(to_string(Settings::Basewave), 42.5 + WindowHeapSize, 85 - WindowHeapSize, 10, 40, System_White, NULL, 0x007FFFFF, System_White, "3rd parameter", 8, _Align::center, _Align::right, InputField::Type::FP_Any);
 	(*T)["AS_SHADERWARNING"] = new TextBox("Shader settings", System_White, 0, 85 - WindowHeapSize, 30, 200, 12, 0xFF7F001F, 0xFF7F007F, 1, _Align::center);
 	(*T)["AS_APPLY"] = Butt = new Button("Apply", System_White, Settings::OnSetApply, 85 - WindowHeapSize, -87.5 - WindowHeapSize, 40, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, NULL, "_");
+	(*T)["AS_EN_FONT"] = Butt = new Button((is_fonted)?"Disable fonts":"Enable fonts", System_White, Settings::ChangeIsFontedVar, 72.5 - WindowHeapSize, -67.5 - WindowHeapSize, 65, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, System_White, " ");
 	(*T)["AS_ROT_ANGLE"] = new InputField(to_string(ROT_ANGLE), -87.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 30, System_White, NULL, 0x007FFFFF, System_White, "Rotation angle", 6, _Align::center, _Align::left, InputField::Type::FP_Any);
 	(*T)["AS_THREADS_COUNT"] = new InputField(to_string(_Data.DetectedThreads), -57.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 20, System_White, NULL, 0x007FFFFF, System_White, "Threads count", 2, _Align::center, _Align::left, InputField::Type::NaturalNumbers);
 	(*T)["AS_FONT_SIZE"] = new WheelVariableChanger(Settings::ApplyFSWheel, -37.5, -82.5, lFontSymbolsInfo::Size, 1, System_White, "Font size", "Delta", WheelVariableChanger::Type::addictable);
@@ -5652,8 +5700,7 @@ void mExit(int a) {
 }
 
 int main(int argc, char ** argv) {
-	if (1)
-		ShowWindow(GetConsoleWindow(), SW_SHOW); 
+	ShowWindow(GetConsoleWindow(), SW_HIDE); 
 	SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS);
 	//srand(1);
 	//srand(clock());
