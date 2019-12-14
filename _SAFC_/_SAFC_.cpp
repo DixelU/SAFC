@@ -314,7 +314,7 @@ struct SingleMIDIReProcessor {
 		this->InQueueToInplaceMerge = InplaceMerge;
 		this->Postfix = RPostfix;
 		this->FileSize = FileSize;
-		this->LogLine = "";
+		this->LogLine = this->WarningLine = this->ErrorLine = " ";
 		this->Finished = 0;
 		this->TrackCount = 0;
 		this->Processing = 0;
@@ -339,7 +339,7 @@ struct SingleMIDIReProcessor {
 		this->InQueueToInplaceMerge = InplaceMerge;
 		this->Postfix = RPostfix;
 		this->FileSize = FileSize;
-		this->LogLine = "";
+		this->LogLine = this->WarningLine = this->ErrorLine = " ";
 		this->Finished = 0;
 		this->TrackCount = 0;
 		this->Processing = 0;

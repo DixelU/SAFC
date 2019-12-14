@@ -229,6 +229,9 @@
   <ItemGroup>
     <ResourceCompile Include="_SAFC_.rc" />
   </ItemGroup>
+  <ItemGroup>
+    <Image Include="_SAFC_.ico" />
+  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>
