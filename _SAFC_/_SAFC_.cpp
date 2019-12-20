@@ -9,6 +9,7 @@
 #include <deque>
 #include <unordered_set>
 #include <list>
+#include <optional>
 #include <limits>
 #include <fstream>
 #include <set>
@@ -17,6 +18,7 @@
 #include <iterator>
 #include <map>
 #include <deque>
+#include <array>
 #include <thread>
 #include <dwmapi.h>
 //#include <>
@@ -45,6 +47,7 @@
 #include "WinReg.h"
 
 #include "consts.h"
+#include <stack>
 
 #define NULL nullptr
 
@@ -268,21 +271,22 @@ struct CutAndTransposeKeys {
 		this->Max = Max; 
 		this->TransposeVal = TransposeVal;
 	}
-	inline BYTE* Process(BYTE Value) {
+	inline optional<BYTE> Process(BYTE Value) {
 		if (Value<=Max && Value>=Min) {
 			SHORT SValue = (SHORT)Value + TransposeVal;
-			if (SValue < 0 || SValue>255)return NULL;
+			if (SValue < 0 || SValue>255)return {};
 			Value = SValue;
-			return new BYTE(Value);
+			return Value;
 		}
 		else {
-			return NULL;
+			return {};
 		}
 	}
 };
 
 #define MTrk 1297379947
 #define MThd 1297377380
+#define STRICT_WARNINGS TRUE
 
 struct SingleMIDIReProcessor {
 	DWORD ThreadID;
@@ -296,12 +300,13 @@ struct SingleMIDIReProcessor {
 	BIT Finished;
 	BIT Processing;
 	BIT InQueueToInplaceMerge;
+	INT64 Start, Length;
 	BYTE_PLC_Core *VolumeMapCore;
 	_14BIT_PLC_Core *PitchMapCore;
 	CutAndTransposeKeys *KeyConverter;
 	BIT LogToConsole;
 	UINT64 FilePosition,FileSize;
-	SingleMIDIReProcessor(wstring filename, DWORD Settings, DWORD Tempo, DWORD GlobalOffset, WORD PPQN, DWORD ThreadID, BYTE_PLC_Core *VolumeMapCore, _14BIT_PLC_Core* PitchMapCore, CutAndTransposeKeys* KeyConverter, wstring RPostfix = L"_.mid", BIT InplaceMerge = 0, UINT64 FileSize = 0) {
+	SingleMIDIReProcessor(wstring filename, DWORD Settings, DWORD Tempo, DWORD GlobalOffset, WORD PPQN, DWORD ThreadID, BYTE_PLC_Core *VolumeMapCore, _14BIT_PLC_Core* PitchMapCore, CutAndTransposeKeys* KeyConverter, wstring RPostfix = L"_.mid", BIT InplaceMerge = 0, UINT64 FileSize = 0, INT64 Start = 0, INT64 Length = -1) {
 		this->ThreadID = ThreadID;
 		this->FileName = filename;
 		this->BoolSettings = Settings;
@@ -319,8 +324,10 @@ struct SingleMIDIReProcessor {
 		this->TrackCount = 0;
 		this->Processing = 0;
 		this->FilePosition = 0;
+		this->Start = Start;
+		this->Length = Length;
 	}
-	SingleMIDIReProcessor(wstring filename, DWORD Settings, DWORD Tempo, DWORD GlobalOffset, WORD PPQN, DWORD ThreadID, PLC<BYTE,BYTE> *VolumeMapCore, PLC<WORD, WORD>* PitchMapCore, CutAndTransposeKeys* KeyConverter, wstring RPostfix = L"_.mid", BIT InplaceMerge = 0, UINT64 FileSize = 0) {
+	SingleMIDIReProcessor(wstring filename, DWORD Settings, DWORD Tempo, DWORD GlobalOffset, WORD PPQN, DWORD ThreadID, PLC<BYTE,BYTE> *VolumeMapCore, PLC<WORD, WORD>* PitchMapCore, CutAndTransposeKeys* KeyConverter, wstring RPostfix = L"_.mid", BIT InplaceMerge = 0, UINT64 FileSize = 0, INT64 Start = 0, INT64 Length = -1) {
 		this->ThreadID = ThreadID;
 		this->FileName = filename;
 		this->BoolSettings = Settings;
@@ -344,12 +351,16 @@ struct SingleMIDIReProcessor {
 		this->TrackCount = 0;
 		this->Processing = 0;
 		this->FilePosition = 0;
+		this->Start = Start;
+		this->Length = Length;
 	}
 	#define PCLOG true
 	void ReProcess() {
 		ifstream fi(this->FileName, ios::binary | ios::in);
 		ofstream fo(this->FileName + Postfix, ios::binary | ios::out);
 		vector<BYTE> Track;///quite memory expensive...
+		array<vector<INT64>,256> CurHolded;
+		array<INT64,256> CurLevel;
 		DWORD EventCounter=0,Header/*,MultitaskTVariable*/;
 		WORD OldPPQN;
 		double DeltaTimeTranq = GlobalOffset,TDeltaTime=0,PPQNIncreaseAmount=1;
@@ -398,11 +409,12 @@ struct SingleMIDIReProcessor {
 
 			if (fi.eof())break;
 
+			INT64 CurTick = 0;//understandable
+
 			DeltaTimeTranq += GlobalOffset;
 			///Parsing events
 			while (fi.good() && !fi.eof()) {
 				if (KeyConverter) {
-
 					Header = 0;
 					NULL;
 				}
@@ -416,7 +428,7 @@ struct SingleMIDIReProcessor {
 				} while (IO & 0x80 && !fi.eof());
 				DeltaTimeTranq += (double)vlv*PPQNIncreaseAmount;
 				DeltaTimeTranq -= (vlv = (DWORD)DeltaTimeTranq);
-				tvlv = vlv;
+				CurTick += (tvlv = vlv);//adding to the "current tick"
 				///pushing proto vlv to track 
 				do {
 					size++;
@@ -436,7 +448,7 @@ struct SingleMIDIReProcessor {
 					Track.push_back(IO);
 					IO = fi.get();//MetaEventType.
 					Track.push_back(IO);
-					if (IO == 0x2F) {
+					if (IO == 0x2F) {//end of track event
 						fi.get();
 						Track.push_back(0);
 						if ((BoolSettings&SMP_BOOL_SETTINGS_EMPTY_TRACKS_RMV && !EventCounter)) {
@@ -455,7 +467,7 @@ struct SingleMIDIReProcessor {
 						EventCounter = 0;
 						break;
 					}
-					else {
+					else {//other meta events
 						if (!(BoolSettings&SMP_BOOL_SETTINGS_IGNORE_ALL_BUT_TEMPOS_NOTES_AND_PITCH)) {
 							tvlv = 0;
 							DWORD vlvsize = 0;
@@ -534,24 +546,50 @@ struct SingleMIDIReProcessor {
 				}
 				else if (IO >= 0x80 && IO <= 0x9F) {///notes
 					RSB = IO;
-					if (!(BoolSettings&SMP_BOOL_SETTINGS_IGNORE_NOTES)) {
+					if (!(BoolSettings&SMP_BOOL_SETTINGS_IGNORE_NOTES) || Length>0) {
+						bool DeleteEvent = BoolSettings&SMP_BOOL_SETTINGS_IGNORE_NOTES, isnoteon = IO >= 0x90;
+						BYTE Key = 0;
 						Track.push_back(IO);///Key data
-						if (this->KeyConverter) {
-							BYTE* T = (this->KeyConverter->Process(fi.get()));
-							if (T) {
-								Track.push_back(*T);
-								delete T;
-							}
+						if (this->KeyConverter) {////key data processing
+							auto T = (this->KeyConverter->Process(fi.get()));
+							if (T.has_value()) 
+								Track.push_back(Key = T.value());
 							else {
-								DeltaTimeTranq += vlv;
-								for (int q = -1; q < (INT32)size; q++) {
-									Track.pop_back();
-								}
-								fi.get();///for volume
-								continue;
+								Track.push_back(0);
+								DeleteEvent = true;
 							}
 						}
-						else Track.push_back(fi.get());
+						else Track.push_back(fi.get());///key data processing
+						////////added
+						if (!DeleteEvent) {
+							if (isnoteon) {//if noteon
+								CurHolded[Key].push_back(CurTick);
+								if (Length > 0 && (CurTick < Start || CurTick > Start + Length))
+									DeleteEvent = true;
+							}
+							else {//if noteoff
+								if (CurHolded[Key].size()) {///can do something with ticks...
+									INT64 StartTick = CurHolded[Key].back();
+									CurHolded[Key].pop_back();
+									if (Length > 0 && (StartTick < Start || StartTick > Start + Length))
+										DeleteEvent = true;
+								}
+								else {
+									DeleteEvent = true;
+									if(STRICT_WARNINGS)
+										WarningLine = "Attempt to unpress unholded note";
+								}
+							}
+						}
+
+						if (DeleteEvent) {///deletes the note from the point of writing the key data.
+							DeltaTimeTranq += vlv;
+							for (int q = -2; q < (INT32)size; q++) {
+								Track.pop_back();
+							}
+							fi.get();///for volume
+							continue;
+						}
 						BYTE Vol = fi.get();
 						if (!Vol) {
 							IO = (IO & 0xF) | 0x80;
@@ -666,7 +704,7 @@ struct SingleMIDIReProcessor {
 					//////////////////////////
 					if (RSB >= 0x80 && RSB <= 0x9F) {///notes
 						if (!(BoolSettings&SMP_BOOL_SETTINGS_IGNORE_NOTES)) {
-							Track.push_back(RSB);
+							/*Track.push_back(RSB);
 							if (this->KeyConverter) {
 								BYTE* T = (this->KeyConverter->Process(IO));
 								if (T) {
@@ -683,6 +721,51 @@ struct SingleMIDIReProcessor {
 								}
 							}
 							else Track.push_back(IO);
+							///*/
+							bool DeleteEvent = BoolSettings & SMP_BOOL_SETTINGS_IGNORE_NOTES, isnoteon = IO >= 0x90;
+							BYTE Key = 0;
+							Track.push_back(RSB);///Key data
+							if (this->KeyConverter) {////key data processing
+								auto T = (this->KeyConverter->Process(IO));
+								if (T.has_value())
+									Track.push_back(Key = T.value());
+								else {
+									Track.push_back(0);
+									DeleteEvent = true;
+								}
+							}
+							else Track.push_back(fi.get());///key data processing
+							////////added
+							if (!DeleteEvent) {
+								if (isnoteon) {//if noteon
+									CurHolded[Key].push_back(CurTick);
+									if (Length > 0 && (CurTick < Start || CurTick > Start + Length))
+										DeleteEvent = true;
+								}
+								else {//if noteoff
+									if (CurHolded[Key].size()) {///can do something with ticks...
+										INT64 StartTick = CurHolded[Key].back();
+										CurHolded[Key].pop_back();
+										if (Length > 0 && (StartTick < Start || StartTick > Start + Length))
+											DeleteEvent = true;
+									}
+									else {
+										DeleteEvent = true;
+										if (STRICT_WARNINGS)
+											WarningLine = "Attempt to unpress unholded note";
+									}
+								}
+							}
+
+							if (DeleteEvent) {///deletes the note from the point of writing the key data.
+								DeltaTimeTranq += vlv;
+								for (int q = -2; q < (INT32)size; q++) {
+									Track.pop_back();
+								}
+								fi.get();///for volume
+								continue;
+							}
+
 							BYTE Vol = fi.get();
 							if (!Vol) {
 								IO = (IO & 0xF) | 0x80;
@@ -4387,6 +4470,7 @@ struct FileSettings {////per file settings
 	INT16 GroupID;
 	INT32 NewTempo;
 	UINT64 FileSize;
+	INT64 Start, Length;
 	BIT IsMIDI, InplaceMergeEnabled;
 	CutAndTransposeKeys *KeyTranspose;
 	PLC<BYTE, BYTE> *VolumeRecalculator;
@@ -4416,6 +4500,8 @@ struct FileSettings {////per file settings
 		KeyTranspose = NULL;
 		FileSize = FMIC.FileSize;
 		GroupID = NewTempo = 0;
+		Start = 0;
+		Length = -1;
 		BoolSettings = DefaultBoolSettings;
 		FileNamePostfix = "_.mid";//_FILENAMEWITHEXTENSIONSTRING_.mid
 		WFileNamePostfix = L"_.mid";
@@ -4429,7 +4515,7 @@ struct FileSettings {////per file settings
 		SwitchBoolSetting(SMP_BoolSetting);
 	}
 	SingleMIDIReProcessor* BuildSMRP() {
-		SingleMIDIReProcessor *SMRP = new SingleMIDIReProcessor(this->Filename, this->BoolSettings, this->NewTempo, this->OffsetTicks, this->NewPPQN, this->GroupID, this->VolumeRecalculator, this->PitchReBender, this->KeyTranspose, this->WFileNamePostfix, this->InplaceMergeEnabled, this->FileSize);
+		SingleMIDIReProcessor *SMRP = new SingleMIDIReProcessor(this->Filename, this->BoolSettings, this->NewTempo, this->OffsetTicks, this->NewPPQN, this->GroupID, this->VolumeRecalculator, this->PitchReBender, this->KeyTranspose, this->WFileNamePostfix, this->InplaceMergeEnabled, this->FileSize, this->Start, this->Length);
 		SMRP->AppearanceFilename = this->AppearanceFilename;
 		return SMRP;
 	}
@@ -4688,6 +4774,9 @@ namespace PropsAndSets {
 			((InputField*)((*PASWptr)["OFFSET"]))->SafeStringReplace(to_string(_Data[ID].OffsetTicks));
 			((InputField*)((*PASWptr)["GROUPID"]))->SafeStringReplace(to_string(_Data[ID].GroupID));
 
+			((InputField*)((*PASWptr)["SELECT_START"]))->SafeStringReplace(to_string(_Data[ID].Start));
+			((InputField*)((*PASWptr)["SELECT_LENGTH"]))->SafeStringReplace(to_string(_Data[ID].Length));
+
 			((CheckBox*)((*PASWptr)["BOOL_REM_TRCKS"]))->State = _Data[ID].BoolSettings&_BoolSettings::remove_empty_tracks;
 			((CheckBox*)((*PASWptr)["BOOL_REM_REM"]))->State = _Data[ID].BoolSettings&_BoolSettings::remove_remnants;
 			((CheckBox*)((*PASWptr)["BOOL_PIANO_ONLY"]))->State = _Data[ID].BoolSettings&_BoolSettings::all_instruments_to_piano;
@@ -4757,15 +4846,17 @@ namespace PropsAndSets {
 			T = stoi(CurStr);
 			if (T)_Data[currentID].NewPPQN = T;
 		}
+
 		CurStr = ((InputField*)(*SMPASptr)["TEMPO"])->CurrentString;
 		if (CurStr.size()) {
 			T = stoi(CurStr);
-			if (T)_Data[currentID].NewTempo = T;
+			_Data[currentID].NewTempo = T;
 		}
+
 		CurStr = ((InputField*)(*SMPASptr)["OFFSET"])->CurrentString;
 		if (CurStr.size()) {
 			T = stoi(CurStr);
-			if (T)_Data[currentID].OffsetTicks = T;
+			_Data[currentID].OffsetTicks = T;
 		}
 
 		CurStr = ((InputField*)(*SMPASptr)["GROUPID"])->CurrentString;
@@ -4775,6 +4866,18 @@ namespace PropsAndSets {
 				_Data[currentID].GroupID = T;
 				ThrowAlert_Error("Manual GroupID editing might cause significant drop of processing perfomance!");
 			}
+		}
+
+		CurStr = ((InputField*)(*SMPASptr)["SELECT_START"])->CurrentString;
+		if (CurStr.size()) {
+			T = stoll(CurStr);
+			if (T) _Data[currentID].Start = T;
+		}
+
+		CurStr = ((InputField*)(*SMPASptr)["SELECT_LENGTH"])->CurrentString;
+		if (CurStr.size()) {
+			T = stoll(CurStr);
+			if (T) _Data[currentID].Length = T;
 		}
 
 		_Data[currentID].SetBoolSetting(_BoolSettings::remove_empty_tracks, (((CheckBox*)(*SMPASptr)["BOOL_REM_TRCKS"])->State));
@@ -5382,7 +5485,7 @@ void Init() {///SetIsFontedVar
 	(*T)["OR"] = Butt = new Button("OR", System_White, PropsAndSets::OR, 37.5, 15 - WindowHeapSize, 20, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, System_White, "Overlaps remover");
 	(*T)["SR"] = new Button("SR", System_White, PropsAndSets::SR, 12.5, 15 - WindowHeapSize, 20, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, System_White, "Sustains remover");
 
-	(*T)["APPLY"] = new Button("Apply", System_White, PropsAndSets::OnApplySettings, 87.5 - WindowHeapSize, 15 - WindowHeapSize, 30, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, NULL, " ");
+	(*T)["APPLY"] = new Button("Apply", System_White, PropsAndSets::OnApplySettings, 87.5 - WindowHeapSize, 15 - WindowHeapSize, 30, 10, 1, 0x7FAFFF3F, 0xFFFFFFFF, 0xFFAF7FFF, 0xFFAF7F3F, 0xFFAF7FFF, NULL, " ");
 
 	(*T)["CUT_AND_TRANSPOSE"] = (Butt = new Button("Cut & Transpose...", System_White, PropsAndSets::CutAndTranspose::OnCaT, 52.5 - WindowHeapSize, 35 - WindowHeapSize, 100, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, System_White, "Cut and Transpose tool"));
 	Butt->Tip->SafeChangePosition_Argumented(_Align::right, 100 - WindowHeapSize, Butt->Tip->CYpos);
@@ -5391,7 +5494,10 @@ void Init() {///SetIsFontedVar
 	(*T)["VOLUME_MAP"] = (Butt = new Button("Volume map ...", System_White, PropsAndSets::VolumeMap::OnVolMap, -37.5 - WindowHeapSize, 35 - WindowHeapSize, 70, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, System_White, "Allows to transform volumes of notes"));
 	Butt->Tip->SafeChangePosition_Argumented(_Align::right, 100 - WindowHeapSize, Butt->Tip->CYpos);
 
-	(*T)["CONSTANT_PROPS"] = new TextBox("_Props text example_", System_White, 0, -42.5 - WindowHeapSize, 80 - WindowHeapSize, 200 - 1.5*WindowHeapSize, 7.5, 0, 0, 1);
+	(*T)["SELECT_START"] = new InputField(" ", -37.5 - WindowHeapSize, -5 - WindowHeapSize, 10, 70, System_White, PropsAndSets::OFFSET, 0x007FFFFF, System_White, "Selection start", 13, _Align::center, _Align::right, InputField::Type::NaturalNumbers);
+	(*T)["SELECT_LENGTH"] = new InputField(" ", 37.5 - WindowHeapSize, -5 - WindowHeapSize, 10, 70, System_White, PropsAndSets::OFFSET, 0x007FFFFF, System_White, "Selection length", 14, _Align::center, _Align::right, InputField::Type::WholeNumbers);
+
+	(*T)["CONSTANT_PROPS"] = new TextBox("_Props text example_", System_White, 0, -57.5 - WindowHeapSize, 80 - WindowHeapSize, 200 - 1.5*WindowHeapSize, 7.5, 0, 0, 1);
 
 	(*WH)["SMPAS"] = T;//Selected midi properties and settings
 
