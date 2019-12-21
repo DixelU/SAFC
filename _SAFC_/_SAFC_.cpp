@@ -346,7 +346,7 @@ struct SingleMIDIReProcessor {
 		this->InQueueToInplaceMerge = InplaceMerge;
 		this->Postfix = RPostfix;
 		this->FileSize = FileSize;
-		this->LogLine = this->WarningLine = this->ErrorLine = " ";
+		this->LogLine = this->WarningLine = this->ErrorLine = "_";
 		this->Finished = 0;
 		this->TrackCount = 0;
 		this->Processing = 0;
@@ -359,7 +359,10 @@ struct SingleMIDIReProcessor {
 		ifstream fi(this->FileName, ios::binary | ios::in);
 		ofstream fo(this->FileName + Postfix, ios::binary | ios::out);
 		vector<BYTE> Track;///quite memory expensive...
+		vector<BYTE> UnLoad;
 		array<vector<BYTE>,256> CurHolded;
+		for (auto& v : CurHolded)
+			v.clear();
 		bool ActiveSelection = Length > 0;
 		DWORD EventCounter=0,Header/*,MultitaskTVariable*/;
 		WORD OldPPQN;
@@ -415,7 +418,7 @@ struct SingleMIDIReProcessor {
 			DeltaTimeTranq += GlobalOffset;
 			///Parsing events
 			while (fi.good() && !fi.eof()) {
-				if (KeyConverter) {
+				if (KeyConverter) {//?
 					Header = 0;
 					NULL;
 				}
@@ -428,19 +431,19 @@ struct SingleMIDIReProcessor {
 					vlv = vlv << 7 | IO&0x7F;
 				} while (IO & 0x80 && !fi.eof());
 				DeltaTimeTranq += (double)vlv*PPQNIncreaseAmount;
-				DeltaTimeTranq -= (vlv = (DWORD)DeltaTimeTranq);
-				CurTick += (tvlv = vlv);//adding to the "current tick"
+				DeltaTimeTranq -= (tvlv = (vlv = (DWORD)DeltaTimeTranq));
+				CurTick += vlv;//adding to the "current tick"
 				///pushing proto vlv to track 
 
 				if (ActiveSelection) {
 					if (!Entered && CurTick >= Start) {
-						printf("Entered# Cur:%li \t Edge:%li \t VLV:%i\n", CurTick, Start, vlv);
+						//printf("Entered# Cur:%li \t Edge:%li \t VLV:%i\n", CurTick, Start, vlv);
 						Entered = true;
 						bool EscapeFlag = true;
 						for (auto& v : CurHolded) {//in case if none of the notes are pressed
 							if (v.size()) {
 								EscapeFlag = false;
-								printf("Escaped\n");
+								//printf("Escaped\n");
 								break;
 							}
 						}
@@ -451,7 +454,7 @@ struct SingleMIDIReProcessor {
 						bool Flag_FirstRun = false;
 						vlv = tvlv - tStartTick;
 						tvlv = vlv;
-						printf("Entered# VLV:%i \t TStart:%li\n", vlv, tStartTick);
+						//printf("Entered# VLV:%i \t TStart:%li\n", vlv, tStartTick);
 						do {
 							tSZ++;
 							Track.push_back(tStartTick & 0x7F);
@@ -476,13 +479,13 @@ struct SingleMIDIReProcessor {
 					}
 					EscapeFromEntered:
 					if (Entered && !Exited && (CurTick >= (Start + Length))) {
-						printf("Exited#  Cur:%li \t Edge:%li \t VLV:%i\n", CurTick, Start + Length, vlv);
+						//printf("Exited#  Cur:%li \t Edge:%li \t VLV:%i\n", CurTick, Start + Length, vlv);
 						Exited = true;
 						bool EscapeFlag = true;
 						for (auto& v : CurHolded) {
 							if (v.size()) {
 								EscapeFlag = false;
-								printf("Escaped\n");
+								//printf("Escaped\n");
 								break;
 							}
 						}
@@ -493,7 +496,7 @@ struct SingleMIDIReProcessor {
 						bool Flag_FirstRun = false;
 						vlv = tvlv - tStartTick;
 						tvlv = vlv;
-						printf("Exited#  VLV:%i \t TStart:%li\n", vlv, tStartTick);
+						//printf("Exited#  VLV:%i \t TStart:%li\n", vlv, tStartTick);
 						do {
 							tSZ++;
 							Track.push_back(tStartTick & 0x7F);
@@ -540,10 +543,25 @@ struct SingleMIDIReProcessor {
 					if (IO == 0x2F) {//end of track event
 						fi.get();
 						Track.push_back(0);
+
+						UnLoad.push_back(0x01);
+						for (size_t i = 0; i < 256; i++) {//in case of having not enough note offs
+							for (auto n : CurHolded[i]) {
+								UnLoad.push_back((n & 0xF) | 0x80);
+								UnLoad.push_back(i);
+								UnLoad.push_back(0x40);
+								UnLoad.push_back(0x00);
+							}
+							CurHolded[i].clear();
+						}
+						UnLoad.pop_back();
+
 						if ((BoolSettings&SMP_BOOL_SETTINGS_EMPTY_TRACKS_RMV && !EventCounter)) {
 							LogLine = "Track " + to_string(TrackCount++) + " deleted!";
 						}
 						else {
+							Track.insert(Track.end() - size - 3, UnLoad.begin(), UnLoad.end());
+							UnLoad.clear();
 							fo.put('M'); fo.put('T'); fo.put('r'); fo.put('k');
 							fo.put(Track.size() >> 24);///size of track
 							fo.put(Track.size() >> 16);
@@ -638,9 +656,9 @@ struct SingleMIDIReProcessor {
 					if (!(BoolSettings&SMP_BOOL_SETTINGS_IGNORE_NOTES) || Length>0) {
 						bool DeleteEvent = BoolSettings&SMP_BOOL_SETTINGS_IGNORE_NOTES, isnoteon = IO >= 0x90;
 						BYTE Key = 0;
-						Track.push_back(IO);///Key data
+						Track.push_back(IO);///Event|Channel data
 						if (this->KeyConverter) {////key data processing
-							auto T = (this->KeyConverter->Process(fi.get()));
+							auto T = (this->KeyConverter->Process(Key = fi.get()));
 							if (T.has_value()) 
 								Track.push_back(Key = T.value());
 							else {
@@ -648,7 +666,7 @@ struct SingleMIDIReProcessor {
 								DeleteEvent = true;
 							}
 						}
-						else Track.push_back(fi.get());///key data processing
+						else Track.push_back(Key = fi.get());///key data processing
 						////////added
 						if (!DeleteEvent) {
 							if (isnoteon) {//if noteon
@@ -688,6 +706,7 @@ struct SingleMIDIReProcessor {
 							Track.push_back((*this->VolumeMapCore)[Vol]);
 						else 
 							Track.push_back(Vol);
+						printf("T:\t%d\n", CurTick);
 						EventCounter++;
 					}
 					else {
@@ -793,27 +812,9 @@ struct SingleMIDIReProcessor {
 					//////////////////////////
 					if (RSB >= 0x80 && RSB <= 0x9F) {///notes
 						if (!(BoolSettings&SMP_BOOL_SETTINGS_IGNORE_NOTES)) {
-							/*Track.push_back(RSB);
-							if (this->KeyConverter) {
-								BYTE* T = (this->KeyConverter->Process(IO));
-								if (T) {
-									Track.push_back(*T);
-									EventCounter++;
-									delete T;
-								}
-								else {
-									DeltaTimeTranq += vlv;
-									for (int i = -1; i < (INT32)size; i++)
-										Track.pop_back();
-									fi.get();///for volume
-									continue;
-								}
-							}
-							else Track.push_back(IO);
-							///*/
-							bool DeleteEvent = BoolSettings & SMP_BOOL_SETTINGS_IGNORE_NOTES, isnoteon = IO >= 0x90;
-							BYTE Key = 0;
-							Track.push_back(RSB);///Key data
+							bool DeleteEvent = BoolSettings & SMP_BOOL_SETTINGS_IGNORE_NOTES, isnoteon = RSB >= 0x90;
+							BYTE Key = IO;
+							Track.push_back(RSB);///Event|Channel data
 							if (this->KeyConverter) {////key data processing
 								auto T = (this->KeyConverter->Process(IO));
 								if (T.has_value())
@@ -823,7 +824,7 @@ struct SingleMIDIReProcessor {
 									DeleteEvent = true;
 								}
 							}
-							else Track.push_back(fi.get());///key data processing
+							else Track.push_back(Key = fi.get());///key data processing
 							////////added
 							if (!DeleteEvent) {
 								if (isnoteon) {//if noteon
@@ -947,10 +948,25 @@ struct SingleMIDIReProcessor {
 						Track.push_back(0x2F);
 						Track.push_back(0xFF);
 						Track.push_back(0x00);
-						if (!EventCounter && BoolSettings&SMP_BOOL_SETTINGS_EMPTY_TRACKS_RMV) {
+
+						UnLoad.push_back(0x01);
+						for (size_t i = 0; i < 256; i++) {//in case of having not enough note offs
+							for (auto n : CurHolded[i]) {
+								UnLoad.push_back((n & 0xF) | 0x80);
+								UnLoad.push_back(i);
+								UnLoad.push_back(0x40);
+								UnLoad.push_back(0x00);
+							}
+							CurHolded[i].clear();
+						}
+						UnLoad.pop_back();
+
+						if (!EventCounter && BoolSettings & SMP_BOOL_SETTINGS_EMPTY_TRACKS_RMV) {
 							WarningLine = "Corrupted track cleared. (" + to_string(TrackCount) + ")";
 						}
 						else {
+							Track.insert(Track.end() - size - 3, UnLoad.begin(), UnLoad.end());
+							UnLoad.clear();
 							fo.put('M'); fo.put('T'); fo.put('r'); fo.put('k');
 							fo.put(Track.size() >> 24);///size of track
 							fo.put(Track.size() >> 16);
@@ -5393,6 +5409,7 @@ void OnStart() {
 	MoveableWindow *MW;
 	INT32 ID = 0;
 	if (WH) {
+		Sleep(100);
 		MW = (*WH)["SMRP_CONTAINER"];
 		for (auto El : MW->WindowActivities) {
 			if (El.first.substr(0, 6) == "SMRP_C")
