@@ -359,8 +359,8 @@ struct SingleMIDIReProcessor {
 		ifstream fi(this->FileName, ios::binary | ios::in);
 		ofstream fo(this->FileName + Postfix, ios::binary | ios::out);
 		vector<BYTE> Track;///quite memory expensive...
-		array<vector<INT64>,256> CurHolded;
-		array<INT64,256> CurLevel;
+		array<vector<BYTE>,256> CurHolded;
+		bool ActiveSelection = Length > 0;
 		DWORD EventCounter=0,Header/*,MultitaskTVariable*/;
 		WORD OldPPQN;
 		double DeltaTimeTranq = GlobalOffset,TDeltaTime=0,PPQNIncreaseAmount=1;
@@ -410,6 +410,7 @@ struct SingleMIDIReProcessor {
 			if (fi.eof())break;
 
 			INT64 CurTick = 0;//understandable
+			bool Entered = false, Exited = false;
 
 			DeltaTimeTranq += GlobalOffset;
 			///Parsing events
@@ -430,6 +431,94 @@ struct SingleMIDIReProcessor {
 				DeltaTimeTranq -= (vlv = (DWORD)DeltaTimeTranq);
 				CurTick += (tvlv = vlv);//adding to the "current tick"
 				///pushing proto vlv to track 
+
+				if (ActiveSelection) {
+					if (!Entered && CurTick >= Start) {
+						printf("Entered# Cur:%li \t Edge:%li \t VLV:%i\n", CurTick, Start, vlv);
+						Entered = true;
+						bool EscapeFlag = true;
+						for (auto& v : CurHolded) {//in case if none of the notes are pressed
+							if (v.size()) {
+								EscapeFlag = false;
+								printf("Escaped\n");
+								break;
+							}
+						}
+						if (EscapeFlag)
+							goto EscapeFromEntered;
+						INT64 tStartTick = tvlv - (CurTick - (Start));
+						DWORD tSZ = 0;
+						bool Flag_FirstRun = false;
+						vlv = tvlv - tStartTick;
+						tvlv = vlv;
+						printf("Entered# VLV:%i \t TStart:%li\n", vlv, tStartTick);
+						do {
+							tSZ++;
+							Track.push_back(tStartTick & 0x7F);
+							tStartTick >>= 7;
+						} while (tStartTick);
+						///making magic with it...
+						for (DWORD i = 0; i < (tSZ >> 1); i++) {
+							swap(Track[Track.size() - 1 - i], Track[Track.size() - tSZ + i]);
+						}
+						for (DWORD i = 2; i <= tSZ; i++) {
+							Track[Track.size() - i] |= 0x80;///hack (going from 2 instead of going from one)
+						}
+						for (int k = 0; k < 256; k++) {
+							for (int polyphony = 0; polyphony < CurHolded[k].size(); polyphony++) {
+								if (Flag_FirstRun)Track.push_back(0);
+								else Flag_FirstRun = true;
+								Track.push_back((CurHolded[k][polyphony] & 0xF) | 0x90);
+								Track.push_back(k);
+								Track.push_back(1);
+							}
+						}
+					}
+					EscapeFromEntered:
+					if (Entered && !Exited && (CurTick >= (Start + Length))) {
+						printf("Exited#  Cur:%li \t Edge:%li \t VLV:%i\n", CurTick, Start + Length, vlv);
+						Exited = true;
+						bool EscapeFlag = true;
+						for (auto& v : CurHolded) {
+							if (v.size()) {
+								EscapeFlag = false;
+								printf("Escaped\n");
+								break;
+							}
+						}
+						if (EscapeFlag)
+							goto ActiveSelectionBorderEscapePoint;
+						INT64 tStartTick = tvlv - (CurTick - (Start + Length));
+						DWORD tSZ = 0;
+						bool Flag_FirstRun = false;
+						vlv = tvlv - tStartTick;
+						tvlv = vlv;
+						printf("Exited#  VLV:%i \t TStart:%li\n", vlv, tStartTick);
+						do {
+							tSZ++;
+							Track.push_back(tStartTick & 0x7F);
+							tStartTick >>= 7;
+						} while (tStartTick);
+						///making magic with it...
+						for (DWORD i = 0; i < (tSZ >> 1); i++) {
+							swap(Track[Track.size() - 1 - i], Track[Track.size() - tSZ + i]);
+						}
+						for (DWORD i = 2; i <= tSZ; i++) {
+							Track[Track.size() - i] |= 0x80;///hack (going from 2 instead of going from one)
+						}
+						for (int k = 0; k < 256; k++) {
+							for (int polyphony = 0; polyphony < CurHolded[k].size(); polyphony++) {
+								if (Flag_FirstRun)Track.push_back(0);
+								else Flag_FirstRun = true;
+								Track.push_back((CurHolded[k][polyphony] & 0xF) | 0x80);
+								Track.push_back(k);
+								Track.push_back(1);
+							}
+						}
+					}
+				}
+				ActiveSelectionBorderEscapePoint:
+
 				do {
 					size++;
 					Track.push_back(tvlv & 0x7F);
@@ -563,15 +652,15 @@ struct SingleMIDIReProcessor {
 						////////added
 						if (!DeleteEvent) {
 							if (isnoteon) {//if noteon
-								CurHolded[Key].push_back(CurTick);
-								if (Length > 0 && (CurTick < Start || CurTick > Start + Length))
+								CurHolded[Key].push_back(RSB);
+								if (ActiveSelection && (!Entered || (Entered && Exited)))
 									DeleteEvent = true;
 							}
 							else {//if noteoff
 								if (CurHolded[Key].size()) {///can do something with ticks...
-									INT64 StartTick = CurHolded[Key].back();
+									//INT64 StartTick = CurHolded[Key].back();
 									CurHolded[Key].pop_back();
-									if (Length > 0 && (StartTick < Start || StartTick > Start + Length))
+									if (ActiveSelection && (!Entered || (Entered && Exited)))
 										DeleteEvent = true;
 								}
 								else {
@@ -738,15 +827,15 @@ struct SingleMIDIReProcessor {
 							////////added
 							if (!DeleteEvent) {
 								if (isnoteon) {//if noteon
-									CurHolded[Key].push_back(CurTick);
-									if (Length > 0 && (CurTick < Start || CurTick > Start + Length))
+									CurHolded[Key].push_back(RSB);
+									if (ActiveSelection && (Entered && !Exited))
 										DeleteEvent = true;
 								}
 								else {//if noteoff
 									if (CurHolded[Key].size()) {///can do something with ticks...
-										INT64 StartTick = CurHolded[Key].back();
+										//INT64 StartTick = CurHolded[Key].back();
 										CurHolded[Key].pop_back();
-										if (Length > 0 && (StartTick < Start || StartTick > Start + Length))
+										if (ActiveSelection && (Entered && !Exited))
 											DeleteEvent = true;
 									}
 									else {
@@ -3477,6 +3566,12 @@ struct MoveableWindow:HandleableUIPart {
 		Lock.unlock();
 		return 1;
 	}
+	BIT AddUIElement(string ElementName, HandleableUIPart* Elem) {
+		Lock.lock();
+		auto ans = WindowActivities.insert_or_assign(ElementName, Elem);
+		Lock.unlock();
+		return ans.second;
+	}
 	void SafeMove(float dx, float dy) override {
 		Lock.lock();
 		XWindowPos += dx;
@@ -4284,11 +4379,12 @@ struct SMRP_Vis: HandleableUIPart {
 	SingleMIDIReProcessor *SMRP;
 	
 	float XPos, YPos;
-	BIT Processing, Finished, Hovered, Lock;
+	BIT Processing, Finished, Hovered;
 	SingleTextLine *STL_Log,*STL_War,*STL_Err,*STL_Info;
 	SMRP_Vis(float XPos, float YPos, SingleTextLineSettings *STLS) {
+		Lock.lock();
+		SMRP = nullptr;
 		DWORD BASERGBA;
-		this->Lock = 0;
 		this->Processing = this->Hovered = this->Finished = 0;
 		this->XPos = XPos;
 		this->YPos = YPos;
@@ -4306,21 +4402,24 @@ struct SMRP_Vis: HandleableUIPart {
 		STLS->SetNewPos(XPos, YPos + 40);
 		this->STL_Info = STLS->CreateOne("_");
 		STLS->RGBAColor = BASERGBA;
+		Lock.unlock();
 	}
 	void SafeMove(float dx, float dy) override {
-		if (Lock)return;
+		Lock.lock();
 		XPos += dx;
 		YPos += dy;
 		STL_Err->SafeMove(dx, dy);
 		STL_War->SafeMove(dx, dy);
 		STL_Log->SafeMove(dx, dy);
 		STL_Info->SafeMove(dx, dy);
+		Lock.unlock();
 	}
 	void SafeChangePosition(float NewX, float NewY) override {
-		if (Lock)return;
+		Lock.lock();
 		NewX -= XPos;
 		NewY -= YPos;
 		SafeMove(NewX, NewY);
+		Lock.unlock();
 	}
 	void SafeChangePosition_Argumented(BYTE Arg, float NewX, float NewY) override {
 		return;
@@ -4332,11 +4431,13 @@ struct SMRP_Vis: HandleableUIPart {
 		return;
 	}
 	void SetInfoString(string NewInfoString) {
+		Lock.lock();
 		this->STL_Info->SafeStringReplace(NewInfoString);
+		Lock.unlock();
 	}
 	void UpdateInfo() {
 		if (!SMRP)return;
-		if (Lock)return;
+		Lock.lock();
 		string T;
 		if (SMRP->LogLine.size() && SMRP->LogLine != STL_Log->_CurrentText)
 			STL_Log->SafeStringReplace(SMRP->LogLine);
@@ -4358,9 +4459,10 @@ struct SMRP_Vis: HandleableUIPart {
 		}
 		if (STL_Info->_CurrentText != T)
 			STL_Info->SafeStringReplace(T);
+		Lock.unlock();
 	}
 	void Draw() override {
-		if (Lock)return;
+		Lock.lock();
 		if (!SMRP) {
 			if (STL_Err->_CurrentText != "SMRP is NULL!")
 				STL_Err->SafeStringReplace("SMRP is NULL!");
@@ -4381,15 +4483,17 @@ struct SMRP_Vis: HandleableUIPart {
 				else SpecialSigns::DrawNo(XPos, YPos, 20, 0xFF3F00FF);
 			}
 		}
+		Lock.unlock();
 	}
 	BIT MouseHandler(float mx, float my, CHAR Button, CHAR State) override {
-		if (Lock)return 0;
+		Lock.lock();
 		mx -= XPos;
 		my -= YPos;
 		if (mx * mx + my * my < 900)
 			Hovered = 1;
 		else
 			Hovered = 0;
+		Lock.unlock();
 		return 0;
 	}
 };
@@ -5290,14 +5394,17 @@ void OnStart() {
 	INT32 ID = 0;
 	if (WH) {
 		MW = (*WH)["SMRP_CONTAINER"];
+		for (auto El : MW->WindowActivities) {
+			if (El.first.substr(0, 6) == "SMRP_C")
+				MW->DeleteUIElementByName(El.first);
+		}
 		for (ID = 0; ID < GlobalMCTM->Cur_Processing.size(); ID++) {
-			//cout << ID << endl;
+			cout << ID << endl;
 			if (!GlobalMCTM->Cur_Processing[ID])
 				continue;
-			else
-				MW->DeleteUIElementByName("SMRP_C" + to_string(ID));
 			auto Q = GetPositionForOneOf(ID, GlobalMCTM->Cur_Processing.size(),112.5);
-			(*MW)["SMRP_C" + to_string(ID)] = new SMRP_Vis(Q.first, Q.second, System_White);
+			auto Vis = new SMRP_Vis(Q.first, Q.second, System_White);
+			MW->AddUIElement("SMRP_C" + to_string(ID), Vis);
 			thread TH([](MIDICollectionThreadedMerger *pMCTM, MoveableWindow *MW, DWORD ID) {
 				string SID = "SMRP_C" + to_string(ID);
 				cout << SID << " Processing started" << endl;
@@ -5494,8 +5601,8 @@ void Init() {///SetIsFontedVar
 	(*T)["VOLUME_MAP"] = (Butt = new Button("Volume map ...", System_White, PropsAndSets::VolumeMap::OnVolMap, -37.5 - WindowHeapSize, 35 - WindowHeapSize, 70, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, System_White, "Allows to transform volumes of notes"));
 	Butt->Tip->SafeChangePosition_Argumented(_Align::right, 100 - WindowHeapSize, Butt->Tip->CYpos);
 
-	(*T)["SELECT_START"] = new InputField(" ", -37.5 - WindowHeapSize, -5 - WindowHeapSize, 10, 70, System_White, PropsAndSets::OFFSET, 0x007FFFFF, System_White, "Selection start", 13, _Align::center, _Align::right, InputField::Type::NaturalNumbers);
-	(*T)["SELECT_LENGTH"] = new InputField(" ", 37.5 - WindowHeapSize, -5 - WindowHeapSize, 10, 70, System_White, PropsAndSets::OFFSET, 0x007FFFFF, System_White, "Selection length", 14, _Align::center, _Align::right, InputField::Type::WholeNumbers);
+	(*T)["SELECT_START"] = new InputField(" ", -37.5 - WindowHeapSize, -5 - WindowHeapSize, 10, 70, System_White, NULL, 0x007FFFFF, System_White, "Selection start", 13, _Align::center, _Align::right, InputField::Type::NaturalNumbers);
+	(*T)["SELECT_LENGTH"] = new InputField(" ", 37.5 - WindowHeapSize, -5 - WindowHeapSize, 10, 70, System_White, NULL, 0x007FFFFF, System_White, "Selection length", 14, _Align::center, _Align::right, InputField::Type::WholeNumbers);
 
 	(*T)["CONSTANT_PROPS"] = new TextBox("_Props text example_", System_White, 0, -57.5 - WindowHeapSize, 80 - WindowHeapSize, 200 - 1.5*WindowHeapSize, 7.5, 0, 0, 1);
 
@@ -5648,7 +5755,6 @@ const GLchar *fragment_shader[] = { //uniform float time;
 };
 
 shader_prog *SP;
-SMRP_Vis atb(0,0,System_White);
 
 void onTimer(int v);
 void mDisplay() {
@@ -5806,7 +5912,7 @@ void mExit(int a) {
 }
 
 int main(int argc, char ** argv) {
-	ShowWindow(GetConsoleWindow(), SW_HIDE); 
+	ShowWindow(GetConsoleWindow(), SW_SHOW); 
 	SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS);
 	//srand(1);
 	//srand(clock());
