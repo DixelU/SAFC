@@ -699,8 +699,8 @@ struct SingleMIDIReProcessor {
 									DeleteEvent = true;
 									UnholdedCount++;
 									if (STRICT_WARNINGS)
-										WarningLine = "Attempt to unpress unholded note AC:" + to_string(UnholdedCount);
-									cout << vlv << ":" << TickTranq << endl;
+										WarningLine = "OFF of nonON Note: " + to_string(UnholdedCount);
+									//cout << vlv << ":" << TickTranq << endl;
 								}
 							}
 						}
@@ -866,7 +866,7 @@ struct SingleMIDIReProcessor {
 										DeleteEvent = true;
 										UnholdedCount++;
 										if (STRICT_WARNINGS)
-											WarningLine = "Attempt to unpress unholded note WN:" + to_string(UnholdedCount);
+											WarningLine = "(RSB) OFF of nonON Note: " + to_string(UnholdedCount);
 										//cout << vlv << ":" << TickTranq << endl;
 									}
 								}
