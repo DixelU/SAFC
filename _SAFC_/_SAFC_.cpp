@@ -5950,7 +5950,7 @@ void mExit(int a) {
 }
 
 int main(int argc, char ** argv) {
-	ShowWindow(GetConsoleWindow(), SW_SHOW); 
+	ShowWindow(GetConsoleWindow(), SW_HIDE); 
 	SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS);
 	//srand(1);
 	//srand(clock());
