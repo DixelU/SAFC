@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <deque>
 #include <unordered_set>
+#include <unordered_map>
 #include <list>
 #include <optional>
 #include <limits>
@@ -59,7 +60,7 @@ typedef bool BIT;
 #define BEG_RANGE 200
 FLOAT RANGE = BEG_RANGE,MXPOS=0.f,MYPOS=0.f;
 
-constexpr char* WINDOWTITLE = "SAFC";
+const char* WINDOWTITLE = "SAFC\0";
 wstring RegPath = L"Software\\SAFC\\";
 string FONTNAME = "Arial";
 BIT is_fonted = 0;
@@ -286,7 +287,7 @@ struct CutAndTransposeKeys {
 
 #define MTrk 1297379947
 #define MThd 1297377380
-#define STRICT_WARNINGS TRUE
+#define STRICT_WARNINGS true
 
 struct SingleMIDIReProcessor {
 	DWORD ThreadID;
@@ -360,11 +361,11 @@ struct SingleMIDIReProcessor {
 		ofstream fo(this->FileName + Postfix, ios::binary | ios::out);
 		vector<BYTE> Track;///quite memory expensive...
 		vector<BYTE> UnLoad;
-		array<vector<BYTE>,256> CurHolded;
+		array<DWORD,4096> CurHolded;
 		for (auto& v : CurHolded)
-			v.clear();
+			v = 0;
 		bool ActiveSelection = Length > 0;
-		DWORD EventCounter=0,Header/*,MultitaskTVariable*/;
+		DWORD EventCounter=0,Header/*,MultitaskTVariable*/, UnholdedCount=0;
 		WORD OldPPQN;
 		double DeltaTimeTranq = GlobalOffset,TDeltaTime=0,PPQNIncreaseAmount=1;
 		BYTE Tempo1, Tempo2, Tempo3;
@@ -431,6 +432,7 @@ struct SingleMIDIReProcessor {
 					IO = fi.get();
 					vlv = vlv << 7 | IO&0x7F;
 				} while (IO & 0x80 && !fi.eof());
+				DWORD file_pos = fi.tellg();
 				DeltaTimeTranq += ((double)vlv * PPQNIncreaseAmount) + TickTranq;
 				DeltaTimeTranq -= (tvlv = (vlv = (DWORD)DeltaTimeTranq));
 				CurTick += vlv - TickTranq;//adding to the "current tick"
@@ -442,7 +444,7 @@ struct SingleMIDIReProcessor {
 						Entered = true;
 						bool EscapeFlag = true;
 						for (auto& v : CurHolded) {//in case if none of the notes are pressed
-							if (v.size()) {
+							if (v) {
 								EscapeFlag = false;
 								//printf("Escaped\n");
 								break;
@@ -468,12 +470,12 @@ struct SingleMIDIReProcessor {
 						for (DWORD i = 2; i <= tSZ; i++) {
 							Track[Track.size() - i] |= 0x80;///hack (going from 2 instead of going from one)
 						}
-						for (int k = 0; k < 256; k++) {
-							for (int polyphony = 0; polyphony < CurHolded[k].size(); polyphony++) {
+						for (int k = 0; k < 4096; k++) {//multichanneled tracks.
+							for (int polyphony = 0; polyphony < CurHolded[k]; polyphony++) {
 								if (Flag_FirstRun)Track.push_back(0);
 								else Flag_FirstRun = true;
-								Track.push_back((CurHolded[k][polyphony] & 0xF) | 0x90);
-								Track.push_back(k);
+								Track.push_back((k & 0xF) | 0x90);
+								Track.push_back(k >> 4);
 								Track.push_back(1);
 							}
 						}
@@ -484,7 +486,7 @@ struct SingleMIDIReProcessor {
 						Exited = true;
 						bool EscapeFlag = true;
 						for (auto& v : CurHolded) {
-							if (v.size()) {
+							if (v) {
 								EscapeFlag = false;
 								//printf("Escaped\n");
 								break;
@@ -510,19 +512,18 @@ struct SingleMIDIReProcessor {
 						for (DWORD i = 2; i <= tSZ; i++) {
 							Track[Track.size() - i] |= 0x80;///hack (going from 2 instead of going from one)
 						}
-						for (int k = 0; k < 256; k++) {
-							for (int polyphony = 0; polyphony < CurHolded[k].size(); polyphony++) {
+						for (int k = 0; k < 4096; k++) {
+							for (int polyphony = 0; polyphony < CurHolded[k]; polyphony++) {
 								if (Flag_FirstRun)Track.push_back(0);
 								else Flag_FirstRun = true;
-								Track.push_back((CurHolded[k][polyphony] & 0xF) | 0x80);
-								Track.push_back(k);
+								Track.push_back((k & 0xF) | 0x80);
+								Track.push_back(k>>4);
 								Track.push_back(1);
 							}
 						}
 					}
 				}
 				ActiveSelectionBorderEscapePoint:
-
 				do {
 					size++;
 					Track.push_back(tvlv & 0x7F);
@@ -546,14 +547,14 @@ struct SingleMIDIReProcessor {
 						Track.push_back(0);
 
 						UnLoad.push_back(0x01);
-						for (size_t i = 0; i < 256; i++) {//in case of having not enough note offs
-							for (auto n : CurHolded[i]) {
-								UnLoad.push_back((n & 0xF) | 0x80);
-								UnLoad.push_back(i);
+						for (size_t k = 0; k < 4096; k++) {//in case of having not enough note offs
+							for (int i = 0; i < CurHolded[k]; i++) {
+								UnLoad.push_back((k & 0xF) | 0x80);
+								UnLoad.push_back(k>>4);
 								UnLoad.push_back(0x40);
 								UnLoad.push_back(0x00);
 							}
-							CurHolded[i].clear();
+							CurHolded[k] = 0;
 						}
 						UnLoad.pop_back();
 
@@ -657,7 +658,7 @@ struct SingleMIDIReProcessor {
 				else if (IO >= 0x80 && IO <= 0x9F) {///notes
 					RSB = IO;
 					if (!(BoolSettings&SMP_BOOL_SETTINGS_IGNORE_NOTES) || Length>0) {
-						bool DeleteEvent = BoolSettings&SMP_BOOL_SETTINGS_IGNORE_NOTES, isnoteon = IO >= 0x90;
+						bool DeleteEvent = BoolSettings&SMP_BOOL_SETTINGS_IGNORE_NOTES, isnoteon = (IO >= 0x90);
 						BYTE Key = 0;
 						Track.push_back(IO);///Event|Channel data
 						if (this->KeyConverter) {////key data processing
@@ -670,46 +671,49 @@ struct SingleMIDIReProcessor {
 							}
 						}
 						else Track.push_back(Key = fi.get());///key data processing
+
+						BYTE Vol = fi.get();
+						if (this->VolumeMapCore && IO & 0x10)
+							Vol = (*this->VolumeMapCore)[Vol];
+						if (!Vol && isnoteon) {
+							IO = (IO & 0xF) | 0x80;
+							*((&Track.back()) - 1) = IO;
+						}
+						isnoteon = (IO >= 0x90);
+						SHORT HoldIndex = (Key << 4) | (RSB & 0xF);
 						////////added
 						if (!DeleteEvent) {
 							if (isnoteon) {//if noteon
-								CurHolded[Key].push_back(RSB);
+								CurHolded[HoldIndex]++;
 								if (ActiveSelection && (!Entered || (Entered && Exited)))
 									DeleteEvent = true;
 							}
 							else {//if noteoff
-								if (CurHolded[Key].size()) {///can do something with ticks...
+								if (CurHolded[HoldIndex]) {///can do something with ticks...
 									//INT64 StartTick = CurHolded[Key].back();
-									CurHolded[Key].pop_back();
+									CurHolded[HoldIndex]--;
 									if (ActiveSelection && (!Entered || (Entered && Exited)))
 										DeleteEvent = true;
 								}
 								else {
 									DeleteEvent = true;
-									if(STRICT_WARNINGS)
-										WarningLine = "Attempt to unpress unholded note";
+									UnholdedCount++;
+									if (STRICT_WARNINGS)
+										WarningLine = "Attempt to unpress unholded note AC:" + to_string(UnholdedCount);
+									cout << vlv << ":" << TickTranq << endl;
 								}
 							}
 						}
-
 						if (DeleteEvent) {///deletes the note from the point of writing the key data.
 							TickTranq = vlv;
 							for (int q = -2; q < (INT32)size; q++) {
 								Track.pop_back();
 							}
-							fi.get();///for volume
 							continue;
 						}
-						BYTE Vol = fi.get();
-						if (!Vol && 0) {
-							IO = (IO & 0xF) | 0x80;
-							*(++Track.rbegin()) = IO;
-						}
-						if (this->VolumeMapCore && IO&0x10)
-							Track.push_back((*this->VolumeMapCore)[Vol]);
-						else 
+						else {
 							Track.push_back(Vol);
-						//printf("T:\t%d\n", CurTick);
+						}
 						EventCounter++;
 					}
 					else {
@@ -782,14 +786,14 @@ struct SingleMIDIReProcessor {
 					if (!(BoolSettings&SMP_BOOL_SETTINGS_IGNORE_ALL_BUT_TEMPOS_NOTES_AND_PITCH)) {
 						Track.push_back(IO);///event type
 						Track.push_back(fi.get() & 0x7F);
-						fi.get();
+						//fi.get();
 						EventCounter++;
 					}
 					else {
 						TickTranq = vlv;
+						fi.get();///...:D
 						for (int i = 0; i < (INT32)size; i++)
 							Track.pop_back();
-						fi.get();///...:D
 						continue;
 					}
 				}
@@ -834,46 +838,49 @@ struct SingleMIDIReProcessor {
 								}
 							}
 							else Track.push_back(Key = fi.get());///key data processing
+
+							BYTE Vol = fi.get();
+							if (this->VolumeMapCore && (RSB & 0x10))
+								Vol = (*this->VolumeMapCore)[Vol];
+							if (!Vol && isnoteon) {
+								IO = (RSB & 0xF) | 0x80;
+								*((&Track.back()) - 1) = IO;
+							}
+							isnoteon = (RSB >= 0x90);
+							SHORT HoldIndex = (Key << 4) | (RSB & 0xF);
 							////////added
 							if (!DeleteEvent) {
 								if (isnoteon) {//if noteon
-									CurHolded[Key].push_back(RSB);
-									if (ActiveSelection && (Entered && !Exited))
+									CurHolded[HoldIndex]++;
+									if (ActiveSelection && (!Entered || (Entered && Exited)))
 										DeleteEvent = true;
 								}
 								else {//if noteoff
-									if (CurHolded[Key].size()) {///can do something with ticks...
+									if (CurHolded[HoldIndex]) {///can do something with ticks...
 										//INT64 StartTick = CurHolded[Key].back();
-										CurHolded[Key].pop_back();
-										if (ActiveSelection && (Entered && !Exited))
+										CurHolded[HoldIndex]--;
+										if (ActiveSelection && (!Entered || (Entered && Exited)))
 											DeleteEvent = true;
 									}
 									else {
 										DeleteEvent = true;
+										UnholdedCount++;
 										if (STRICT_WARNINGS)
-											WarningLine = "Attempt to unpress unholded note";
+											WarningLine = "Attempt to unpress unholded note WN:" + to_string(UnholdedCount);
+										//cout << vlv << ":" << TickTranq << endl;
 									}
 								}
 							}
-
 							if (DeleteEvent) {///deletes the note from the point of writing the key data.
 								TickTranq = vlv;
 								for (int q = -2; q < (INT32)size; q++) {
 									Track.pop_back();
 								}
-								fi.get();///for volume
 								continue;
 							}
-							BYTE Vol = fi.get();
-							if (!Vol) {
-								IO = (IO & 0xF) | 0x80;
-								*(++Track.rbegin()) = IO;
-							}
-							if (this->VolumeMapCore && IO & 0x10)
-								Track.push_back((*this->VolumeMapCore)[Vol]);
-							else
+							else {
 								Track.push_back(Vol);
-
+							}
 							EventCounter++;
 						}
 						else {
@@ -963,14 +970,14 @@ struct SingleMIDIReProcessor {
 						Track.push_back(0x00);
 
 						UnLoad.push_back(0x01);
-						for (size_t i = 0; i < 256; i++) {//in case of having not enough note offs
-							for (auto n : CurHolded[i]) {
-								UnLoad.push_back((n & 0xF) | 0x80);
-								UnLoad.push_back(i);
+						for (size_t k = 0; k < 4096; k++) {//in case of having not enough note offs
+							for (int i = 0; i < CurHolded[k]; i++) {
+								UnLoad.push_back((k & 0xF) | 0x80);
+								UnLoad.push_back(k >> 4);
 								UnLoad.push_back(0x40);
 								UnLoad.push_back(0x00);
 							}
-							CurHolded[i].clear();
+							CurHolded[k] = 0;
 						}
 						UnLoad.pop_back();
 
@@ -1435,7 +1442,7 @@ struct FastMIDIInfoCollector {
 };
 
 
-map<char, string> ASCII;
+unordered_map<char, string> ASCII;
 void InitASCIIMap() {
 	ASCII.clear();
 	ifstream file("ascii.dotmap", ios::in);
@@ -1458,14 +1465,14 @@ void InitASCIIMap() {
 		ASCII['.'] = "2";
 		ASCII['/'] = "81";
 		ASCII['0'] = "97139";
-		ASCII['1'] = "48213";
+		ASCII['1'] = "482 13";
 		ASCII['2'] = "796413";
-		ASCII['3'] = "7965631";
-		ASCII['4'] = "74693";
+		ASCII['3'] = "7965 631";
+		ASCII['4'] = "746 93";
 		ASCII['5'] = "974631";
 		ASCII['6'] = "9741364";
 		ASCII['7'] = "7952";
-		ASCII['8'] = "7931746";
+		ASCII['8'] = "17931 46";
 		ASCII['9'] = "1369746";
 		ASCII[':'] = "8 5~";
 		ASCII[';'] = "8 15~";
@@ -1474,17 +1481,17 @@ void InitASCIIMap() {
 		ASCII['>'] = "761";
 		ASCII['?'] = "795 2";
 		ASCII['@'] = "317962486";
-		ASCII['A'] = "1793641";
-		ASCII['B'] = "17954135";
+		ASCII['A'] = "1793 46";
+		ASCII['B'] = "17954 531";
 		ASCII['C'] = "9713";
 		ASCII['D'] = "178621";
-		ASCII['E'] = "9745413";
-		ASCII['F'] = "974541";
+		ASCII['E'] = "9713 54";
+		ASCII['F'] = "971 54";
 		ASCII['G'] = "971365";
-		ASCII['H'] = "174639";
-		ASCII['I'] = "798231";
-		ASCII['J'] = "79621";
-		ASCII['K'] = "95471453";
+		ASCII['H'] = "9641 74 63";
+		ASCII['I'] = "79 82 13";
+		ASCII['J'] = "79 821";
+		ASCII['K'] = "71 954 53";
 		ASCII['L'] = "713";
 		ASCII['M'] = "17593";
 		ASCII['N'] = "1739";
@@ -1498,7 +1505,7 @@ void InitASCIIMap() {
 		ASCII['V'] = "729";
 		ASCII['W'] = "71539";
 		ASCII['X'] = "73 91";
-		ASCII['Y'] = "75952";
+		ASCII['Y'] = "752 95";
 		ASCII['Z'] = "7913 46";
 		ASCII['['] = "9823";
 		ASCII['\\']= "72";
