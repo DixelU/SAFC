@@ -432,7 +432,7 @@ struct SingleMIDIReProcessor {
 					IO = fi.get();
 					vlv = vlv << 7 | IO&0x7F;
 				} while (IO & 0x80 && !fi.eof());
-				DWORD file_pos = fi.tellg();
+				//DWORD file_pos = fi.tellg();
 				DeltaTimeTranq += ((double)vlv * PPQNIncreaseAmount) + TickTranq;
 				DeltaTimeTranq -= (tvlv = (vlv = (DWORD)DeltaTimeTranq));
 				CurTick += vlv - TickTranq;//adding to the "current tick"
