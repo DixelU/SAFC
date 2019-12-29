@@ -837,7 +837,7 @@ struct SingleMIDIReProcessor {
 									DeleteEvent = true;
 								}
 							}
-							else Track.push_back(Key = fi.get());///key data processing
+							else Track.push_back(Key = IO);///key data processing
 
 							BYTE Vol = fi.get();
 							if (this->VolumeMapCore && (RSB & 0x10))
@@ -846,8 +846,8 @@ struct SingleMIDIReProcessor {
 								IO = (RSB & 0xF) | 0x80;
 								*((&Track.back()) - 1) = IO;
 							}
-							isnoteon = (RSB >= 0x90);
-							SHORT HoldIndex = (Key << 4) | (RSB & 0xF);
+							isnoteon = (IO >= 0x90);
+							SHORT HoldIndex = (Key << 4) | (IO & 0xF);
 							////////added
 							if (!DeleteEvent) {
 								if (isnoteon) {//if noteon
@@ -5362,6 +5362,7 @@ namespace Settings {
 		cout << "AS_THREADS_COUNT " << T << endl;
 		if (T.size()) {
 			_Data.DetectedThreads = stoi(T);
+			_Data.ResolveSubdivisionProblem_GroupIDAssign();
 			if (RK_OP)TRY_CATCH(RK_Access.SetDwordValue(L"AS_THREADS_COUNT", _Data.DetectedThreads);, "Failed on setting AS_THREADS_COUNT")
 		}
 		cout << _Data.DetectedThreads << endl;
@@ -5407,11 +5408,11 @@ namespace Settings {
 	}
 }
 
-pair<float, float> GetPositionForOneOf(INT32 Position, INT32 Amount, float UnitSize) {
+pair<float, float> GetPositionForOneOf(INT32 Position, INT32 Amount, float UnitSize, float HeightRel) {
 	pair<float, float> T(0,0);
 	INT32 SideAmount = ceil(sqrt(Amount));
 	T.first = (0 - (Position%SideAmount) + ((SideAmount - 1) / 2.f))*UnitSize;
-	T.second = (0 - (Position / SideAmount) + ((SideAmount - 1) / 2.f))*UnitSize;
+	T.second = (0 - (Position / SideAmount) + ((SideAmount - 1) / 2.f))*UnitSize * HeightRel;
 	return T;
 }
 
@@ -5440,7 +5441,7 @@ void OnStart() {
 			cout << ID << endl;
 			if (!GlobalMCTM->Cur_Processing[ID])
 				continue;
-			auto Q = GetPositionForOneOf(ID, GlobalMCTM->Cur_Processing.size(),112.5);
+			auto Q = GetPositionForOneOf(ID, GlobalMCTM->Cur_Processing.size(),140,0.7);
 			auto Vis = new SMRP_Vis(Q.first, Q.second, System_White);
 			MW->AddUIElement("SMRP_C" + to_string(ID), Vis);
 			thread TH([](MIDICollectionThreadedMerger *pMCTM, MoveableWindow *MW, DWORD ID) {
@@ -5950,7 +5951,7 @@ void mExit(int a) {
 }
 
 int main(int argc, char ** argv) {
-	ShowWindow(GetConsoleWindow(), SW_HIDE); 
+	ShowWindow(GetConsoleWindow(), SW_SHOW); 
 	SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS);
 	//srand(1);
 	//srand(clock());
