@@ -1338,18 +1338,19 @@ struct MIDICollectionThreadedMerger {
 			ifstream	*IM = new ifstream(_SaveTo + L".I.mid", ios::binary | ios::out),
 						*RM = new ifstream(_SaveTo + L".R.mid", ios::binary | ios::out);
 			ofstream F(_SaveTo, ios::binary | ios::out);
-			BIT IMgood= IM->good(), RMgood= RM->good();
-			if (!IMgood && !RMgood) {
+			BIT IMgood= IM->is_open(), RMgood= RM->is_open();
+			if (!IMgood || !RMgood) {
 				IM->close();
 				RM->close();
 				F.close();
+				//wcout << '#' << _SaveTo.c_str() << '#' << endl;
+				//cout << string(_SaveTo.begin(), _SaveTo.end()) << endl;
 				_wremove(_SaveTo.c_str());
+				_wrename((_SaveTo + L".I.mid").c_str(), _SaveTo.c_str());
+				_wrename((_SaveTo + L".R.mid").c_str(), _SaveTo.c_str());//one of these will not work
 				delete IM, RM;
+				*FinishedFlag = 1;
 				return;
-			}
-			if (!IMgood) {
-				swap(RMgood, IMgood);
-				swap(RM, IM);
 			}
 			WORD T=0;
 			BYTE A=0, B=0;
@@ -1358,24 +1359,17 @@ struct MIDICollectionThreadedMerger {
 			if (RMgood)RM->seekg(10);
 			A = IM->get();
 			B = IM->get();
-			if (RMgood) {
-				T = (A + RM->get()) << 8;
-				T += (B + RM->get());
-			}
-			else {
-				T = A << 8;
-				T += B;
-			}
-			//cout << "tracks amount" << T << endl;
+			T = (A + RM->get()) << 8;
+			T += (B + RM->get());
 			A = T >> 8;
 			B = T;
 			F.put(A);
 			F.put(B);
 			F.put(IM->get());
 			F.put(IM->get());
-			if (RMgood)RM->seekg(14);
+			RM->seekg(14);
 			F << IM->rdbuf();
-			if (RMgood)F << RM->rdbuf();
+			F << RM->rdbuf();
 			IM->close();
 			RM->close();
 			delete IM;
@@ -4694,7 +4688,7 @@ struct SAFCData {////overall settings and storing perfile settings....
 			SaveDirectory = L"";
 			return;
 		}
-		else if(SaveDirectory == L"" || SaveDirectory.rfind(L".AfterSAFC.mid") < SaveDirectory.size())
+		else if(Files.size())
 			SaveDirectory = Files[0].Filename + L".AfterSAFC.mid";
 
 		if (Files.size() == 1) {
