@@ -5773,6 +5773,16 @@ const GLchar *fragment_shader[] = { //uniform float time;
 	"	p.x = (p.x + 0.24) * dy;\n",
 	"	return vec4( p.x*p.x, dy*0.3, dy, 1.0 );\n",
 	"}",
+	"vec4 flare2(float Time, vec2 p, float y, float param1 , float param2, float source_alpha){\n",
+	"	vec2 sp = (p.xy * 2.0 - resolution.xy) / min(resolution.x, resolution.y);\n",
+	"	sp.y = -dot(sp,sp);\n",
+	"	float color = param2;\n",
+	"	for (int i = 0; i < 20; i++) {\n",
+	"		float t = float(i)+sin(Time*param1*0.1+float(i));\n",
+	"		color += 0.025/distance(sp,vec2(sp.x,cos(t+sp.x)));\n",
+	"	}\n",
+	"	return color*vec4(vec3((sp.x)*0.1, 0.05, -(sp.x)*0.1), 1.0-source_alpha);"
+	"}",
 	"void main() {\n",
 	"	 vec4 Color; float Transp = gl_Color[3];\n",
 	"    if (Mode==1)Color = pow(gl_Color,vec4(Basewave + rand(gl_FragCoord.xy + vec2(Time,2.*Time))*SinewaveWidth));\n",
@@ -5781,6 +5791,7 @@ const GLchar *fragment_shader[] = { //uniform float time;
 	//"    else if(Mode==4)Color = (SinewaveWidth + 1.)*gl_Color - (Basewave)*spirals(Time, gl_FragCoord.xy / 1600.);\n",
 	"    else if(Mode==4)Color = pow(gl_Color,spirals(Time, gl_FragCoord.xy / (resolution.x * Param3 * 3.)));\n",
 	"    else if(Mode==5)Color = pow(flare(Time, gl_FragCoord.xy, MousePos.y/resolution.y*1.8*Param3 + 0.5, Basewave, SinewaveWidth+0.15),vec4(1.)-gl_Color);\n",
+	"    //else if(Mode==6)Color = gl_Color * (Param3 * 20.) * flare2(Time, gl_FragCoord.xy, MousePos.y/resolution.y*1.8*Param3 + 0.5, Basewave + 1., SinewaveWidth+0.15,Transp);\n",
 	"	 else Color = gl_Color;\n",
 	"	 Color.w = Transp;\n",
 	"    gl_FragColor = Color;\n",
@@ -5822,7 +5833,7 @@ void mDisplay() {
 		glUniform1f(glGetUniformLocation(SP->prog, "Basewave"), Settings::Basewave);
 		glUniform1f(glGetUniformLocation(SP->prog, "Param3"), Settings::Param3);
 		glUniform2f(glGetUniformLocation(SP->prog, "MousePos"), MXPOS, MYPOS);
-		glUniform2f(glGetUniformLocation(SP->prog, "resolution"), WINDXSIZE, WINDYSIZE);
+		glUniform2f(glGetUniformLocation(SP->prog, "resolution"), WindX, WindY);
 		SP->use(); 
 	}
 	if (APRIL_FOOL) {
@@ -5945,7 +5956,7 @@ void mExit(int a) {
 }
 
 int main(int argc, char ** argv) {
-	ShowWindow(GetConsoleWindow(), SW_SHOW); 
+	ShowWindow(GetConsoleWindow(), SW_HIDE); 
 	SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS);
 	//srand(1);
 	//srand(clock());
