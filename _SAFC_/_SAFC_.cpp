@@ -1435,7 +1435,6 @@ struct FastMIDIInfoCollector {
 	}
 };
 
-
 unordered_map<char, string> ASCII;
 void InitASCIIMap() {
 	ASCII.clear();
@@ -1555,6 +1554,7 @@ struct Coords {
 		x = newx; y = newy;
 	}
 };
+
 struct DottedSymbol {
 	float Xpos, Ypos;
 	BYTE R, G, B, A, LineWidth;
@@ -1666,6 +1666,7 @@ struct DottedSymbol {
 		return;
 	}
 };
+
 FLOAT lFONT_HEIGHT_TO_WIDTH = 2.5;
 namespace lFontSymbolsInfo {
 	bool IsInitialised = false;
@@ -1742,6 +1743,7 @@ struct lFontSymbol : DottedSymbol {
 		lFontSymbolsInfo::CallListOnChar(Symb);
 	}
 };
+
 struct BiColoredDottedSymbol : DottedSymbol {
 	BYTE gR[9],gG[9],gB[9],gA[9];
 	BYTE _PointData;
@@ -1881,6 +1883,7 @@ struct BiColoredDottedSymbol : DottedSymbol {
 		if (BACK)RenderWay.back() = BACK;
 	}
 };
+
 struct SingleTextLine {
 	string _CurrentText;
 	float CXpos, CYpos;
@@ -2025,6 +2028,7 @@ struct SingleTextLine {
 		}
 	}
 };
+
 #define CharWidthPerHeight_Fonted 0.666f
 #define CharWidthPerHeight 0.5f
 #define CharSpaceBetween(CharHeight) CharHeight/2.f
@@ -2092,6 +2096,7 @@ struct SingleTextLineSettings {
 		this->CYpos += dy;
 	}
 };
+
 struct HandleableUIPart {
 	recursive_mutex Lock;
 	~HandleableUIPart() {}
@@ -2232,6 +2237,7 @@ struct CheckBox : HandleableUIPart {///NeedsTest
 		return _TellType::checkbox;
 	}
 };
+
 struct InputField : HandleableUIPart {
 	enum PassCharsType {
 		PassNumbers = 0b1,
@@ -2274,8 +2280,8 @@ struct InputField : HandleableUIPart {
 		this->Ypos = Ypos;
 		this->Height = (DefaultStringSettings->YUnitSize * 2 > Height) ? DefaultStringSettings->YUnitSize * 2 : Height;
 		this->Width = Width;
-		this->CurrentString = DefaultString;
-		this->FirstInput = this->Focused = 0;
+		this->CurrentString = "";//DefaultString;
+		this->FirstInput = this->Focused = false;
 		this->OutputSource = OutputSource;
 	}
 	BIT MouseHandler(float mx, float my, CHAR Button/*-1 left, 1 right, 0 move*/, CHAR State /*-1 down, 1 up*/) override {
@@ -2330,6 +2336,11 @@ struct InputField : HandleableUIPart {
 		else {
 			this->STL->SafeStringReplace(" ");
 		}
+		Lock.unlock();
+	}
+	void FlushCurrentStringWithoutGUIUpdate(BIT SetDefault = false) {
+		Lock.lock();
+		this->CurrentString = (SetDefault) ? this->DefaultString : "";
 		Lock.unlock();
 	}
 	void PutIntoSource(string *AnotherSource=NULL) {
@@ -2423,6 +2434,7 @@ struct InputField : HandleableUIPart {
 		return TT_INPUT_FIELD;
 	}
 };
+
 struct Button : HandleableUIPart {
 	SingleTextLine *STL,*Tip;
 	float Xpos, Ypos;
@@ -2598,6 +2610,7 @@ struct Button : HandleableUIPart {
 		return TT_BUTTON;
 	}
 };
+
 struct ButtonSettings {
 	string ButtonText,TipText; 
 	void(*OnClick)();
@@ -2700,6 +2713,7 @@ struct ButtonSettings {
 			return new Button(((KeepText) ? this->ButtonText : ButtonText), OnClick, Xpos, Ypos, Width, Height, CharHeight, RGBAColor, gRGBAColor, BasePoint, GradPoint, BorderWidth, RGBABackground, RGBABorder, HoveredRGBAColor, HoveredRGBABackground, HoveredRGBABorder, Tip, TipText);
 	}
 };
+
 struct TextBox : HandleableUIPart {
 	enum class VerticalOverflow{cut,display,recalibrate};
 	_Align TextAlign;
@@ -2731,7 +2745,7 @@ struct TextBox : HandleableUIPart {
 		this->RGBABorder = RGBABorder;
 		this->RGBABackground = RGBABackground;
 		this->Height = Height;
-		this->Text = Text;
+		this->Text = (Text.size()) ? Text : " ";
 		RecalculateAvailableSpaceForText();
 		TextReformat();
 	}
@@ -3179,6 +3193,7 @@ struct SelectablePropertedList : HandleableUIPart {
 		return TT_SELPROPLIST;
 	}
 };
+
 #define HTSQ2 (2)
 struct SpecialSigns {
 	static void DrawOK(float x, float y,float SZParam,DWORD RGBAColor,DWORD NOARGUMENT=0) {
@@ -3410,13 +3425,16 @@ struct WheelVariableChanger :HandleableUIPart {
 				) * Height;
 		SafeChangePosition(NewX + CW, NewY + CH);
 	}
+	void CheckupInputs() {
+		variable = stod(var_if->STL->_CurrentText);
+		factor = stod(fac_if->STL->_CurrentText);
+	}
 	void KeyboardHandler(CHAR CH) override {
 		fac_if->KeyboardHandler(CH);
 		var_if->KeyboardHandler(CH);
 		if (IsHovered) {
 			if (CH == 13) {
-				variable = stod(var_if->STL->_CurrentText);
-				factor = stod(fac_if->STL->_CurrentText);
+				CheckupInputs();
 				if (OnApply)
 					OnApply(variable);
 			}
@@ -3438,11 +3456,12 @@ struct WheelVariableChanger :HandleableUIPart {
 						OnApply(variable);
 				WheelFieldHovered = true;
 				if (Button) {
+					CheckupInputs();
 					if (Button == 2 /*UP*/) {
 						if (State == -1) {
 							switch (type) {
-							case WheelVariableChanger::Type::exponential: {variable *= factor; break; }
-							case WheelVariableChanger::Type::addictable: {variable += factor;	break; }
+								case WheelVariableChanger::Type::exponential: {variable *= factor; break; }
+								case WheelVariableChanger::Type::addictable: {variable += factor;	break; }
 							}
 							var_if->UpdateInputString(to_string(variable));
 							if (Sen == Sensitivity::on_wheel)
@@ -3453,8 +3472,8 @@ struct WheelVariableChanger :HandleableUIPart {
 					else if (Button == 3 /*DOWN*/) {
 						if (State == -1) {
 							switch (type) {
-							case WheelVariableChanger::Type::exponential: {variable /= factor; break; }
-							case WheelVariableChanger::Type::addictable: {variable -= factor;	break; }
+								case WheelVariableChanger::Type::exponential: {variable /= factor; break; }
+								case WheelVariableChanger::Type::addictable: {variable -= factor;	break; }
 							}
 							var_if->UpdateInputString(to_string(variable));
 							if (Sen == Sensitivity::on_wheel)
@@ -3472,7 +3491,6 @@ struct WheelVariableChanger :HandleableUIPart {
 		return 0;
 	}
 };
-
 
 #define WindowHeapSize 15
 struct MoveableWindow:HandleableUIPart {
@@ -5878,6 +5896,7 @@ void mDisplay() {
 
 	glutSwapBuffers();
 }
+
 void mInit() {
 	glMatrixMode(GL_PROJECTION);
 	glLoadIdentity();
