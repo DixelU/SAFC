@@ -1727,7 +1727,7 @@ namespace lFontSymbolsInfo {
 }
 struct lFontSymbol : DottedSymbol {
 	char Symb;
-	GLYPHMETRICS GM;
+	GLYPHMETRICS GM = {0};
 	lFontSymbol(char Symb, float CXpos, float CYpos, float XUnitSize, float YUnitSize, DWORD RGBA) :
 		DottedSymbol(" ", CXpos, CYpos, XUnitSize, YUnitSize, 1, RGBA >> 24, (RGBA >> 16) & 0xFF, (RGBA >> 8) & 0xFF, RGBA & 0xFF) {
 		this->Symb = Symb;
@@ -2224,16 +2224,20 @@ struct CheckBox : HandleableUIPart {///NeedsTest
 				//cout << "State switch from " << State << endl;
 				if (State == 1)
 					this->State = !this->State;
+				Lock.unlock();
 				return 1;
 			}
-			else return 0;
+			else { 
+				Lock.unlock();
+				return 0; 
+			}
 		}
 		else {
 			if (Focused)
 				FocusChange();
+			Lock.unlock();
 			return 0;
 		}
-		Lock.unlock();
 	}
 	inline DWORD TellType() override {
 		return _TellType::checkbox;
@@ -2371,18 +2375,21 @@ struct InputField : HandleableUIPart {
 				if (InputType & PassCharsType::PassNumbers) {
 					if (CH >= '0' && CH <= '9') {
 						Input(CH);
+						Lock.unlock();
 						return;
 					}
 				}
 				if (InputType & PassCharsType::PassFrontMinusSign) {
 					if (CH == '-' && CurrentString.empty()) {
 						Input(CH);
+						Lock.unlock();
 						return;
 					}
 				}
 				if (InputType & PassCharsType::PassFirstPoint) {
 					if (CH == '.' && CurrentString.find('.') >= CurrentString.size()) {
 						Input(CH);
+						Lock.unlock();
 						return;
 					}
 				}
@@ -3046,7 +3053,9 @@ struct SelectablePropertedList : HandleableUIPart {
 	}
 	void SafeRotateList(INT32 Delta) {
 		Lock.lock();
-		if (!MaxVisibleLines)return;
+		if (!MaxVisibleLines) {
+			Lock.unlock(); return;
+		}
 		if (Delta < 0 && CurrentTopLineID < 0-Delta)CurrentTopLineID = 0;
 		else if (Delta > 0 && CurrentTopLineID + Delta + MaxVisibleLines > SelectorsText.size())
 			CurrentTopLineID = SelectorsText.size() - MaxVisibleLines;
@@ -3056,8 +3065,12 @@ struct SelectablePropertedList : HandleableUIPart {
 	}
 	void SafeRemoveStringByID(DWORD ID) {
 		Lock.lock();
-		if (ID >= SelectorsText.size())return;
-		if (SelectorsText.empty())return;
+		if (ID >= SelectorsText.size()) {
+			Lock.unlock(); return;
+		}
+		if (SelectorsText.empty()) {
+			Lock.unlock(); return;
+		}
 		if (MaxVisibleLines) {
 			if (ID < CurrentTopLineID) {
 				CurrentTopLineID--;
@@ -3073,14 +3086,18 @@ struct SelectablePropertedList : HandleableUIPart {
 	}
 	void ReSetAlignFor(DWORD ID, _Align Align) {
 		Lock.lock();
-		if (ID>=Selectors.size())return;
+		if (ID>=Selectors.size()) {
+			Lock.unlock(); return;
+		}
 		float nx = HeaderCXPos - ((Align == _Align::left) ? 0.5f : ((Align == _Align::right)? 0 - 0.5f :0))*(Width - SpaceBetween);
 		Selectors[ID]->STL->SafeChangePosition_Argumented(Align, nx, Selectors[ID]->Ypos);
 		Lock.unlock();
 	}
 	void ReSetAlign_All(_Align Align) {
 		Lock.lock();
-		if (!Align)return;
+		if (!Align) {
+			Lock.unlock(); return;
+		}
 		float nx = HeaderCXPos - ((Align == _Align::left) ? 0.5f : ((Align == _Align::right) ? 0 - 0.5f : 0))*(Width - SpaceBetween);
 		for (int i = 0; i < Selectors.size(); i++)
 			Selectors[i]->STL->SafeChangePosition_Argumented(Align, nx, Selectors[i]->Ypos);
@@ -3091,8 +3108,9 @@ struct SelectablePropertedList : HandleableUIPart {
 		if (MaxCharsInLine)ButtonText = ButtonText.substr(0, MaxCharsInLine);
 		SelectorsText.push_back(ButtonText);
 		if (MaxVisibleLines && SelectorsText.size() > MaxVisibleLines) {
-			SafeUpdateLines();
-			return;
+			SafeUpdateLines(); {
+				Lock.unlock(); return;
+			}
 		}
 		ButtSettings->ChangePosition(HeaderCXPos, HeaderYPos - (SelectorsText.size() - 0.5f)*SpaceBetween);
 		ButtSettings->Height = SpaceBetween;
@@ -3553,7 +3571,8 @@ struct MoveableWindow:HandleableUIPart {
 		if (mx > XWindowPos + Width - WindowHeapSize && mx < XWindowPos + Width && my < YWindowPos && my > YWindowPos - WindowHeapSize) {///close button
 			if (Button && State==1) {
 				Drawable = 0;
-				CursorFollowMode = 0;
+				CursorFollowMode = 0; 
+				Lock.unlock();
 				return 1;
 			}
 			else if(!Button) {
@@ -4015,7 +4034,9 @@ struct CAT_Piano :HandleableUIPart {
 	}
 	void UpdateInfo() {
 		Lock.lock();
-		if (!PianoTransform)return;
+		if (!PianoTransform) {
+			Lock.unlock(); return;
+		}
 		MinCont->SafeStringReplace("Min: " + to_string(PianoTransform->Min));
 		MaxCont->SafeStringReplace("Max: " + to_string(PianoTransform->Max));
 		Transp->SafeStringReplace("Transp: " + to_string(PianoTransform->TransposeVal));
@@ -4032,7 +4053,10 @@ struct CAT_Piano :HandleableUIPart {
 		MinCont->Draw();
 		MaxCont->Draw();
 		Transp->Draw();
-		if (!PianoTransform)return;
+		if (!PianoTransform) {
+			Lock.unlock(); 
+			return;
+		}
 
 		glLineWidth(0.5f*KeyWidth / pixsz);
 		glBegin(GL_LINES);
@@ -4055,7 +4079,8 @@ struct CAT_Piano :HandleableUIPart {
 		}
 		x = BaseXPos - (128 + PianoTransform->TransposeVal)*KeyWidth;
 		for (int i = 0; i < 256; i++, x += KeyWidth) {//CAT Piano
-			if (fabs(x - BaseXPos) >= 0.5*CalculatedWidth)continue;
+			if (fabs(x - BaseXPos) >= 0.5*CalculatedWidth)
+				continue;
 			Inside = ((i - (PianoTransform->TransposeVal) >= (PianoTransform->Min)) && (i - (PianoTransform->TransposeVal) <= (PianoTransform->Max)));
 			if (IsWhiteKey(i)) {
 				glColor4f(1, 1, 1, (Inside ? 0.9f : 0.25f));
@@ -4084,7 +4109,10 @@ struct CAT_Piano :HandleableUIPart {
 		glVertex2f(x, BaseYPos + 1.5f * PianoHeight);
 		glVertex2f(x, BaseYPos - 1.5f * PianoHeight);
 		glEnd();
-		if (!Focused)return;
+		if (!Focused) {
+			Lock.unlock();
+			return;
+		}
 		glColor4f(1, 0.5, 0, 1);
 		glBegin(GL_LINE_LOOP);
 		glVertex2f(BaseXPos - 0.5f*CalculatedWidth, BaseYPos - 0.5f*CalculatedHeight);
@@ -4126,7 +4154,10 @@ struct CAT_Piano :HandleableUIPart {
 	void KeyboardHandler(CHAR CH) override {
 		Lock.lock();
 		if (Focused) {
-			if (!PianoTransform)return;
+			if (!PianoTransform) {
+				Lock.unlock();
+				return;
+			}
 			switch (CH) {
 			case 'W':
 			case 'w':

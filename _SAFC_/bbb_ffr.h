@@ -39,8 +39,8 @@ public:
 	byte_by_byte_fast_file_reader(const wchar_t* filename, int default_buffer_size = 20000000) {
 		auto err_no = _wfopen_s(&file, filename, L"rb");
 		is_open = !(err_no);
-		next_chunk_is_unavailable = is_eof = feof(file);
-		if (err_no) {
+		next_chunk_is_unavailable = is_eof = (file) ? feof(file) : true;
+		if (err_no | is_eof) {
 			file_pos = 0;
 			buffer = nullptr;
 			buffer_size = 0;
