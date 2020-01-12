@@ -49,6 +49,7 @@
 
 #include "consts.h"
 #include <stack>
+#include "bbb_ffr.h"
 
 #define NULL nullptr
 
@@ -119,7 +120,6 @@ size_t getAvailableRAM(){
 
 	HINSTANCE hIL = LoadLibrary(L"kernel32.dll");
 	GMSEx = (BOOL(__stdcall*)(LPMEMORYSTATUSEX))GetProcAddress(hIL, "GlobalMemoryStatusEx");
-
 	if (GMSEx) {
 		MEMORYSTATUSEX m;
 		m.dwLength = sizeof(m);
@@ -357,7 +357,7 @@ struct SingleMIDIReProcessor {
 	}
 	#define PCLOG true
 	void ReProcess() {
-		ifstream fi(this->FileName, ios::binary | ios::in);
+		bbb_ffr fi(FileName.c_str());
 		ofstream fo(this->FileName + Postfix, ios::binary | ios::out);
 		vector<BYTE> Track;///quite memory expensive...
 		vector<BYTE> UnLoad;
@@ -369,8 +369,8 @@ struct SingleMIDIReProcessor {
 		WORD OldPPQN;
 		double DeltaTimeTranq = GlobalOffset,TDeltaTime=0,PPQNIncreaseAmount=1;
 		BYTE Tempo1, Tempo2, Tempo3;
-		BYTE IO,TYPEIO;//register?
-		BYTE RSB;
+		BYTE IO = 0, TYPEIO = 0;//register?
+		BYTE RSB = 0;
 		TrackCount = 0;
 		Processing = 1;
 
@@ -1098,18 +1098,19 @@ struct MIDICollectionThreadedMerger {
 			}
 			BIT ActiveStreamFlag = 1;
 			BIT ActiveTrackReading = 1;
-			vector<ifstream*> fiv;
+			vector<bbb_ffr*> fiv;
 			#define pfiv (*fiv[i])
 			vector<INT64> DecayingDeltaTimes;
 			#define ddt (DecayingDeltaTimes[i])
 			vector<BYTE> Track;
-			ifstream *fi;
+			bbb_ffr *fi;
 			ofstream fo(_SaveTo + L".I.mid", ios::binary | ios::out);
 			fo << "MThd" << '\0' << '\0' << '\0' << (char)6 << '\0' << (char)1;
 			for (auto Y = IMC->begin(); Y != IMC->end(); Y++) {
-				fi = new ifstream((*Y)->FileName + (*Y)->Postfix, ios::binary | ios::in);///
+				fi = new bbb_ffr(((*Y)->FileName + (*Y)->Postfix).c_str());///
 				//if ((*Y)->TrackCount > *TrackCount)*TrackCount = (*Y)->TrackCount;
-				fi->seekg(14);
+				for (int i = 0; i < 14; i++)
+					fi->get();
 				DecayingDeltaTimes.push_back(0);
 				fiv.push_back(fi);
 			}
@@ -1201,6 +1202,7 @@ struct MIDICollectionThreadedMerger {
 								Track.push_back(pfiv.get());
 							}
 							else {///RSB CANNOT APPEAR ON THIS STAGE
+								printf("Inplace error\n");
 								goto trackending;
 							}
 							goto deltatime_reading;
@@ -2345,8 +2347,13 @@ struct InputField : HandleableUIPart {
 	}
 	void PutIntoSource(string *AnotherSource=NULL) {
 		Lock.lock();
-		if(OutputSource)*OutputSource = CurrentString;
-		else if (AnotherSource)*AnotherSource = CurrentString;
+		if (OutputSource) {
+			if(CurrentString.size())
+				*OutputSource = CurrentString;
+		}
+		else if (AnotherSource)
+			if (CurrentString.size())
+				*AnotherSource = CurrentString;
 		Lock.unlock();
 	}
 	void ProcessFirstInput() {
@@ -5386,9 +5393,11 @@ namespace Settings {
 		DefaultBoolSettings = (DefaultBoolSettings & (~_BoolSettings::ignore_pitches)) | (_BoolSettings::ignore_pitches * (!!((CheckBox*)(*pptr)["BOOL_IGN_PITCH"])->State));
 		DefaultBoolSettings = (DefaultBoolSettings & (~_BoolSettings::ignore_notes)) | (_BoolSettings::ignore_notes * (!!((CheckBox*)(*pptr)["BOOL_IGN_NOTES"])->State));
 		DefaultBoolSettings = (DefaultBoolSettings & (~_BoolSettings::ignore_all_but_tempos_notes_and_pitch)) | (_BoolSettings::ignore_all_but_tempos_notes_and_pitch * (!!((CheckBox*)(*pptr)["BOOL_IGN_ALL_EX_TPS"])->State));
-		if (RK_OP) {TRY_CATCH(RK_Access.SetDwordValue(L"DEFAULT_BOOL_SETTINGS", DefaultBoolSettings);, "Failed on setting DEFAULT_BOOL_SETTINGS")}
+
+		if (RK_OP) { TRY_CATCH(RK_Access.SetDwordValue(L"DEFAULT_BOOL_SETTINGS", DefaultBoolSettings); , "Failed on setting DEFAULT_BOOL_SETTINGS") }
 
 		if (RK_OP) { TRY_CATCH(RK_Access.SetDwordValue(L"FONTSIZE", lFontSymbolsInfo::Size); , "Failed on setting FONTSIZE") }
+
 		if (RK_OP) { TRY_CATCH(RK_Access.SetDwordValue(L"FLOAT_FONTHTW", *(DWORD*)(&lFONT_HEIGHT_TO_WIDTH)); , "Failed on setting FLOAT_FONTHTW") }
 
 		_Data.InplaceMergeFlag = (((CheckBox*)(*pptr)["INPLACE_MERGE"])->State);
@@ -5568,19 +5577,14 @@ void RestoreRegSettings() {
 		}
 		catch (...) { cout << "Exception thrown while restoring COLLAPSEDFONTNAME from registry\n"; }
 		try {
-			wstring ws = Settings::RK_Access.GetStringValue(L"COLLAPSEDFONTNAME");//COLLAPSEDFONTNAME
-			FONTNAME = string(ws.begin(), ws.end());
-		}
-		catch (...) { cout << "Exception thrown while restoring COLLAPSEDFONTNAME from registry\n"; }
-		try {
 			lFontSymbolsInfo::Size = Settings::RK_Access.GetDwordValue(L"FONTSIZE");//COLLAPSEDFONTNAME
 		}
-		catch (...) { cout << "Exception thrown while restoring COLLAPSEDFONTNAME from registry\n"; }
+		catch (...) { cout << "Exception thrown while restoring FONTSIZE from registry\n"; }
 		try {
 			DWORD B = Settings::RK_Access.GetDwordValue(L"FLOAT_FONTHTW");//COLLAPSEDFONTNAME
 			lFONT_HEIGHT_TO_WIDTH = *(float*)&B;
 		}
-		catch (...) { cout << "Exception thrown while restoring COLLAPSEDFONTNAME from registry\n"; }
+		catch (...) { cout << "Exception thrown while restoring FLOAT_FONTHTW from registry\n"; }
 		Settings::RK_Access.Close();
 	}
 }
@@ -5975,6 +5979,7 @@ void mExit(int a) {
 }
 
 int main(int argc, char ** argv) {
+	ios_base::sync_with_stdio(false);//why not
 	ShowWindow(GetConsoleWindow(), SW_HIDE); 
 	SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS);
 	//srand(1);
