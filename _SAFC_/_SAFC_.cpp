@@ -373,6 +373,7 @@ struct SingleMIDIReProcessor {
 		BYTE RSB = 0;
 		TrackCount = 0;
 		Processing = 1;
+		Track.reserve(10000000);//just in case...
 
 		if (NewTempo) {
 			Tempo1 = ((60000000 / NewTempo) >> 16),
@@ -1015,6 +1016,7 @@ struct SingleMIDIReProcessor {
 		Finished = 1;
 	}
 };
+
 struct MIDICollectionThreadedMerger {
 	wstring SaveTo;
 	BIT IntermediateRegularFlag;
@@ -1102,7 +1104,9 @@ struct MIDICollectionThreadedMerger {
 			#define pfiv (*fiv[i])
 			vector<INT64> DecayingDeltaTimes;
 			#define ddt (DecayingDeltaTimes[i])
-			vector<BYTE> Track;
+			vector<BYTE> Track,Local_IER;
+			vector<pair<size_t,INT64>> cutoffs_and_corresponding_ticks;
+			size_t cutoff_acc=0;
 			bbb_ffr *fi;
 			ofstream fo(_SaveTo + L".I.mid", ios::binary | ios::out);
 			fo << "MThd" << '\0' << '\0' << '\0' << (char)6 << '\0' << (char)1;
@@ -1122,7 +1126,7 @@ struct MIDICollectionThreadedMerger {
 				///reading tracks
 				DWORD Header = 0,DIO,DeltaLen=0, TrackSize = 0, POS=0;
 				UINT64 InTrackDelta = 0;
-				BIT ITD_Flag = 1 /*, NotNoteEvents_ProcessedFlag = 0*/;
+				BIT ITD_Flag = 1 /*, NotNoteEvents_ProcessedFlag = 0*/; cutoff_acc = 0;
 				for (int i = 0; i < fiv.size(); i++) {
 					while (pfiv.good() && Header != MTrk) {
 						Header = (Header << 8) | pfiv.get();
@@ -1150,6 +1154,12 @@ struct MIDICollectionThreadedMerger {
 								IO = pfiv.get();
 								DIO = (DIO << 7) | (IO & 0x7F);
 							} while (IO & 0x80);
+							///local insertion for fixing inplace overflow
+							if (Track.size() >= 0x7F000000ul + cutoff_acc) {
+								cutoff_acc = Track.size();
+								cutoffs_and_corresponding_ticks.push_back({ Track.size(),Tick });
+							}
+							///
 							if (pfiv.eof())goto trackending;
 							if (ddt = DIO)goto escape;
 						eventevalution:///becasue why not
@@ -1171,7 +1181,6 @@ struct MIDICollectionThreadedMerger {
 									Track[Track.size() - q] |= 0x80;///hack (going from 2 instead of going from one)
 								}
 							}
-
 							if (EVENTTYPE == 0xFF) {///meta
 								Track.push_back(EVENTTYPE);
 								Track.push_back(pfiv.get());
@@ -1202,7 +1211,8 @@ struct MIDICollectionThreadedMerger {
 								Track.push_back(pfiv.get());
 							}
 							else {///RSB CANNOT APPEAR ON THIS STAGE
-								printf("Inplace error\n");
+								ThrowAlert_Error("Inplace error\n");
+								//printf("Inplace error\n");
 								goto trackending;
 							}
 							goto deltatime_reading;
@@ -1245,39 +1255,73 @@ struct MIDICollectionThreadedMerger {
 						for (DWORD q = 2; q <= DeltaLen; q++) {
 							Track[Track.size() - q] |= 0x80;
 						}
-
 						Track.push_back(0xFF);
 						Track.push_back(0x2F);
 						Track.push_back(0x00);
-					}
-					if (0 && TrackSize != Track.size()) {
-						for (int r = 0; r < Track.size(); r++)
-							printf("%2X ", Track[r]);
-						printf("\n");
+						cutoff_acc = Track.size();
+						cutoffs_and_corresponding_ticks.push_back({ Track.size(),Tick });
+						//cout << cutoffs_and_corresponding_ticks.back().first << " " << cutoffs_and_corresponding_ticks.back().second << endl;
 					}
 					TrackSize = Track.size();
 				}
 				ActiveTrackReading = 1;
-				if (Track.size() > 0xFFFFFFFFu)
-					cout << "TrackSize overflow!!!\n";
-				else if (Track.empty())continue;
-				fo << "MTrk";
-				if (Track.size() > 0xFFFFFFFFu) {
-					ThrowAlert_Error("Inplace merge:\nTrackSize overflow!!!\n" + to_string(Track.size()) + " bytes");
-					fo.put(0xFF);
-					fo.put(0xFF);
-					fo.put(0xFF);
-					fo.put(0xFF);
+				bool local_ier_flag = false;
+				size_t prev_position = 0;
+				INT64 prev_tick = 0;
+				constexpr INT64 EDGE = 0x7000000;
+				for (auto Y = cutoffs_and_corresponding_ticks.begin(); Y < cutoffs_and_corresponding_ticks.end(); Y++) {
+					(*TrackCount)++;
+					Local_IER.push_back('M');
+					Local_IER.push_back('T');
+					Local_IER.push_back('r');
+					Local_IER.push_back('k');
+					Local_IER.push_back(0);
+					Local_IER.push_back(0);
+					Local_IER.push_back(0);
+					Local_IER.push_back(0);
+					INT64 Q = prev_tick;
+					if (local_ier_flag) {//not mistyped iter, ier = inplace error regulator//error is related to inplace merging resulting in track overflow.
+						while (Q > 0) {
+							UINT64 T = (Q >= EDGE) ? EDGE : Q;
+							DeltaLen = 0;///Hack from main reprocessor algo
+							do {
+								DeltaLen++;
+								Local_IER.push_back(T & 0x7F);
+								T >>= 7;
+							} while (T);
+							for (DWORD q = 0; q < (DeltaLen >> 1); q++)
+								swap(Local_IER[Local_IER.size() - 1 - q], Local_IER[Local_IER.size() - DeltaLen + q]);
+							for (DWORD q = 2; q <= DeltaLen; q++)
+								Local_IER[Local_IER.size() - q] |= 0x80;
+							if (Q > EDGE) {
+								Local_IER.push_back(0xFF);//empty text event
+								Local_IER.push_back(0x01);
+								Local_IER.push_back(0x00);
+							}
+							Q -= EDGE;
+						}
+					}
+					else
+						local_ier_flag = true;
+					Q = Local_IER.size() + Track.size() - 8;
+					Local_IER[4] = Q >> 24;
+					Local_IER[5] = Q >> 16;
+					Local_IER[6] = Q >> 8;
+					Local_IER[7] = Q;
+					copy(Local_IER.begin(), Local_IER.end(), ostream_iterator<BYTE>(fo));
+					copy(Track.begin() + prev_position, Track.begin() + Y->first, ostream_iterator<BYTE>(fo));
+					if (Y < cutoffs_and_corresponding_ticks.end() - 1) {
+						//fo.put(0);
+						fo.put(0xFF);
+						fo.put(0x2F);
+						fo.put(0);
+					}
+					prev_position = Y->first;
+					prev_tick = Y->second;
+					Local_IER.clear();
 				}
-				else {
-					fo.put(Track.size() >> 24);
-					fo.put(Track.size() >> 16);
-					fo.put(Track.size() >> 8);
-					fo.put(Track.size());
-				}
-				copy(Track.begin(), Track.end(), ostream_iterator<BYTE>(fo));
-				Track.clear();
-				(*TrackCount)++;
+				Track.clear(); 
+				cutoffs_and_corresponding_ticks.clear();
 			}
 			for (int i = 0; i < fiv.size(); i++) {
 				pfiv.close();
@@ -3569,13 +3613,13 @@ struct MoveableWindow:HandleableUIPart {
 		}
 		HoveredCloseButton = 0;
 		if (mx > XWindowPos + Width - WindowHeapSize && mx < XWindowPos + Width && my < YWindowPos && my > YWindowPos - WindowHeapSize) {///close button
-			if (Button && State==1) {
+			if (Button && State == 1) {
 				Drawable = 0;
-				CursorFollowMode = 0; 
+				CursorFollowMode = false;
 				Lock.unlock();
 				return 1;
 			}
-			else if(!Button) {
+			else if (!Button) {
 				HoveredCloseButton = 1;
 			}
 		}
@@ -3586,10 +3630,11 @@ struct MoveableWindow:HandleableUIPart {
 					PCurX = mx;
 					PCurY = my;
 				}
-				Lock.unlock();
-				return 1;
+				else if (State == 1) {
+					CursorFollowMode = !CursorFollowMode;
+				}
 			}
-		} 
+		}
 		if (CursorFollowMode) {
 			SafeMove(mx - PCurX, my - PCurY);
 			PCurX = mx;
@@ -5986,12 +6031,16 @@ void mKey(BYTE k, int x, int y) {
 }
 void mClick(int butt, int state, int x, int y) {
 	float fx, fy;
-	CHAR Button,State=0;
+	CHAR Button,State=state;
 	absoluteToActualCoords(x, y, fx, fy);
 	Button = butt - 1;
 	if (state == GLUT_DOWN)State = -1;
 	else if (state == GLUT_UP)State = 1;
 	if (WH)WH->MouseHandler(fx, fy, Button, State);
+}
+void mDrag(int x, int y) {
+	//mClick(88, MOUSE_DRAG_EVENT, x, y);
+	mMotion(x, y);
 }
 void mSpecialKey(int Key,int x, int y) {
 	//cout << "Spec: " << Key << endl;
@@ -6011,7 +6060,13 @@ void mExit(int a) {
 
 int main(int argc, char ** argv) {
 	ios_base::sync_with_stdio(false);//why not
-	ShowWindow(GetConsoleWindow(), SW_HIDE); 
+
+#ifdef _DEBUG 
+	ShowWindow(GetConsoleWindow(), SW_SHOW);
+#else // _DEBUG 
+	ShowWindow(GetConsoleWindow(), SW_HIDE);
+#endif
+
 	SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS);
 	//srand(1);
 	//srand(clock());
@@ -6050,7 +6105,7 @@ int main(int argc, char ** argv) {
 	glutMouseFunc(mClick);
 	glutReshapeFunc(OnResize);
 	glutSpecialFunc(mSpecialKey);
-	//glutMotionFunc(mMotion);
+	glutMotionFunc(mDrag);
 	glutPassiveMotionFunc(mMotion);
 	glutKeyboardFunc(mKey);
 	glutDisplayFunc(mDisplay);
