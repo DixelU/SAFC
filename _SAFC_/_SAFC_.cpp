@@ -672,7 +672,6 @@ struct SingleMIDIReProcessor {
 							}
 						}
 						else Track.push_back(Key = fi.get());///key data processing
-
 						BYTE Vol = fi.get();
 						if (this->VolumeMapCore && IO & 0x10)
 							Vol = (*this->VolumeMapCore)[Vol];
@@ -1027,6 +1026,129 @@ struct MIDICollectionThreadedMerger {
 	WORD IRTrackCount;
 	WORD IITrackCount;
 	vector<SingleMIDIReProcessor*> SMRP, Cur_Processing;
+
+	struct DegeneratedTrackIterator {
+		INT64 CurPosition;
+		INT64 CurTick;
+		BYTE* TrackData;
+		UINT64 TrackSize;
+		array<INT64, 4096> Holded;
+		bool Processing;
+		DegeneratedTrackIterator(vector<BYTE>& Vec) {
+			TrackData = Vec.data();
+			TrackSize = Vec.size();
+			CurTick = 0; 
+			CurPosition = 0;
+			Processing = true;
+			for (auto& a : Holded)
+				a = 0;
+		}
+		INT64 TellPoliphony() {
+			INT64 T = 0;
+			for (auto& q : Holded) {
+				T += q;
+			}
+			return T;
+		}
+		void SingleEventAdvance() {
+			if (Processing && CurPosition < TrackSize) {
+				DWORD VLV = 0, IO = 0;
+				do {
+					IO = TrackData[CurPosition];
+					CurPosition++;
+					VLV = (VLV << 7) | (IO & 0x7F);
+				} while (IO & 0x80);
+				CurTick += VLV;
+				if (TrackData[CurPosition] == 0xFF) {
+					CurPosition++;
+					if (TrackData[CurPosition] == 0x2F) {
+						Processing = false;
+						CurPosition+=2;
+					}
+					else {
+						IO = 0;
+						CurPosition++;
+						do {
+							IO = TrackData[CurPosition];
+							CurPosition++;
+							VLV = (VLV << 7) | (IO & 0x7F);
+						} while (IO & 0x80);
+						for (int vlvsize = 0; vlvsize < IO; vlvsize++) 
+							CurPosition++;
+					}
+				}
+				else if (TrackData[CurPosition] >= 0x80 && TrackData[CurPosition] <= 0x9F) {
+					WORD FTD = TrackData[CurPosition];
+					CurPosition++;
+					WORD KEY = TrackData[CurPosition];
+					CurPosition++;
+					CurPosition++;//volume - meh;
+					WORD Argument = (KEY << 4) | (FTD & 0xF);
+					if (FTD & 0x10) //if noteon
+						Holded[Argument]++;
+					else if (Holded[Argument] > 0) {
+						Holded[Argument]--;
+					}
+					else {
+						printf("unholded: %d: %d\n", Argument, CurPosition);;
+					}
+				}
+				else if ((TrackData[CurPosition] >= 0xA0 && TrackData[CurPosition] <= 0xBF) || (TrackData[CurPosition] >= 0xE0 && TrackData[CurPosition] <= 0xEF))
+					CurPosition += 3;
+				else if ((TrackData[CurPosition] >= 0xC0 && TrackData[CurPosition] <= 0xDF))
+					CurPosition += 2;
+				else if (false)
+					ThrowAlert_Error("DTI Failure at " + to_string(CurPosition) + ". Type: " +to_string(TrackData[CurPosition])+ ". Tell developer about it and give hime source midi\n");
+			}
+			else Processing = false;
+		}
+		bool AdvanceUntilReachingPositionOf(INT64 Position) {
+			while (Processing && CurPosition < Position)
+				SingleEventAdvance();
+			return Processing;
+		}
+		void PutCurrentHoldedNotes(vector<BYTE>& out, bool output_noteon_wall) {
+			constexpr DWORD LocalDeltaTimeTrunkEdge = 0xF000000;//BC808000 in vlv
+			bool first_nonzero_delta_output = output_noteon_wall;
+			UINT64 LocalTick = CurTick;
+			BYTE DeltaLen = 0;
+			while (output_noteon_wall && LocalTick > LocalDeltaTimeTrunkEdge) {//fillers
+				out.push_back(0xBC);//vlv
+				out.push_back(0x80);
+				out.push_back(0x80);
+				out.push_back(0x00);
+				out.push_back(0xFF);//empty text event
+				out.push_back(0x01);
+				out.push_back(0x00);
+				LocalTick -= LocalDeltaTimeTrunkEdge;
+			}
+			if (output_noteon_wall) {
+				do {
+					DeltaLen++;
+					out.push_back(LocalTick & 0x7F);
+					LocalTick >>= 7;
+				} while (LocalTick);
+				for (DWORD q = 0; q < (DeltaLen >> 1); q++)
+					swap(out[out.size() - 1 - q], out[out.size() - DeltaLen + q]);
+				for (DWORD q = 2; q <= DeltaLen; q++)
+					out[out.size() - q] |= 0x80;
+			}
+			else
+				out.push_back(0);
+			for (int i = 0; i < 4096;i++) {
+				INT64 key = Holded[i];
+				while (key) {
+					out.push_back((0x10 * output_noteon_wall) | (i&0xF) | 0x80);//note data;
+					out.push_back(i >> 4);//key;
+					out.push_back(1);//almost silent
+					out.push_back(0);//delta time
+					key--;
+				}
+			}
+			if(out.size())
+				out.pop_back();
+		}
+	};
 	~MIDICollectionThreadedMerger() {
 		ResetEverything();
 	}
@@ -1104,12 +1226,10 @@ struct MIDICollectionThreadedMerger {
 			#define pfiv (*fiv[i])
 			vector<INT64> DecayingDeltaTimes;
 			#define ddt (DecayingDeltaTimes[i])
-			vector<BYTE> Track,Local_IER;
-			vector<pair<size_t,INT64>> cutoffs_and_corresponding_ticks;
-			size_t cutoff_acc=0;
+			vector<BYTE> Track, FrontEdge, BackEdge;
 			bbb_ffr *fi;
-			ofstream fo(_SaveTo + L".I.mid", ios::binary | ios::out);
-			fo << "MThd" << '\0' << '\0' << '\0' << (char)6 << '\0' << (char)1;
+			ofstream file_output(_SaveTo + L".I.mid", ios::binary | ios::out);
+			file_output << "MThd" << '\0' << '\0' << '\0' << (char)6 << '\0' << (char)1;
 			for (auto Y = IMC->begin(); Y != IMC->end(); Y++) {
 				fi = new bbb_ffr(((*Y)->FileName + (*Y)->Postfix).c_str());///
 				//if ((*Y)->TrackCount > *TrackCount)*TrackCount = (*Y)->TrackCount;
@@ -1118,20 +1238,20 @@ struct MIDICollectionThreadedMerger {
 				DecayingDeltaTimes.push_back(0);
 				fiv.push_back(fi);
 			}
-			fo.put(*TrackCount >> 8);
-			fo.put(*TrackCount);
-			fo.put(PPQN>>8);
-			fo.put(PPQN);
+			file_output.put(*TrackCount >> 8);
+			file_output.put(*TrackCount);
+			file_output.put(PPQN>>8);
+			file_output.put(PPQN);
 			while (ActiveStreamFlag) {
 				///reading tracks
-				DWORD Header = 0,DIO,DeltaLen=0, TrackSize = 0, POS=0;
+				DWORD Header = 0, DIO, DeltaLen = 0, POS = 0;
 				UINT64 InTrackDelta = 0;
-				BIT ITD_Flag = 1 /*, NotNoteEvents_ProcessedFlag = 0*/; cutoff_acc = 0;
+				BIT ITD_Flag = 1 /*, NotNoteEvents_ProcessedFlag = 0*/;
 				for (int i = 0; i < fiv.size(); i++) {
 					while (pfiv.good() && Header != MTrk) {
 						Header = (Header << 8) | pfiv.get();
 					}
-					for(int w=0;w<4;w++)
+					for (int w = 0; w < 4; w++)
 						pfiv.get();///adlakjfkljsdflsdkf
 					Header = 0;
 					if (pfiv.good())
@@ -1142,24 +1262,18 @@ struct MIDICollectionThreadedMerger {
 				for (UINT64 Tick = 0; ActiveTrackReading; Tick++, InTrackDelta++) {
 					BYTE IO, EVENTTYPE;///yas
 					ActiveTrackReading = 0;
-					ActiveStreamFlag = 0; 
+					ActiveStreamFlag = 0;
 					//NotNoteEvents_ProcessedFlag = 0;
 					for (int i = 0; i < fiv.size(); i++) {
 						///every stream
-						if(ddt==0){///there will be parser...
-							if(Tick)goto eventevalution;
+						if (ddt == 0) {///there will be parser...
+							if (Tick)goto eventevalution;
 						deltatime_reading:
 							DIO = 0;
 							do {
 								IO = pfiv.get();
 								DIO = (DIO << 7) | (IO & 0x7F);
 							} while (IO & 0x80);
-							///local insertion for fixing inplace overflow
-							if (Track.size() >= 0x7F000000ul + cutoff_acc) {
-								cutoff_acc = Track.size();
-								cutoffs_and_corresponding_ticks.push_back({ Track.size(),Tick });
-							}
-							///
 							if (pfiv.eof())goto trackending;
 							if (ddt = DIO)goto escape;
 						eventevalution:///becasue why not
@@ -1170,7 +1284,7 @@ struct MIDICollectionThreadedMerger {
 								DeltaLen = 0;
 								do {
 									DeltaLen++;
-									Track.push_back(InTrackDelta&0x7F);
+									Track.push_back(InTrackDelta & 0x7F);
 									InTrackDelta >>= 7;
 								} while (InTrackDelta);
 
@@ -1181,6 +1295,7 @@ struct MIDICollectionThreadedMerger {
 									Track[Track.size() - q] |= 0x80;///hack (going from 2 instead of going from one)
 								}
 							}
+
 							if (EVENTTYPE == 0xFF) {///meta
 								Track.push_back(EVENTTYPE);
 								Track.push_back(pfiv.get());
@@ -1211,14 +1326,15 @@ struct MIDICollectionThreadedMerger {
 								Track.push_back(pfiv.get());
 							}
 							else {///RSB CANNOT APPEAR ON THIS STAGE
-								ThrowAlert_Error("Inplace error\n");
-								//printf("Inplace error\n");
+								printf("Inplace error\n");
+								Track.push_back(0xCA);
+								Track.push_back(0);
 								goto trackending;
 							}
 							goto deltatime_reading;
 						trackending:
 							ddt = -1;
-							if(!pfiv.eof())
+							if (!pfiv.eof())
 								ActiveStreamFlag = 1;
 							continue;
 						escape:
@@ -1243,7 +1359,7 @@ struct MIDICollectionThreadedMerger {
 						///while it's zero delta time
 					}
 					if (!ActiveTrackReading && !Track.empty()) {
-						DeltaLen=0;///Hack from main reprocessor algo
+						DeltaLen = 0;///Hack from main reprocessor algo
 						do {
 							DeltaLen++;
 							Track.push_back(InTrackDelta & 0x7F);
@@ -1258,80 +1374,72 @@ struct MIDICollectionThreadedMerger {
 						Track.push_back(0xFF);
 						Track.push_back(0x2F);
 						Track.push_back(0x00);
-						cutoff_acc = Track.size();
-						cutoffs_and_corresponding_ticks.push_back({ Track.size(),Tick });
-						//cout << cutoffs_and_corresponding_ticks.back().first << " " << cutoffs_and_corresponding_ticks.back().second << endl;
 					}
-					TrackSize = Track.size();
 				}
 				ActiveTrackReading = 1;
-				bool local_ier_flag = false;
-				size_t prev_position = 0;
-				INT64 prev_tick = 0;
-				constexpr INT64 EDGE = 0x7000000;
-				for (auto Y = cutoffs_and_corresponding_ticks.begin(); Y < cutoffs_and_corresponding_ticks.end(); Y++) {
+				constexpr INT32 EDGE = 0x7F000000;
+				if (Track.size() > 0xFFFFFFFFu)
+					cout << "TrackSize overflow!!!\n";
+				else if (Track.empty())continue;
+				if (Track.size() > EDGE*2) {
+					INT64 TotalShift = EDGE, PrevEdgePos = 0;
+					DegeneratedTrackIterator DTI(Track);
+					FrontEdge.clear();
+					while (DTI.AdvanceUntilReachingPositionOf(TotalShift)) {
+						TotalShift = DTI.CurPosition + EDGE;
+						BackEdge.clear();
+						DTI.PutCurrentHoldedNotes(BackEdge, false);
+						UINT64 TotalSize = FrontEdge.size() + (DTI.CurPosition - PrevEdgePos) + BackEdge.size() + 4;
+						file_output << "MTrk";
+						file_output.put(TotalSize >> 24);
+						file_output.put(TotalSize >> 16);
+						file_output.put(TotalSize >> 8);
+						file_output.put(TotalSize); 
+						copy(FrontEdge.begin(), FrontEdge.end(), ostream_iterator<BYTE>(file_output));
+						copy(Track.begin() + PrevEdgePos, Track.begin() + DTI.CurPosition, ostream_iterator<BYTE>(file_output));
+						copy(BackEdge.begin(), BackEdge.end(), ostream_iterator<BYTE>(file_output));
+						file_output.put(0);//that's why +4
+						file_output.put(0xFF);
+						file_output.put(0x2F);
+						file_output.put(0);
+						(*TrackCount)++;
+						PrevEdgePos = DTI.CurPosition;
+						FrontEdge.clear();
+						DTI.PutCurrentHoldedNotes(FrontEdge, true);
+					}
+					file_output << "MTrk";
+					UINT64 TotalSize = FrontEdge.size() + (DTI.CurPosition - PrevEdgePos);
+					//cout << "Outside:" << TotalSize << endl;
+					file_output.put(TotalSize >> 24);
+					file_output.put(TotalSize >> 16);
+					file_output.put(TotalSize >> 8);
+					file_output.put(TotalSize);
+					copy(FrontEdge.begin(), FrontEdge.end(), ostream_iterator<BYTE>(file_output));
+					copy(Track.begin() + PrevEdgePos, Track.end(), ostream_iterator<BYTE>(file_output));
+					FrontEdge.clear();
+					BackEdge.clear();
 					(*TrackCount)++;
-					Local_IER.push_back('M');
-					Local_IER.push_back('T');
-					Local_IER.push_back('r');
-					Local_IER.push_back('k');
-					Local_IER.push_back(0);
-					Local_IER.push_back(0);
-					Local_IER.push_back(0);
-					Local_IER.push_back(0);
-					INT64 Q = prev_tick;
-					if (local_ier_flag) {//not mistyped iter, ier = inplace error regulator//error is related to inplace merging resulting in track overflow.
-						while (Q > 0) {
-							UINT64 T = (Q >= EDGE) ? EDGE : Q;
-							DeltaLen = 0;///Hack from main reprocessor algo
-							do {
-								DeltaLen++;
-								Local_IER.push_back(T & 0x7F);
-								T >>= 7;
-							} while (T);
-							for (DWORD q = 0; q < (DeltaLen >> 1); q++)
-								swap(Local_IER[Local_IER.size() - 1 - q], Local_IER[Local_IER.size() - DeltaLen + q]);
-							for (DWORD q = 2; q <= DeltaLen; q++)
-								Local_IER[Local_IER.size() - q] |= 0x80;
-							if (Q > EDGE) {
-								Local_IER.push_back(0xFF);//empty text event
-								Local_IER.push_back(0x01);
-								Local_IER.push_back(0x00);
-							}
-							Q -= EDGE;
-						}
-					}
-					else
-						local_ier_flag = true;
-					Q = Local_IER.size() + Track.size() - 8;
-					Local_IER[4] = Q >> 24;
-					Local_IER[5] = Q >> 16;
-					Local_IER[6] = Q >> 8;
-					Local_IER[7] = Q;
-					copy(Local_IER.begin(), Local_IER.end(), ostream_iterator<BYTE>(fo));
-					copy(Track.begin() + prev_position, Track.begin() + Y->first, ostream_iterator<BYTE>(fo));
-					if (Y < cutoffs_and_corresponding_ticks.end() - 1) {
-						//fo.put(0);
-						fo.put(0xFF);
-						fo.put(0x2F);
-						fo.put(0);
-					}
-					prev_position = Y->first;
-					prev_tick = Y->second;
-					Local_IER.clear();
 				}
-				Track.clear(); 
-				cutoffs_and_corresponding_ticks.clear();
+				else {
+					file_output << "MTrk";
+					file_output.put(Track.size() >> 24);
+					file_output.put(Track.size() >> 16);
+					file_output.put(Track.size() >> 8);
+					file_output.put(Track.size());
+					copy(Track.begin(), Track.end(), ostream_iterator<BYTE>(file_output));
+					(*TrackCount)++;
+				}
+				Track.clear();
 			}
 			for (int i = 0; i < fiv.size(); i++) {
 				pfiv.close();
 				if ((*IMC)[i]->BoolSettings&_BoolSettings::remove_remnants)
 					_wremove(((((*IMC)[i]->FileName) + ((*IMC)[i]->Postfix)).c_str()));
 			}
-			fo.seekp(10, ios::beg);
-			fo.put((*TrackCount) >> 8);
-			fo.put((*TrackCount)&0xff);
-			fo.close();
+			file_output.seekp(10, ios::beg);
+			file_output.put((*TrackCount) >> 8);
+			file_output.put((*TrackCount)&0xff);
+			file_output.close();
 			(*FinishedFlag) = 1; /// Will this work?
 			delete IMC;
 		}, InplaceMergeCandidats, &IntermediateInplaceFlag, FinalPPQN, SaveTo, &IITrackCount);
