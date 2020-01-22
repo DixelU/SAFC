@@ -49,7 +49,7 @@
 
 #include "consts.h"
 #include <stack>
-#include "bbb_ffr.h"
+#include "bbb_ffio.h"
 
 #define NULL nullptr
 
@@ -157,6 +157,7 @@ BIT RestoreIsFontedVar() {
 		RK.Close();
 	return false;
 }
+
 void SetIsFontedVar(BIT VAL) {
 	bool RK_OP = false;
 	WinReg::RegKey RK;
@@ -307,6 +308,12 @@ struct SingleMIDIReProcessor {
 	CutAndTransposeKeys *KeyConverter;
 	BIT LogToConsole;
 	UINT64 FilePosition,FileSize;
+	static void ostream_write(vector<BYTE>& vec, const vector<BYTE>::iterator& beg, const vector<BYTE>::iterator& end, ostream& out) {
+		out.write(((char*)vec.data()) + (beg - vec.begin()), end - beg);
+	}
+	static void ostream_write(vector<BYTE>& vec, ostream& out) {
+		out.write(((char*)vec.data()), vec.size());;
+	}
 	SingleMIDIReProcessor(wstring filename, DWORD Settings, DWORD Tempo, DWORD GlobalOffset, WORD PPQN, DWORD ThreadID, BYTE_PLC_Core *VolumeMapCore, _14BIT_PLC_Core* PitchMapCore, CutAndTransposeKeys* KeyConverter, wstring RPostfix = L"_.mid", BIT InplaceMerge = 0, UINT64 FileSize = 0, INT64 Start = 0, INT64 Length = -1) {
 		this->ThreadID = ThreadID;
 		this->FileName = filename;
@@ -358,7 +365,7 @@ struct SingleMIDIReProcessor {
 	#define PCLOG true
 	void ReProcess() {
 		bbb_ffr fi(FileName.c_str());
-		ofstream fo(this->FileName + Postfix, ios::binary | ios::out);
+		ofstream file_output(this->FileName + Postfix, ios::binary | ios::out);
 		vector<BYTE> Track;///quite memory expensive...
 		vector<BYTE> UnLoad;
 		array<DWORD,4096> CurHolded;
@@ -382,12 +389,12 @@ struct SingleMIDIReProcessor {
 		}
 		///processing starts here///
 		for (int i = 0; i < 12 && fi.good(); i++)
-			fo.put(fi.get());
+			file_output.put(fi.get());
 		///PPQN swich
 		OldPPQN = ((WORD)fi.get())<<8;
 		OldPPQN |= fi.get();
-		fo.put(NewPPQN >> 8);
-		fo.put(NewPPQN & 0xFF);
+		file_output.put(NewPPQN >> 8);
+		file_output.put(NewPPQN & 0xFF);
 		PPQNIncreaseAmount = (double)NewPPQN / OldPPQN;
 		///if statement says everything
 		///just in case of having no tempoevents :)
@@ -565,12 +572,13 @@ struct SingleMIDIReProcessor {
 						else {
 							Track.insert(Track.end() - size - 3, UnLoad.begin(), UnLoad.end());
 							UnLoad.clear();
-							fo.put('M'); fo.put('T'); fo.put('r'); fo.put('k');
-							fo.put(Track.size() >> 24);///size of track
-							fo.put(Track.size() >> 16);
-							fo.put(Track.size() >> 8);
-							fo.put(Track.size());
-							copy(Track.begin(), Track.end(), ostream_iterator<BYTE>(fo));
+							file_output.put('M'); file_output.put('T'); file_output.put('r'); file_output.put('k');
+							file_output.put(Track.size() >> 24);///size of track
+							file_output.put(Track.size() >> 16);
+							file_output.put(Track.size() >> 8);
+							file_output.put(Track.size());
+							//copy(Track.begin(), Track.end(), ostream_iterator<BYTE>(fo));
+							SingleMIDIReProcessor::ostream_write(Track, file_output);
 							LogLine = "Track " + to_string(TrackCount++) + " is processed";
 						}
 						Track.clear();
@@ -987,12 +995,13 @@ struct SingleMIDIReProcessor {
 						else {
 							Track.insert(Track.end() - size - 3, UnLoad.begin(), UnLoad.end());
 							UnLoad.clear();
-							fo.put('M'); fo.put('T'); fo.put('r'); fo.put('k');
-							fo.put(Track.size() >> 24);///size of track
-							fo.put(Track.size() >> 16);
-							fo.put(Track.size() >> 8);
-							fo.put(Track.size());
-							copy(Track.begin(), Track.end(), ostream_iterator<BYTE>(fo));
+							file_output.put('M'); file_output.put('T'); file_output.put('r'); file_output.put('k');
+							file_output.put(Track.size() >> 24);///size of track
+							file_output.put(Track.size() >> 16);
+							file_output.put(Track.size() >> 8);
+							file_output.put(Track.size());
+							//copy(Track.begin(), Track.end(), ostream_iterator<BYTE>(file_output));
+							SingleMIDIReProcessor::ostream_write(Track, file_output);
 							WarningLine = "An attempt to recover the track. (" + to_string(TrackCount++) + ")";
 							TrackCount++;
 						}
@@ -1007,10 +1016,10 @@ struct SingleMIDIReProcessor {
 		}
 		fi.close();
 		Track.clear();
-		fo.seekp(10, ios::beg);///changing amount of tracks :)
-		fo.put(TrackCount >> 8);
-		fo.put(TrackCount & 0xFF);
-		fo.close();
+		file_output.seekp(10, ios::beg);///changing amount of tracks :)
+		file_output.put(TrackCount >> 8);
+		file_output.put(TrackCount & 0xFF);
+		file_output.close();
 		Processing = 0;
 		Finished = 1;
 	}
@@ -1089,15 +1098,12 @@ struct MIDICollectionThreadedMerger {
 					else if (Holded[Argument] > 0) {
 						Holded[Argument]--;
 					}
-					else {
-						printf("unholded: %d: %d\n", Argument, CurPosition);;
-					}
 				}
 				else if ((TrackData[CurPosition] >= 0xA0 && TrackData[CurPosition] <= 0xBF) || (TrackData[CurPosition] >= 0xE0 && TrackData[CurPosition] <= 0xEF))
 					CurPosition += 3;
 				else if ((TrackData[CurPosition] >= 0xC0 && TrackData[CurPosition] <= 0xDF))
 					CurPosition += 2;
-				else if (false)
+				else if (true)
 					ThrowAlert_Error("DTI Failure at " + to_string(CurPosition) + ". Type: " +to_string(TrackData[CurPosition])+ ". Tell developer about it and give hime source midi\n");
 			}
 			else Processing = false;
@@ -1395,9 +1401,14 @@ struct MIDICollectionThreadedMerger {
 						file_output.put(TotalSize >> 16);
 						file_output.put(TotalSize >> 8);
 						file_output.put(TotalSize); 
-						copy(FrontEdge.begin(), FrontEdge.end(), ostream_iterator<BYTE>(file_output));
-						copy(Track.begin() + PrevEdgePos, Track.begin() + DTI.CurPosition, ostream_iterator<BYTE>(file_output));
-						copy(BackEdge.begin(), BackEdge.end(), ostream_iterator<BYTE>(file_output));
+
+						SingleMIDIReProcessor::ostream_write(FrontEdge, file_output);
+						//copy(FrontEdge.begin(), FrontEdge.end(), ostream_iterator<BYTE>(file_output));
+						SingleMIDIReProcessor::ostream_write(Track, Track.begin() + PrevEdgePos, Track.begin() + DTI.CurPosition, file_output);
+						//copy(Track.begin() + PrevEdgePos, Track.begin() + DTI.CurPosition, ostream_iterator<BYTE>(file_output));
+						SingleMIDIReProcessor::ostream_write(BackEdge, BackEdge.begin(), BackEdge.end(), file_output);
+						//copy(BackEdge.begin(), BackEdge.end(), ostream_iterator<BYTE>(file_output));
+
 						file_output.put(0);//that's why +4
 						file_output.put(0xFF);
 						file_output.put(0x2F);
@@ -1414,8 +1425,12 @@ struct MIDICollectionThreadedMerger {
 					file_output.put(TotalSize >> 16);
 					file_output.put(TotalSize >> 8);
 					file_output.put(TotalSize);
-					copy(FrontEdge.begin(), FrontEdge.end(), ostream_iterator<BYTE>(file_output));
-					copy(Track.begin() + PrevEdgePos, Track.end(), ostream_iterator<BYTE>(file_output));
+
+					SingleMIDIReProcessor::ostream_write(FrontEdge, file_output);
+					//copy(FrontEdge.begin(), FrontEdge.end(), ostream_iterator<BYTE>(file_output));
+					SingleMIDIReProcessor::ostream_write(Track, Track.begin() + PrevEdgePos, Track.end(), file_output);
+					//copy(Track.begin() + PrevEdgePos, Track.end(), ostream_iterator<BYTE>(file_output));
+
 					FrontEdge.clear();
 					BackEdge.clear();
 					(*TrackCount)++;
@@ -1426,7 +1441,9 @@ struct MIDICollectionThreadedMerger {
 					file_output.put(Track.size() >> 16);
 					file_output.put(Track.size() >> 8);
 					file_output.put(Track.size());
-					copy(Track.begin(), Track.end(), ostream_iterator<BYTE>(file_output));
+
+					SingleMIDIReProcessor::ostream_write(Track, file_output);
+					//copy(Track.begin(), Track.end(), ostream_iterator<BYTE>(file_output));
 					(*TrackCount)++;
 				}
 				Track.clear();

@@ -226,7 +226,7 @@
     </ResourceCompile>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClInclude Include="bbb_ffr.h" />
+    <ClInclude Include="bbb_ffio.h" />
     <ClInclude Include="consts.h" />
     <ClInclude Include="fast_ifile.h" />
     <ClInclude Include="font_extractor.h" />
