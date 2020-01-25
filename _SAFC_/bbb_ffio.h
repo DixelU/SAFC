@@ -11,7 +11,7 @@ private:
 	unsigned char* buffer;
 	size_t buffer_size;
 	size_t inner_buffer_pos;
-	INT64 file_pos;
+	signed long long int file_pos;
 	bool is_open;
 	bool is_eof;
 	bool next_chunk_is_unavailable;
@@ -39,7 +39,7 @@ public:
 	byte_by_byte_fast_file_reader(const wchar_t* filename, int default_buffer_size = 20000000) {
 		auto err_no = _wfopen_s(&file, filename, L"rb");
 		is_open = !(err_no);
-		next_chunk_is_unavailable = is_eof = (file) ? feof(file) : true;
+		next_chunk_is_unavailable = (is_eof = (file) ? feof(file) : true);
 		if (err_no | is_eof) {
 			file_pos = 0;
 			buffer = nullptr;
@@ -61,7 +61,34 @@ public:
 		if (is_open)
 			fclose(file);
 	}
-	inline void seekg(INT64 abs_pos) {
+	inline void reopen_next_file(const wchar_t* filename) {
+		close(); 
+		auto err_no = _wfopen_s(&file, filename, L"rb");
+		is_open = !(err_no);
+		next_chunk_is_unavailable = (is_eof = (file) ? feof(file) : true);
+		if ((err_no | is_eof) && buffer_size) {
+			file_pos = 0;
+			buffer_size = 0;
+			inner_buffer_pos = 0;
+		}
+		else {
+			file_pos = 0;
+			inner_buffer_pos = 0;
+			ZeroMemory(buffer, buffer_size);
+			__read_next_chunk();
+		}
+	}
+	//rdbuf analogue
+	inline void put_into_ostream(std::ostream& out) {
+		while (!is_eof) {
+			size_t offset = 0;
+			file_pos += (offset = (buffer_size - inner_buffer_pos));
+			out.write((char*)(buffer + inner_buffer_pos), offset);
+			__read_next_chunk();
+		}
+		close();
+	}
+	inline void seekg(signed long long int abs_pos) {
 		_fseeki64_nolock(file, file_pos = abs_pos, 0); 
 		__read_next_chunk();
 	}
@@ -79,7 +106,7 @@ public:
 		is_eof = true;
 		is_open = false;
 	}
-	inline INT64 tellg() const {
+	inline signed long long int  tellg() const {
 		return file_pos;
 	}
 	inline bool good() {

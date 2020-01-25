@@ -1474,28 +1474,34 @@ struct MIDICollectionThreadedMerger {
 			}
 			WORD T=0;
 			BIT FirstFlag=1;
-			//BYTE IO;
-			ofstream fo(_SaveTo + L".R.mid", ios::binary | ios::out);
-			fo << "MThd" << '\0' << '\0' << '\0' << (char)6 << '\0' << (char)1;
-			fo.put(0);
-			fo.put(0);
-			fo.put(PPQN>>8);
-			fo.put(PPQN);
+			const size_t buffer_size = 20000000;
+			BYTE *buffer = new BYTE[buffer_size];
+			ofstream file_output(_SaveTo + L".R.mid", ios::binary | ios::out);
+			bbb_ffr file_input(((*(RMC->begin()))->FileName + (*(RMC->begin()))->Postfix).c_str());
+			wstring filename = ((*(RMC->begin()))->FileName + (*(RMC->begin()))->Postfix);
+			file_output.rdbuf()->pubsetbuf((char*)buffer, buffer_size);
+			file_output << "MThd" << '\0' << '\0' << '\0' << (char)6 << '\0' << (char)1;
+			file_output.put(0);
+			file_output.put(0);
+			file_output.put(PPQN>>8);
+			file_output.put(PPQN);
 			for (auto Y = RMC->begin(); Y != RMC->end(); Y++) {
-				ifstream fi((*Y)->FileName + (*Y)->Postfix, ios::binary | ios::in);
+				filename = (*Y)->FileName + (*Y)->Postfix;
+				if (Y != RMC->begin())
+					file_input.reopen_next_file(filename.c_str());
 				*TrackCount += (*Y)->TrackCount;
-				fi.seekg(14);
-				fo.operator<<(fi.rdbuf());//oooof ... i'll keep it this way to see what this actually does
-				fi.close();
-				if ((*Y)->BoolSettings&_BoolSettings::remove_remnants)
-					_wremove(((*Y)->FileName + (*Y)->Postfix).c_str());
-				///fo << fi.rdbuf();
+				for (int i = 0; i < 14; i++)
+					file_input.get();
+				file_input.put_into_ostream(file_output); 
+				int t;
+				if ((*Y)->BoolSettings & _BoolSettings::remove_remnants)
+					t = _wremove(filename.c_str());
 			}
-			fo.seekp(10, ios::beg);
-			fo.put(*TrackCount >> 8);
-			fo.put(*TrackCount);
+			file_output.seekp(10, ios::beg);
+			file_output.put(*TrackCount >> 8);
+			file_output.put(*TrackCount);
 			(*FinishedFlag) = 1; /// Will this work?
-			fo.close();
+			file_output.close();
 			delete RMC;
 		}, RegularMergeCandidats, &IntermediateRegularFlag, FinalPPQN, SaveTo, &IRTrackCount);
 		RMC_Processor.detach();
@@ -1506,16 +1512,14 @@ struct MIDICollectionThreadedMerger {
 	}
 	void FinalMerge() {
 		thread RMC_Processor([this](BIT *FinishedFlag, wstring _SaveTo) {
-			ifstream	*IM = new ifstream(_SaveTo + L".I.mid", ios::binary | ios::out),
-						*RM = new ifstream(_SaveTo + L".R.mid", ios::binary | ios::out);
+			bbb_ffr	*IM = new bbb_ffr(_SaveTo + L".I.mid"),
+						*RM = new bbb_ffr(_SaveTo + L".R.mid");
 			ofstream F(_SaveTo, ios::binary | ios::out);
-			BIT IMgood= IM->is_open(), RMgood= RM->is_open();
+			BIT IMgood= !IM->eof(), RMgood= !RM->eof();
 			if (!IMgood || !RMgood) {
 				IM->close();
 				RM->close();
 				F.close();
-				//wcout << '#' << _SaveTo.c_str() << '#' << endl;
-				//cout << string(_SaveTo.begin(), _SaveTo.end()) << endl;
 				_wremove(_SaveTo.c_str());
 				_wrename((_SaveTo + L".I.mid").c_str(), _SaveTo.c_str());
 				_wrename((_SaveTo + L".R.mid").c_str(), _SaveTo.c_str());//one of these will not work
@@ -1526,8 +1530,10 @@ struct MIDICollectionThreadedMerger {
 			WORD T=0;
 			BYTE A=0, B=0;
 			F << "MThd" << '\0' << '\0' << '\0' << (char)6 << '\0' << (char)1;
-			IM->seekg(10);
-			if (RMgood)RM->seekg(10);
+			for (int i = 0; i < 10; i++)
+				IM->get();
+			for (int i = 0; i < 10; i++)
+				RM->get();
 			A = IM->get();
 			B = IM->get();
 			T = (A + RM->get()) << 8;
@@ -1538,9 +1544,10 @@ struct MIDICollectionThreadedMerger {
 			F.put(B);
 			F.put(IM->get());
 			F.put(IM->get());
-			RM->seekg(14);
-			F << IM->rdbuf();
-			F << RM->rdbuf();
+			for (int i = 0; i < 4; i++)
+				RM->get();
+			IM->put_into_ostream(F);
+			RM->put_into_ostream(F);
 			IM->close();
 			RM->close();
 			delete IM;
