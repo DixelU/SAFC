@@ -290,6 +290,44 @@ struct CutAndTransposeKeys {
 #define MThd 1297377380
 #define STRICT_WARNINGS true
 
+template<typename T>
+struct Locker {
+private:
+	T abc;
+	recursive_mutex mtx;
+public:
+	void lock() {
+		mtx.lock();
+	}
+	void unlock() {
+		mtx.unlock();
+	}
+	T& operator*() {
+		return abc;
+	}
+	const T& operator*() const {
+		return abc;
+	}
+};
+
+//future iterator
+struct SingleMIDIInfoCollector {
+	struct TempoEvent {
+		BYTE A;
+		BYTE B;
+		BYTE C;
+		inline operator double() {
+			DWORD L = (A<<16) | (B<<8) | (C);
+			return 60000000. / L;
+		}
+	};
+	wstring FileName;
+	string LogLine;
+	Locker<std::vector<std::pair<UINT64, TempoEvent>>> TempoMap;
+	Locker<std::vector<UINT64>> TracksBeginings;
+	BIT Processing;
+};
+
 struct SingleMIDIReProcessor {
 	DWORD ThreadID;
 	wstring FileName,Postfix;
@@ -1512,8 +1550,8 @@ struct MIDICollectionThreadedMerger {
 	}
 	void FinalMerge() {
 		thread RMC_Processor([this](BIT *FinishedFlag, wstring _SaveTo) {
-			bbb_ffr	*IM = new bbb_ffr(_SaveTo + L".I.mid"),
-						*RM = new bbb_ffr(_SaveTo + L".R.mid");
+			bbb_ffr	*IM = new bbb_ffr((_SaveTo + L".I.mid").c_str()),
+						*RM = new bbb_ffr((_SaveTo + L".R.mid").c_str());
 			ofstream F(_SaveTo, ios::binary | ios::out);
 			BIT IMgood= !IM->eof(), RMgood= !RM->eof();
 			if (!IMgood || !RMgood) {
@@ -1561,17 +1599,7 @@ struct MIDICollectionThreadedMerger {
 		RMC_Processor.detach();
 	}
 };
-/*
-BIT operator<(MIDIEvent_3FP A, MIDIEvent_3FP B) {
-//	if (A.Type < B.Type)return 1;
-//	else if (A.Type == B.Type) {
-//		if (A.Key < B.Key)return 1;
-//		else return 0;
-//	}
-//	else return 0;
-	return (A.Key < B.Key);
-}
-*/
+
 struct FastMIDIInfoCollector {
 	wstring File;
 	BIT IsAcssessable,IsMIDI;
