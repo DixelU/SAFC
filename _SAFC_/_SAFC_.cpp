@@ -402,7 +402,7 @@ struct SingleMIDIReProcessor {
 	}
 	#define PCLOG true
 	void ReProcess() {
-		bbb_ffr fi(FileName.c_str());
+		bbb_ffr file_input(FileName.c_str());
 		ofstream file_output(this->FileName + Postfix, ios::binary | ios::out);
 		vector<BYTE> Track;///quite memory expensive...
 		vector<BYTE> UnLoad;
@@ -426,11 +426,11 @@ struct SingleMIDIReProcessor {
 			Tempo3 = ((60000000 / NewTempo) & 0xFF);
 		}
 		///processing starts here///
-		for (int i = 0; i < 12 && fi.good(); i++)
-			file_output.put(fi.get());
+		for (int i = 0; i < 12 && file_input.good(); i++)
+			file_output.put(file_input.get());
 		///PPQN swich
-		OldPPQN = ((WORD)fi.get())<<8;
-		OldPPQN |= fi.get();
+		OldPPQN = ((WORD)file_input.get())<<8;
+		OldPPQN |= file_input.get();
 		file_output.put(NewPPQN >> 8);
 		file_output.put(NewPPQN & 0xFF);
 		PPQNIncreaseAmount = (double)NewPPQN / OldPPQN;
@@ -447,17 +447,16 @@ struct SingleMIDIReProcessor {
 			EventCounter++;
 		}
 		///Tracks 
-
-		while (fi.good() && !fi.eof()) {
+		while (file_input.good() && !file_input.eof()) {
 			Header = 0;
-			while (Header != MTrk && fi.good() && !fi.eof()) {//MTrk = 1297379947
-				Header = (Header << 8) | fi.get();
+			while (Header != MTrk && file_input.good() && !file_input.eof()) {//MTrk = 1297379947
+				Header = (Header << 8) | file_input.get();
 			}
 			///here was header;
-			for (int i = 0; i < 4 && fi.good(); i++)
-				fi.get();
+			for (int i = 0; i < 4 && file_input.good(); i++)
+				file_input.get();
 
-			if (fi.eof())break;
+			if (file_input.eof())break;
 
 			INT64 CurTick = 0;//understandable
 			bool Entered = false, Exited = false;
@@ -465,7 +464,7 @@ struct SingleMIDIReProcessor {
 
 			DeltaTimeTranq += GlobalOffset;
 			///Parsing events
-			while (fi.good() && !fi.eof()) {
+			while (file_input.good() && !file_input.eof()) {
 				if (KeyConverter) {//?
 					Header = 0;
 					NULL;
@@ -475,9 +474,9 @@ struct SingleMIDIReProcessor {
 				DWORD size = 0, true_delta;
 				IO = 0;
 				do {
-					IO = fi.get();
+					IO = file_input.get();
 					vlv = vlv << 7 | IO&0x7F;
-				} while (IO & 0x80 && !fi.eof());
+				} while (IO & 0x80 && !file_input.eof());
 				//DWORD file_pos = fi.tellg();
 				DeltaTimeTranq += ((double)vlv * PPQNIncreaseAmount) + TickTranq;
 				DeltaTimeTranq -= (tvlv = (vlv = (DWORD)DeltaTimeTranq));
@@ -582,14 +581,14 @@ struct SingleMIDIReProcessor {
 				for (DWORD i = 2; i <= size; i++) {
 					Track[Track.size() - i] |= 0x80;///hack (going from 2 instead of going from one)
 				}
-				IO = fi.get();
+				IO = file_input.get();
 				if (IO == 0xFF) {//I love metaevents :d
 					RSB = 0;
 					Track.push_back(IO);
-					IO = fi.get();//MetaEventType.
+					IO = file_input.get();//MetaEventType.
 					Track.push_back(IO);
 					if (IO == 0x2F) {//end of track event
-						fi.get();
+						file_input.get();
 						Track.push_back(0);
 
 						UnLoad.push_back(0x01);
@@ -629,37 +628,37 @@ struct SingleMIDIReProcessor {
 							DWORD vlvsize = 0;
 							TYPEIO = IO;
 							do {
-								IO = fi.get();
+								IO = file_input.get();
 								Track.push_back(IO);
 								vlvsize++;
 								tvlv = (tvlv << 7) | (IO & 0x7F);
 							} while (IO & 0x80);
 							if (TYPEIO != 0x51 ) {
 								for (int i = 0; i < tvlv; i++)
-									Track.push_back(fi.get()); 
+									Track.push_back(file_input.get()); 
 							}
 							else {
 								if (BoolSettings&SMP_BOOL_SETTINGS_IGNORE_TEMPOS) {//deleting
 									TickTranq = vlv;
 									for (int i = -2-vlvsize; i < (INT32)size; i++)
 										Track.pop_back();
-									for (int i = 0; i < tvlv; i++)fi.get();
+									for (int i = 0; i < tvlv; i++)file_input.get();
 									continue;
 								}
 								else {
 									if (NewTempo) {
-										fi.get();
-										fi.get();
-										fi.get();
+										file_input.get();
+										file_input.get();
+										file_input.get();
 										Track.push_back(Tempo1);
 										Track.push_back(Tempo2);
 										Track.push_back(Tempo3);
 										EventCounter++;
 									}
 									else {
-										Track.push_back(fi.get());
-										Track.push_back(fi.get());
-										Track.push_back(fi.get());
+										Track.push_back(file_input.get());
+										Track.push_back(file_input.get());
+										Track.push_back(file_input.get());
 										EventCounter++;
 									}
 								}
@@ -670,7 +669,7 @@ struct SingleMIDIReProcessor {
 							DWORD vlvsize = 0;
 							TYPEIO = IO;
 							do {
-								IO = fi.get();
+								IO = file_input.get();
 								Track.push_back(IO);
 								vlvsize++;
 								tvlv = (tvlv << 7) | (IO & 0x7F);
@@ -679,23 +678,23 @@ struct SingleMIDIReProcessor {
 								TickTranq = vlv;
 								for (int i = -2 - vlvsize; i < (INT32)size; i++)
 									Track.pop_back();
-								for (int i = 0; i < tvlv; i++)fi.get();
+								for (int i = 0; i < tvlv; i++)file_input.get();
 								continue;
 							}
 							else{
 								if (NewTempo) {
-									fi.get();
-									fi.get();
-									fi.get();
+									file_input.get();
+									file_input.get();
+									file_input.get();
 									Track.push_back(Tempo1);
 									Track.push_back(Tempo2);
 									Track.push_back(Tempo3);
 									EventCounter++;
 								}
 								else {
-									Track.push_back(fi.get());
-									Track.push_back(fi.get());
-									Track.push_back(fi.get());
+									Track.push_back(file_input.get());
+									Track.push_back(file_input.get());
+									Track.push_back(file_input.get());
 									EventCounter++;
 								}
 							}
@@ -705,11 +704,11 @@ struct SingleMIDIReProcessor {
 				else if (IO >= 0x80 && IO <= 0x9F) {///notes
 					RSB = IO;
 					if (!(BoolSettings&SMP_BOOL_SETTINGS_IGNORE_NOTES) || Length>0) {
-						bool DeleteEvent = BoolSettings&SMP_BOOL_SETTINGS_IGNORE_NOTES, isnoteon = (IO >= 0x90);
-						BYTE Key = 0;
+						bool DeleteEvent = BoolSettings&SMP_BOOL_SETTINGS_IGNORE_NOTES, isnoteon = (RSB >= 0x90);
+						BYTE Key = file_input.get();
 						Track.push_back(IO);///Event|Channel data
 						if (this->KeyConverter) {////key data processing
-							auto T = (this->KeyConverter->Process(Key = fi.get()));
+							auto T = (this->KeyConverter->Process(Key));
 							if (T.has_value()) 
 								Track.push_back(Key = T.value());
 							else {
@@ -717,16 +716,17 @@ struct SingleMIDIReProcessor {
 								DeleteEvent = true;
 							}
 						}
-						else Track.push_back(Key = fi.get());///key data processing
-						BYTE Vol = fi.get();
-						if (this->VolumeMapCore && IO & 0x10)
+						else Track.push_back(Key);///key data processing
+						BYTE Vol = file_input.get();
+						if (this->VolumeMapCore && (IO & 0x10))
 							Vol = (*this->VolumeMapCore)[Vol];
 						if (!Vol && isnoteon) {
 							IO = (IO & 0xF) | 0x80;
 							*((&Track.back()) - 1) = IO;
 						}
 						isnoteon = (IO >= 0x90);
-						SHORT HoldIndex = (Key << 4) | (RSB & 0xF);
+
+						SHORT HoldIndex = (Key << 4) | (IO & 0xF);
 						////////added
 						if (!DeleteEvent) {
 							if (isnoteon) {//if noteon
@@ -766,7 +766,7 @@ struct SingleMIDIReProcessor {
 						TickTranq = vlv;
 						for (int i = 0; i < (INT32)size; i++)
 							Track.pop_back();
-						fi.get(); fi.get();///for 1st and 2nd parameter
+						file_input.get(); file_input.get();///for 1st and 2nd parameter
 						continue;
 					}
 				}
@@ -775,15 +775,15 @@ struct SingleMIDIReProcessor {
 					if (!(BoolSettings&SMP_BOOL_SETTINGS_IGNORE_PITCHES)) {
 						Track.push_back(IO);
 						if (this->PitchMapCore) {
-							WORD PitchBend = fi.get()<<7;
-							PitchBend |= fi.get()&0x7F;
+							WORD PitchBend = file_input.get()<<7;
+							PitchBend |= file_input.get()&0x7F;
 							PitchBend = (*PitchMapCore)[PitchBend];
 							Track.push_back((PitchBend >> 7) & 0x7F);
 							Track.push_back(PitchBend & 0x7F);
 						}
 						else {
-							Track.push_back(fi.get()&0x7F);
-							Track.push_back(fi.get()&0x7F);
+							Track.push_back(file_input.get()&0x7F);
+							Track.push_back(file_input.get()&0x7F);
 						}
 						EventCounter++;
 					}
@@ -791,7 +791,7 @@ struct SingleMIDIReProcessor {
 						TickTranq = vlv;
 						for (int i = 0; i < (INT32)size; i++)
 							Track.pop_back();
-						fi.get(); fi.get();///for 1st and 2nd parameter
+						file_input.get(); file_input.get();///for 1st and 2nd parameter
 						continue;
 					}
 				}
@@ -799,15 +799,15 @@ struct SingleMIDIReProcessor {
 					RSB = IO;
 					if (!(BoolSettings&SMP_BOOL_SETTINGS_IGNORE_ALL_BUT_TEMPOS_NOTES_AND_PITCH)) {
 						Track.push_back(IO);///event type
-						Track.push_back(fi.get());///1st parameter
-						Track.push_back(fi.get());///2nd parameter
+						Track.push_back(file_input.get());///1st parameter
+						Track.push_back(file_input.get());///2nd parameter
 						EventCounter++;
 					}
 					else {
 						TickTranq = vlv;
 						for (int i = 0; i < (INT32)size; i++)
 							Track.pop_back();
-						fi.get(); fi.get();
+						file_input.get(); file_input.get();
 						continue;
 					}
 				}
@@ -815,15 +815,15 @@ struct SingleMIDIReProcessor {
 					RSB = IO;
 					if (!(BoolSettings&SMP_BOOL_SETTINGS_IGNORE_ALL_BUT_TEMPOS_NOTES_AND_PITCH)) {
 						Track.push_back(IO);///event type
-						if(BoolSettings&SMP_BOOL_SETTINGS_ALL_INSTRUMENTS_TO_PIANO)Track.push_back(fi.get() & 0);///1st parameter
-						else Track.push_back(fi.get() & 0x7F);
+						if(BoolSettings&SMP_BOOL_SETTINGS_ALL_INSTRUMENTS_TO_PIANO)Track.push_back(file_input.get() & 0);///1st parameter
+						else Track.push_back(file_input.get() & 0x7F);
 						EventCounter++;
 					}
 					else {
 						TickTranq = vlv;
 						for (int i = 0; i < (INT32)size; i++)
 							Track.pop_back();
-						fi.get();///for its single parameter
+						file_input.get();///for its single parameter
 						continue;
 					}
 				}
@@ -831,13 +831,13 @@ struct SingleMIDIReProcessor {
 					RSB = IO;
 					if (!(BoolSettings&SMP_BOOL_SETTINGS_IGNORE_ALL_BUT_TEMPOS_NOTES_AND_PITCH)) {
 						Track.push_back(IO);///event type
-						Track.push_back(fi.get() & 0x7F);
+						Track.push_back(file_input.get() & 0x7F);
 						//fi.get();
 						EventCounter++;
 					}
 					else {
 						TickTranq = vlv;
-						fi.get();///...:D
+						file_input.get();///...:D
 						for (int i = 0; i < (INT32)size; i++)
 							Track.pop_back();
 						continue;
@@ -849,33 +849,34 @@ struct SingleMIDIReProcessor {
 					tvlv = 0;
 					Track.push_back(IO);
 					do {
-						IO = fi.get();
+						IO = file_input.get();
 						Track.push_back(IO);
 						vlvsize++;
 						tvlv = (tvlv << 7) | (IO & 0x7F);
 					} while (IO & 0x80);
 					if (!(BoolSettings&SMP_BOOL_SETTINGS_IGNORE_ALL_BUT_TEMPOS_NOTES_AND_PITCH)) {
 						for (int i = 0; i < tvlv; i++)
-							Track.push_back(fi.get());
+							Track.push_back(file_input.get());
 						EventCounter++;
 					}
 					else {
 						TickTranq = vlv;
 						for (int i = -1 - vlvsize; i < (INT32)size; i++)
 							Track.pop_back();
-						for (int i = 0; i < tvlv; i++)fi.get();
+						for (int i = 0; i < tvlv; i++)file_input.get();
 						continue;
 					}
 				}
 				else {///RUNNING STATUS BYTE
 					//////////////////////////
+					//WarningLine = "Running status detected";
 					if (RSB >= 0x80 && RSB <= 0x9F) {///notes
 						if (!(BoolSettings&SMP_BOOL_SETTINGS_IGNORE_NOTES)) {
-							bool DeleteEvent = BoolSettings & SMP_BOOL_SETTINGS_IGNORE_NOTES, isnoteon = RSB >= 0x90;
+							bool DeleteEvent = (BoolSettings & SMP_BOOL_SETTINGS_IGNORE_NOTES), isnoteon = (RSB >= 0x90);
 							BYTE Key = IO;
 							Track.push_back(RSB);///Event|Channel data
 							if (this->KeyConverter) {////key data processing
-								auto T = (this->KeyConverter->Process(IO));
+								auto T = (this->KeyConverter->Process(Key));
 								if (T.has_value())
 									Track.push_back(Key = T.value());
 								else {
@@ -883,17 +884,22 @@ struct SingleMIDIReProcessor {
 									DeleteEvent = true;
 								}
 							}
-							else Track.push_back(Key = IO);///key data processing
+							else Track.push_back(Key);///key data processing
 
-							BYTE Vol = fi.get();
-							if (this->VolumeMapCore && (RSB & 0x10))
+							BYTE Vol = file_input.get();
+							if (this->VolumeMapCore && isnoteon)
 								Vol = (*this->VolumeMapCore)[Vol];
 							if (!Vol && isnoteon) {
 								IO = (RSB & 0xF) | 0x80;
 								*((&Track.back()) - 1) = IO;
 							}
+							else
+								IO = RSB;
+
 							isnoteon = (IO >= 0x90);
-							SHORT HoldIndex = (Key << 4) | (IO & 0xF);
+							SHORT HoldIndex = (Key << 4) | (RSB & 0xF);
+							//printf("%X %X\n", Key, file_input.tellg());
+
 							////////added
 							if (!DeleteEvent) {
 								if (isnoteon) {//if noteon
@@ -911,9 +917,9 @@ struct SingleMIDIReProcessor {
 									else {
 										DeleteEvent = true;
 										UnholdedCount++;
+										//printf("%X %X nonholded\n", Key, file_input.tellg());
 										if (STRICT_WARNINGS)
 											WarningLine = "(RSB) OFF of nonON Note: " + to_string(UnholdedCount);
-										//cout << vlv << ":" << TickTranq << endl;
 									}
 								}
 							}
@@ -933,7 +939,7 @@ struct SingleMIDIReProcessor {
 							TickTranq = vlv;
 							for (int i = 0; i < (INT32)size; i++)
 								Track.pop_back();
-							fi.get();///for 2nd parameter
+							file_input.get();///for 2nd parameter
 							continue;
 						}
 					}
@@ -942,14 +948,14 @@ struct SingleMIDIReProcessor {
 							Track.push_back(RSB);
 							if (this->PitchMapCore) {
 								WORD PitchBend = IO << 7;
-								PitchBend |= fi.get() & 0x7F;
+								PitchBend |= file_input.get() & 0x7F;
 								PitchBend = (*PitchMapCore)[PitchBend];
 								Track.push_back((PitchBend >> 7) & 0x7F);
 								Track.push_back(PitchBend & 0x7F);
 							}
 							else {
 								Track.push_back(IO);
-								Track.push_back(fi.get() & 0x7F);
+								Track.push_back(file_input.get() & 0x7F);
 							}
 							EventCounter++;
 						}
@@ -957,7 +963,7 @@ struct SingleMIDIReProcessor {
 							TickTranq = vlv;
 							for (int i = 0; i < (INT32)size; i++)
 								Track.pop_back();
-							fi.get();///for 2nd parameter
+							file_input.get();///for 2nd parameter
 							continue;
 						}
 					}
@@ -965,21 +971,21 @@ struct SingleMIDIReProcessor {
 						if (!(BoolSettings&SMP_BOOL_SETTINGS_IGNORE_ALL_BUT_TEMPOS_NOTES_AND_PITCH)) {
 							Track.push_back(RSB);///event type
 							Track.push_back(IO);///1st parameter
-							Track.push_back(fi.get());///2nd parameter
+							Track.push_back(file_input.get());///2nd parameter
 							EventCounter++;
 						}
 						else {
 							TickTranq = vlv;
 							for (int i = 0; i < (INT32)size; i++)
 								Track.pop_back();
-							fi.get();
+							file_input.get();
 							continue;
 						}
 					}
 					else if ((RSB >= 0xC0 && RSB <= 0xCF)) {///program change
 						if (!(BoolSettings&SMP_BOOL_SETTINGS_IGNORE_ALL_BUT_TEMPOS_NOTES_AND_PITCH)) {
 							Track.push_back(RSB);///event type
-							if (BoolSettings&SMP_BOOL_SETTINGS_ALL_INSTRUMENTS_TO_PIANO)Track.push_back(fi.get() & 0);///1st parameter
+							if (BoolSettings&SMP_BOOL_SETTINGS_ALL_INSTRUMENTS_TO_PIANO)Track.push_back(file_input.get() & 0);///1st parameter
 							else Track.push_back(IO);///////////////////////////////aksjdhkahkfjhak
 							EventCounter++;
 						}
@@ -1005,11 +1011,12 @@ struct SingleMIDIReProcessor {
 						}
 					}
 					else {
-						ErrorLine = "Track corruption. Pos:" + to_string(fi.tellg());
+						ErrorLine = "Track corruption. Pos:" + to_string(file_input.tellg());
+						//ThrowAlert_Error(ErrorLine);
 						RSB = 0;
 						DWORD T=0;
-						while (T != 0x2FFF00 && fi.good() && !fi.eof()) {
-							T = ((T << 8) | fi.get())&0xFFFFFF;
+						while (T != 0x2FFF00 && file_input.good() && !file_input.eof()) {
+							T = ((T << 8) | file_input.get())&0xFFFFFF;
 						}
 						Track.push_back(0x2F);
 						Track.push_back(0xFF);
@@ -1050,9 +1057,9 @@ struct SingleMIDIReProcessor {
 				}
 				TickTranq = 0;
 			}
-			FilePosition = fi.tellg();
+			FilePosition = file_input.tellg();
 		}
-		fi.close();
+		file_input.close();
 		Track.clear();
 		file_output.seekp(10, ios::beg);///changing amount of tracks :)
 		file_output.put(TrackCount >> 8);
@@ -3964,15 +3971,15 @@ struct WindowsHandler {
 	#define Map(WindowName,ElementName) (*Map[WindowName])[ElementName]
 	list<map<string, MoveableWindow*>::iterator> ActiveWindows;
 	string MainWindow_ID,MW_ID_Holder;
-	BIT InterfaceIsActive, WindowWasDisabledDuringMouseHandling;
+	BIT WindowWasDisabledDuringMouseHandling;
+	std::recursive_mutex locker;
 	WindowsHandler() {
 		MW_ID_Holder = "";
 		MainWindow_ID = "MAIN";
-		InterfaceIsActive = 1;
 		WindowWasDisabledDuringMouseHandling = 0;
 		MoveableWindow* ptr;
-		Map["ALERT"] = ptr = new MoveableWindow("Alert window", System_White, -100, 25, 200, 50, 0xFFFFFFAF, 0x3F3F3F7F);
-		(*ptr)["AlertText"] = new TextBox("_", System_Black, 17.5, -7.5, 37, 160, 7.5, 0, 0, 0, _Align::left, TextBox::VerticalOverflow::recalibrate);
+		Map["ALERT"] = ptr = new MoveableWindow("Alert window", System_White, -100, 25, 200, 50, 0x3F3F3FCF, 0x7F7F7F7F);
+		(*ptr)["AlertText"] = new TextBox("_", System_White, 17.5, -7.5, 37, 160, 7.5, 0, 0, 0, _Align::left, TextBox::VerticalOverflow::recalibrate);
 		(*ptr)["AlertSign"] = new SpecialSignHandler(SpecialSigns::DrawACircle,-80,-12.5,7.5,0x000000FF,0x001FFFFF);
 
 		Map["PROMPT"] = ptr = new MoveableWindow("prompt", System_White, -50, 50, 100, 100, 0x3F3F3FCF, 0x7F7F7F7F);
@@ -3981,7 +3988,7 @@ struct WindowsHandler {
 		(*ptr)["BUTT"] = new Button("Submit", System_White, NULL, -0, -20 - WindowHeapSize, 80, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFF7F00FF, 0xFFFFFFFF, 0xFF7F00FF, NULL, " ");
 	}
 	void MouseHandler(float mx,float my, CHAR Button, CHAR State) {
-		if (!InterfaceIsActive)return;
+		locker.lock();
 		//printf("%X\n", Button);
 		list<map<string, MoveableWindow*>::iterator>::iterator AWIterator = ActiveWindows.begin(),CurrentAW;
 		CurrentAW = AWIterator;
@@ -3995,8 +4002,10 @@ struct WindowsHandler {
 			if (WindowWasDisabledDuringMouseHandling)
 				WindowWasDisabledDuringMouseHandling = 0;
 		}
+		locker.unlock();
 	}
 	void ThrowPrompt(string StaticTipText,string WindowTitle, void(*OnSubmit)(),_Align STipAlign,InputField::Type InputType,string DefaultString="",DWORD MaxChars=0) {
+		locker.lock();
 		auto wptr = Map["PROMPT"];
 		auto ifptr = ((InputField*)(*wptr)["FLD"]);
 		auto tbptr = ((TextBox*)(*wptr)["TXT"]);
@@ -4010,8 +4019,10 @@ struct WindowsHandler {
 
 		wptr->SafeChangePosition(-50, 50);
 		EnableWindow("PROMPT");
+		locker.unlock();
 	}
 	void ThrowAlert(string AlertText, string AlertHeader, void(*SpecialSignsDrawFunc)(float, float, float, DWORD, DWORD), BIT Update = false, DWORD FRGBA = 0, DWORD SRGBA = 0) {
+		locker.lock();
 		auto AlertWptr = Map["ALERT"];
 		AlertWptr->SafeWindowRename(AlertHeader);
 		AlertWptr->_NotSafeResize_Centered(50, 200);
@@ -4028,37 +4039,55 @@ struct WindowsHandler {
 			AlertWSptr->SRGBA = SRGBA;
 		}
 		EnableWindow("ALERT");
+		locker.unlock();
 	}
 	void DisableWindow(string ID) {
+		locker.lock();
 		auto Y = Map.find(ID);
 		if (Y != Map.end()) {
 			WindowWasDisabledDuringMouseHandling = 1;
 			Y->second->Drawable = 1;
 			ActiveWindows.remove(Y);
 		}
+		locker.unlock();
 	}
 	void DisableAllWindows() {
+		locker.lock();
 		ActiveWindows.clear();
 		EnableWindow(MainWindow_ID);
+		locker.unlock();
 	}
 	void TurnOnMainWindow() {
+		locker.lock();
 		if (this->MW_ID_Holder != "") 
 			swap(this->MainWindow_ID, this->MW_ID_Holder);
 		this->EnableWindow(MainWindow_ID);
+		locker.unlock();
 	}
 	void TurnOffMainWindow() {
+		locker.lock();
 		if (this->MW_ID_Holder == "")
 			swap(this->MainWindow_ID, this->MW_ID_Holder);
 		this->DisableWindow(MainWindow_ID);
+		locker.unlock();
 	}
 	void DisableWindow(list<map<string, MoveableWindow*>::iterator>::iterator Window) {
-		if (Window == ActiveWindows.end())return;
+		locker.lock();
+		if (Window == ActiveWindows.end()) {
+			locker.lock(); 
+			return; 
+		}
 		WindowWasDisabledDuringMouseHandling = 1;
 		(*Window)->second->Drawable = 1;
 		ActiveWindows.erase(Window);
+		locker.unlock();
 	}
 	void EnableWindow(map<string, MoveableWindow*>::iterator Window) {
-		if (Window == Map.end())return;
+		locker.lock();
+		if (Window == Map.end()) {
+			locker.lock(); 
+			return; 
+		}
 		for (auto Y = ActiveWindows.begin(), Q = ActiveWindows.begin(); Y != ActiveWindows.end(); Y++) {
 			if (*Y == Window) {
 				Window->second->Drawable = 1;
@@ -4077,19 +4106,23 @@ struct WindowsHandler {
 		}
 
 		ActiveWindows.push_front(Window);
+		locker.unlock();
 		//cout << Window->first << " " << ActiveWindows.front()->first << endl;
 	}
 	void EnableWindow(string ID) {
+		locker.lock();
 		this->EnableWindow(Map.find(ID));
+		locker.unlock();
 	}
 	void KeyboardHandler(char CH) {
-		if (!InterfaceIsActive)return;
+		locker.lock();
 		if (ActiveWindows.size())
 			(*(ActiveWindows.begin()))->second->KeyboardHandler(CH);
+		locker.unlock();
 	}
 	void Draw() {
 		BIT MetMain = 0;
-		if (!InterfaceIsActive)return;
+		locker.lock();
 		if (!ActiveWindows.empty()) {//if only reverse iterators could be easily converted to usual iterators...
 			auto Y = (++ActiveWindows.rbegin()).base();
 
@@ -4113,6 +4146,7 @@ struct WindowsHandler {
 		}
 		//cout << endl;
 		if (!MetMain)this->EnableWindow(MainWindow_ID);
+		locker.unlock();
 	}
 	inline MoveableWindow*& operator[](string ID) {
 		return (this->Map[ID]);
@@ -5746,8 +5780,9 @@ void OnStart() {
 			cout << "F: Out from sleep!!!\n";
 			MW->DeleteUIElementByName("FM");
 
+			WH->DisableWindow(WH->MainWindow_ID);
 			WH->MainWindow_ID = "MAIN";
-			WH->DisableAllWindows();
+			//WH->DisableAllWindows();
 			WH->EnableWindow("MAIN");
 			//pMCTM->ResetEverything();
 		},GlobalMCTM,MW);

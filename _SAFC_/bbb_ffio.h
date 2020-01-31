@@ -102,7 +102,8 @@ public:
 			return 0;
 	}
 	inline void close() {
-		fclose(file);
+		if(is_open)
+			fclose(file);
 		is_eof = true;
 		is_open = false;
 	}
