@@ -50,7 +50,7 @@
 #endif
 
 #include "shader_smpclass.h"
-//#include "OR.h"
+#include "allocator.h"
 #include "WinReg.h"
 
 #include "consts.h"
@@ -176,11 +176,14 @@ bool SAFC_Update(const wstring& latest_release) {
 		if (_waccess(L"SAFC.exe", 0) != 0) {
 			system("\"C:\\Program Files (x86)\\7-Zip\\7z.exe\" x -y update.7z");
 			if (_waccess(L"SAFC.exe", 0) != 0) {
-				ThrowAlert_Error("Extract: To perform this operation you must have 7-Zip installed.\n");
-				_wrename(L"_s", L"SAFC.exe");
-				_wrename(L"_f", L"freeglut.dll");
-				_wrename(L"_g", L"glew32.dll");
-				flag = false;
+				system("7z.exe x -y update.7z");
+				if (_waccess(L"SAFC.exe", 0) != 0) {
+					ThrowAlert_Error("Extract: To perform this operation you must have 7-Zip installed.\n");
+					_wrename(L"_s", L"SAFC.exe");
+					_wrename(L"_f", L"freeglut.dll");
+					_wrename(L"_g", L"glew32.dll");
+					flag = false;
+				}
 			}
 		}
 		_wremove(L"update.7z");
@@ -479,20 +482,26 @@ public:
 	}
 };
 
-//future iterator
 struct SingleMIDIInfoCollector {
 	struct TempoEvent {
 		BYTE A;
 		BYTE B;
 		BYTE C;
-		inline operator double() {
-			DWORD L = (A<<16) | (B<<8) | (C);
+		TempoEvent(BYTE A, BYTE B, BYTE C) : A(A), B(B), C(C) {	}
+		TempoEvent() :TempoEvent(0x7, 0xA1, 0x20) {}
+		inline static double get_bpm(BYTE A, BYTE B, BYTE C) {
+			DWORD L = (A << 16) | (B << 8) | (C);
 			return 60000000. / L;
 		}
+		inline operator double() {
+			return get_bpm(A, B, C);
+		}
 	};
+	using tick_tempo_pair = std::pair<UINT64, TempoEvent>;
+	using alloc_multiset = std::multiset<tick_tempo_pair, std::less<tick_tempo_pair>, moya_alloc::allocator<tick_tempo_pair>>;
 	wstring FileName;
 	string LogLine;
-	Locker<std::vector<std::pair<UINT64, TempoEvent>>> TempoMap;
+	Locker<alloc_multiset> TempoMap;
 	Locker<std::vector<UINT64>> TracksBeginings;
 	BIT Processing;
 };
