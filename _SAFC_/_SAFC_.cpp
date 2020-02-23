@@ -6319,7 +6319,7 @@ const GLchar *fragment_shader[] = { //uniform float time;
 	"    //else if(Mode==4)Color = pow(gl_Color,spirals(Time, gl_FragCoord.xy / (resolution.x * Param3 * 3.)));\n",
 	"    //else if(Mode==5)Color = pow(flare(Time, gl_FragCoord.xy, MousePos.y/resolution.y*1.8*Param3 + 0.5, Basewave, SinewaveWidth+0.15),vec4(1.)-gl_Color);\n",
 	"    //else if(Mode==6)Color = gl_Color * (Param3 * 20.) * flare2(Time, gl_FragCoord.xy, MousePos.y/resolution.y*1.8*Param3 + 0.5, Basewave + 1., SinewaveWidth+0.15,Transp);\n",
-	"	 else Color = gl_Color;\n",
+	"	 /*else*/ Color = gl_Color;\n",
 	"	 Color.w = Transp;\n",
 	"    gl_FragColor = Color;\n",
 	"}"
