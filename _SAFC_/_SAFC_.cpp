@@ -163,11 +163,10 @@ bool SAFC_Update(const wstring& link_to_commit_info) {
 	HRESULT res = URLDownloadToFileW(NULL, link_to_commit_info.c_str(), current_file_path, 0, NULL);
 	if (res == S_OK) {
 #ifndef __X64
-		constexpr wchar_t* archive_name = L"SAFC32.7z";
+		constexpr wchar_t* archive_name = (wchar_t* const)L"SAFC32.7z";;
 #else
-		constexpr wchar_t* archive_name = L"SAFC64.7z";
+		constexpr wchar_t* const archive_name = (wchar_t* const)L"SAFC64.7z";
 #endif
-
 		ifstream input(current_file_path);
 		string temp_buffer;
 		std::getline(input, temp_buffer);
@@ -225,7 +224,7 @@ void SAFC_VersionCheck() {
 		_wremove(L"_s");
 		_wremove(L"_f");
 		_wremove(L"_g");
-		constexpr wchar_t* SAFC_tags_link = L"https://api.github.com/repos/DixelU/SAFC/tags";
+		constexpr wchar_t* SAFC_tags_link = (wchar_t* const)L"https://api.github.com/repos/DixelU/SAFC/tags";
 		//printf("Url: %S\n", SAFC_tags_link);
 		wchar_t current_file_path[MAX_PATH];
 		GetCurrentDirectoryW(MAX_PATH, current_file_path);
@@ -6319,7 +6318,8 @@ const GLchar *fragment_shader[] = { //uniform float time;
 	"    //else if(Mode==4)Color = pow(gl_Color,spirals(Time, gl_FragCoord.xy / (resolution.x * Param3 * 3.)));\n",
 	"    //else if(Mode==5)Color = pow(flare(Time, gl_FragCoord.xy, MousePos.y/resolution.y*1.8*Param3 + 0.5, Basewave, SinewaveWidth+0.15),vec4(1.)-gl_Color);\n",
 	"    //else if(Mode==6)Color = gl_Color * (Param3 * 20.) * flare2(Time, gl_FragCoord.xy, MousePos.y/resolution.y*1.8*Param3 + 0.5, Basewave + 1., SinewaveWidth+0.15,Transp);\n",
-	"	 /*else*/ Color = gl_Color;\n",
+	"	 //else\n",
+	"	     Color = gl_Color;\n",
 	"	 Color.w = Transp;\n",
 	"    gl_FragColor = Color;\n",
 	"}"
