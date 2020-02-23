@@ -151,70 +151,47 @@ std::tuple<WORD, WORD, WORD, WORD> ___GetCurFileVersion() {
 	return { 0,0,0,0 };
 }
 
-bool SAFC_Update(const wstring& link_to_commit_info) {
-	//printf("Url: %S\n", SAFC_tags_link);
+bool SAFC_Update(const wstring& latest_release) {
+
+#ifndef __X64
+	constexpr wchar_t* archive_name = (wchar_t* const)L"SAFC32.7z";;
+#else
+	constexpr wchar_t* const archive_name = (wchar_t* const)L"SAFC64.7z";
+#endif
+
 	wchar_t current_file_path[MAX_PATH];
 	wchar_t update_file[MAX_PATH];
 	bool flag = false;
 	GetCurrentDirectoryW(MAX_PATH, current_file_path);
 	wsprintf(update_file, L"%s\\update.7z", current_file_path);
-	wsprintf(current_file_path, L"%s\\file_infos.json", current_file_path);
-	//printf("Path: %S\n", current_file_path);
-	HRESULT res = URLDownloadToFileW(NULL, link_to_commit_info.c_str(), current_file_path, 0, NULL);
-	if (res == S_OK) {
-#ifndef __X64
-		constexpr wchar_t* archive_name = (wchar_t* const)L"SAFC32.7z";;
-#else
-		constexpr wchar_t* const archive_name = (wchar_t* const)L"SAFC64.7z";
-#endif
-		ifstream input(current_file_path);
-		string temp_buffer;
-		std::getline(input, temp_buffer);
-		input.close();
-		auto JSON_Value = JSON::Parse(temp_buffer.c_str());
-		if (JSON_Value->IsObject()) {
-			auto Object = JSON_Value->AsObject();
-			auto Files = Object.find(L"sha");
-			if (Files != Object.end() && Files->second->IsString()) {
-				wstring link = L"https://github.com/DixelU/SAFC/raw/" + Files->second->AsString() + L"/" + archive_name;
-				wcout << link << endl;
-				printf("Downloading to %s...\n", update_file);
-				HRESULT co_res = URLDownloadToFileW(NULL, link.c_str(), update_file, 0, NULL);
-				if (co_res == S_OK) {
-					flag = true;
-					_wrename(L"SAFC.exe", L"_s");
-					_wrename(L"freeglut.dll", L"_f");
-					_wrename(L"glew32.dll", L"_g");
-					system("\"C:\\Program Files\\7-Zip\\7z.exe\" x -y update.7z");
-					if (_waccess(L"SAFC.exe", 0) != 0) {
-						printf("x64 is not installed\n");
-						system("\"C:\\Program Files (x86)\\7-Zip\\7z.exe\" x -y update.7z");
-						if (_waccess(L"SAFC.exe", 0) != 0) {
-							ThrowAlert_Error("Extract: To perform this operation you must have 7-Zip installed.\n");
-							_wrename(L"_s", L"SAFC.exe");
-							_wrename(L"_f", L"freeglut.dll");
-							_wrename(L"_g", L"glew32.dll");
-							flag = false;
-						}
-					}
-					_wremove(L"update.7z");
-				}
-				else if (co_res == E_OUTOFMEMORY)
-					ThrowAlert_Error("Update: Buffer length invalid, or insufficient memory\n");
-				else if (co_res == INET_E_DOWNLOAD_FAILURE)
-					ThrowAlert_Error("Update: URL is invalid\n");
-				else
-					ThrowAlert_Error("Update: Other error: " + to_string( co_res));
+	wstring link = L"https://github.com/DixelU/SAFC/releases/download/" + latest_release + L"/" + archive_name;
+	wcout << link << endl;
+	HRESULT co_res = URLDownloadToFileW(NULL, link.c_str(), update_file, 0, NULL);
+	if (co_res == S_OK) {
+		flag = true;
+		_wrename(L"SAFC.exe", L"_s");
+		_wrename(L"freeglut.dll", L"_f");
+		_wrename(L"glew32.dll", L"_g");
+		system("\"C:\\Program Files\\7-Zip\\7z.exe\" x -y update.7z");
+		if (_waccess(L"SAFC.exe", 0) != 0) {
+			system("\"C:\\Program Files (x86)\\7-Zip\\7z.exe\" x -y update.7z");
+			if (_waccess(L"SAFC.exe", 0) != 0) {
+				ThrowAlert_Error("Extract: To perform this operation you must have 7-Zip installed.\n");
+				_wrename(L"_s", L"SAFC.exe");
+				_wrename(L"_f", L"freeglut.dll");
+				_wrename(L"_g", L"glew32.dll");
+				flag = false;
 			}
 		}
+		_wremove(L"update.7z");
 	}
-	else if (res == E_OUTOFMEMORY)
-		ThrowAlert_Error("Files: Buffer length invalid, or insufficient memory\n");
-	else if (res == INET_E_DOWNLOAD_FAILURE)
-		ThrowAlert_Error("Files: URL is invalid\n");
+	else if (co_res == E_OUTOFMEMORY)
+		ThrowAlert_Error("Update: Buffer length invalid, or insufficient memory\n");
+	else if (co_res == INET_E_DOWNLOAD_FAILURE)
+		ThrowAlert_Error("Update: URL is invalid\n");
 	else
-		ThrowAlert_Error("Files: Other error: " + to_string(res));
-	_wremove(current_file_path);
+		ThrowAlert_Error("Update: Other error: " + to_string( co_res));
+	
 	return flag;
 }
 
@@ -270,15 +247,10 @@ void SAFC_VersionCheck() {
 								maj == version_partied[0] && min < version_partied[1] ||
 								maj == version_partied[0] && min == version_partied[1] && ver < version_partied[2] ||
 								maj == version_partied[0] && min == version_partied[1] && ver == version_partied[2] && build < version_partied[3]) {
-								////////UPDATE///////
-								auto Commit = FirstElement->AsObject().find(L"commit");
-								if (Commit != FirstElement->AsObject().end()) {
-									ThrowAlert_Error("Update found! The app will restart soon...\nUpdate: " + string(git_latest_version.begin(), git_latest_version.end()));
-									auto Url = Commit->second->AsObject().find(L"url")->second;
-									flag = SAFC_Update(Url->AsString());
-									if(flag)
-										ThrowAlert_Error("SAFC will restart in 3 seconds...");
-								}
+								ThrowAlert_Error("Update found! The app will restart soon...\nUpdate: " + string(git_latest_version.begin(), git_latest_version.end()));
+								flag = SAFC_Update(git_latest_version);
+								if(flag)
+									ThrowAlert_Error("SAFC will restart in 3 seconds...");
 							}
 						}
 					}
