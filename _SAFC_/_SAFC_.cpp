@@ -1,4 +1,9 @@
-﻿#include <wchar.h>
+﻿//#include "httplib.h"
+#include <algorithm>
+#include <cstdlib>
+#include <wchar.h>
+#include <io.h>
+#include <tuple>
 #include <ctime>
 #include <mutex>
 #include <iostream>
@@ -15,17 +20,18 @@
 #include <fstream>
 #include <set>
 #include <string>
-#include <algorithm>
 #include <iterator>
 #include <map>
 #include <deque>
 #include <array>
 #include <thread>
-#include <dwmapi.h>
-//#include <>
 
+#include <WinSock2.h>
+#include <dwmapi.h>
 //#define WIN32_LEAN_AND_MEAN
 
+#pragma comment (lib, "Version.lib")//Urlmon.lib
+#pragma comment (lib, "Urlmon.lib")//Urlmon.lib
 #pragma comment (lib, "dwmapi.lib")
 
 #include "glew.h"
@@ -50,6 +56,11 @@
 #include "consts.h"
 #include <stack>
 #include "bbb_ffio.h"
+
+#include "JSON/JSON.h"
+#include "JSON/JSON.cpp"
+#include "JSON/JSONValue.h"
+#include "JSON/JSONValue.cpp"
 
 #define NULL nullptr
 
@@ -106,7 +117,194 @@ void ThrowAlert_Error(string AlertText);
 void AddFiles(vector<wstring> Filenames);
 #pragma warning(disable : 4996)
 
-size_t getAvailableRAM(){
+std::tuple<WORD, WORD, WORD, WORD> ___GetCurFileVersion() {
+	constexpr int
+		filename_len = 500;
+	wchar_t		szExeFileName[filename_len];
+	DWORD		verHandle = 0;
+	UINT		size = 0;
+	LPBYTE		lpBuffer = NULL;
+	GetModuleFileNameW(NULL, szExeFileName, filename_len);
+	DWORD		verSize = GetFileVersionInfoSizeW(szExeFileName, &verHandle);
+	if (verSize != 0) {
+		LPSTR verData = new char[verSize];
+		if (GetFileVersionInfoW(szExeFileName, verHandle, verSize, verData)) {
+			if (VerQueryValueW(verData, L"\\", (VOID FAR * FAR*) & lpBuffer, &size)) {
+				if (size) {
+					VS_FIXEDFILEINFO* verInfo = (VS_FIXEDFILEINFO*)lpBuffer;
+					if (verInfo->dwSignature == 0xfeef04bd) {
+
+						// Doesn't matter if you are on 32 bit or 64 bit,
+						// DWORD is always 32 bits, so first two revision numbers
+						// come from dwFileVersionMS, last two come from dwFileVersionLS
+						return {
+							HIWORD(verInfo->dwProductVersionMS),
+							LOWORD(verInfo->dwProductVersionMS),
+							HIWORD(verInfo->dwProductVersionLS),
+							LOWORD(verInfo->dwProductVersionLS) };
+					}
+				}
+			}
+		}
+		delete[] verData;
+	}
+	return { 0,0,0,0 };
+}
+
+bool SAFC_Update(const wstring& link_to_commit_info) {
+	//printf("Url: %S\n", SAFC_tags_link);
+	wchar_t current_file_path[MAX_PATH];
+	wchar_t update_file[MAX_PATH];
+	bool flag = false;
+	GetCurrentDirectoryW(MAX_PATH, current_file_path);
+	wsprintf(update_file, L"%s\\update.7z", current_file_path);
+	wsprintf(current_file_path, L"%s\\file_infos.json", current_file_path);
+	//printf("Path: %S\n", current_file_path);
+	HRESULT res = URLDownloadToFileW(NULL, link_to_commit_info.c_str(), current_file_path, 0, NULL);
+	if (res == S_OK) {
+#ifndef __X64
+		constexpr wchar_t* archive_name = L"SAFC32.7z";
+#else
+		constexpr wchar_t* archive_name = L"SAFC64.7z";
+#endif
+
+		ifstream input(current_file_path);
+		string temp_buffer;
+		std::getline(input, temp_buffer);
+		input.close();
+		auto JSON_Value = JSON::Parse(temp_buffer.c_str());
+		if (JSON_Value->IsObject()) {
+			auto Object = JSON_Value->AsObject();
+			auto Files = Object.find(L"sha");
+			if (Files != Object.end() && Files->second->IsString()) {
+				wstring link = L"https://github.com/DixelU/SAFC/raw/" + Files->second->AsString() + L"/" + archive_name;
+				wcout << link << endl;
+				printf("Downloading to %s...\n", update_file);
+				HRESULT co_res = URLDownloadToFileW(NULL, link.c_str(), update_file, 0, NULL);
+				if (co_res == S_OK) {
+					flag = true;
+					_wrename(L"SAFC.exe", L"_s");
+					_wrename(L"freeglut.dll", L"_f");
+					_wrename(L"glew32.dll", L"_g");
+					system("\"C:\\Program Files\\7-Zip\\7z.exe\" x -y update.7z");
+					if (_waccess(L"SAFC.exe", 0) != 0) {
+						printf("x64 is not installed\n");
+						system("\"C:\\Program Files (x86)\\7-Zip\\7z.exe\" x -y update.7z");
+						if (_waccess(L"SAFC.exe", 0) != 0) {
+							ThrowAlert_Error("Extract: To perform this operation you must have 7-Zip installed.\n");
+							_wrename(L"_s", L"SAFC.exe");
+							_wrename(L"_f", L"freeglut.dll");
+							_wrename(L"_g", L"glew32.dll");
+							flag = false;
+						}
+					}
+					_wremove(L"update.7z");
+				}
+				else if (co_res == E_OUTOFMEMORY)
+					ThrowAlert_Error("Update: Buffer length invalid, or insufficient memory\n");
+				else if (co_res == INET_E_DOWNLOAD_FAILURE)
+					ThrowAlert_Error("Update: URL is invalid\n");
+				else
+					ThrowAlert_Error("Update: Other error: " + to_string( co_res));
+			}
+		}
+	}
+	else if (res == E_OUTOFMEMORY)
+		ThrowAlert_Error("Files: Buffer length invalid, or insufficient memory\n");
+	else if (res == INET_E_DOWNLOAD_FAILURE)
+		ThrowAlert_Error("Files: URL is invalid\n");
+	else
+		ThrowAlert_Error("Files: Other error: " + to_string(res));
+	_wremove(current_file_path);
+	return flag;
+}
+
+void SAFC_VersionCheck() {
+	thread version_checker([]() {
+		bool flag = false;
+		_wremove(L"_s");
+		_wremove(L"_f");
+		_wremove(L"_g");
+		constexpr wchar_t* SAFC_tags_link = L"https://api.github.com/repos/DixelU/SAFC/tags";
+		//printf("Url: %S\n", SAFC_tags_link);
+		wchar_t current_file_path[MAX_PATH];
+		GetCurrentDirectoryW(MAX_PATH, current_file_path);
+		wsprintf(current_file_path, L"%s\\tags.json", current_file_path);
+		//printf("Path: %S\n", current_file_path);
+		HRESULT res = URLDownloadToFileW(NULL, SAFC_tags_link, current_file_path, 0, NULL);
+		if (res == S_OK) {
+			auto [maj, min, ver, build] = ___GetCurFileVersion();
+			ifstream input(current_file_path);
+			string temp_buffer;
+			std::getline(input, temp_buffer);
+			input.close();
+			auto JSON_Value = JSON::Parse(temp_buffer.c_str());
+			if (JSON_Value->IsArray()) {
+				auto FirstElement = JSON_Value->AsArray()[0];
+				if (FirstElement->IsObject()) {
+					auto Name = FirstElement->AsObject().find(L"name");
+					if (FirstElement->AsObject().end() != Name &&
+						Name->second->IsString()) {
+						auto git_latest_version = Name->second->AsString();
+						std::wcout << L"Git answered with version: " << git_latest_version << endl;
+						bool was_digit = false;
+						WORD version_partied[4] = {0,0,0,0};
+						int cur_index = -1;
+						if (git_latest_version.size() <= 100) {
+							for (auto& ch : git_latest_version) {
+								if (isdigit(ch)) {
+									if (!was_digit) {
+										was_digit = true;
+										if (cur_index < 4)
+											cur_index++;
+										else
+											break;
+									}
+									version_partied[cur_index] *= 10;
+									version_partied[cur_index] += (ch - '0') % 10;
+								}
+								else {
+									was_digit = false;
+								}
+							}
+							if (maj < version_partied[0] ||
+								maj == version_partied[0] && min < version_partied[1] ||
+								maj == version_partied[0] && min == version_partied[1] && ver < version_partied[2] ||
+								maj == version_partied[0] && min == version_partied[1] && ver == version_partied[2] && build < version_partied[3]) {
+								////////UPDATE///////
+								auto Commit = FirstElement->AsObject().find(L"commit");
+								if (Commit != FirstElement->AsObject().end()) {
+									ThrowAlert_Error("Update found! The app will restart soon...\nUpdate: " + string(git_latest_version.begin(), git_latest_version.end()));
+									auto Url = Commit->second->AsObject().find(L"url")->second;
+									flag = SAFC_Update(Url->AsString());
+									if(flag)
+										ThrowAlert_Error("SAFC will restart in 3 seconds...");
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+		else if (res == E_OUTOFMEMORY)
+			ThrowAlert_Error("Tags: Buffer length invalid, or insufficient memory\n");
+		else if (res == INET_E_DOWNLOAD_FAILURE)
+			ThrowAlert_Error("Tags: URL is invalid\n");
+		else
+			ThrowAlert_Error("Tags: Other error: Other error: " + to_string(res));
+
+		_wremove(current_file_path);
+
+		if (flag) {
+			Sleep(3000);
+			system("start SAFC.exe");
+			exit(0);
+		}
+	});
+	version_checker.detach();
+}
+
+size_t GetAvailableMemory(){
 	size_t ret = 0;
 	DWORD v = GetVersion();
 	DWORD major = (DWORD)(LOBYTE(LOWORD(v)));
@@ -3738,6 +3936,7 @@ struct MoveableWindow:HandleableUIPart {
 	BIT Drawable;
 	BIT HoveredCloseButton;
 	BIT CursorFollowMode;
+	BIT HUIP_MapWasChanged;
 	float PCurX, PCurY;
 	~MoveableWindow() {
 		Lock.lock();
@@ -3753,6 +3952,7 @@ struct MoveableWindow:HandleableUIPart {
 			this->WindowName = WindowNameSettings->CreateOne(WindowName);
 			this->WindowName->SafeMove(this->WindowName->CalculatedWidth*0.5 + WindowHeapSize * 0.5f, 0 - WindowHeapSize * 0.5f);
 		}
+		this->HUIP_MapWasChanged = false;
 		this->XWindowPos = XPos;
 		this->YWindowPos = YPos;
 		this->Width = Width;
@@ -3768,8 +3968,13 @@ struct MoveableWindow:HandleableUIPart {
 	}
 	void KeyboardHandler(char CH) {
 		Lock.lock();
-		for (auto i = WindowActivities.begin(); i != WindowActivities.end(); i++)
+		for (auto i = WindowActivities.begin(); i != WindowActivities.end(); i++) {
 			i->second->KeyboardHandler(CH);
+			if (HUIP_MapWasChanged) {
+				HUIP_MapWasChanged = false;
+				break;
+			}
+		}
 		Lock.unlock();
 	}
 	BIT MouseHandler(float mx, float my, CHAR Button/*-1 left, 1 right, 0 move*/, CHAR State /*-1 down, 1 up*/) override {
@@ -3814,6 +4019,10 @@ struct MoveableWindow:HandleableUIPart {
 		auto Y = WindowActivities.begin();
 		while (Y != WindowActivities.end()) {
 			flag=Y->second->MouseHandler(mx, my, Button, State);
+			if (HUIP_MapWasChanged) {
+				HUIP_MapWasChanged = false;
+				break;
+			}
 			Y++;
 		}
 
@@ -3842,6 +4051,7 @@ struct MoveableWindow:HandleableUIPart {
 	}
 	BIT DeleteUIElementByName(string ElementName) {
 		Lock.lock();
+		HUIP_MapWasChanged = true;
 		auto ptr = WindowActivities.find(ElementName);
 		if (ptr == WindowActivities.end()) {
 			Lock.unlock();
@@ -3855,6 +4065,7 @@ struct MoveableWindow:HandleableUIPart {
 	}
 	BIT AddUIElement(string ElementName, HandleableUIPart* Elem) {
 		Lock.lock();
+		HUIP_MapWasChanged = true;
 		auto ans = WindowActivities.insert_or_assign(ElementName, Elem);
 		Lock.unlock();
 		return ans.second;
@@ -4053,6 +4264,7 @@ struct WindowsHandler {
 	}
 	void DisableAllWindows() {
 		locker.lock();
+		WindowWasDisabledDuringMouseHandling = 1;
 		ActiveWindows.clear();
 		EnableWindow(MainWindow_ID);
 		locker.unlock();
@@ -4902,14 +5114,14 @@ struct FileSettings {////per file settings
 	UINT64 FileSize;
 	INT64 Start, Length;
 	BIT IsMIDI, InplaceMergeEnabled;
-	CutAndTransposeKeys *KeyTranspose;
-	PLC<BYTE, BYTE> *VolumeRecalculator;
-	PLC<WORD, WORD> *PitchReBender;
+	CutAndTransposeKeys *KeyMap;
+	PLC<BYTE, BYTE> *VolumeMap;
+	PLC<WORD, WORD> *PitchBendMap;
 	DWORD OffsetTicks,BoolSettings;///use ump to see how far you wanna offset all that.
 	~FileSettings() {
-		if (KeyTranspose)delete KeyTranspose;
-		if (VolumeRecalculator)delete VolumeRecalculator;
-		if (PitchReBender)delete PitchReBender;
+		if (KeyMap)delete KeyMap;
+		if (VolumeMap)delete VolumeMap;
+		if (PitchBendMap)delete PitchBendMap;
 	}
 	FileSettings(wstring Filename) {
 		this->Filename = Filename;
@@ -4925,9 +5137,9 @@ struct FileSettings {////per file settings
 		OldPPQN = FMIC.PPQN;
 		OldTrackNumber = FMIC.ExpectedTrackNumber;
 		OffsetTicks = InplaceMergeEnabled = 0;
-		VolumeRecalculator = NULL;
-		PitchReBender = NULL;
-		KeyTranspose = NULL;
+		VolumeMap = NULL;
+		PitchBendMap = NULL;
+		KeyMap = NULL;
 		FileSize = FMIC.FileSize;
 		GroupID = NewTempo = 0;
 		Start = 0;
@@ -4945,7 +5157,7 @@ struct FileSettings {////per file settings
 		SwitchBoolSetting(SMP_BoolSetting);
 	}
 	SingleMIDIReProcessor* BuildSMRP() {
-		SingleMIDIReProcessor *SMRP = new SingleMIDIReProcessor(this->Filename, this->BoolSettings, this->NewTempo, this->OffsetTicks, this->NewPPQN, this->GroupID, this->VolumeRecalculator, this->PitchReBender, this->KeyTranspose, this->WFileNamePostfix, this->InplaceMergeEnabled, this->FileSize, this->Start, this->Length);
+		SingleMIDIReProcessor *SMRP = new SingleMIDIReProcessor(this->Filename, this->BoolSettings, this->NewTempo, this->OffsetTicks, this->NewPPQN, this->GroupID, this->VolumeMap, this->PitchBendMap, this->KeyMap, this->WFileNamePostfix, this->InplaceMergeEnabled, this->FileSize, this->Start, this->Length);
 		SMRP->AppearanceFilename = this->AppearanceFilename;
 		return SMRP;
 	}
@@ -5188,6 +5400,7 @@ void AddFiles(vector<wstring> Filenames) {
 	_Data.ResolveSubdivisionProblem_GroupIDAssign();
 }
 void OnAdd() {
+	//throw "";
 	vector<wstring> Filenames = MOFD(L"Select midi files");
 	AddFiles(Filenames);
 }
@@ -5341,8 +5554,8 @@ namespace PropsAndSets {
 		void OnCaT() {
 			auto Wptr = (*WH)["CAT"];
 			auto CATptr = (CAT_Piano*)((*Wptr)["CAT_ITSELF"]);
-			if (!_Data[currentID].KeyTranspose) _Data[currentID].KeyTranspose = new CutAndTransposeKeys(0,127,0);
-			CATptr->PianoTransform = _Data[currentID].KeyTranspose;
+			if (!_Data[currentID].KeyMap) _Data[currentID].KeyMap = new CutAndTransposeKeys(0,127,0);
+			CATptr->PianoTransform = _Data[currentID].KeyMap;
 			CATptr->UpdateInfo();
 			WH->EnableWindow("CAT");
 		}
@@ -5389,8 +5602,8 @@ namespace PropsAndSets {
 			auto Wptr = (*WH)["CAT"];
 			((CAT_Piano*)((*Wptr)["CAT_ITSELF"]))->PianoTransform = NULL;
 			WH->DisableWindow("CAT");
-			delete _Data[currentID].KeyTranspose;
-			_Data[currentID].KeyTranspose = NULL;
+			delete _Data[currentID].KeyMap;
+			_Data[currentID].KeyMap = NULL;
 		}
 	}
 	namespace VolumeMap {
@@ -5404,8 +5617,8 @@ namespace PropsAndSets {
 			VM->ActiveSetting = 0;
 			VM->Hovered = 0;
 			VM->RePutMode = 0;
-			if (!_Data[currentID].VolumeRecalculator)_Data[currentID].VolumeRecalculator = new PLC<BYTE, BYTE>();
-			VM->PLC_bb = _Data[currentID].VolumeRecalculator;
+			if (!_Data[currentID].VolumeMap)_Data[currentID].VolumeMap = new PLC<BYTE, BYTE>();
+			VM->PLC_bb = _Data[currentID].VolumeMap;
 			WH->EnableWindow("VM");
 		}
 		void OnDegreeShape() {
@@ -5468,9 +5681,9 @@ namespace PropsAndSets {
 				ThrowAlert_Error("If you see this message, some error might have happen, since PLC_bb is null");
 		}
 		void OnDelete() {
-			if (_Data[currentID].VolumeRecalculator) {
-				delete _Data[currentID].VolumeRecalculator;
-				_Data[currentID].VolumeRecalculator = NULL;
+			if (_Data[currentID].VolumeMap) {
+				delete _Data[currentID].VolumeMap;
+				_Data[currentID].VolumeMap = NULL;
 			}
 			auto Wptr = (*WH)["VM"];
 			auto VM = ((PLC_VolumeWorker*)(*Wptr)["VM_PLC"]);
@@ -5488,6 +5701,8 @@ void OnRem() {
 	_Data.RemoveByID(ptr->SelectedID);
 	ptr->SafeRemoveStringByID(ptr->SelectedID);
 	WH->DisableWindow("SMPAS");
+	WH->DisableWindow("VM");
+	WH->DisableWindow("CAT");
 	_Data.SetGlobalPPQN();
 	_Data.ResolveSubdivisionProblem_GroupIDAssign();
 }
@@ -5495,6 +5710,8 @@ void OnRem() {
 void OnRemAll() {
 	auto ptr = _WH_t("MAIN", "List", SelectablePropertedList*);
 	WH->DisableWindow("SMPAS");
+	WH->DisableWindow("VM");
+	WH->DisableWindow("CAT");
 	while(_Data.Files.size()){
 		_Data.RemoveByID(0);
 		ptr->SafeRemoveStringByID(0);
@@ -5548,23 +5765,23 @@ void OnRemVolMaps() {
 	((PLC_VolumeWorker*)(*((*WH)["VM"]))["VM_PLC"])->PLC_bb = NULL;
 	WH->DisableWindow("VM");
 	for (int i = 0; i < _Data.Files.size(); i++) {
-		if(_Data[i].VolumeRecalculator)delete _Data[i].VolumeRecalculator;
-		_Data[i].VolumeRecalculator = NULL;
+		if(_Data[i].VolumeMap)delete _Data[i].VolumeMap;
+		_Data[i].VolumeMap = NULL;
 	}
 }
 void OnRemCATs() {
 	WH->DisableWindow("CAT");
 	for (int i = 0; i < _Data.Files.size(); i++) {
-		if(_Data[i].KeyTranspose)delete _Data[i].KeyTranspose;
-		_Data[i].KeyTranspose = NULL;
+		if(_Data[i].KeyMap)delete _Data[i].KeyMap;
+		_Data[i].KeyMap = NULL;
 	}
 }
 void OnRemPitchMaps() {
 	//WH->DisableWindow("CAT");
 	ThrowAlert_Error("Currently pitch maps can not be created and/or deleted :D");
 	for (int i = 0; i < _Data.Files.size(); i++) {
-		if(_Data[i].PitchReBender)delete _Data[i].PitchReBender;
-		_Data[i].PitchReBender = NULL;
+		if(_Data[i].PitchBendMap)delete _Data[i].PitchBendMap;
+		_Data[i].PitchBendMap = NULL;
 	}
 }
 void OnRemAllModules() {
@@ -5713,15 +5930,24 @@ pair<float, float> GetPositionForOneOf(INT32 Position, INT32 Amount, float UnitS
 void OnStart() {
 	if (_Data.Files.empty())
 		return;
+	printf("Begining\n");
 	WH->MainWindow_ID = "SMRP_CONTAINER";
+	printf("MWID_OVERRIDE\n");
 	WH->DisableAllWindows();
+	printf("DisableAllWindows\n");
 	WH->EnableWindow("SMRP_CONTAINER");
+	printf("EnableSMRP\n");
 	if (GlobalMCTM) {
+		printf("MCTM detected\n");
 		delete GlobalMCTM;
+		printf("MCTM deleted\n");
 		GlobalMCTM = NULL;
+		printf("MCTM cleared\n");
 	}
 	GlobalMCTM = _Data.MCTM_Constructor();
+	printf("MCTM constructed\n");
 	GlobalMCTM->ProcessMIDIs();
+	printf("MCTM Prcessing has begun\n");
 	MoveableWindow *MW;
 	INT32 ID = 0;
 	if (WH) {
@@ -5866,7 +6092,7 @@ void RestoreRegSettings() {
 void Init() {///SetIsFontedVar
 	RestoreRegSettings();
 	hDc = GetDC(hWnd);
-	_Data.DetectedThreads = min(thread::hardware_concurrency() - 1,(int)(ceil(getAvailableRAM() / 2048.)));
+	_Data.DetectedThreads = min((int)thread::hardware_concurrency() - 1,(int)(ceil(GetAvailableMemory() / 2048.)));
 
 	MoveableWindow *T = new MoveableWindow("Main window", System_White, -200, 200, 400, 400, 0x3F3F3FAF, 0x7F7F7F7F);
 	SelectablePropertedList *SPL = new SelectablePropertedList(BS_List_Black_Small, NULL, PropsAndSets::OGPInMIDIList, -50, 172, 300, 12, 65, 30);
@@ -5921,7 +6147,8 @@ void Init() {///SetIsFontedVar
 	//(*T)["OR"] = Butt = new Button("OR", System_White, PropsAndSets::OR, 37.5, 15 - WindowHeapSize, 20, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, System_White, "Overlaps remover");
 	//(*T)["SR"] = new Button("SR", System_White, PropsAndSets::SR, 12.5, 15 - WindowHeapSize, 20, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, System_White, "Sustains remover");
 
-	(*T)["MIDIINFO"] = new Button("Collect info", System_White, PropsAndSets::InitializeCollecting, 20, 15 - WindowHeapSize, 65, 10, 1, 0x7F7F7F3F, 0x7F7F7FFF, 0xFFFFFFFF, 0xFFFFFF3F, 0xFFFFFFFF, System_White, "Collects additional info about the midi");
+	(*T)["MIDIINFO"] = Butt = new Button("Collect info", System_White, PropsAndSets::InitializeCollecting, 20, 15 - WindowHeapSize, 65, 10, 1, 0x7F7F7F3F, 0x7F7F7FFF, 0xFFFFFFFF, 0xFFFFFF3F, 0xFFFFFFFF, System_White, "Collects additional info about the midi");
+	Butt->Tip->SafeMove(-20, 0);
 
 	(*T)["APPLY"] = new Button("Apply", System_White, PropsAndSets::OnApplySettings, 87.5 - WindowHeapSize, 15 - WindowHeapSize, 30, 10, 1, 0x7FAFFF3F, 0xFFFFFFFF, 0xFFAF7FFF, 0xFFAF7F3F, 0xFFAF7FFF, NULL, " ");
 
@@ -6016,6 +6243,8 @@ void Init() {///SetIsFontedVar
 	DragAcceptFiles(hWnd, TRUE);
 	OleInitialize(NULL);
 	cout << "RDD " << (RegisterDragDrop(hWnd, &DNDH_Global)) << endl;
+	
+	SAFC_VersionCheck();
 }
 
 
@@ -6083,12 +6312,12 @@ const GLchar *fragment_shader[] = { //uniform float time;
 	"}",
 	"void main() {\n",
 	"	 vec4 Color; float Transp = gl_Color[3];\n",
-	"    if (Mode==1)Color = pow(gl_Color,vec4(Basewave + rand(gl_FragCoord.xy + vec2(Time,2.*Time))*SinewaveWidth));\n",
-	"    else if(Mode==2)Color = pow(gl_Color,normalize(vec4(gl_FragCoord.xyz,Param3)));\n",
-	"    else if(Mode==3)Color = pow(gl_Color,vec4(sin(Time*4. + gl_FragCoord.y/200.)*SinewaveWidth + Basewave + SinewaveWidth));\n",
+	"    //if (Mode==1)Color = pow(gl_Color,vec4(Basewave + rand(gl_FragCoord.xy + vec2(Time,2.*Time))*SinewaveWidth));\n",
+	"    //else if(Mode==2)Color = pow(gl_Color,normalize(vec4(gl_FragCoord.xyz,Param3)));\n",
+	"    //else if(Mode==3)Color = pow(gl_Color,vec4(sin(Time*4. + gl_FragCoord.y/200.)*SinewaveWidth + Basewave + SinewaveWidth));\n",
 	//"    else if(Mode==4)Color = (SinewaveWidth + 1.)*gl_Color - (Basewave)*spirals(Time, gl_FragCoord.xy / 1600.);\n",
-	"    else if(Mode==4)Color = pow(gl_Color,spirals(Time, gl_FragCoord.xy / (resolution.x * Param3 * 3.)));\n",
-	"    else if(Mode==5)Color = pow(flare(Time, gl_FragCoord.xy, MousePos.y/resolution.y*1.8*Param3 + 0.5, Basewave, SinewaveWidth+0.15),vec4(1.)-gl_Color);\n",
+	"    //else if(Mode==4)Color = pow(gl_Color,spirals(Time, gl_FragCoord.xy / (resolution.x * Param3 * 3.)));\n",
+	"    //else if(Mode==5)Color = pow(flare(Time, gl_FragCoord.xy, MousePos.y/resolution.y*1.8*Param3 + 0.5, Basewave, SinewaveWidth+0.15),vec4(1.)-gl_Color);\n",
 	"    //else if(Mode==6)Color = gl_Color * (Param3 * 20.) * flare2(Time, gl_FragCoord.xy, MousePos.y/resolution.y*1.8*Param3 + 0.5, Basewave + 1., SinewaveWidth+0.15,Transp);\n",
 	"	 else Color = gl_Color;\n",
 	"	 Color.w = Transp;\n",
@@ -6259,13 +6488,16 @@ void mExit(int a) {
 }
 
 int main(int argc, char ** argv) {
+	_wremove(L"_s");
+	_wremove(L"_f");
+	_wremove(L"_g");
 	ios_base::sync_with_stdio(false);//why not
-
 #ifdef _DEBUG 
 	ShowWindow(GetConsoleWindow(), SW_SHOW);
 #else // _DEBUG 
 	ShowWindow(GetConsoleWindow(), SW_HIDE);
 #endif
+	ShowWindow(GetConsoleWindow(), SW_SHOW);
 
 	SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS);
 	//srand(1);
@@ -6300,7 +6532,8 @@ int main(int argc, char ** argv) {
 
 	glewExperimental = GL_TRUE;
 	DWORD glewInitVal;
-	if (glewInitVal = glewInit())cout << "Something is wrong with glew. Code: " << glewInitVal << endl;
+	if (glewInitVal = glewInit())
+		cout << "Something is wrong with glew. Code: " << glewInitVal << endl;
 
 	glutMouseFunc(mClick);
 	glutReshapeFunc(OnResize);

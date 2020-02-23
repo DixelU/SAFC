@@ -24,19 +24,16 @@
     <ClInclude Include="resource.h">
       <Filter>Файлы заголовков</Filter>
     </ClInclude>
-    <ClInclude Include="fast_ifile.h">
-      <Filter>Файлы заголовков</Filter>
-    </ClInclude>
     <ClInclude Include="OR.h">
-      <Filter>Файлы заголовков</Filter>
-    </ClInclude>
-    <ClInclude Include="font_extractor.h">
       <Filter>Файлы заголовков</Filter>
     </ClInclude>
     <ClInclude Include="WinReg.h">
       <Filter>Файлы заголовков</Filter>
     </ClInclude>
     <ClInclude Include="bbb_ffio.h">
+      <Filter>Файлы заголовков</Filter>
+    </ClInclude>
+    <ClInclude Include="allocator.h">
       <Filter>Файлы заголовков</Filter>
     </ClInclude>
   </ItemGroup>
