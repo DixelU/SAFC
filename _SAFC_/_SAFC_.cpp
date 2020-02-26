@@ -113,7 +113,8 @@ int TIMESEED() {
 	return t.wMilliseconds + (t.wSecond * 1000) + t.wMinute * 60000;
 }
 
-void ThrowAlert_Error(string AlertText); 
+void ThrowAlert_Error(string AlertText);
+void ThrowAlert_Warning(string AlertText);
 void AddFiles(vector<wstring> Filenames);
 #pragma warning(disable : 4996)
 
@@ -225,7 +226,7 @@ void SAFC_VersionCheck() {
 					if (FirstElement->AsObject().end() != Name &&
 						Name->second->IsString()) {
 						auto git_latest_version = Name->second->AsString();
-						std::wcout << L"Git answered with version: " << git_latest_version << endl;
+						std::wcout << L"Git latest version: " << git_latest_version << endl;
 						bool was_digit = false;
 						WORD version_partied[4] = {0,0,0,0};
 						int cur_index = -1;
@@ -250,10 +251,10 @@ void SAFC_VersionCheck() {
 								maj == version_partied[0] && min < version_partied[1] ||
 								maj == version_partied[0] && min == version_partied[1] && ver < version_partied[2] ||
 								maj == version_partied[0] && min == version_partied[1] && ver == version_partied[2] && build < version_partied[3]) {
-								ThrowAlert_Error("Update found! The app will restart soon...\nUpdate: " + string(git_latest_version.begin(), git_latest_version.end()));
+								ThrowAlert_Warning("Update found! The app will restart soon...\nUpdate: " + string(git_latest_version.begin(), git_latest_version.end()));
 								flag = SAFC_Update(git_latest_version);
 								if(flag)
-									ThrowAlert_Error("SAFC will restart in 3 seconds...");
+									ThrowAlert_Warning("SAFC will restart in 3 seconds...");
 							}
 						}
 					}
@@ -504,6 +505,7 @@ struct SingleMIDIInfoCollector {
 	Locker<alloc_multiset> TempoMap;
 	Locker<std::vector<UINT64>> TracksBeginings;
 	BIT Processing;
+	
 };
 
 struct SingleMIDIReProcessor {
@@ -1524,8 +1526,7 @@ struct MIDICollectionThreadedMerger {
 									Track[Track.size() - q] |= 0x80;///hack (going from 2 instead of going from one)
 								}
 							}
-
-							if (EVENTTYPE == 0xFF) {///meta
+							if (EVENTTYPE == 0xFF ) {///meta
 								Track.push_back(EVENTTYPE);
 								Track.push_back(pfiv.get());
 								if (Track.back() == 0x2F) {
@@ -1539,11 +1540,22 @@ struct MIDICollectionThreadedMerger {
 									do {
 										IO = pfiv.get();
 										Track.push_back(IO);
-										DIO = DIO << 7 | IO & 0x7F;
+										DIO = (DIO << 7) | (IO & 0x7F);
 									} while (IO & 0x80);
 									for (int vlvsize = 0; vlvsize < DIO; vlvsize++)
 										Track.push_back(pfiv.get());
 								}
+							}
+							else if (EVENTTYPE == 0xF0 || EVENTTYPE == 0xF7) {
+								Track.push_back(EVENTTYPE);
+								DIO = 0;
+								do {
+									IO = pfiv.get();
+									Track.push_back(IO);
+									DIO = (DIO << 7) | (IO & 0x7F);
+								} while (IO & 0x80);
+								for (int vlvsize = 0; vlvsize < DIO; vlvsize++)
+									Track.push_back(pfiv.get());
 							}
 							else if ((EVENTTYPE >= 0x80 && EVENTTYPE <= 0xBF) || (EVENTTYPE >= 0xE0 && EVENTTYPE <= 0xEF)) {
 								Track.push_back(EVENTTYPE);
@@ -1555,7 +1567,7 @@ struct MIDICollectionThreadedMerger {
 								Track.push_back(pfiv.get());
 							}
 							else {///RSB CANNOT APPEAR ON THIS STAGE
-								printf("Inplace error\n");
+								printf("Inplace error %X\n", pfiv.tellg());
 								Track.push_back(0xCA);
 								Track.push_back(0);
 								goto trackending;
@@ -4109,7 +4121,8 @@ struct MoveableWindow:HandleableUIPart {
 		if (WindowName)WindowName->Draw();
 
 		for (auto Y = WindowActivities.begin(); Y != WindowActivities.end(); Y++)
-			Y->second->Draw();
+			if(Y->second)
+				Y->second->Draw();
 		Lock.unlock();
 	}
 	void _NotSafeResize(float NewHeight, float NewWidth) {
@@ -5243,7 +5256,12 @@ MIDICollectionThreadedMerger *GlobalMCTM = NULL;
 
 void ThrowAlert_Error(string AlertText) {
 	if (WH)
-		WH->ThrowAlert(AlertText, "ERROR!", SpecialSigns::DrawExTriangle, 1, 0xFF7F00AF, 0xFF);
+		WH->ThrowAlert(AlertText, "ERROR!", SpecialSigns::DrawExTriangle, 1, 0xFF7F00FF, 0xFF);
+}
+
+void ThrowAlert_Warning(string AlertText) {
+	if (WH)
+		WH->ThrowAlert(AlertText, "Warning!", SpecialSigns::DrawExTriangle, 1, 0x7F7F7FFF, 0xFFFFFFAF);
 }
 
 vector<wstring> MOFD(const wchar_t* Title) {
