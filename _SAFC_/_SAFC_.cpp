@@ -1759,9 +1759,11 @@ struct MIDICollectionThreadedMerger {
 				_wrename((_SaveTo + L".I.mid").c_str(), _SaveTo.c_str());
 				_wrename((_SaveTo + L".R.mid").c_str(), _SaveTo.c_str());//one of these will not work
 				delete IM, RM;
-				*FinishedFlag = 1;
+				printf("Escaped last stage\n");
+				*FinishedFlag = true;
 				return;
 			}
+			printf("Active merging at last stage\n");
 			WORD T=0;
 			BYTE A=0, B=0;
 			F << "MThd" << '\0' << '\0' << '\0' << (char)6 << '\0' << (char)1;
@@ -1787,7 +1789,7 @@ struct MIDICollectionThreadedMerger {
 			RM->close();
 			delete IM;
 			delete RM;
-			*FinishedFlag = 1;
+			*FinishedFlag = true;
 			if (RemnantsRemove) {
 				_wremove((_SaveTo + L".I.mid").c_str());
 				_wremove((_SaveTo + L".R.mid").c_str());
@@ -6427,7 +6429,7 @@ void OnResize(int x, int y) {
 	if (WH) {
 		auto SMRP = (*WH)["SMRP_CONTAINER"];
 		SMRP->SafeChangePosition_Argumented(0, 0, 0);
-		SMRP->_NotSafeResize_Centered(RANGE * 3 *(WindY / WINDYSIZE), RANGE * 3 *(WindX / WINDXSIZE));
+		SMRP->_NotSafeResize_Centered(RANGE * 3 *(WindY / WINDYSIZE) + 2*WindowHeapSize, RANGE * 3 *(WindX / WINDXSIZE));
 	}
 }
 void inline rotate(float& x, float& y) {
