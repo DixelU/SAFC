@@ -27,11 +27,13 @@
 #include <thread>
 
 #include <WinSock2.h>
+#include <WinInet.h>
 #include <dwmapi.h>
 //#define WIN32_LEAN_AND_MEAN
 
 #pragma comment (lib, "Version.lib")//Urlmon.lib
 #pragma comment (lib, "Urlmon.lib")//Urlmon.lib
+#pragma comment (lib, "wininet.lib")//Urlmon.lib
 #pragma comment (lib, "dwmapi.lib")
 
 #include "glew.h"
@@ -134,6 +136,7 @@ std::tuple<WORD, WORD, WORD, WORD> ___GetCurFileVersion() {
 				if (size) {
 					VS_FIXEDFILEINFO* verInfo = (VS_FIXEDFILEINFO*)lpBuffer;
 					if (verInfo->dwSignature == 0xfeef04bd) {
+						delete[] verData;
 
 						// Doesn't matter if you are on 32 bit or 64 bit,
 						// DWORD is always 32 bits, so first two revision numbers
@@ -146,8 +149,8 @@ std::tuple<WORD, WORD, WORD, WORD> ___GetCurFileVersion() {
 					}
 				}
 			}
+			delete[] verData;
 		}
-		delete[] verData;
 	}
 	return { 0,0,0,0 };
 }
@@ -596,8 +599,8 @@ struct SingleMIDIReProcessor {
 		BYTE Tempo1, Tempo2, Tempo3;
 		BYTE IO = 0, TYPEIO = 0;//register?
 		BYTE RSB = 0;
-		TrackCount = 0;
-		Processing = 1;
+		TrackCount = 0x0;
+		Processing = 0x1;
 		Track.reserve(10000000);//just in case...
 
 		if (NewTempo) {
@@ -1252,6 +1255,7 @@ struct SingleMIDIReProcessor {
 
 struct MIDICollectionThreadedMerger {
 	wstring SaveTo;
+	BIT FirstStageComplete;
 	BIT IntermediateRegularFlag;
 	BIT IntermediateInplaceFlag;
 	BIT CompleteFlag;
@@ -1435,7 +1439,7 @@ struct MIDICollectionThreadedMerger {
 					this->Cur_Processing[Counter] = SMRPv[i];
 					SMRPv[i]->ReProcess();
 				}
-				//this->Cur_Processing[Counter] = NULL;
+				this->Cur_Processing[Counter] = NULL;
 			}, SMRPv, Counter++);
 			TH.detach();
 			SMRPv.clear();
@@ -1692,6 +1696,9 @@ struct MIDICollectionThreadedMerger {
 			file_output.put((*TrackCount) >> 8);
 			file_output.put((*TrackCount)&0xff);
 			file_output.close();
+			for (auto& t : fiv) {
+				delete t;
+			}
 			(*FinishedFlag) = 1; /// Will this work?
 			delete IMC;
 		}, InplaceMergeCandidats, &IntermediateInplaceFlag, FinalPPQN, SaveTo, &IITrackCount);
@@ -1738,6 +1745,7 @@ struct MIDICollectionThreadedMerger {
 			(*FinishedFlag) = 1; /// Will this work?
 			file_output.close();
 			delete RMC;
+			delete[] buffer;
 		}, RegularMergeCandidats, &IntermediateRegularFlag, FinalPPQN, SaveTo, &IRTrackCount);
 		RMC_Processor.detach();
 	}
@@ -1758,7 +1766,8 @@ struct MIDICollectionThreadedMerger {
 				_wremove(_SaveTo.c_str());
 				_wrename((_SaveTo + L".I.mid").c_str(), _SaveTo.c_str());
 				_wrename((_SaveTo + L".R.mid").c_str(), _SaveTo.c_str());//one of these will not work
-				delete IM, RM;
+				delete IM;
+				delete RM;
 				printf("Escaped last stage\n");
 				*FinishedFlag = true;
 				return;
@@ -4012,7 +4021,8 @@ struct MoveableWindow:HandleableUIPart {
 		BIT flag=0;
 		auto Y = WindowActivities.begin();
 		while (Y != WindowActivities.end()) {
-			flag=Y->second->MouseHandler(mx, my, Button, State);
+			if(Y->second)
+				flag=Y->second->MouseHandler(mx, my, Button, State);
 			if (HUIP_MapWasChanged) {
 				HUIP_MapWasChanged = false;
 				break;
@@ -4070,7 +4080,8 @@ struct MoveableWindow:HandleableUIPart {
 		YWindowPos += dy;
 		WindowName->SafeMove(dx, dy);
 		for (auto Y = WindowActivities.begin(); Y != WindowActivities.end(); Y++)
-			Y->second->SafeMove(dx, dy);
+			if(Y->second)
+				Y->second->SafeMove(dx, dy);
 		Lock.unlock();
 	}
 	void SafeChangePosition_Argumented(BYTE Arg, float NewX, float NewY) {
@@ -5947,7 +5958,7 @@ void OnStart() {
 	GlobalMCTM = _Data.MCTM_Constructor();
 	printf("MCTM constructed\n");
 	GlobalMCTM->ProcessMIDIs();
-	printf("MCTM Prcessing has begun\n");
+	printf("MCTM Processing has begun\n");
 	MoveableWindow *MW;
 	INT32 ID = 0;
 	if (WH) {
@@ -5963,7 +5974,8 @@ void OnStart() {
 				continue;
 			auto Q = GetPositionForOneOf(ID, GlobalMCTM->Cur_Processing.size(),140,0.7);
 			auto Vis = new SMRP_Vis(Q.first, Q.second, System_White);
-			MW->AddUIElement("SMRP_C" + to_string(ID), Vis);
+			string temp = "";
+			MW->AddUIElement(temp = "SMRP_C" + to_string(ID), Vis);
 			thread TH([](MIDICollectionThreadedMerger *pMCTM, MoveableWindow *MW, DWORD ID) {
 				string SID = "SMRP_C" + to_string(ID);
 				cout << SID << " Processing started" << endl;
@@ -6242,7 +6254,7 @@ void Init() {///SetIsFontedVar
 	
 	DragAcceptFiles(hWnd, TRUE);
 	OleInitialize(NULL);
-	cout << "RDD " << (RegisterDragDrop(hWnd, &DNDH_Global)) << endl;
+	cout << "Register Drag&Drop " << (RegisterDragDrop(hWnd, &DNDH_Global)) << endl;
 	
 	SAFC_VersionCheck();
 }

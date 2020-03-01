@@ -35,6 +35,14 @@ private:
 		file_pos++;
 		return buf_ch;
 	}
+	inline void zero_buffer() {
+		auto end = buffer + buffer_size;
+		auto current = buffer;
+		while (current != end) {
+			*current = 0;
+			current++;
+		}
+	}
 public:
 	byte_by_byte_fast_file_reader(const wchar_t* filename, int default_buffer_size = 20000000) {
 		auto err_no = _wfopen_s(&file, filename, L"rb");
@@ -50,16 +58,15 @@ public:
 			file_pos = 0;
 			inner_buffer_pos = 0;
 			buffer = new unsigned char[default_buffer_size];
-			buffer_size = default_buffer_size;
-			ZeroMemory(buffer, default_buffer_size);
+			buffer_size = default_buffer_size; 
 			__read_next_chunk();
 		}
 	}
 	~byte_by_byte_fast_file_reader() {
-		delete[] buffer;
-		buffer = nullptr;
 		if (is_open)
 			fclose(file);
+		delete[] buffer;
+		buffer = nullptr;
 	}
 	inline void reopen_next_file(const wchar_t* filename) {
 		close(); 
@@ -74,7 +81,6 @@ public:
 		else {
 			file_pos = 0;
 			inner_buffer_pos = 0;
-			ZeroMemory(buffer, buffer_size);
 			__read_next_chunk();
 		}
 	}
