@@ -182,22 +182,28 @@ bool SAFC_Update(const wstring& latest_release) {
 			if (_waccess(L"SAFC.exe", 0) != 0) {
 				system("7z.exe x -y update.7z");
 				if (_waccess(L"SAFC.exe", 0) != 0) {
-					ThrowAlert_Error("Extract: To perform this operation you must have 7-Zip installed.\n");
-					_wrename(L"_s", L"SAFC.exe");
-					_wrename(L"_f", L"freeglut.dll");
-					_wrename(L"_g", L"glew32.dll");
-					flag = false;
+					system("\"C:\\Program Files\\WinRAR\\WinRAR.exe\" x -y update.7z");
+					if (_waccess(L"SAFC.exe", 0) != 0) {
+						system("\"C:\\Program Files (x86)\\WinRAR\\WinRAR.exe\" x -y update.7z");
+						if (_waccess(L"SAFC.exe", 0) != 0) {
+							ThrowAlert_Error("Extraction: To perform this operation you must have latest 7-Zip or WinRAR installed in default directories.\n");
+							_wrename(L"_s", L"SAFC.exe");
+							_wrename(L"_f", L"freeglut.dll");
+							_wrename(L"_g", L"glew32.dll");
+							flag = false;
+						}
+					}
 				}
 			}
 		}
 		_wremove(L"update.7z");
 	}
 	else if (co_res == E_OUTOFMEMORY)
-		ThrowAlert_Error("Update: Buffer length invalid, or insufficient memory\n");
+		ThrowAlert_Error("Update check: Buffer length invalid, or insufficient memory\n");
 	else if (co_res == INET_E_DOWNLOAD_FAILURE)
-		ThrowAlert_Error("Update: URL is invalid\n");
+		ThrowAlert_Error("Update check: URL is invalid\n");
 	else
-		ThrowAlert_Error("Update: Other error: " + to_string( co_res));
+		ThrowAlert_Error("Update check: Other error: " + to_string( co_res));
 	
 	return flag;
 }
