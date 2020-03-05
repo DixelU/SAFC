@@ -1705,6 +1705,7 @@ struct MIDICollectionThreadedMerger {
 			for (auto& t : fiv) {
 				delete t;
 			}
+			printf("Inplace: finished\n");
 			(*FinishedFlag) = 1; /// Will this work?
 			delete IMC;
 		}, InplaceMergeCandidats, &IntermediateInplaceFlag, FinalPPQN, SaveTo, &IITrackCount);
@@ -1748,7 +1749,7 @@ struct MIDICollectionThreadedMerger {
 			file_output.seekp(10, ios::beg);
 			file_output.put(*TrackCount >> 8);
 			file_output.put(*TrackCount);
-			(*FinishedFlag) = 1; /// Will this work?
+			(*FinishedFlag) = true; /// Will this work?
 			file_output.close();
 			delete RMC;
 			delete[] buffer;

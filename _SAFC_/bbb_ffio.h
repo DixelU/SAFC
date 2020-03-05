@@ -15,6 +15,7 @@ private:
 	bool is_open;
 	bool is_eof;
 	bool next_chunk_is_unavailable;
+	const int true_buffer_size;
 	inline void __read_next_chunk() {
 		if (!next_chunk_is_unavailable) {
 			size_t new_buffer_len = _fread_nolock_s(buffer, buffer_size, 1, buffer_size, file);
@@ -44,7 +45,7 @@ private:
 		}
 	}
 public:
-	byte_by_byte_fast_file_reader(const wchar_t* filename, int default_buffer_size = 20000000) {
+	byte_by_byte_fast_file_reader(const wchar_t* filename, int default_buffer_size = 20000000) :true_buffer_size(default_buffer_size) {
 		auto err_no = _wfopen_s(&file, filename, L"rb");
 		is_open = !(err_no);
 		next_chunk_is_unavailable = (is_eof = (file) ? feof(file) : true);
@@ -81,6 +82,7 @@ public:
 		else {
 			file_pos = 0;
 			inner_buffer_pos = 0;
+			buffer_size = true_buffer_size;
 			__read_next_chunk();
 		}
 	}
