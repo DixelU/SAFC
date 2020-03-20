@@ -126,15 +126,4 @@ public:
 	}
 } bbb_ffr;
 
-typedef struct byte_by_byte_fast_file_writer {
-private:
-	FILE* file;
-	unsigned char* buffer;
-	size_t buffer_size;
-	size_t inner_buffer_pos;
-	INT64 file_pos;
-public:
-	byte_by_byte_fast_file_writer();
-} bbb_ffw;
-
 #endif

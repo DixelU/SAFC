@@ -64,9 +64,8 @@
 #include "JSON/JSONValue.h"
 #include "JSON/JSONValue.cpp"
 
-#include "btree/btree_map.h"
-
 #define NULL nullptr
+constexpr bool transparency = true;
 
 using namespace std;
 
@@ -98,9 +97,9 @@ float ROT_ANGLE = 0.f;
 #define GLCOLOR(uINT) glColor4ub(((uINT & 0xFF000000) >> 24), ((uINT & 0xFF0000) >> 16), ((uINT & 0xFF00) >> 8), (uINT & 0xFF))
 
 float WindX = WINDXSIZE, WindY = WINDYSIZE;
+WORD MOUSEX=0, MOUSEY=0;
 
-BIT ANIMATION_IS_ACTIVE = 0, FIRSTBOOT = 1, DRAG_OVER = 0, 
-	APRIL_FOOL = 0, SHIFT_HELD = 0;
+BIT ANIMATION_IS_ACTIVE = 0, FIRSTBOOT = 1, DRAG_OVER = 0;
 DWORD TimerV = 0;
 HWND hWnd;
 HDC hDc;
@@ -113,7 +112,6 @@ float CONSTZERO(float x, float y) { return 0.f; }
 int TIMESEED() {
 	SYSTEMTIME t;
 	GetLocalTime(&t);
-	if (t.wMonth == 4 && t.wDay == 1)APRIL_FOOL = 1;
 	return t.wMilliseconds + (t.wSecond * 1000) + t.wMinute * 60000;
 }
 
@@ -505,25 +503,18 @@ struct SingleMIDIInfoCollector {
 			DWORD L = (A << 16) | (B << 8) | (C);
 			return 60000000. / L;
 		}
-		inline operator double() const {
+		inline operator double() {
 			return get_bpm(A, B, C);
 		}
-		inline bool operator<(const TempoEvent& TE) const {
-			return double(*this) < (double)TE;
-		}
 	};
-	BIT Processing;
+	using tick_tempo_pair = std::pair<UINT64, TempoEvent>;
+	using alloc_multiset = std::multiset<tick_tempo_pair, std::less<tick_tempo_pair>, moya_alloc::allocator<tick_tempo_pair>>;
 	wstring FileName;
 	string LogLine;
-	Locker<btree::btree_map<INT64,TempoEvent>> TempoMap;
-	Locker<std::vector<INT64>> TracksBeginings;
-	//Locker<btree::btree_map<UINT64, UINT64>> Polyphony;
-	//Locker<btree::btree_map<>>
-	SingleMIDIInfoCollector(wstring filename) : FileName(filename), LogLine(" "), Processing(0) { }
-	void Lookup() {
-		Processing = true;
-		bbb_ffr in(FileName.c_str());
-	}
+	Locker<alloc_multiset> TempoMap;
+	Locker<std::vector<UINT64>> TracksBeginings;
+	BIT Processing;
+	
 };
 
 struct SingleMIDIReProcessor {
@@ -3349,7 +3340,7 @@ struct SelectablePropertedList : HandleableUIPart {
 	ButtonSettings *ButtSettings;
 	deque<string> SelectorsText;
 	deque<Button*> Selectors;
-	deque<DWORD> SelectedID;
+	DWORD SelectedID;
 	DWORD MaxVisibleLines,CurrentTopLineID,MaxCharsInLine;
 	BYTE TopArrowHovered,BottomArrowHovered;
 	~SelectablePropertedList() {
@@ -3371,7 +3362,7 @@ struct SelectablePropertedList : HandleableUIPart {
 		this->HeaderYPos = HeaderYPos;
 		this->CurrentTopLineID = 0;
 		this->TextInButtonsAlign = TextInButtonsAlign;
-		//SelectedID = 0xFFFFFFFF;
+		SelectedID = 0xFFFFFFFF;
 	}
 	void RecalculateCurrentHeight() {
 		Lock.lock();
@@ -3418,20 +3409,12 @@ struct SelectablePropertedList : HandleableUIPart {
 			for (int i = 0; i < Selectors.size(); i++) {
 				if (Selectors[i]->MouseHandler(mx, my, Button, State) && flag) {
 					if (Button == -1) {
-						if(!glutGetModifiers() == GLUT_ACTIVE_SHIFT)
-							SelectedID.clear();
-						auto it = std::find(SelectedID.begin(), SelectedID.end(), i + CurrentTopLineID);
-						if (!(it != SelectedID.end()))
-							SelectedID.push_back(i + CurrentTopLineID);
-						else
-							SelectedID.erase(it);
-						if (OnSelect)
-							OnSelect(i + CurrentTopLineID);
+						SelectedID = i + CurrentTopLineID;
+						if (OnSelect)OnSelect(i + CurrentTopLineID);
 					}
 					if (Button == 1) {
 						//cout << "PROP\n";
-						if (OnGetProperties)
-							OnGetProperties(i + CurrentTopLineID);
+						if (OnGetProperties)OnGetProperties(i + CurrentTopLineID);
 					}
 					flag = 0;
 					Lock.unlock();
@@ -3443,10 +3426,9 @@ struct SelectablePropertedList : HandleableUIPart {
 			for (int i=0;i<Selectors.size();i++)
 				Selectors[i]->MouseHandler(mx, my, 0, 0);
 		}
-		for(auto ID: SelectedID)
-			if (ID < SelectorsText.size())
-				if (ID >= CurrentTopLineID && ID < CurrentTopLineID + MaxVisibleLines)
-					Selectors[ID - CurrentTopLineID]->MouseHandler(Selectors[ID - CurrentTopLineID]->Xpos, Selectors[ID - CurrentTopLineID]->Ypos, 0, 0);
+		if (SelectedID < SelectorsText.size())
+			if (SelectedID >= CurrentTopLineID && SelectedID < CurrentTopLineID + MaxVisibleLines)
+				Selectors[SelectedID - CurrentTopLineID]->MouseHandler(Selectors[SelectedID - CurrentTopLineID]->Xpos, Selectors[SelectedID - CurrentTopLineID]->Ypos, 0, 0);
 		Lock.unlock();
 		return 0;
 	}
@@ -3458,7 +3440,10 @@ struct SelectablePropertedList : HandleableUIPart {
 	void SafeStringReplace(string NewString,DWORD LineID) {
 		Lock.lock();
 		if (LineID == 0xFFFFFFFF) {
-			SafeStringReplace(NewString, SelectedID.front());
+			SelectorsText[SelectedID] = NewString;
+			if (SelectedID < SelectorsText.size() && MaxVisibleLines)
+				if (SelectedID > CurrentTopLineID && SelectedID < CurrentTopLineID + MaxVisibleLines)
+					Selectors[SelectedID - CurrentTopLineID]->SafeStringReplace(NewString);
 		}
 		else {
 			SelectorsText[LineID] = NewString;
@@ -3515,26 +3500,7 @@ struct SelectablePropertedList : HandleableUIPart {
 		}
 		SelectorsText.erase(SelectorsText.begin() + ID);
 		SafeUpdateLines();
-		SelectedID.clear();
-		Lock.unlock();
-	}
-	void RemoveSelected() {
-		Lock.lock();
-		std::sort(SelectedID.begin(), SelectedID.end());
-		while (SelectedID.size()) {
-			if (MaxVisibleLines) {
-				if (SelectedID.back() < CurrentTopLineID) {
-					CurrentTopLineID--;
-				}
-				else if (SelectedID.back() == CurrentTopLineID) {
-					if (CurrentTopLineID == SelectorsText.size() - 1)CurrentTopLineID--;
-				}
-			}
-			SelectorsText.erase(SelectorsText.begin() + SelectedID.back());
-			SelectedID.pop_back();
-		}
-		SafeUpdateLines();
-		SelectedID.clear();
+		SelectedID = 0xFFFFFFFF;
 		Lock.unlock();
 	}
 	void ReSetAlignFor(DWORD ID, _Align Align) {
@@ -4236,14 +4202,14 @@ struct WindowsHandler {
 		MainWindow_ID = "MAIN";
 		WindowWasDisabledDuringMouseHandling = 0;
 		MoveableWindow* ptr;
-		Map["ALERT"] = ptr = new MoveableWindow("Alert window", System_White, -100, 25, 200, 50, 0x3F3F3FCF, 0x7F7F7F7F);
+		Map["ALERT"] = ptr = new MoveableWindow("Alert window", System_White, -100, 25, 200, 50, 0x414141FF, 0x5F5F5FFF);
 		(*ptr)["AlertText"] = new TextBox("_", System_White, 17.5, -7.5, 37, 160, 7.5, 0, 0, 0, _Align::left, TextBox::VerticalOverflow::recalibrate);
 		(*ptr)["AlertSign"] = new SpecialSignHandler(SpecialSigns::DrawACircle,-80,-12.5,7.5,0x000000FF,0x001FFFFF);
 
-		Map["PROMPT"] = ptr = new MoveableWindow("prompt", System_White, -50, 50, 100, 100, 0x3F3F3FCF, 0x7F7F7F7F);
+		Map["PROMPT"] = ptr = new MoveableWindow("prompt", System_White, -50, 50, 100, 100, 0x414141FF, 0x5F5F5FFF);
 		(*ptr)["FLD"] = new InputField("", 0, 35 - WindowHeapSize, 10, 80, System_White, NULL, 0x007FFFFF, NULL, "", 0, _Align::center);
 		(*ptr)["TXT"] = new TextBox("_abc_", System_White, 0, 7.5-WindowHeapSize, 10, 80, 7.5, 0, 0, 2,_Align::center,TextBox::VerticalOverflow::recalibrate); 
-		(*ptr)["BUTT"] = new Button("Submit", System_White, NULL, -0, -20 - WindowHeapSize, 80, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFF7F00FF, 0xFFFFFFFF, 0xFF7F00FF, NULL, " ");
+		(*ptr)["BUTT"] = new Button("Submit", System_White, NULL, -0, -20 - WindowHeapSize, 80, 10, 1, 0x2B4D80FF, 0x007FFFFF, 0xFF7F00FF, 0xFFFFFFFF, 0xFF7F00FF, NULL, " ");
 	}
 	void MouseHandler(float mx,float my, CHAR Button, CHAR State) {
 		locker.lock();
@@ -4344,7 +4310,7 @@ struct WindowsHandler {
 	void EnableWindow(map<string, MoveableWindow*>::iterator Window) {
 		locker.lock();
 		if (Window == Map.end()) {
-			locker.lock(); 
+			locker.unlock(); 
 			return; 
 		}
 		for (auto Y = ActiveWindows.begin(), Q = ActiveWindows.begin(); Y != ActiveWindows.end(); Y++) {
@@ -4363,7 +4329,6 @@ struct WindowsHandler {
 				}
 			}
 		}
-
 		ActiveWindows.push_front(Window);
 		locker.unlock();
 		//cout << Window->first << " " << ActiveWindows.front()->first << endl;
@@ -4394,7 +4359,10 @@ struct WindowsHandler {
 							break;
 						}
 						else DisableWindow(Y);
-					else (*Y)->second->Drawable = true;
+					else {
+						(*Y)->second->Drawable = true;
+						exit(0);// :shrug:
+					}
 					continue;
 				}
 				(*Y)->second->Draw();
@@ -4404,7 +4372,8 @@ struct WindowsHandler {
 			}
 		}
 		//cout << endl;
-		if (!MetMain)this->EnableWindow(MainWindow_ID);
+		if (!MetMain)
+			this->EnableWindow(MainWindow_ID);
 		locker.unlock();
 	}
 	inline MoveableWindow*& operator[](string ID) {
@@ -4558,20 +4527,22 @@ struct CAT_Piano :HandleableUIPart {
 
 		glLineWidth(0.5f*KeyWidth / pixsz);
 		glBegin(GL_LINES);
+		float temp = 0;
 		for (int i = 0; i < 256; i++, x += KeyWidth) {//Main piano
 			Inside = ((i >= (PianoTransform->Min)) && (i <= (PianoTransform->Max)));
+			temp = (Inside ? 0.9f : 0.25f);
 			if (IsWhiteKey(i)) {
-				glColor4f(1, 1, 1, (Inside ? 0.9f : 0.25f));
+				glColor4f(temp, temp, temp, temp);
 				glVertex2f(x, BaseYPos - 1.25f*PianoHeight);
 				glVertex2f(x, BaseYPos - 0.25f*PianoHeight);
 				continue;
 			}
 			else {
-				glColor4f(0, 0, 0, (Inside ? 0.9f : 0.25f));
+				glColor4f(0.5 - temp * 0.5, 0.5 - temp * 0.5, 0.5 - temp * 0.5, 1);
 				glVertex2f(x, BaseYPos - 0.75f*PianoHeight);
 				glVertex2f(x, BaseYPos - 0.25f*PianoHeight);
 			}
-			glColor4f(1, 1, 1, (Inside ? 0.9f : 0.25f));
+			glColor4f(temp, temp, temp, 1);
 			glVertex2f(x, BaseYPos - 0.75f*PianoHeight);
 			glVertex2f(x, BaseYPos - 1.25f*PianoHeight);
 		}
@@ -4580,18 +4551,19 @@ struct CAT_Piano :HandleableUIPart {
 			if (fabs(x - BaseXPos) >= 0.5*CalculatedWidth)
 				continue;
 			Inside = ((i - (PianoTransform->TransposeVal) >= (PianoTransform->Min)) && (i - (PianoTransform->TransposeVal) <= (PianoTransform->Max)));
+			temp = (Inside ? 0.9f : 0.25f);
 			if (IsWhiteKey(i)) {
-				glColor4f(1, 1, 1, (Inside ? 0.9f : 0.25f));
+				glColor4f(temp, temp, temp, temp);
 				glVertex2f(x, BaseYPos + 1.25f*PianoHeight);
 				glVertex2f(x, BaseYPos + 0.25f*PianoHeight);
 				continue;
 			}
 			else {
-				glColor4f(0, 0, 0, (Inside ? 0.9f : 0.25f));
+				glColor4f(0.5 - temp * 0.5, 0.5 - temp * 0.5, 0.5 - temp * 0.5, 1);
 				glVertex2f(x, BaseYPos + 0.75f*PianoHeight);
 				glVertex2f(x, BaseYPos + 0.25f*PianoHeight);
 			}
-			glColor4f(1, 1, 1, (Inside ? 0.9f : 0.25f));
+			glColor4f(temp, temp, temp, 1);
 			glVertex2f(x, BaseYPos + 1.25f*PianoHeight);
 			glVertex2f(x, BaseYPos + 0.75f*PianoHeight);
 		}
@@ -4599,7 +4571,7 @@ struct CAT_Piano :HandleableUIPart {
 		
 		x = BaseXPos - (128 - PianoTransform->Min + 0.5f)*KeyWidth;//Square
 		glLineWidth(1);
-		glColor4f(0, 1, 0, 0.75f);
+		glColor4f(0, 0.75f, 0, 1);
 		glBegin(GL_LINE_LOOP);
 		glVertex2f(x, BaseYPos - 1.5f * PianoHeight);
 		glVertex2f(x, BaseYPos + 1.5f * PianoHeight);
@@ -4747,7 +4719,8 @@ struct PLC_VolumeWorker:HandleableUIPart {
 	void Draw() override {
 		Lock.lock();
 		float begx = CXPos - 0.5f*HorizontalSidesSize, begy = CYPos - 0.5f*VerticalSidesSize;
-		glColor4f(1, 1, 1, (Hovered)? 0.85f : 0.5f);
+		float false_transparancy = (Hovered) ? 0.85f : 0.5f;
+		glColor4f(false_transparancy, false_transparancy, false_transparancy, 1);
 		glLineWidth(1);
 		glBegin(GL_LINE_LOOP);
 		glVertex2f(begx, begy);
@@ -4755,8 +4728,8 @@ struct PLC_VolumeWorker:HandleableUIPart {
 		glVertex2f(begx + HorizontalSidesSize, begy + VerticalSidesSize);
 		glVertex2f(begx + HorizontalSidesSize, begy);
 		glEnd();
-		glColor4f(0.5, 1, 0.5, 0.05);//showing "safe" for volumes square 
-		glBegin(GL_QUADS);
+		glColor4f(0.5, 0.65, 0.5, 1);//showing "safe" for volumes square 
+		glBegin(GL_LINE_LOOP);
 		glVertex2f(begx, begy);
 		glVertex2f(begx, begy + 0.5f*VerticalSidesSize);
 		glVertex2f(begx + 0.5f*HorizontalSidesSize, begy + 0.5f*VerticalSidesSize);
@@ -4764,7 +4737,7 @@ struct PLC_VolumeWorker:HandleableUIPart {
 		glEnd();
 
 		if (Hovered) {
-			glColor4f(1, 1, 1, 0.25);
+			glColor4f(1, 1, 1, 1);
 			glBegin(GL_LINES);
 			glVertex2f(begx + _xsqsz * XCP, begy);
 			glVertex2f(begx + _xsqsz * XCP, begy + VerticalSidesSize);
@@ -4778,7 +4751,7 @@ struct PLC_VolumeWorker:HandleableUIPart {
 		}
 		if (PLC_bb && PLC_bb->ConversionMap.size()) {
 			glLineWidth(3);
-			glColor4f(1, 0.75f, 1, 0.5f);
+			glColor4f(1, 0.75f, 1, 1);
 			glBegin(GL_LINE_STRIP);
 			glVertex2f(begx, begy + _ysqsz * (PLC_bb->AskForValue(0) + 0.5f));
 
@@ -4787,7 +4760,7 @@ struct PLC_VolumeWorker:HandleableUIPart {
 
 			glVertex2f(begx + 255.5f*_xsqsz, begy + _ysqsz * (PLC_bb->AskForValue(255) + 0.5f));
 			glEnd();
-			glColor4f(1, 1, 1, 0.75f);
+			glColor4f(1, 1, 1, 1);
 			glPointSize(5);
 			glBegin(GL_POINTS);
 			for (auto Y = PLC_bb->ConversionMap.begin(); Y != PLC_bb->ConversionMap.end(); Y++)
@@ -5147,7 +5120,7 @@ struct BoolAndWORDChecker : HandleableUIPart {
 };
 
 ButtonSettings 
-					*BS_List_Black_Small = new ButtonSettings(System_White, 0, 0, 100, 10, 1, 0, 0, 0xFFEFDFFF, 0x00003F7F, 0x7F7F7FFF);
+					*BS_List_Black_Small = new ButtonSettings(System_White, 0, 0, 100, 10, 1, 0, 0, 0xFFEFDFFF, 0x14143FFF, 0x7F7F7FFF);
 
 DWORD DefaultBoolSettings = _BoolSettings::remove_remnants | /*_BoolSettings::remove_empty_tracks*/ 0 | _BoolSettings::all_instruments_to_piano;
 
@@ -5750,10 +5723,8 @@ namespace PropsAndSets {
 
 void OnRem() {
 	auto ptr = _WH_t("MAIN", "List", SelectablePropertedList*);
-	for (auto ID = ptr->SelectedID.rbegin(); ID != ptr->SelectedID.rend(); ID++) {
-		_Data.RemoveByID(*ID);
-	}
-	ptr->RemoveSelected();
+	_Data.RemoveByID(ptr->SelectedID);
+	ptr->SafeRemoveStringByID(ptr->SelectedID);
 	WH->DisableWindow("SMPAS");
 	WH->DisableWindow("VM");
 	WH->DisableWindow("CAT");
@@ -6075,7 +6046,6 @@ void OnStart() {
 	}
 	//ThrowAlert_Error("It's not done yet :p");
 }
-
 void OnSaveTo() {
 	_Data.SaveDirectory = SOFD(L"Save final midi to...");
 	size_t Pos = _Data.SaveDirectory.rfind(L".mid");
@@ -6147,70 +6117,72 @@ void RestoreRegSettings() {
 
 void Init() {///SetIsFontedVar
 	RestoreRegSettings();
+
 	hDc = GetDC(hWnd);
 	_Data.DetectedThreads = min((int)thread::hardware_concurrency() - 1,(int)(ceil(GetAvailableMemory() / 2048.)));
 
-	MoveableWindow *T = new MoveableWindow("Main window", System_White, -200, 200, 400, 400, 0x3F3F3FAF, 0x7F7F7F7F);
+	MoveableWindow *T = new MoveableWindow("Main window", System_White, -200, 200, 400, 400, 0x414141FF, 0x5F5F5FFF);
 	SelectablePropertedList *SPL = new SelectablePropertedList(BS_List_Black_Small, NULL, PropsAndSets::OGPInMIDIList, -50, 172, 300, 12, 65, 30);
 	Button *Butt;
 	(*T)["List"] = SPL;
 
-	(*T)["ADD_Butt"] = new Button("Add MIDIs", System_White, OnAdd, 150, 172.5, 75, 12, 1, 0x00003FAF, 0xFFFFFFFF, 0x00003FFF, 0xFFFFFFFF, 0x7F7F7F7FF,NULL," ");
-	(*T)["REM_Butt"] = new Button("Remove selected", System_White, OnRem, 150, 160, 75, 12, 1, 0x3F0000AF, 0xFFFFFFFF, 0x3F0000FF, 0xFFFFFFFF, 0x7F7F7F7FF, NULL, " ");
-	(*T)["REM_ALL_Butt"] = new Button("Remove all", System_White, OnRemAll, 150, 147.5, 75, 12, 1, 0xAF0000AF, 0xFFFFFFFF, 0xAF0000AF, 0xFFFFFFFF, 0x7F7F7F7FF, System_White, "May cause lag");
-	(*T)["GLOBAL_PPQN_Butt"] = new Button("Global PPQN", System_White, OnGlobalPPQN, 150, 122.5, 75, 12, 1, 0xFF3F00AF, 0xFFFFFFFF, 0xFF3F00AF, 0xFFFFFFFF, 0x7F7F7F7FF, NULL, " ");
-	(*T)["GLOBAL_OFFSET_Butt"] = new Button("Global offset", System_White, OnGlobalOffset, 150, 110, 75, 12, 1, 0xFF7F00AF, 0xFFFFFFFF, 0xFF7F00FF, 0xFFFFFFFF, 0x7F7F7F7FF, NULL, " ");
-	(*T)["GLOBAL_TEMPO_Butt"] = new Button("Global tempo", System_White, OnGlobalTempo, 150, 97.5, 75, 12, 1, 0xFFAF00AF, 0xFFFFFFFF, 0xFFAF00AF, 0xFFFFFFFF, 0x7F7F7F7FF, NULL, " ");
+	(*T)["ADD_Butt"] = new Button("Add MIDIs", System_White, OnAdd, 150, 172.5, 75, 12, 1, 0x14143FFF, 0xFFFFFFFF, 0x14143FFF, 0xFFFFFFFF, 0xF7F7F7FF,NULL," ");
+	(*T)["REM_Butt"] = new Button("Remove selected", System_White, OnRem, 150, 160, 75, 12, 1, 0x3F1414FF, 0xFFFFFFFF, 0x3F1414FF, 0xFFFFFFFF, 0xF7F7F7FF, NULL, " ");
+	(*T)["REM_ALL_Butt"] = new Button("Remove all", System_White, OnRemAll, 150, 147.5, 75, 12, 1, 0x8C1414FF, 0xFFFFFFFF, 0x8C1414FF, 0xFFFFFFFF, 0xF7F7F7FF, System_White, "May cause lag");
+	(*T)["GLOBAL_PPQN_Butt"] = new Button("Global PPQN", System_White, OnGlobalPPQN, 150, 122.5, 75, 12, 1, 0xCF3F14FF, 0xFFFFFFFF, 0xCF3F14FF, 0xFFFFFFFF, 0xF7F7F7FF, NULL, " ");
+	(*T)["GLOBAL_OFFSET_Butt"] = new Button("Global offset", System_White, OnGlobalOffset, 150, 110, 75, 12, 1, 0xCF6B14FF, 0xFFFFFFFF, 0xCF6B14FF, 0xFFFFFFFF, 0xF7F7F7FF, NULL, " ");
+	(*T)["GLOBAL_TEMPO_Butt"] = new Button("Global tempo", System_White, OnGlobalTempo, 150, 97.5, 75, 12, 1, 0xCC9900FF, 0xFFFFFFFF, 0xCC9900FF, 0xFFFFFFFF, 0xF7F7F7FF, NULL, " ");
 	//(*T)["_FRESOLVE"] = new Button("_ForceResolve", System_White, _OnResolve, 150, 0, 75, 12, 1, 0x7F007F3F, 0xFFFFFF3F, 0x000000FF, 0xFFFFFF3F, 0x7F7F7F73F, NULL, " ");
 	(*T)["DELETE_ALL_VM"] = new Button("Remove vol. maps", System_White, OnRemVolMaps, 150, 72.5, 75, 12, 1,
-		0x7F7F7FAF, 0xFFFFFFFF, 0x7F7F7FAF, 0xFFFFFFFF, 0x7F7F7F7FF, NULL, " ");//0xFF007FAF
+		0x6B6B6BFF, 0xFFFFFFFF, 0x6B6B6BFF, 0xFFFFFFFF, 0xF7F7F7FF, NULL, " ");//0xFF007FAF
 	(*T)["DELETE_ALL_CAT"] = new Button("Remove C&Ts", System_White, OnRemCATs, 150, 60, 75, 12, 1, 
-		0x7F7F7FAF, 0xFFFFFFFF, 0x7F7F7FAF, 0xFFFFFFFF, 0x7F7F7F7FF, NULL, " ");
+		0x6B6B6BFF, 0xFFFFFFFF, 0x6B6B6BFF, 0xFFFFFFFF, 0xF7F7F7FF, NULL, " ");
 	(*T)["DELETE_ALL_PITCHES"] = new Button("Remove p. maps", System_White, OnRemPitchMaps, 150, 47.5, 75, 12, 1, 
-		0x7F7F7FAF, 0xFFFFFFFF, 0x7F7F7FAF, 0xFFFFFFFF, 0x7F7F7F7FF, NULL, " ");
+		0x6B6B6BFF, 0xFFFFFFFF, 0x6B6B6BFF, 0xFFFFFFFF, 0xF7F7F7FF, NULL, " ");
 	(*T)["DELETE_ALL_MODULES"] = new Button("Remove modules", System_White, OnRemAllModules, 150, 35, 75, 12, 1, 
-		0x7F7F7FAF, 0xFFFFFFFF, 0x7F7F7FAF, 0xFFFFFFFF, 0x7F7F7F7FF, NULL, " ");
+		0x6B6B6BFF, 0xFFFFFFFF, 0x6B6B6BFF, 0xFFFFFFFF, 0xF7F7F7FF, NULL, " ");
 
 	(*T)["SETTINGS"] = new Button("Settings...", System_White, Settings::OnSettings, 150, -140, 75, 12, 1,
-		0x5F5F5FAF, 0xFFFFFFFF, 0x5F5F5FAF, 0xFFFFFFFF, 0x7F7F7F7FF, NULL, " ");
+		0x555555FF, 0xFFFFFFFF, 0x555555FF, 0xFFFFFFFF, 0xF7F7F7FF, NULL, " ");
 	(*T)["SAVE_AS"] = new Button("Save as...", System_White, OnSaveTo, 150, -152.5, 75, 12, 1,
-		0x3FAF00AF, 0xFFFFFFFF, 0x3FAF00AF, 0xFFFFFFFF, 0x7F7F7F7FF, NULL, " ");
+		0x66A819FF, 0xFFFFFFFF, 0x66A819FF, 0xFFFFFFFF, 0xF7F7F7FF, NULL, " ");
 	(*T)["START"] = Butt = new Button("Start merging", System_White, OnStart, 150, -177.5, 75, 12, 1,
-		0x000000AF, 0xFFFFFFFF, 0x000000AF, 0xFFFFFFFF, 0x7F7F7F7FF, NULL, " ");//177.5
+		0x000000FF, 0xFFFFFFFF, 0x000000FF, 0xFFFFFFFF, 0xF7F7F7FF, NULL, " ");//177.5
 
 	(*WH)["MAIN"] = T;
 
-	T = new MoveableWindow("Props. and sets.", System_White, -100, 100, 200, 200, 0x3F3F3FCF, 0x7F7F7F7F);
+	T = new MoveableWindow("Props. and sets.", System_White, -100, 100, 200, 200, 0x414141FF, 0x5F5F5FFF);
 	(*T)["FileName"] = new TextBox("_", System_White, 0, 88.5 - WindowHeapSize, 6, 200 - 1.5*WindowHeapSize, 7.5, 0, 0, 0, _Align::left, TextBox::VerticalOverflow::cut); 
 	(*T)["PPQN"] = new InputField(" ", -90 + WindowHeapSize, 75 - WindowHeapSize, 10, 25, System_White, PropsAndSets::PPQN, 0x007FFFFF, System_White, "PPQN is lesser than 65536.", 5, _Align::center, _Align::left, InputField::Type::NaturalNumbers);
 	(*T)["TEMPO"] = new InputField(" ", -45 + WindowHeapSize, 75 - WindowHeapSize, 10, 55, System_White, PropsAndSets::TEMPO, 0x007FFFFF, System_White, "Specific tempo override field", 7, _Align::center, _Align::left, InputField::Type::NaturalNumbers);
 	(*T)["OFFSET"] = new InputField(" ", 17.5 + WindowHeapSize, 75 - WindowHeapSize, 10, 60, System_White, PropsAndSets::OFFSET, 0x007FFFFF, System_White, "Offset from begining in ticks", 10, _Align::center, _Align::right, InputField::Type::NaturalNumbers);
 
-	(*T)["BOOL_REM_TRCKS"] = new CheckBox(-97.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, System_White, _Align::left, "Remove empty tracks");
-	(*T)["BOOL_REM_REM"] = new CheckBox(-82.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, System_White, _Align::left, "Remove merge \"remnants\"");
-	(*T)["BOOL_PIANO_ONLY"] = new CheckBox(-67.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, System_White, _Align::left, "Replace all instruments with piano");
-	(*T)["BOOL_IGN_TEMPO"] = new CheckBox(-52.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::left, "Ignore tempo events");
-	(*T)["BOOL_IGN_PITCH"] = new CheckBox(-37.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::center, "Ignore pitch bending events");
-	(*T)["BOOL_IGN_NOTES"] = new CheckBox(-22.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::center, "Ignore note events");
-	(*T)["BOOL_IGN_ALL_EX_TPS"] = new CheckBox(-7.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::center, "Ignore everything except specified");
-	(*T)["BOOL_APPLY_TO_ALL_MIDIS"] = Butt = new Button("A2A", System_White, PropsAndSets::OnApplyBS2A, 80 - WindowHeapSize, 55 - WindowHeapSize, 15, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, System_White, "Sets \"bool settings\" to all midis");
+	(*T)["BOOL_REM_TRCKS"] = new CheckBox(-97.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 0x007FFFFF, 0x9F2020FF, 0x209F20FF, 1, 1, System_White, _Align::left, "Remove empty tracks");
+	(*T)["BOOL_REM_REM"] = new CheckBox(-82.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 0x007FFFFF, 0x9F2020FF, 0x209F20FF, 1, 1, System_White, _Align::left, "Remove merge \"remnants\"");
+	(*T)["BOOL_PIANO_ONLY"] = new CheckBox(-67.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 0x007FFFFF, 0x9F2020FF, 0x209F20FF, 1, 1, System_White, _Align::left, "Replace all instruments with piano");
+	(*T)["BOOL_IGN_TEMPO"] = new CheckBox(-52.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 0x007FFFFF, 0x9F2020FF, 0x209F20FF, 1, 0, System_White, _Align::left, "Ignore tempo events");
+	(*T)["BOOL_IGN_PITCH"] = new CheckBox(-37.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 0x007FFFFF, 0x9F2020FF, 0x209F20FF, 1, 0, System_White, _Align::center, "Ignore pitch bending events");
+	(*T)["BOOL_IGN_NOTES"] = new CheckBox(-22.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 0x007FFFFF, 0x9F2020FF, 0x209F20FF, 1, 0, System_White, _Align::center, "Ignore note events");
+	(*T)["BOOL_IGN_ALL_EX_TPS"] = new CheckBox(-7.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 0x007FFFFF, 0x9F2020FF, 0x209F20FF, 1, 0, System_White, _Align::center, "Ignore everything except specified");
+
+	(*T)["BOOL_APPLY_TO_ALL_MIDIS"] = Butt = new Button("A2A", System_White, PropsAndSets::OnApplyBS2A, 80 - WindowHeapSize, 55 - WindowHeapSize, 15, 10, 1, 0x2F4F6EFF, 0x007FFFFF, 0xFFFFFFFF, 0x6E4F2FFF, 0xFF7F00FF, System_White, "Sets \"bool settings\" to all midis");
 	Butt->Tip->SafeChangePosition_Argumented(_Align::right, 87.5 - WindowHeapSize, Butt->Tip->CYpos);
 
-	(*T)["INPLACE_MERGE"] = new CheckBox(97.5 - WindowHeapSize, 55 - WindowHeapSize, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, 0, System_White, _Align::right, "Enables/disables inplace merge");
+	(*T)["INPLACE_MERGE"] = new CheckBox(97.5 - WindowHeapSize, 55 - WindowHeapSize, 10, 0x007FFFFF, 0x9F2020FF, 0x209F20FF, 1, 0, System_White, _Align::right, "Enables/disables inplace merge");
 
 	(*T)["GROUPID"] = new InputField(" ", 92.5 - WindowHeapSize, 75 - WindowHeapSize, 10, 20, System_White, PropsAndSets::PPQN, 0x007FFFFF, System_White, "Group ID...", 2, _Align::center, _Align::right, InputField::Type::NaturalNumbers);
 
 	//(*T)["OR"] = Butt = new Button("OR", System_White, PropsAndSets::OR, 37.5, 15 - WindowHeapSize, 20, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, System_White, "Overlaps remover");
 	//(*T)["SR"] = new Button("SR", System_White, PropsAndSets::SR, 12.5, 15 - WindowHeapSize, 20, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, System_White, "Sustains remover");
 
-	(*T)["MIDIINFO"] = Butt = new Button("Collect info", System_White, PropsAndSets::InitializeCollecting, 20, 15 - WindowHeapSize, 65, 10, 1, 0x7F7F7F3F, 0x7F7F7FFF, 0xFFFFFFFF, 0xFFFFFF3F, 0xFFFFFFFF, System_White, "Collects additional info about the midi");
+	(*T)["MIDIINFO"] = Butt = new Button("Collect info", System_White, PropsAndSets::InitializeCollecting, 20, 15 - WindowHeapSize, 65, 10, 1, 0x7F7F7FFF, 0x7F7F7FFF, 0xFFFFFFFF, 0x3F3F3FFF, 0xFFFFFFFF, System_White, "Collects additional info about the midi");
 	Butt->Tip->SafeMove(-20, 0);
 
-	(*T)["APPLY"] = new Button("Apply", System_White, PropsAndSets::OnApplySettings, 87.5 - WindowHeapSize, 15 - WindowHeapSize, 30, 10, 1, 0x7FAFFF3F, 0xFFFFFFFF, 0xFFAF7FFF, 0xFFAF7F3F, 0xFFAF7FFF, NULL, " ");
+	(*T)["APPLY"] = new Button("Apply", System_White, PropsAndSets::OnApplySettings, 87.5 - WindowHeapSize, 15 - WindowHeapSize, 30, 10, 1, 0x4F5B6EFF, 0xFFFFFFFF, 0xFFAF7FFF, 0xBF6430FF, 0xFFAF7FFF, NULL, " ");
 
-	(*T)["CUT_AND_TRANSPOSE"] = (Butt = new Button("Cut & Transpose...", System_White, PropsAndSets::CutAndTranspose::OnCaT, 52.5 - WindowHeapSize, 35 - WindowHeapSize, 100, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, System_White, "Cut and Transpose tool"));
+	(*T)["CUT_AND_TRANSPOSE"] = (Butt = new Button("Cut & Transpose...", System_White, PropsAndSets::CutAndTranspose::OnCaT, 52.5 - WindowHeapSize, 35 - WindowHeapSize, 100, 10, 1, 0x2F4F6EFF, 0x007FFFFF, 0xFFFFFFFF, 0x6E4F2FFF, 0xFF7F00FF, System_White, "Cut and Transpose tool"));
 	Butt->Tip->SafeChangePosition_Argumented(_Align::right, 100 - WindowHeapSize, Butt->Tip->CYpos);
-	(*T)["PITCH_MAP"] = (Butt = new Button("Pitch map ...", System_White, PropsAndSets::OnPitchMap, -37.5 - WindowHeapSize, 15 - WindowHeapSize, 70, 10, 1, 0x7F7F7F3F, 0x7F7F7FFF, 0xFFFFFFFF, 0xFFFFFF3F, 0xFFFFFFFF, System_White, "Allows to transform pitches"));
+	(*T)["PITCH_MAP"] = (Butt = new Button("Pitch map ...", System_White, PropsAndSets::OnPitchMap, -37.5 - WindowHeapSize, 15 - WindowHeapSize, 70, 10, 1, 0x7F7F7FFF, 0x7F7F7FFF, 0xFFFFFFFF, 0x3F3F3FFF, 0xFFFFFFFF, System_White, "Allows to transform pitches"));
 	Butt->Tip->SafeChangePosition_Argumented(_Align::right, 100 - WindowHeapSize, Butt->Tip->CYpos);
 	(*T)["VOLUME_MAP"] = (Butt = new Button("Volume map ...", System_White, PropsAndSets::VolumeMap::OnVolMap, -37.5 - WindowHeapSize, 35 - WindowHeapSize, 70, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, System_White, "Allows to transform volumes of notes"));
 	Butt->Tip->SafeChangePosition_Argumented(_Align::right, 100 - WindowHeapSize, Butt->Tip->CYpos);
@@ -6222,7 +6194,7 @@ void Init() {///SetIsFontedVar
 
 	(*WH)["SMPAS"] = T;//Selected midi properties and settings
 
-	T = new MoveableWindow("Cut and Transpose.", System_White, -200, 50, 400, 100, 0x3F3F3FCF, 0x7F7F7F7F);
+	T = new MoveableWindow("Cut and Transpose.", System_White, -200, 50, 400, 100, 0x414141FF, 0x5F5F5FFF);
 	(*T)["CAT_ITSELF"] = new CAT_Piano(0, 25-WindowHeapSize, 1, 10, NULL);
 	(*T)["CAT_SET_DEFAULT"] = new Button("Reset", System_White, PropsAndSets::CutAndTranspose::OnReset, -150, -10 - WindowHeapSize, 40, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, NULL, " ");
 	(*T)["CAT_+128"] = new Button("0-127 -> 128-255", System_White, PropsAndSets::CutAndTranspose::On0_127to128_255, -85, -10 - WindowHeapSize, 80, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, NULL, " ");
@@ -6233,7 +6205,7 @@ void Init() {///SetIsFontedVar
 
 	(*WH)["CAT"] = T;
 
-	T = new MoveableWindow("Volume map.", System_White, -150, 150, 300, 350, 0x3F3F3FCF, 0x7F7F7F7F,0x7F6F8FCF);
+	T = new MoveableWindow("Volume map.", System_White, -150, 150, 300, 350, 0x414141FF, 0x5F5F5FFF, 0x7F6F8FFF);
 	(*T)["VM_PLC"] = new PLC_VolumeWorker(0, 0 - WindowHeapSize, 300 - WindowHeapSize * 2, 300 - WindowHeapSize * 2, new PLC<BYTE, BYTE>());///todo: interface
 	(*T)["VM_SSBDIIF"] = Butt = new Button("Shape alike x^y", System_White, PropsAndSets::VolumeMap::OnDegreeShape, -110 + WindowHeapSize, -150 - WindowHeapSize, 80, 10, 1, 0xFFFFFF3F, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFAFFF3F, 0xFFAFFFFF, System_White, "Where y is from frame bellow");///Set shape by degree in input field;
 	Butt->Tip->SafeChangePosition_Argumented(_Align::left, -150 + WindowHeapSize, -160 - WindowHeapSize);
@@ -6248,7 +6220,7 @@ void Init() {///SetIsFontedVar
 
 	(*WH)["VM"] = T;
 
-	T = new MoveableWindow("App settings", System_White, -100, 100, 200, 220, 0x3F3F3FCF, 0x7F7F7F7F);
+	T = new MoveableWindow("App settings", System_White, -100, 100, 200, 220, 0x414141FF, 0x5F5F5FFF);
 
 	(*T)["AS_SHADERMODE"] = new InputField(to_string(Settings::ShaderMode), -87.5 + WindowHeapSize, 85 - WindowHeapSize, 10, 30, System_White, NULL, 0x007FFFFF, System_White, "Shader ID", 2, _Align::center, _Align::left, InputField::Type::NaturalNumbers);
 	(*T)["AS_SWW"] = new InputField(to_string(Settings::SinewaveWidth), -47.5 + WindowHeapSize, 85 - WindowHeapSize, 10, 40, System_White, NULL, 0x007FFFFF, System_White, "Wave \"height\"", 8, _Align::center, _Align::left, InputField::Type::FP_Any);
@@ -6263,26 +6235,26 @@ void Init() {///SetIsFontedVar
 	(*T)["AS_FONT_P"] = new WheelVariableChanger(Settings::ApplyRelWheel, -37.5, -22.5, lFONT_HEIGHT_TO_WIDTH, 0.01, System_White, "Font rel.", "Delta", WheelVariableChanger::Type::addictable);
 	(*T)["AS_FONT_NAME"] = new InputField(FONTNAME, 52.5 - WindowHeapSize, 55 - WindowHeapSize, 10, 100, _STLS_WhiteSmall, &FONTNAME, 0x007FFFFF, System_White, "Font name", 32, _Align::center, _Align::left, InputField::Type::Text);
 
-	(*T)["BOOL_REM_TRCKS"] = new CheckBox(-97.5 + WindowHeapSize, 35 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, System_White, _Align::left, "DV: Remove empty tracks");
-	(*T)["BOOL_REM_REM"] = new CheckBox(-82.5 + WindowHeapSize, 35 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, System_White, _Align::left, "DV: Remove merge \"remnants\"");
-	(*T)["BOOL_PIANO_ONLY"] = new CheckBox(-67.5 + WindowHeapSize, 35 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, System_White, _Align::left, "DV: All instuments to piano");
-	(*T)["BOOL_IGN_TEMPO"] = new CheckBox(-52.5 + WindowHeapSize, 35 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::left, "DV: Ignore tempo events");
-	(*T)["BOOL_IGN_PITCH"] = new CheckBox(-37.5 + WindowHeapSize, 35 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::center, "DV: Ignore pitch bending events");
-	(*T)["BOOL_IGN_NOTES"] = new CheckBox(-22.5 + WindowHeapSize, 35 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::center, "DV: Ignore note events");
-	(*T)["BOOL_IGN_ALL_EX_TPS"] = new CheckBox(-7.5 + WindowHeapSize, 35 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::center, "DV: Ignore everything except specified");
+	(*T)["BOOL_REM_TRCKS"] = new CheckBox(-97.5 + WindowHeapSize, 35 - WindowHeapSize, 10, 0x007FFFFF, 0x9F2020FF, 0x209F20FF, 1, 1, System_White, _Align::left, "DV: Remove empty tracks");
+	(*T)["BOOL_REM_REM"] = new CheckBox(-82.5 + WindowHeapSize, 35 - WindowHeapSize, 10, 0x007FFFFF, 0x9F2020FF, 0x209F20FF, 1, 1, System_White, _Align::left, "DV: Remove merge \"remnants\"");
+	(*T)["BOOL_PIANO_ONLY"] = new CheckBox(-67.5 + WindowHeapSize, 35 - WindowHeapSize, 10, 0x007FFFFF, 0x9F2020FF, 0x209F20FF, 1, 1, System_White, _Align::left, "DV: All instuments to piano");
+	(*T)["BOOL_IGN_TEMPO"] = new CheckBox(-52.5 + WindowHeapSize, 35 - WindowHeapSize, 10, 0x007FFFFF, 0x9F2020FF, 0x209F20FF, 1, 0, System_White, _Align::left, "DV: Ignore tempo events");
+	(*T)["BOOL_IGN_PITCH"] = new CheckBox(-37.5 + WindowHeapSize, 35 - WindowHeapSize, 10, 0x007FFFFF, 0x9F2020FF, 0x209F20FF, 1, 0, System_White, _Align::center, "DV: Ignore pitch bending events");
+	(*T)["BOOL_IGN_NOTES"] = new CheckBox(-22.5 + WindowHeapSize, 35 - WindowHeapSize, 10, 0x007FFFFF, 0x9F2020FF, 0x209F20FF, 1, 0, System_White, _Align::center, "DV: Ignore note events");
+	(*T)["BOOL_IGN_ALL_EX_TPS"] = new CheckBox(-7.5 + WindowHeapSize, 35 - WindowHeapSize, 10, 0x007FFFFF, 0x9F2020FF, 0x209F20FF, 1, 0, System_White, _Align::center, "DV: Ignore everything except specified");
 
 	(*T)["BOOL_APPLY_TO_ALL_MIDIS"] = Butt = new Button("A2A", System_White, Settings::ApplyToAll, 80 - WindowHeapSize, 35 - WindowHeapSize, 15, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, System_White, "The same as A2A in MIDI's props.");
 	Butt->Tip->SafeChangePosition_Argumented(_Align::right, 87.5 - WindowHeapSize, Butt->Tip->CYpos);
 
-	(*T)["INPLACE_MERGE"] = new CheckBox(97.5 - WindowHeapSize, 35 - WindowHeapSize, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, 0, System_White, _Align::right, "DV: Enable/disable inplace merge");
+	(*T)["INPLACE_MERGE"] = new CheckBox(97.5 - WindowHeapSize, 35 - WindowHeapSize, 10, 0x007FFFFF, 0x9F2020FF, 0x209F20FF, 1, 0, System_White, _Align::right, "DV: Enable/disable inplace merge");
 
 	(*WH)["APP_SETTINGS"] = T;
 
-	T = new MoveableWindow("SMRP Container", System_White, -300, 300, 600, 600, 0x000000CF, 0xFFFFFF7F);
+	T = new MoveableWindow("SMRP Container", System_White, -300, 300, 600, 600, 0x000000CF, 0);
 	
 	(*WH)["SMRP_CONTAINER"] = T;
 
-	T = new MoveableWindow("Sustains/Overlaps remover", System_White, -100, 25, 200, 45, 0x3F3F3FCF, 0x7F7F7F7F);
+	T = new MoveableWindow("Sustains/Overlaps remover", System_White, -100, 25, 200, 45, 0x414141FF, 0x5F5F5FFF);
 	(*T)["TEXT"] = new TextBox("sdokflsdkflk", System_White, 0, -WindowHeapSize + 15, 15, 180, 10, 0, 0, 0, _Align::center);
 
 	(*WH)["OR"] = T;
@@ -6308,148 +6280,37 @@ void Init() {///SetIsFontedVar
 /////////////END OF USE////////////////
 ///////////////////////////////////////
 
-const GLchar *vertex_shader[] = {
-	"#version 120\n",
-	"void main(void) {\n",//rand(gl_FragCoord.xy + vec2(Time,2.*Time))/2.
-	"    vec4 pos = ftransform();\n",
-	//"    pos = pos*sin(pos.x-pos.y);\n",
-	//"    pos.x += recalc(rand(pos.xy + vec2(Time,2.*Time))*1.,-1,1)/625.;\n",
-	//"    pos.y += recalc(rand(pos.xy + vec2(2.*Time,Time))*1.,-1,1)/625.;\n",
-	"    gl_Position = pos;\n",
-	"    gl_FrontColor = gl_Color;\n",
-	"}"
-};
-
-const GLchar *fragment_shader[] = { //uniform float time;
-	"#version 120\n",
-	"uniform float Time = 0.;\n",//
-	"uniform float SinewaveWidth = 0.;\n",//
-	"uniform float Basewave = 1.;\n",//
-	"uniform float Param3 = 1.;\n",//
-	"uniform int Mode = 0;\n",//
-	"uniform vec2 MousePos;\n",//
-	"uniform vec2 resolution;\n",//
-	"float rand(vec2 co){\n",
-	"    float a = 12.9898;\n",
-	"    float b = 78.233;\n",
-	"    float c = 43758.5453;\n",
-	"    float dt= dot(co.xy ,vec2(a,b));\n",
-	"    float sn= mod(dt,3.14);\n",
-	"    return fract(sin(sn) * c);\n",
-	"}\n",
-	"vec3 palette( in float t, in vec3 a, in vec3 b, in vec3 c, in vec3 d ){\n",
-	"    return a + b*cos( 6.28318*(c*t+d) );\n",
-	"}\n",
-	"vec4 spirals(float Time, vec2 p){\n",
-	"	float col;\n",
-	"        for(float i = 0.25; i < 15.0; i++){\n",
-	"		p.x += 0.25 / (i) * sin(i * 4.0 * p.y + Time + cos(Time / (15. * i + SinewaveWidth*tan(i)) * i));\n",
-	"     		p.y -= 0.1 / (i)* cos(i * 8.0 * p.x + Time + sin((Time / (30. * i) + SinewaveWidth*atan(i)) * i));\n",
-	"     	}\n",
-	"     	col = abs(p.y * p.x)/(max(abs(Basewave),0.1)*sign(Basewave)*10.);\n",
-	"	return vec4(palette(col, vec3(0.5, 0.5, 0.5), vec3(0.5, 0.5, 0.5), vec3(1.0, 1.0, 1.0), vec3(0.00, 0.10, 0.20)), 1.0) + vec4(0.2,0.1,0.1,0.1);\n",
-	"}"
-	"vec4 flare(float Time, vec2 p, float y, float param1 , float param2){\n",
-	"	p = ( p / resolution.xy ) - y;\n",
-	"	float sx = param2 * (p.x + 1.) * sin(cos( 5.0 * p.x - 1. * Time));\n",
-	"	float dy = param1 / ( 250. * abs(p.y - sx));\n",
-	"	dy += 1./ (60. * length(p - vec2(p.x, 0.))/param1);\n",
-	"	p.x = (p.x + 0.24) * dy;\n",
-	"	return vec4( p.x*p.x, dy*0.3, dy, 1.0 );\n",
-	"}",
-	"vec4 flare2(float Time, vec2 p, float y, float param1 , float param2, float source_alpha){\n",
-	"	vec2 sp = (p.xy * 2.0 - resolution.xy) / min(resolution.x, resolution.y);\n",
-	"	sp.y = -dot(sp,sp);\n",
-	"	float color = param2;\n",
-	"	for (int i = 0; i < 20; i++) {\n",
-	"		float t = float(i)+sin(Time*param1*0.1+float(i));\n",
-	"		color += 0.025/distance(sp,vec2(sp.x,cos(t+sp.x)));\n",
-	"	}\n",
-	"	return color*vec4(vec3((sp.x)*0.1, 0.05, -(sp.x)*0.1), 1.0-source_alpha);"
-	"}",
-	"void main() {\n",
-	"	 vec4 Color; float Transp = gl_Color[3];\n",
-	"    //if (Mode==1)Color = pow(gl_Color,vec4(Basewave + rand(gl_FragCoord.xy + vec2(Time,2.*Time))*SinewaveWidth));\n",
-	"    //else if(Mode==2)Color = pow(gl_Color,normalize(vec4(gl_FragCoord.xyz,Param3)));\n",
-	"    //else if(Mode==3)Color = pow(gl_Color,vec4(sin(Time*4. + gl_FragCoord.y/200.)*SinewaveWidth + Basewave + SinewaveWidth));\n",
-	//"    else if(Mode==4)Color = (SinewaveWidth + 1.)*gl_Color - (Basewave)*spirals(Time, gl_FragCoord.xy / 1600.);\n",
-	"    //else if(Mode==4)Color = pow(gl_Color,spirals(Time, gl_FragCoord.xy / (resolution.x * Param3 * 3.)));\n",
-	"    //else if(Mode==5)Color = pow(flare(Time, gl_FragCoord.xy, MousePos.y/resolution.y*1.8*Param3 + 0.5, Basewave, SinewaveWidth+0.15),vec4(1.)-gl_Color);\n",
-	"    //else if(Mode==6)Color = gl_Color * (Param3 * 20.) * flare2(Time, gl_FragCoord.xy, MousePos.y/resolution.y*1.8*Param3 + 0.5, Basewave + 1., SinewaveWidth+0.15,Transp);\n",
-	"	 //else\n",
-	"	     Color = gl_Color;\n",
-	"	 Color.w = Transp;\n",
-	"    gl_FragColor = Color;\n",
-	"}"
-};
-
-shader_prog *SP;
-
 void onTimer(int v);
 void mDisplay() {
 	if(!(TimerV&0xF))
 		lFontSymbolsInfo::InitialiseFont(FONTNAME);
 	glClear(GL_COLOR_BUFFER_BIT | GL_ACCUM_BUFFER_BIT);
-	glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+	glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
 	if (FIRSTBOOT) {
-		FIRSTBOOT = 0;
 
-		//Settings::ShaderMode = rand() & 3;
-		if (glCreateShader) {
-			SP = new shader_prog(vertex_shader, fragment_shader);
-			cout << "GLEW is working! Yeee ( -3-)\n";
-		}
-		else 
-			cout << "GLEW is not initialised ( o.o)\n";
+		FIRSTBOOT = 0;
 
 		WH = new WindowsHandler();
 		Init();
 		//WH->ThrowAlert("kokoko", "alerttest", SpecialSigns::DrawWait, 1, 0xFF00FF7F, 20);//
-		if (APRIL_FOOL) {
-			WH->ThrowAlert("Today is a special day! ( -w-)\nTake a walk and come back tommorow\n(-w- )", "1st of April!", SpecialSigns::DrawWait, 1, 0xFF00FFFF, 20);
-			(*WH)["ALERT"]->RGBABackground = 0; 
-			_WH_t("ALERT", "AlertText", TextBox*)->SafeTextColorChange(0xFFFFFFFF);
-		}
 		ANIMATION_IS_ACTIVE = !ANIMATION_IS_ACTIVE;
 		onTimer(0);
 	}
-	if (SP) {
-		glUniform1f(glGetUniformLocation(SP->prog, "Time"), TimerV / 100.f);
-		glUniform1i(glGetUniformLocation(SP->prog, "Mode"), Settings::ShaderMode);
-		glUniform1f(glGetUniformLocation(SP->prog, "SinewaveWidth"), Settings::SinewaveWidth);
-		glUniform1f(glGetUniformLocation(SP->prog, "Basewave"), Settings::Basewave);
-		glUniform1f(glGetUniformLocation(SP->prog, "Param3"), Settings::Param3);
-		glUniform2f(glGetUniformLocation(SP->prog, "MousePos"), MXPOS, MYPOS);
-		glUniform2f(glGetUniformLocation(SP->prog, "resolution"), WindX, WindY);
-		SP->use(); 
-	}
-	if (APRIL_FOOL) {
-		Settings::ShaderMode = 1;
-		Settings::Basewave = 3.5f;
+	if (!Settings::ShaderMode) {
 		glBegin(GL_QUADS);
-		glColor4f(1, 0, 1, (DRAG_OVER) ? 0.25f : 1);
-		glVertex2f(0 - RANGE * (WindX / WINDXSIZE), 0 - RANGE * (WindY / WINDYSIZE));
-		glColor4f(0, 1, 0, (DRAG_OVER) ? 0.25f : 1);
-		glVertex2f(0 - RANGE * (WindX / WINDXSIZE), RANGE * (WindY / WINDYSIZE));
-		glColor4f(1, 0.5f, 0, (DRAG_OVER) ? 0.25f : 1);
-		glVertex2f(RANGE * (WindX / WINDXSIZE), RANGE * (WindY / WINDYSIZE));
-		glColor4f(0, 0.5f, 1, (DRAG_OVER) ? 0.25f : 1);
-		glVertex2f(RANGE * (WindX / WINDXSIZE), 0 - RANGE * (WindY / WINDYSIZE));
-		glEnd();
-	}
-	else if (Settings::ShaderMode < 4) {
-		glBegin(GL_QUADS);
-		glColor4f(1, 0.5f, 0, (DRAG_OVER) ? 0.25f : 1);
+		float DragF = (DRAG_OVER) ? 0.25f : 1;
+		glColor4f(1 * DragF, 0.5f * DragF, 0, 0.25f + (!transparency)*0.75f);
 		glVertex2f(0 - RANGE * (WindX / WINDXSIZE), 0 - RANGE * (WindY / WINDYSIZE));
 		glVertex2f(0 - RANGE * (WindX / WINDXSIZE), RANGE * (WindY / WINDYSIZE));
-		glColor4f(0, 0.5f, 1, (DRAG_OVER) ? 0.25f : 1);
+		glColor4f(0, 0.5f * DragF, 1 * DragF, 0.25f);
 		glVertex2f(RANGE * (WindX / WINDXSIZE), RANGE * (WindY / WINDYSIZE));
 		glVertex2f(RANGE * (WindX / WINDXSIZE), 0 - RANGE * (WindY / WINDYSIZE));
 		glEnd();
 	}
-	else {
+	else if(Settings::ShaderMode==1) {
 		glBegin(GL_QUADS);
-		glColor4f(0.25f, 0.25f, 0.25f, (DRAG_OVER) ? 0.25f : 1);
+		float DragF = (DRAG_OVER) ? 0.25f : 1;
+		glColor4f(DragF, DragF, DragF, 0.25f + (!transparency) * 0.75f);
 		glVertex2f(0 - RANGE * (WindX / WINDXSIZE), 0 - RANGE * (WindY / WINDYSIZE));
 		glVertex2f(0 - RANGE * (WindX / WINDXSIZE), RANGE * (WindY / WINDYSIZE));
 		glVertex2f(RANGE * (WindX / WINDXSIZE), RANGE * (WindY / WINDYSIZE));
@@ -6497,6 +6358,8 @@ void inline rotate(float& x, float& y) {
 	x = t;
 }
 void inline absoluteToActualCoords(int ix, int iy, float &x, float &y) {
+	MOUSEX = ix;
+	MOUSEY = iy;
 	float wx = WindX, wy = WindY,t;
 	x = ((float)(ix - wx * 0.5)) / (0.5*(wx / (RANGE*(WindX / WINDXSIZE))));
 	y = ((float)(0 - iy + wy * 0.5)) / (0.5*(wy / (RANGE*(WindY / WINDYSIZE))));
@@ -6515,7 +6378,7 @@ void mKey(BYTE k, int x, int y) {
 	if (k == '=') { ANIMATION_IS_ACTIVE = !ANIMATION_IS_ACTIVE; }
 	else if (k == 27)exit(1);
 	else {
-		cout << (int)k << ' ' << k << endl;
+		//cout << (int)k << ' ' << k << endl;
 	}
 }
 void mClick(int butt, int state, int x, int y) {
@@ -6544,7 +6407,7 @@ void mSpecialKey(int Key,int x, int y) {
 }
 void mExit(int a) {
 	Settings::RK_Access.Close();
-	if (SP)(~(*SP));
+
 }
 
 int main(int argc, char ** argv) {
@@ -6574,15 +6437,27 @@ int main(int argc, char ** argv) {
 
 	hWnd = FindWindowA(NULL, WINDOWTITLE);
 
-	if(APRIL_FOOL)
-		glBlendFunc(GL_SRC_ALPHA, GL_ONE);//_MINUS_SRC_ALPHA
-	else
-		glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);//_MINUS_SRC_ALPHA
-	glEnable(GL_BLEND); 
+	if (transparency) {
+		DWORD style = ::GetWindowLong(hWnd, GWL_STYLE);
+		//style &= ~WS_OVERLAPPEDWINDOW;
+		style |=  WS_EX_TRANSPARENT;
+		::SetWindowLong(hWnd, GWL_STYLE, style);
+
+		DWM_BLURBEHIND bb = { 0 };
+		bb.dwFlags = DWM_BB_ENABLE | DWM_BB_BLURREGION;
+		bb.fEnable = true;
+		bb.hRgnBlur = CreateRectRgn(0, 0, 5, 5);;
+		DwmEnableBlurBehindWindow(hWnd, &bb);
+	}
+
+	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);//_MINUS_SRC_ALPHA
 	
 	//glEnable(GL_POLYGON_SMOOTH);//laggy af
 	glEnable(GL_LINE_SMOOTH);//GL_POLYGON_SMOOTH
 	glEnable(GL_POINT_SMOOTH);
+
+	glEnable(GL_BLEND);
+	glEnable(GL_ALPHA_TEST);
 
 	glShadeModel(GL_SMOOTH);
 
