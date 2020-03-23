@@ -157,56 +157,91 @@ std::tuple<WORD, WORD, WORD, WORD> ___GetCurFileVersion() {
 	return { 0,0,0,0 };
 }
 
-bool SAFC_Update(const wstring& latest_release) {
+std::wstring ExtractDirectory(const std::wstring& path) {
+	constexpr wchar_t delim = (L"\\")[0];
+	return path.substr(0, path.find_last_of(delim) + 1);
+}
 
+
+bool SAFC_Update(const wstring& latest_release) {
 #ifndef __X64
 	constexpr wchar_t* archive_name = (wchar_t* const)L"SAFC32.7z";;
 #else
 	constexpr wchar_t* const archive_name = (wchar_t* const)L"SAFC64.7z";
 #endif
-
 	wchar_t current_file_path[MAX_PATH];
-	wchar_t update_file[MAX_PATH];
 	bool flag = false;
-	GetCurrentDirectoryW(MAX_PATH, current_file_path);
-	wsprintf(update_file, L"%s\\update.7z", current_file_path);
+	//GetCurrentDirectoryW(MAX_PATH, current_file_path);
+	GetModuleFileNameW(NULL, current_file_path, MAX_PATH);
+	wstring executablepath = current_file_path;
+	wstring filename = ExtractDirectory(current_file_path);
+	wstring pathway = filename;
+	filename += L"update.7z";
+	//wsprintfW(current_file_path, L"%S%S", filename.c_str(), L"update.7z\0");
 	wstring link = L"https://github.com/DixelU/SAFC/releases/download/" + latest_release + L"/" + archive_name;
-	wcout << link << endl;
-	HRESULT co_res = URLDownloadToFileW(NULL, link.c_str(), update_file, 0, NULL);
-	if (co_res == S_OK) {
-		flag = true;
-		_wrename(L"SAFC.exe", L"_s");
-		_wrename(L"freeglut.dll", L"_f");
-		_wrename(L"glew32.dll", L"_g");
-		system("\"C:\\Program Files\\7-Zip\\7z.exe\" x -y update.7z");
-		if (_waccess(L"SAFC.exe", 0) != 0) {
-			system("\"C:\\Program Files (x86)\\7-Zip\\7z.exe\" x -y update.7z");
-			if (_waccess(L"SAFC.exe", 0) != 0) {
-				system("7z.exe x -y update.7z");
-				if (_waccess(L"SAFC.exe", 0) != 0) {
-					system("\"C:\\Program Files\\WinRAR\\WinRAR.exe\" x -y update.7z");
-					if (_waccess(L"SAFC.exe", 0) != 0) {
-						system("\"C:\\Program Files (x86)\\WinRAR\\WinRAR.exe\" x -y update.7z");
-						if (_waccess(L"SAFC.exe", 0) != 0) {
-							ThrowAlert_Error("Extraction: To perform this operation you must have latest 7-Zip or WinRAR installed in default directories.\n");
-							_wrename(L"_s", L"SAFC.exe");
-							_wrename(L"_f", L"freeglut.dll");
-							_wrename(L"_g", L"glew32.dll");
-							flag = false;
-						}
-					}
+	HRESULT co_res = URLDownloadToFileW(NULL, link.c_str(), filename.c_str(), 0, NULL);
+	const vector<pair<wstring, wstring>> unpack_lines = {
+		{L"C:\\Program Files\\7-Zip\\7z.exe", (L"x -y \"" + filename + L"\"")},
+		{L"C:\\Program Files (x86)\\7-Zip\\7z.exe", (L"x -y \"" + filename + L"\"")},
+		{L"C:\\Program Files\\WinRAR\\WinRAR.exe", (L"x -y \"" + filename + L"\"")},
+		{L"C:\\Program Files (x86)\\WinRAR\\WinRAR.exe", (L"x -y \"" + filename + L"\"")}
+	};
+	if (co_res == S_OK) { 
+		errno = 0;
+		_wrename((pathway + L"SAFC.exe").c_str(), (pathway + L"_s").c_str());
+		cout << strerror(errno) << endl;
+		_wrename((pathway + L"freeglut.dll").c_str(), (pathway + L"_f").c_str());
+		cout << strerror(errno) << endl;
+		_wrename((pathway + L"glew32.dll").c_str(), (pathway + L"_g").c_str()); 
+		cout << strerror(errno) << endl; 
+		//wcout << pathway << endl;
+		if (!errno) {
+			wstring dir = pathway.substr(0, pathway.length() - 1);
+			for (auto& line : unpack_lines) {
+				wstring t = (L"\"" + line.first + L"\" " + line.second);
+
+				if (_waccess(line.first.c_str(), 0)) {
+					wcout << L"Unable to find: " << line.first << endl;
+					continue;
 				}
+
+				SHELLEXECUTEINFO ShExecInfo = { 0 };
+				ShExecInfo.cbSize = sizeof(SHELLEXECUTEINFO);
+				ShExecInfo.fMask = SEE_MASK_NOCLOSEPROCESS;
+				ShExecInfo.hwnd = NULL;
+				ShExecInfo.lpVerb = NULL;
+				ShExecInfo.lpFile = line.first.data();
+				ShExecInfo.lpParameters = line.second.data();
+				ShExecInfo.lpDirectory = dir.data();
+				ShExecInfo.nShow = SW_SHOW;
+				ShExecInfo.hInstApp = NULL;
+				ShellExecuteExW(&ShExecInfo);
+				WaitForSingleObject(ShExecInfo.hProcess, INFINITE);
+				CloseHandle(ShExecInfo.hProcess);
+
+				if (!_waccess((pathway + L"SAFC.exe").c_str(), 0)) { 
+					flag = true;
+					break;
+				}
+				wcout << L"Failed: " << t << endl;
+			}
+			if (!flag) {
+				ThrowAlert_Error("Extraction:\nAutoupdate requres latest 7-Zip or WinRAR installed to default directory.\n");
+				_wrename((pathway + L"_s").c_str(), (pathway + L"SAFC.exe").c_str());
+				_wrename((pathway + L"_f").c_str(), (pathway + L"freeglut.dll").c_str());
+				_wrename((pathway + L"_g").c_str(), (pathway + L"glew32.dll").c_str());
 			}
 		}
-		_wremove(L"update.7z");
+		else {
+			ThrowAlert_Error(string("Autoudate error:\n") + strerror(errno));
+			_wrename((pathway + L"_s").c_str(), (pathway + L"SAFC.exe").c_str());
+			_wrename((pathway + L"_f").c_str(), (pathway + L"freeglut.dll").c_str());
+			_wrename((pathway + L"_g").c_str(), (pathway + L"glew32.dll").c_str());
+		}
+		_wremove(filename.c_str());
 	}
-	else if (co_res == E_OUTOFMEMORY)
-		ThrowAlert_Error("Update check: Buffer length invalid, or insufficient memory\n");
-	else if (co_res == INET_E_DOWNLOAD_FAILURE)
-		ThrowAlert_Error("Update check: URL is invalid\n");
 	else
-		ThrowAlert_Error("Update check: Other error: " + to_string( co_res));
-	
+		ThrowAlert_Error("Autoupdate error: #" + to_string(co_res));
 	return flag;
 }
 
@@ -217,15 +252,16 @@ void SAFC_VersionCheck() {
 		_wremove(L"_f");
 		_wremove(L"_g");
 		constexpr wchar_t* SAFC_tags_link = (wchar_t* const)L"https://api.github.com/repos/DixelU/SAFC/tags";
-		//printf("Url: %S\n", SAFC_tags_link);
 		wchar_t current_file_path[MAX_PATH];
-		GetCurrentDirectoryW(MAX_PATH, current_file_path);
-		wsprintf(current_file_path, L"%s\\tags.json", current_file_path);
-		//printf("Path: %S\n", current_file_path);
-		HRESULT res = URLDownloadToFileW(NULL, SAFC_tags_link, current_file_path, 0, NULL);
+		GetModuleFileNameW(NULL, current_file_path, MAX_PATH);
+		wstring executablepath = current_file_path;
+		wstring filename = ExtractDirectory(current_file_path);
+		wstring pathway = filename;
+		filename += L"tags.json";
+		HRESULT res = URLDownloadToFileW(NULL, SAFC_tags_link, filename.c_str(), 0, NULL);
 		if (res == S_OK) {
 			auto [maj, min, ver, build] = ___GetCurFileVersion();
-			ifstream input(current_file_path);
+			ifstream input(filename);
 			string temp_buffer;
 			std::getline(input, temp_buffer);
 			input.close();
@@ -262,28 +298,24 @@ void SAFC_VersionCheck() {
 								maj == version_partied[0] && min < version_partied[1] ||
 								maj == version_partied[0] && min == version_partied[1] && ver < version_partied[2] ||
 								maj == version_partied[0] && min == version_partied[1] && ver == version_partied[2] && build < version_partied[3]) {
-								ThrowAlert_Warning("Update found! The app will restart soon...\nUpdate: " + string(git_latest_version.begin(), git_latest_version.end()));
+								ThrowAlert_Warning("Update found! The app might restart soon...\nUpdate: " + string(git_latest_version.begin(), git_latest_version.end()));
 								flag = SAFC_Update(git_latest_version);
-								if(flag)
-									ThrowAlert_Warning("SAFC will restart in 3 seconds...");
+								if (flag)
+									ThrowAlert_Warning("SAFC will restart in 3 seconds..."); 
 							}
 						}
 					}
 				}
 			}
 		}
-		else if (res == E_OUTOFMEMORY)
-			ThrowAlert_Error("Tags: Buffer length invalid, or insufficient memory\n");
-		else if (res == INET_E_DOWNLOAD_FAILURE)
-			ThrowAlert_Error("Tags: URL is invalid\n");
-		else
-			ThrowAlert_Error("Tags: Other error: Other error: " + to_string(res));
+		else 
+			ThrowAlert_Warning("Most likely your internet connection is unstable\nSAFC cannot check for updates");
 
-		_wremove(current_file_path);
-
+		_wremove(filename.c_str());
 		if (flag) {
 			Sleep(3000);
-			system("start SAFC.exe");
+			ShellExecuteW(NULL, L"open", executablepath.c_str(), NULL, NULL, SW_SHOWNORMAL);
+			//_wsystem((L"start \"" + executablepath + L"\"").c_str());
 			exit(0);
 		}
 	});
@@ -512,17 +544,127 @@ struct SingleMIDIInfoCollector {
 			return double(*this) < (double)TE;
 		}
 	};
+	struct TrackData {
+		INT64 MTrk_pos;
+	};
 	BIT Processing;
 	wstring FileName;
 	string LogLine;
-	Locker<btree::btree_map<INT64,TempoEvent>> TempoMap;
-	Locker<std::vector<INT64>> TracksBeginings;
+	string ErrorLine;
+	btree::btree_map<INT64,TempoEvent> TempoMap;
+	btree::btree_map<INT64, INT64> PolyphonyFiniteDifference;
+	std::vector<TrackData> Tracks;
 	//Locker<btree::btree_map<UINT64, UINT64>> Polyphony;
 	//Locker<btree::btree_map<>>
 	SingleMIDIInfoCollector(wstring filename) : FileName(filename), LogLine(" "), Processing(0) { }
 	void Lookup() {
 		Processing = true;
-		bbb_ffr in(FileName.c_str());
+		bbb_ffr file_input(FileName.c_str());
+		for (int i = 0; i < 14; i++)
+			file_input.get();
+		array<DWORD, 4096> CurHolded;
+		DWORD MTRK = 0, vlv = 0;
+		UINT64 CurTick = 0;
+		BYTE IO = 0, RSB = 0;
+		TrackData TData;
+		while (file_input.good()) {
+			CurTick = 0;
+			while (MTRK == MTrk && file_input.good()) 
+				MTRK = (MTRK << 8) | (file_input.get());
+			for (int i = 0; i < 4; i++)
+				file_input.get();
+			IO = RSB = 0;
+			while (file_input.good()) {
+				TData.MTrk_pos = file_input.tellg() - 8;
+				vlv = 0;
+				do {
+					IO = file_input.get();
+					vlv = vlv << 7 | IO & 0x7F;
+				} while (IO & 0x80 && !file_input.eof());
+				CurTick += vlv;
+				BYTE EventType = file_input.get();
+				if (EventType == 0xFF) {
+					RSB = 0;
+					BYTE type = file_input.get();
+					DWORD meta_data_size = 0;
+					do {
+						IO = file_input.get();
+						vlv = vlv << 7 | IO & 0x7F;
+					} while (IO & 0x80 && !file_input.eof());
+					if (type == 0x2F) {
+						Tracks.push_back(TData);
+						break;
+					}
+					else if (type == 0x51) {
+						TempoEvent TE;
+						TE.A = file_input.get();
+						TE.B = file_input.get();
+						TE.C = file_input.get();
+						TempoMap[CurTick]=TE;
+					}
+					else {
+						while (meta_data_size--) 
+							file_input.get();
+					}
+				}
+				else if (EventType >= 0x80 && EventType <= 0x9F) {
+					RSB = EventType;
+					int change = (EventType & 0x10) ? 1 : -1;
+					auto it = PolyphonyFiniteDifference.find(CurTick);
+					if (it == PolyphonyFiniteDifference.end())
+						PolyphonyFiniteDifference[CurTick] = change;
+					else
+						it->second += change;
+					file_input.get();
+					file_input.get();
+				}
+				else if ((EventType >= 0xA0 && EventType <= 0xBF) || 
+					(EventType >= 0xE0 && EventType <= 0xEF) ) {
+					RSB = EventType;
+					file_input.get();
+					file_input.get();
+				}
+				else if (EventType >= 0xC0 && EventType <= 0xDF) {
+					RSB = EventType;
+					file_input.get();
+				}
+				else if (EventType == 0xF0 || EventType == 0xF7) {
+					RSB = 0;
+					DWORD meta_data_size = 0;
+					do {
+						IO = file_input.get();
+						vlv = vlv << 7 | IO & 0x7F;
+					} while (IO & 0x80 && !file_input.eof());
+					while (meta_data_size--)
+						file_input.get();
+				}
+				else {
+					BYTE FirstParam = EventType;
+					EventType = RSB;
+					if (EventType >= 0x80 && EventType <= 0x9F) {
+						int change = (EventType & 0x10) ? 1 : -1;
+						auto it = PolyphonyFiniteDifference.find(CurTick);
+						if (it == PolyphonyFiniteDifference.end())
+							PolyphonyFiniteDifference[CurTick] = change;
+						else
+							it->second += change;
+						file_input.get();
+					}
+					else if ((EventType >= 0xA0 && EventType <= 0xBF) ||
+						(EventType >= 0xE0 && EventType <= 0xEF)) {
+						file_input.get();
+					}
+					else if (EventType >= 0xC0 && EventType <= 0xDF) {
+						//nothing
+					}
+					else { // here throw an error
+						ErrorLine = "Corruption detected at: " + to_string(file_input.tellg());
+						break;
+					}
+				}
+			}
+		}
+		file_input.close();
 	}
 };
 
@@ -542,7 +684,7 @@ struct SingleMIDIReProcessor {
 	BYTE_PLC_Core *VolumeMapCore;
 	_14BIT_PLC_Core *PitchMapCore;
 	CutAndTransposeKeys *KeyConverter;
-	BIT LogToConsole;
+	BIT CutFromStart;
 	UINT64 FilePosition,FileSize;
 	static void ostream_write(vector<BYTE>& vec, const vector<BYTE>::iterator& beg, const vector<BYTE>::iterator& end, ostream& out) {
 		out.write(((char*)vec.data()) + (beg - vec.begin()), end - beg);
@@ -550,7 +692,7 @@ struct SingleMIDIReProcessor {
 	static void ostream_write(vector<BYTE>& vec, ostream& out) {
 		out.write(((char*)vec.data()), vec.size());;
 	}
-	SingleMIDIReProcessor(wstring filename, DWORD Settings, DWORD Tempo, DWORD GlobalOffset, WORD PPQN, DWORD ThreadID, BYTE_PLC_Core *VolumeMapCore, _14BIT_PLC_Core* PitchMapCore, CutAndTransposeKeys* KeyConverter, wstring RPostfix = L"_.mid", BIT InplaceMerge = 0, UINT64 FileSize = 0, INT64 Start = 0, INT64 Length = -1) {
+	SingleMIDIReProcessor(wstring filename, DWORD Settings, DWORD Tempo, DWORD GlobalOffset, WORD PPQN, DWORD ThreadID, BYTE_PLC_Core *VolumeMapCore, _14BIT_PLC_Core* PitchMapCore, CutAndTransposeKeys* KeyConverter, wstring RPostfix = L"_.mid", BIT InplaceMerge = 0, UINT64 FileSize = 0, INT64 Start = 0, INT64 Length = -1, BIT CurFromStart = false) {
 		this->ThreadID = ThreadID;
 		this->FileName = filename;
 		this->BoolSettings = Settings;
@@ -570,8 +712,9 @@ struct SingleMIDIReProcessor {
 		this->FilePosition = 0;
 		this->Start = Start;
 		this->Length = Length;
+		this->CutFromStart = CutFromStart;
 	}
-	SingleMIDIReProcessor(wstring filename, DWORD Settings, DWORD Tempo, DWORD GlobalOffset, WORD PPQN, DWORD ThreadID, PLC<BYTE,BYTE> *VolumeMapCore, PLC<WORD, WORD>* PitchMapCore, CutAndTransposeKeys* KeyConverter, wstring RPostfix = L"_.mid", BIT InplaceMerge = 0, UINT64 FileSize = 0, INT64 Start = 0, INT64 Length = -1) {
+	SingleMIDIReProcessor(wstring filename, DWORD Settings, DWORD Tempo, DWORD GlobalOffset, WORD PPQN, DWORD ThreadID, PLC<BYTE,BYTE> *VolumeMapCore, PLC<WORD, WORD>* PitchMapCore, CutAndTransposeKeys* KeyConverter, wstring RPostfix = L"_.mid", BIT InplaceMerge = 0, UINT64 FileSize = 0, INT64 Start = 0, INT64 Length = -1, BIT CurFromStart = false) {
 		this->ThreadID = ThreadID;
 		this->FileName = filename;
 		this->BoolSettings = Settings;
@@ -597,6 +740,7 @@ struct SingleMIDIReProcessor {
 		this->FilePosition = 0;
 		this->Start = Start;
 		this->Length = Length;
+		this->CutFromStart = CutFromStart;
 	}
 	#define PCLOG true
 	void ReProcess() {
@@ -3672,7 +3816,7 @@ struct SelectablePropertedList : HandleableUIPart {
 	}
 };
 
-#define HTSQ2 (2)
+#define HTSQ2 (1.85)
 struct SpecialSigns {
 	static void DrawOK(float x, float y,float SZParam,DWORD RGBAColor,DWORD NOARGUMENT=0) {
 		GLCOLOR(RGBAColor);
@@ -4222,7 +4366,9 @@ SingleTextLineSettings
 						* _STLS_BlackSmall = new SingleTextLineSettings("_", 0, 0, 5, 0x000000FF),
 
 						* System_Black = (is_fonted)? new SingleTextLineSettings(10, 0x000000FF) : new SingleTextLineSettings("_", 0, 0, 5, 0x000000FF),
-						* System_White = (is_fonted) ? new SingleTextLineSettings(10, 0xFFFFFFFF) : new SingleTextLineSettings("_", 0, 0, 5, 0xFFFFFFFF);
+						* System_White = (is_fonted) ? new SingleTextLineSettings(10, 0xFFFFFFFF) : new SingleTextLineSettings("_", 0, 0, 5, 0xFFFFFFFF),
+						* System_Red = (is_fonted) ? new SingleTextLineSettings(10, 0xFF7F3FFF) : new SingleTextLineSettings("_", 0, 0, 5, 0xFF7F3FFF),
+						* System_Blue = (is_fonted) ? new SingleTextLineSettings(10, 0x9FCFFFFF) : new SingleTextLineSettings("_", 0, 0, 5, 0x9FCFFFFF);
 
 struct WindowsHandler {
 	map<string, MoveableWindow*> Map;
@@ -4231,14 +4377,15 @@ struct WindowsHandler {
 	string MainWindow_ID,MW_ID_Holder;
 	BIT WindowWasDisabledDuringMouseHandling;
 	std::recursive_mutex locker;
+	static constexpr float alerttext_vert_pos = -7.5, alertheight = 65;
 	WindowsHandler() {
 		MW_ID_Holder = "";
 		MainWindow_ID = "MAIN";
 		WindowWasDisabledDuringMouseHandling = 0;
 		MoveableWindow* ptr;
-		Map["ALERT"] = ptr = new MoveableWindow("Alert window", System_White, -100, 25, 200, 50, 0x3F3F3FCF, 0x7F7F7F7F);
-		(*ptr)["AlertText"] = new TextBox("_", System_White, 17.5, -7.5, 37, 160, 7.5, 0, 0, 0, _Align::left, TextBox::VerticalOverflow::recalibrate);
-		(*ptr)["AlertSign"] = new SpecialSignHandler(SpecialSigns::DrawACircle,-80,-12.5,7.5,0x000000FF,0x001FFFFF);
+		Map["ALERT"] = ptr = new MoveableWindow("Alert window", System_White, -100, alertheight/2, 200, alertheight, 0x3F3F3FCF, 0x7F7F7F7F);
+		(*ptr)["AlertText"] = new TextBox("_", System_White, 17.5, alerttext_vert_pos, alertheight - 12.5, 160, 7.5, 0, 0, 0, _Align::left, TextBox::VerticalOverflow::recalibrate);
+		(*ptr)["AlertSign"] = new SpecialSignHandler(SpecialSigns::DrawACircle,-78.5,-17,12,0x000000FF,0x001FFFFF);
 
 		Map["PROMPT"] = ptr = new MoveableWindow("prompt", System_White, -50, 50, 100, 100, 0x3F3F3FCF, 0x7F7F7F7F);
 		(*ptr)["FLD"] = new InputField("", 0, 35 - WindowHeapSize, 10, 80, System_White, NULL, 0x007FFFFF, NULL, "", 0, _Align::center);
@@ -4283,11 +4430,11 @@ struct WindowsHandler {
 		locker.lock();
 		auto AlertWptr = Map["ALERT"];
 		AlertWptr->SafeWindowRename(AlertHeader);
-		AlertWptr->_NotSafeResize_Centered(50, 200);
 		AlertWptr->SafeChangePosition_Argumented(0, 0, 0);
+		AlertWptr->_NotSafeResize_Centered(alertheight, 200);
 		TextBox *AlertWTptr = (TextBox*)((*AlertWptr)["AlertText"]);
 		AlertWTptr->SafeStringReplace(AlertText);
-		if (AlertWTptr->CalculatedTextHeight > AlertWTptr->Height) {
+		if (0 && AlertWTptr->CalculatedTextHeight > AlertWTptr->Height) {
 			AlertWptr->_NotSafeResize_Centered(AlertWTptr->CalculatedTextHeight + WindowHeapSize, AlertWptr->Width);
 		}
 		auto AlertWSptr = ((SpecialSignHandler*)(*AlertWptr)["AlertSign"]);
@@ -4488,9 +4635,11 @@ struct DragNDropHandler : IDropTarget {
 				}
 				AddFiles(WC);
 			}
-			else ThrowAlert_Error("DND: Get data is not succeeded!");
+			else 
+				ThrowAlert_Error("DND: GET_DATA");
 		}
-		else ThrowAlert_Error("DND: Query get data is not succeeded!");
+		else 
+			ThrowAlert_Error("DND: QUERY_GET_DATA");
 		DRAG_OVER = 0;
 		*effect = DROPEFFECT_COPY;
 		return NOERROR;
@@ -4960,6 +5109,18 @@ struct PLC_VolumeWorker:HandleableUIPart {
 	}
 };
 
+template<typename map_key, typename map_value, typename map_type>
+struct Graphing : HandleableUIPart {
+	
+
+
+
+
+
+
+
+};
+
 struct SMRP_Vis: HandleableUIPart {
 	SingleMIDIReProcessor *SMRP;
 	
@@ -5310,7 +5471,7 @@ MIDICollectionThreadedMerger *GlobalMCTM = NULL;
 
 void ThrowAlert_Error(string AlertText) {
 	if (WH)
-		WH->ThrowAlert(AlertText, "ERROR!", SpecialSigns::DrawExTriangle, 1, 0xFF7F00FF, 0xFF);
+		WH->ThrowAlert(AlertText, "ERROR!", SpecialSigns::DrawExTriangle, 1, 0xFFAF00FF, 0xFF);
 }
 
 void ThrowAlert_Warning(string AlertText) {
@@ -5497,7 +5658,13 @@ namespace PropsAndSets {
 		}
 	}
 	void InitializeCollecting() {
-		ThrowAlert_Error("If you see this, then midi info collector is not done yet :)");
+		ThrowAlert_Warning("Still testing :)");
+		if (currentID < 0 && currentID >= _Data.Files.size()) {
+			ThrowAlert_Error("How you've managed to select the midi beyond the list? O.o\n" + to_string(currentID));
+			return;
+		}
+		auto SMICptr = new SingleMIDIInfoCollector(_Data.Files[currentID].Filename);
+		WH->EnableWindow("SMIC");
 	}
 	void OR() {
 		if (currentID > -1) {
@@ -6282,12 +6449,14 @@ void Init() {///SetIsFontedVar
 	
 	(*WH)["SMRP_CONTAINER"] = T;
 
-	T = new MoveableWindow("Sustains/Overlaps remover", System_White, -100, 25, 200, 45, 0x3F3F3FCF, 0x7F7F7F7F);
-	(*T)["TEXT"] = new TextBox("sdokflsdkflk", System_White, 0, -WindowHeapSize + 15, 15, 180, 10, 0, 0, 0, _Align::center);
+	T = new MoveableWindow("MIDI Info Collector", System_White, -150, 100, 300, 200, 0x3F3F3FCF, 0x7F7F7F7F);
+	(*T)["FLL"] = new TextBox("--File log line--", System_Blue, 0, -WindowHeapSize + 85, 15, 285, 10, 0, 0, 0, _Align::left);
+	(*T)["FEL"] = new TextBox("--File error line--", System_Red, 0, -WindowHeapSize + 75, 15, 285, 10, 0, 0, 0, _Align::left);
 
-	(*WH)["OR"] = T;
+	(*WH)["SMIC"] = T;
 
 	WH->EnableWindow("MAIN");
+	//WH->EnableWindow("SMIC");
 	//WH->EnableWindow("OR");
 	//WH->EnableWindow("SMRP_CONTAINER");
 	//WH->EnableWindow("APP_SETTINGS");
@@ -6295,10 +6464,12 @@ void Init() {///SetIsFontedVar
 	//WH->EnableWindow("CAT");
 	//WH->EnableWindow("SMPAS");//Debug line
 	//WH->EnableWindow("PROMPT");////DEBUUUUG
-	
+
+	//ThrowAlert_Warning("aksdlkadskl\nalksd;laksd");
+
 	DragAcceptFiles(hWnd, TRUE);
 	OleInitialize(NULL);
-	cout << "Register Drag&Drop " << (RegisterDragDrop(hWnd, &DNDH_Global)) << endl;
+	cout << "Registering Drag&Drop: " << (RegisterDragDrop(hWnd, &DNDH_Global)) << endl;
 	
 	SAFC_VersionCheck();
 }
@@ -6567,6 +6738,7 @@ int main(int argc, char ** argv) {
 
 	srand(TIMESEED());
 	__glutInitWithExit(&argc, argv, mExit);
+	//cout << argv[0] << endl;
 	glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGBA | GLUT_ALPHA);
 	glutInitWindowSize(WINDXSIZE, WINDYSIZE);
 	//glutInitWindowPosition(50, 0);
