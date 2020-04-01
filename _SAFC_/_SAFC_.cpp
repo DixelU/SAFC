@@ -6581,7 +6581,7 @@ void mDisplay() {
 		Init();
 		//WH->ThrowAlert("kokoko", "alerttest", SpecialSigns::DrawWait, 1, 0xFF00FF7F, 20);//
 		if (APRIL_FOOL) {
-			WH->ThrowAlert("Today is a special day! ( -w-)\nTake a walk and come back tommorow\n(-w- )", "1st of April!", SpecialSigns::DrawWait, 1, 0xFF00FFFF, 20);
+			WH->ThrowAlert("Today is a special day! ( -w-)\nToday you'll have new background\n(-w- )", "1st of April!", SpecialSigns::DrawWait, 1, 0xFF00FFFF, 20);
 			(*WH)["ALERT"]->RGBABackground = 0; 
 			_WH_t("ALERT", "AlertText", TextBox*)->SafeTextColorChange(0xFFFFFFFF);
 		}
