@@ -758,6 +758,7 @@ struct SingleMIDIReProcessor {
 		BYTE Tempo1, Tempo2, Tempo3;
 		BYTE IO = 0, TYPEIO = 0;//register?
 		BYTE RSB = 0;
+		BIT TrackEnded = false;
 		TrackCount = 0x0;
 		Processing = 0x1;
 		Track.reserve(10000000);//just in case...
@@ -803,6 +804,7 @@ struct SingleMIDIReProcessor {
 			INT64 CurTick = 0;//understandable
 			bool Entered = false, Exited = false;
 			INT64 TickTranq = 0;
+			TrackEnded = false;
 
 			DeltaTimeTranq += GlobalOffset;
 			///Parsing events
@@ -962,6 +964,7 @@ struct SingleMIDIReProcessor {
 						}
 						Track.clear();
 						EventCounter = 0;
+						TrackEnded = true;
 						break;
 					}
 					else {//other meta events
@@ -1378,6 +1381,7 @@ struct SingleMIDIReProcessor {
 
 						if (!EventCounter && BoolSettings & SMP_BOOL_SETTINGS_EMPTY_TRACKS_RMV) {
 							WarningLine = "Corrupted track cleared. (" + to_string(TrackCount) + ")";
+							TrackEnded = true;
 						}
 						else {
 							Track.insert(Track.end() - size - 3, UnLoad.begin(), UnLoad.end());
@@ -1391,6 +1395,7 @@ struct SingleMIDIReProcessor {
 							SingleMIDIReProcessor::ostream_write(Track, file_output);
 							WarningLine = "An attempt to recover the track. (" + to_string(TrackCount++) + ")";
 							TrackCount++;
+							TrackEnded = true;
 						}
 						Track.clear();
 						EventCounter = 0;
@@ -4384,7 +4389,7 @@ struct WindowsHandler {
 		WindowWasDisabledDuringMouseHandling = 0;
 		MoveableWindow* ptr;
 		Map["ALERT"] = ptr = new MoveableWindow("Alert window", System_White, -100, alertheight/2, 200, alertheight, 0x3F3F3FCF, 0x7F7F7F7F);
-		(*ptr)["AlertText"] = new TextBox("_", System_White, 17.5, alerttext_vert_pos, alertheight - 12.5, 160, 7.5, 0, 0, 0, _Align::left, TextBox::VerticalOverflow::recalibrate);
+		(*ptr)["AlertText"] = new TextBox("_", System_White, 20, alerttext_vert_pos, alertheight - 12.5, 155, 7.5, 0, 0, 0, _Align::left, TextBox::VerticalOverflow::recalibrate);
 		(*ptr)["AlertSign"] = new SpecialSignHandler(SpecialSigns::DrawACircle,-78.5,-17,12,0x000000FF,0x001FFFFF);
 
 		Map["PROMPT"] = ptr = new MoveableWindow("prompt", System_White, -50, 50, 100, 100, 0x3F3F3FCF, 0x7F7F7F7F);
@@ -6082,9 +6087,8 @@ namespace Settings {
 
 		T = ((InputField*)(*pptr)["AS_ROT_ANGLE"])->CurrentString;
 		cout << "ROT_ANGLE " << T << endl;
-		if (T.size()) {
+		if (T.size() && !is_fonted) {
 			ROT_ANGLE = stof(T);
-			//not save
 		}
 		cout << ROT_ANGLE << endl;
 
@@ -6746,10 +6750,7 @@ int main(int argc, char ** argv) {
 
 	hWnd = FindWindowA(NULL, WINDOWTITLE);
 
-	if(APRIL_FOOL)
-		glBlendFunc(GL_SRC_ALPHA, GL_ONE);//_MINUS_SRC_ALPHA
-	else
-		glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);//_MINUS_SRC_ALPHA
+	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);//_MINUS_SRC_ALPHA
 	glEnable(GL_BLEND); 
 	
 	//glEnable(GL_POLYGON_SMOOTH);//laggy af
