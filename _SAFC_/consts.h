@@ -23,6 +23,7 @@ enum _BoolSettings {
 #define TT_TEXTBOX 0b1000
 #define TT_SELPROPLIST 0b10000
 #define TT_CHECKBOX 0b100000
+#define TT_GRAPH 0b1000000
 
 enum _TellType {
 	unspecified = TT_UNSPECIFIED,
@@ -31,7 +32,8 @@ enum _TellType {
 	button = TT_BUTTON,
 	textbox = TT_TEXTBOX,
 	selectable_properted_list = TT_SELPROPLIST,
-	checkbox = TT_CHECKBOX
+	checkbox = TT_CHECKBOX,
+	graph = TT_GRAPH
 };
 
 #define GLOBAL_LEFT 0b0001

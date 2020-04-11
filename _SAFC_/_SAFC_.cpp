@@ -547,29 +547,34 @@ struct SingleMIDIInfoCollector {
 	struct TrackData {
 		INT64 MTrk_pos;
 	};
-	BIT Processing;
+	BIT Processing, Finished;
 	wstring FileName;
 	string LogLine;
 	string ErrorLine;
+	using tempo_graph = btree::btree_map<INT64, TempoEvent>;
+	using polyphony_graph = btree::btree_map<INT64, INT64>;
 	btree::btree_map<INT64,TempoEvent> TempoMap;
 	btree::btree_map<INT64, INT64> PolyphonyFiniteDifference;
 	std::vector<TrackData> Tracks;
+	WORD PPQ;
 	//Locker<btree::btree_map<UINT64, UINT64>> Polyphony;
 	//Locker<btree::btree_map<>>
-	SingleMIDIInfoCollector(wstring filename) : FileName(filename), LogLine(" "), Processing(0) { }
+	SingleMIDIInfoCollector(wstring filename, WORD PPQ) : FileName(filename), LogLine(" "), Processing(0), Finished(0), PPQ(PPQ){ }
 	void Lookup() {
 		Processing = true;
 		bbb_ffr file_input(FileName.c_str());
-		for (int i = 0; i < 14; i++)
-			file_input.get();
 		array<DWORD, 4096> CurHolded;
 		DWORD MTRK = 0, vlv = 0;
+		UINT64 LastTick = 0;
 		UINT64 CurTick = 0;
 		BYTE IO = 0, RSB = 0;
 		TrackData TData;
+		TempoMap[0] = TempoEvent(0x7, 0xA1, 0x20);
+		PolyphonyFiniteDifference[0] = 0;
 		while (file_input.good()) {
 			CurTick = 0;
-			while (MTRK == MTrk && file_input.good()) 
+			MTRK = 0;
+			while (MTRK != MTrk && file_input.good()) 
 				MTRK = (MTRK << 8) | (file_input.get());
 			for (int i = 0; i < 4; i++)
 				file_input.get();
@@ -579,9 +584,11 @@ struct SingleMIDIInfoCollector {
 				vlv = 0;
 				do {
 					IO = file_input.get();
-					vlv = vlv << 7 | IO & 0x7F;
+					vlv = (vlv << 7) | (IO & 0x7F);
 				} while (IO & 0x80 && !file_input.eof());
 				CurTick += vlv;
+				if (LastTick < CurTick)
+					LastTick = CurTick;
 				BYTE EventType = file_input.get();
 				if (EventType == 0xFF) {
 					RSB = 0;
@@ -589,10 +596,11 @@ struct SingleMIDIInfoCollector {
 					DWORD meta_data_size = 0;
 					do {
 						IO = file_input.get();
-						vlv = vlv << 7 | IO & 0x7F;
+						meta_data_size = meta_data_size << 7 | IO & 0x7F;
 					} while (IO & 0x80 && !file_input.eof());
 					if (type == 0x2F) {
 						Tracks.push_back(TData);
+						LogLine = "Passed " + to_string(Tracks.size()) + " tracks";
 						break;
 					}
 					else if (type == 0x51) {
@@ -603,7 +611,7 @@ struct SingleMIDIInfoCollector {
 						TempoMap[CurTick]=TE;
 					}
 					else {
-						while (meta_data_size--) 
+						while (meta_data_size--)
 							file_input.get();
 					}
 				}
@@ -633,7 +641,7 @@ struct SingleMIDIInfoCollector {
 					DWORD meta_data_size = 0;
 					do {
 						IO = file_input.get();
-						vlv = vlv << 7 | IO & 0x7F;
+						meta_data_size = (meta_data_size << 7) | (IO & 0x7F);
 					} while (IO & 0x80 && !file_input.eof());
 					while (meta_data_size--)
 						file_input.get();
@@ -664,6 +672,9 @@ struct SingleMIDIInfoCollector {
 				}
 			}
 		}
+		TempoMap[LastTick] = TempoMap.rbegin()->second;
+		Finished = true;
+		Processing = false;
 		file_input.close();
 	}
 };
@@ -3416,7 +3427,7 @@ struct TextBox : HandleableUIPart {
 	}
 	void SafeStringReplace(string NewString) override {
 		Lock.lock();
-		this->Text = NewString;
+		this->Text = (NewString.size()) ? NewString : " ";
 		Lines.clear();
 		RecalculateAvailableSpaceForText();
 		TextReformat();
@@ -5114,21 +5125,228 @@ struct PLC_VolumeWorker:HandleableUIPart {
 	}
 };
 
-template<typename map_key, typename map_value, typename map_type>
+template<typename ordered_map_type = std::map<int,int>>
 struct Graphing : HandleableUIPart {
-	
-
-
-
-
-
-
-
+	float CXpos, CYpos;
+	float MYpos, MXpos;
+	float HorizontalScaling, CentralPoint;
+	float AssignedXSelection_ByKey;
+	ordered_map_type* Graph;
+	SingleTextLine* STL_Info;
+	float Width, TargetHeight, ScaleCoef, Shift;
+	BIT AutoAdjusting, IsHovered, IsEnabled;
+	DWORD Color;
+	Graphing(float CXpos, float CYpos, float Width, float TargetHeight, float ScaleCoef, BIT AutoAdjusting, DWORD Color, ordered_map_type* Graph, SingleTextLineSettings* STLS, BIT IsEnabled) :
+		CXpos(CXpos), CYpos(CYpos), Width(Width), TargetHeight(TargetHeight), ScaleCoef(ScaleCoef), Color(Color), AutoAdjusting(AutoAdjusting), Graph(Graph), IsEnabled(IsEnabled)
+	{
+		HorizontalScaling = 1;
+		CentralPoint = 0;
+		IsHovered = false;
+		MYpos = MXpos = Shift = 0;
+		AssignedXSelection_ByKey = 0;
+		STLS->RGBAColor = 0xFFFFFFFF;
+		STLS->SetNewPos(CXpos, CYpos - 0.5f*TargetHeight + 5.f);
+		STL_Info = STLS->CreateOne("_");
+	}
+	~Graphing() {
+		delete STL_Info;
+	}
+	void Draw() override {
+		Lock.lock();
+		if (IsEnabled && Graph && Graph->size()) {
+			float begin = Graph->begin()->first;
+			float end = Graph->rbegin()->first;
+			float max_value = -1e31f, min_value = 1e31f;
+			float prev_value = CYpos - 0.5 * TargetHeight + (ScaleCoef * Graph->begin()->second + Shift) * TargetHeight;
+			float t_prev_value = prev_value;
+			BIT IsFirstLine = true;
+			BIT IsLastLoopComplete = false;
+			GLCOLOR(Color);
+			glBegin(GL_LINE_STRIP);
+			for (auto T : *Graph) {
+				IsLastLoopComplete = false;
+				float cur_pos = T.first;
+				float cur_value = T.second;
+				float cur_y = ScaleCoef * (cur_value) + Shift;
+				float cur_x = ((cur_pos - begin) / (end - begin) - 0.5f + CentralPoint) * HorizontalScaling;
+				t_prev_value = std::clamp(prev_value, CYpos - 0.5f * TargetHeight, CYpos + 0.5f * TargetHeight);
+				prev_value = CYpos - 0.5f * TargetHeight + cur_y * TargetHeight;
+				if (cur_x < -0.5f)
+					continue;
+				if (cur_x > 0.5f)
+					break;
+				if (max_value < cur_y)
+					max_value = cur_y;
+				if (min_value > cur_y)
+					min_value = cur_y;
+				if (IsFirstLine) {
+					IsFirstLine = false;
+					if(t_prev_value)
+					glVertex2f(CXpos - 0.5f * Width, t_prev_value);
+				}
+				glVertex2f(CXpos + cur_x * Width, t_prev_value);
+				glVertex2f(CXpos + cur_x * Width, prev_value);
+				IsLastLoopComplete = true;
+			}
+			glVertex2f(CXpos + 0.5f * Width, (IsLastLoopComplete)? prev_value : t_prev_value);
+			glEnd();
+			if (AssignedXSelection_ByKey > 0.5f) {
+				GLCOLOR(0xFFFFFF1F);
+				float last_tempo_pos_x = ((AssignedXSelection_ByKey - begin) / (end - begin) - 0.5f + CentralPoint) * HorizontalScaling;
+				if (last_tempo_pos_x >= -0.5f) {
+					last_tempo_pos_x = ((last_tempo_pos_x < 0.5f) ? last_tempo_pos_x : 0.5f) * Width;
+					glBegin(GL_POLYGON);
+					glVertex2f(CXpos - 0.5f * Width, CYpos + TargetHeight * 0.5f);
+					glVertex2f(CXpos + last_tempo_pos_x, CYpos + TargetHeight * 0.5f);
+					glVertex2f(CXpos + last_tempo_pos_x, CYpos - TargetHeight * 0.5f);
+					glVertex2f(CXpos - 0.5f * Width, CYpos - TargetHeight * 0.5f);
+					glEnd();
+				}
+			}
+			if (AutoAdjusting) {
+				if (min_value != max_value) {
+					Shift = (Shift - min_value);
+					ScaleCoef /= (max_value - min_value);
+				}
+			}
+			//printf("SH:%f\tSC:%f\n", Shift, ScaleCoef);
+			if (IsHovered) {
+				float cur_x =  (((MXpos - CXpos) / Width) / HorizontalScaling - CentralPoint + 0.5f) * (end - begin) + begin;
+				glLineWidth(1);
+				GLCOLOR(0xFFFFFF3F);
+				glBegin(GL_LINE_LOOP);
+				glVertex2f(CXpos - 0.5f * Width, CYpos + TargetHeight * 0.5f);
+				glVertex2f(CXpos + 0.5f * Width, CYpos + TargetHeight * 0.5f);
+				glVertex2f(CXpos + 0.5f * Width, CYpos - TargetHeight * 0.5f);
+				glVertex2f(CXpos - 0.5f * Width, CYpos - TargetHeight * 0.5f);
+				glEnd();
+				glBegin(GL_LINES);
+				glVertex2f(MXpos, CYpos - TargetHeight * 0.5f);
+				glVertex2f(MXpos, CYpos + TargetHeight * 0.5f);
+				auto equal_u_bound = Graph->upper_bound(cur_x);
+				auto lesser_one = equal_u_bound;
+				if (equal_u_bound != Graph->begin())
+					lesser_one--;
+				float last_tempo_pos_x = ((lesser_one->first - begin) / (end - begin) - 0.5f + CentralPoint) * HorizontalScaling;
+				float last_tempo_pos_y = CYpos - 0.5f * TargetHeight + (ScaleCoef * lesser_one->second + Shift) * TargetHeight;
+				if (abs(last_tempo_pos_x) <= 0.5f) {
+					last_tempo_pos_x = last_tempo_pos_x * Width + CXpos;
+					GLCOLOR(0x7FAFFFAF);
+					glLineWidth(3);
+					glVertex2f(last_tempo_pos_x, CYpos - TargetHeight * 0.5f);
+					glVertex2f(last_tempo_pos_x, CYpos + TargetHeight * 0.5f);
+					glEnd();
+					GLCOLOR(0xFFFFFFFF);
+					glPointSize(3);
+					glBegin(GL_POINTS);
+					glVertex2f(last_tempo_pos_x, last_tempo_pos_y);
+					glEnd();
+				}
+				STL_Info->SafeStringReplace(to_string(lesser_one->first) + " : " + to_string(lesser_one->second));
+			}
+			else
+				if(STL_Info->_CurrentText != "-:-")
+					STL_Info->SafeStringReplace("-:-");
+		}
+		else if(IsEnabled) {
+			if (STL_Info->_CurrentText != "NULL Graph")
+				STL_Info->SafeStringReplace("NULL Graph");
+		}
+		else {
+			glColor4f(0.f, 0.f, 0.f, 0.15f);
+			glBegin(GL_POLYGON);
+			glVertex2f(CXpos - 0.5f * Width, CYpos + TargetHeight * 0.5f);
+			glVertex2f(CXpos + 0.5f * Width, CYpos + TargetHeight * 0.5f);
+			glVertex2f(CXpos + 0.5f * Width, CYpos - TargetHeight * 0.5f);
+			glVertex2f(CXpos - 0.5f * Width, CYpos - TargetHeight * 0.5f);
+			glEnd();
+			if (STL_Info->_CurrentText != "Graph disabled")
+				STL_Info->SafeStringReplace("Graph disabled");
+		}
+		STL_Info->Draw();
+		Lock.unlock();
+	}
+	void SafeMove(float dx, float dy) override {
+		Lock.lock();
+		CXpos += dx;
+		CYpos += dy;
+		STL_Info->SafeMove(dx, dy);
+		Lock.unlock();
+	}
+	void SafeChangePosition(float NewX, float NewY) override {
+		Lock.lock();
+		NewX -= CXpos;
+		NewY -= CYpos;
+		SafeMove(NewX, NewY);
+		Lock.unlock();
+	}
+	void SafeChangePosition_Argumented(BYTE Arg, float NewX, float NewY) override {
+		Lock.lock();
+		float CW = 0.5f * (
+			(INT32)((BIT)(GLOBAL_LEFT & Arg))
+			- (INT32)((BIT)(GLOBAL_RIGHT & Arg))
+			) * Width,
+			CH = 0.5f * (
+				(INT32)((BIT)(GLOBAL_BOTTOM & Arg))
+				- (INT32)((BIT)(GLOBAL_TOP & Arg))
+			) * TargetHeight;
+		SafeChangePosition(NewX + CW, NewY + CH);
+		Lock.unlock();
+	}
+	void KeyboardHandler(CHAR CH) override {
+		if (!IsHovered || !IsEnabled)
+			return;
+		Lock.lock();
+		switch (CH) {
+		case 'W':
+		case 'w':
+			HorizontalScaling *= 1.1f;
+			if (HorizontalScaling < 1)
+				HorizontalScaling = 1;
+			break;
+		case 'S':
+		case 's':
+			HorizontalScaling /= 1.1f;
+			if (HorizontalScaling < 1)
+				HorizontalScaling = 1;
+			break;
+		case 'D':
+		case 'd':
+			CentralPoint -= 0.05f / HorizontalScaling;
+			break;
+		case 'A':
+		case 'a':
+			CentralPoint += 0.05f / HorizontalScaling;
+			break;
+		case 'r':
+		case 'R':
+			CentralPoint = 0;
+			HorizontalScaling = 1;
+			ScaleCoef = 0.001f;
+			Shift = 0;
+		}
+		Lock.unlock();
+		return;
+	}
+	void SafeStringReplace(string Meaningless) override {
+		return;
+	}
+	BIT MouseHandler(float mx, float my, CHAR Button, CHAR State) override {
+		Lock.lock();
+		if (abs(mx - CXpos) <= 0.5f * Width && abs(my - CYpos) <= 0.5f * TargetHeight) {
+			IsHovered = true;
+		}
+		else
+			IsHovered = false;
+		MXpos = mx;
+		MYpos = my;
+		Lock.unlock();
+		return 0;
+	}
 };
 
 struct SMRP_Vis: HandleableUIPart {
 	SingleMIDIReProcessor *SMRP;
-	
 	float XPos, YPos;
 	BIT Processing, Finished, Hovered;
 	SingleTextLine *STL_Log,*STL_War,*STL_Err,*STL_Info;
@@ -5625,6 +5843,7 @@ void OnAdd() {
 namespace PropsAndSets {
 	string *PPQN=new string(""), *OFFSET = new string(""), *TEMPO = new string("");
 	int currentID=-1,CaTID=-1,VMID=-1,PMID=-1;
+	SingleMIDIInfoCollector* SMICptr = nullptr;
 	void OGPInMIDIList(int ID) {
 		if (ID<_Data.Files.size() && ID>=0) {
 			currentID = ID;
@@ -5663,13 +5882,63 @@ namespace PropsAndSets {
 		}
 	}
 	void InitializeCollecting() {
-		ThrowAlert_Warning("Still testing :)");
+		//ThrowAlert_Warning("Still testing :)");
 		if (currentID < 0 && currentID >= _Data.Files.size()) {
 			ThrowAlert_Error("How you've managed to select the midi beyond the list? O.o\n" + to_string(currentID));
 			return;
 		}
-		auto SMICptr = new SingleMIDIInfoCollector(_Data.Files[currentID].Filename);
+		auto UIElement = (Graphing<SingleMIDIInfoCollector::tempo_graph>*)(*(*WH)["SMIC"])["TEMPO_GRAPH"];
+		UIElement->Graph = nullptr;
+		if (SMICptr)
+			delete SMICptr;
+		SMICptr = new SingleMIDIInfoCollector(_Data.Files[currentID].Filename, _Data.Files[currentID].OldPPQN);
+		thread th([]() {
+			thread ith([]() {
+				auto ErrorLine = (TextBox*)(*(*WH)["SMIC"])["FEL"];
+				auto InfoLine = (TextBox*)(*(*WH)["SMIC"])["FLL"];
+				while (!SMICptr->Finished){
+					if (ErrorLine->Text != SMICptr->ErrorLine)
+						ErrorLine->SafeStringReplace(SMICptr->ErrorLine);
+					if (InfoLine->Text != SMICptr->LogLine)
+						InfoLine->SafeStringReplace(SMICptr->LogLine);
+					Sleep(100);
+				}
+				InfoLine->SafeStringReplace("Finished");
+			});
+			ith.detach();
+			SMICptr->Lookup();
+			auto UIElement_TG = (Graphing<SingleMIDIInfoCollector::tempo_graph>*)(*(*WH)["SMIC"])["TEMPO_GRAPH"];
+			UIElement_TG->Graph = &(SMICptr->TempoMap);
+			auto UIElement_PG = (Graphing<SingleMIDIInfoCollector::polyphony_graph>*)(*(*WH)["SMIC"])["POLY_GRAPH"];
+			UIElement_PG->Graph = &(SMICptr->PolyphonyFiniteDifference);
+			auto UIElement_TB = (TextBox*)(*(*WH)["SMIC"])["TOTAL_INFO"];
+			UIElement_TB->SafeStringReplace(
+				"Total (real) tracks: " + to_string(SMICptr->Tracks.size()) + "; ... "
+				);
+
+		});
+		th.detach();
 		WH->EnableWindow("SMIC");
+	}
+	namespace SMIC {
+		void EnablePG() {
+			auto UIElement_PG = (Graphing<SingleMIDIInfoCollector::polyphony_graph>*)(*(*WH)["SMIC"])["POLY_GRAPH"];
+			auto UIElement_Butt = (Button*)(*(*WH)["SMIC"])["PG_SWITCH"];
+			if (UIElement_PG->IsEnabled)
+				UIElement_Butt->SafeStringReplace("Enable graph B");
+			else
+				UIElement_Butt->SafeStringReplace("Disable graph B");
+			UIElement_PG->IsEnabled ^= true;
+		}
+		void EnableTG() {
+			auto UIElement_PG = (Graphing<SingleMIDIInfoCollector::polyphony_graph>*)(*(*WH)["SMIC"])["TEMPO_GRAPH"];
+			auto UIElement_Butt = (Button*)(*(*WH)["SMIC"])["TG_SWITCH"];
+			if (UIElement_PG->IsEnabled)
+				UIElement_Butt->SafeStringReplace("Enable graph A");
+			else
+				UIElement_Butt->SafeStringReplace("Disable graph A");
+			UIElement_PG->IsEnabled ^= true;
+		}
 	}
 	void OR() {
 		if (currentID > -1) {
@@ -5926,18 +6195,14 @@ void OnRem() {
 		_Data.RemoveByID(*ID);
 	}
 	ptr->RemoveSelected();
-	WH->DisableWindow("SMPAS");
-	WH->DisableWindow("VM");
-	WH->DisableWindow("CAT");
+	WH->DisableAllWindows();
 	_Data.SetGlobalPPQN();
 	_Data.ResolveSubdivisionProblem_GroupIDAssign();
 }
 
 void OnRemAll() {
 	auto ptr = _WH_t("MAIN", "List", SelectablePropertedList*);
-	WH->DisableWindow("SMPAS");
-	WH->DisableWindow("VM");
-	WH->DisableWindow("CAT");
+	WH->DisableAllWindows();
 	while(_Data.Files.size()){
 		_Data.RemoveByID(0);
 		ptr->SafeRemoveStringByID(0);
@@ -6374,7 +6639,7 @@ void Init() {///SetIsFontedVar
 	//(*T)["OR"] = Butt = new Button("OR", System_White, PropsAndSets::OR, 37.5, 15 - WindowHeapSize, 20, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, System_White, "Overlaps remover");
 	//(*T)["SR"] = new Button("SR", System_White, PropsAndSets::SR, 12.5, 15 - WindowHeapSize, 20, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, System_White, "Sustains remover");
 
-	(*T)["MIDIINFO"] = Butt = new Button("Collect info", System_White, PropsAndSets::InitializeCollecting, 20, 15 - WindowHeapSize, 65, 10, 1, 0x7F7F7F3F, 0x7F7F7FFF, 0xFFFFFFFF, 0xFFFFFF3F, 0xFFFFFFFF, System_White, "Collects additional info about the midi");
+	(*T)["MIDIINFO"] = Butt = new Button("Collect info", System_White, PropsAndSets::InitializeCollecting, 20, 15 - WindowHeapSize, 65, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, System_White, "Collects additional info about the midi");
 	Butt->Tip->SafeMove(-20, 0);
 
 	(*T)["APPLY"] = new Button("Apply", System_White, PropsAndSets::OnApplySettings, 87.5 - WindowHeapSize, 15 - WindowHeapSize, 30, 10, 1, 0x7FAFFF3F, 0xFFFFFFFF, 0xFFAF7FFF, 0xFFAF7F3F, 0xFFAF7FFF, NULL, " ");
@@ -6453,9 +6718,25 @@ void Init() {///SetIsFontedVar
 	
 	(*WH)["SMRP_CONTAINER"] = T;
 
-	T = new MoveableWindow("MIDI Info Collector", System_White, -150, 100, 300, 200, 0x3F3F3FCF, 0x7F7F7F7F);
-	(*T)["FLL"] = new TextBox("--File log line--", System_Blue, 0, -WindowHeapSize + 85, 15, 285, 10, 0, 0, 0, _Align::left);
-	(*T)["FEL"] = new TextBox("--File error line--", System_Red, 0, -WindowHeapSize + 75, 15, 285, 10, 0, 0, 0, _Align::left);
+	T = new MoveableWindow("MIDI Info Collector", System_White, -150, 200, 300, 400, 0x3F3F3FCF, 0x7F7F7F7F);
+	(*T)["FLL"] = new TextBox("--File log line--", System_White, 0, -WindowHeapSize + 185, 15, 285, 10, 0, 0, 0, _Align::left);
+	(*T)["FEL"] = new TextBox("--File error line--", System_Red, 0, -WindowHeapSize + 175, 15, 285, 10, 0, 0, 0, _Align::left);
+	(*T)["TEMPO_GRAPH"] = new Graphing<SingleMIDIInfoCollector::tempo_graph>(
+		0, -WindowHeapSize + 145, 285, 50, (1. / 20000.), true, 0x7FAFFFCF, nullptr, System_White, true
+	);
+	(*T)["POLY_GRAPH"] = new Graphing<SingleMIDIInfoCollector::polyphony_graph>(
+		0, -WindowHeapSize + 95, 285, 50, (1. / 20000.), true, 0x7FAFFFCF, nullptr, System_White, false
+	);
+	(*T)["PG_SWITCH"] = new Button("Enable graph B", System_White, PropsAndSets::SMIC::EnablePG, 37.5, 60 - WindowHeapSize, 70, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, nullptr);
+	(*T)["TG_SWITCH"] = new Button("Enable graph A", System_White, PropsAndSets::SMIC::EnableTG, -37.5, 60 - WindowHeapSize, 70, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, nullptr);
+	(*T)["TOTAL_INFO"] = new TextBox("----", System_White, 0, -150, 35, 285, 10, 0, 0, 0, _Align::left);
+	(*T)["INT_MIN"] = new InputField("0", -132.5, 40 - WindowHeapSize, 10, 20, System_White, NULL, 0x007FFFFF, System_White, "Minutes", 3, _Align::center, _Align::left, InputField::Type::NaturalNumbers);
+	(*T)["INT_SEC"] = new InputField("0", -107.5, 40 - WindowHeapSize, 10, 20, System_White, NULL, 0x007FFFFF, System_White, "Seconds", 2, _Align::center, _Align::left, InputField::Type::NaturalNumbers);
+	(*T)["INT_MSC"] = new InputField("000", -80, 40 - WindowHeapSize, 10, 25, System_White, NULL, 0x007FFFFF, System_White, "Milliseconds", 3, _Align::center, _Align::left, InputField::Type::NaturalNumbers);
+	(*T)["INTEGRATE_TICKS"] = new Button("Integrate ticks", System_White, nullptr, -25, 40 - WindowHeapSize, 70, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, System_White, "Result is the closest tick to that time.");
+	(*T)["INT_TIC"] = new InputField("0", -105, 20 - WindowHeapSize, 10, 75, System_White, NULL, 0x007FFFFF, System_White, "Ticks", 17, _Align::center, _Align::left, InputField::Type::NaturalNumbers);
+	(*T)["INTEGRATE_TIME"] = new Button("Integrate time", System_White, nullptr, -25, 20 - WindowHeapSize, 70, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, System_White, "Result is the time of that tick.");
+	
 
 	(*WH)["SMIC"] = T;
 
@@ -6690,7 +6971,7 @@ void mKey(BYTE k, int x, int y) {
 	if (k == '=') { ANIMATION_IS_ACTIVE = !ANIMATION_IS_ACTIVE; }
 	else if (k == 27)exit(1);
 	else {
-		cout << (int)k << ' ' << k << endl;
+		//cout << (int)k << ' ' << k << endl;
 	}
 }
 void mClick(int butt, int state, int x, int y) {
