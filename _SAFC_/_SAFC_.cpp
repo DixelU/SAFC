@@ -2628,6 +2628,7 @@ struct SingleTextLineSettings {
 	float CXpos, CYpos, XUnitSize, YUnitSize;
 	BYTE BasePoint, GradPoint, LineWidth, SpaceWidth;
 	BIT isFonted;
+	DWORD default_RGBAC, default_gRGBAC;
 	DWORD RGBAColor, gRGBAColor;
 	SingleTextLineSettings(string Text, float CXpos, float CYpos, float XUnitSize, float YUnitSize, BYTE LineWidth, BYTE SpaceWidth, DWORD RGBAColor, DWORD gRGBAColor, BYTE BasePoint, BYTE GradPoint) {
 		this->STLstring = Text;
@@ -2635,8 +2636,8 @@ struct SingleTextLineSettings {
 		this->CYpos = CYpos;
 		this->XUnitSize = XUnitSize;
 		this->YUnitSize = YUnitSize;
-		this->RGBAColor = RGBAColor;
-		this->gRGBAColor = gRGBAColor;
+		this->default_RGBAC = this->RGBAColor = RGBAColor;
+		this->default_gRGBAC = this->gRGBAColor = gRGBAColor;
 		this->LineWidth = LineWidth;
 		this->SpaceWidth = SpaceWidth;
 		this->BasePoint = BasePoint;
@@ -2654,7 +2655,8 @@ struct SingleTextLineSettings {
 		this->isFonted = 1;
 		this->XUnitSize = XUnitSize;
 		this->YUnitSize = YUnitSize;
-		this->RGBAColor = RGBAColor;
+		this->default_RGBAC = this->RGBAColor = RGBAColor;
+		//this->default_gRGBAC = this->gRGBAColor = gRGBAColor;
 	}
 	SingleTextLineSettings(float CharHeight, DWORD RGBAColor) :
 		SingleTextLineSettings(CharHeight* CharWidthPerHeight / 4, CharHeight / 2, RGBAColor) {}
@@ -2666,16 +2668,28 @@ struct SingleTextLineSettings {
 		this->isFonted = Example->isListedFont;
 	}
 	SingleTextLine* CreateOne() {
+		SingleTextLine* ptr = nullptr;
 		if (GradPoint & 0xF0 && !isFonted)
-			return new SingleTextLine(STLstring, CXpos, CYpos, XUnitSize, YUnitSize, SpaceWidth, LineWidth, RGBAColor);
-		if(!isFonted) return new SingleTextLine(STLstring, CXpos, CYpos, XUnitSize, YUnitSize, SpaceWidth, LineWidth, RGBAColor, new DWORD(gRGBAColor), ((BasePoint & 0xF) << 4) | (GradPoint & 0xF));
-		return new SingleTextLine(STLstring, CXpos, CYpos, XUnitSize, YUnitSize, SpaceWidth, LineWidth, RGBAColor, nullptr, 0xF, true);
+			ptr = new SingleTextLine(STLstring, CXpos, CYpos, XUnitSize, YUnitSize, SpaceWidth, LineWidth, RGBAColor);
+		else if(!isFonted) 
+			ptr = new SingleTextLine(STLstring, CXpos, CYpos, XUnitSize, YUnitSize, SpaceWidth, LineWidth, RGBAColor, new DWORD(gRGBAColor), ((BasePoint & 0xF) << 4) | (GradPoint & 0xF));
+		else
+			ptr = new SingleTextLine(STLstring, CXpos, CYpos, XUnitSize, YUnitSize, SpaceWidth, LineWidth, RGBAColor, nullptr, 0xF, true);
+		RGBAColor = default_RGBAC;
+		gRGBAColor = default_gRGBAC;
+		return ptr;
 	}
 	SingleTextLine* CreateOne(string TextOverride) {
+		SingleTextLine* ptr = nullptr;
 		if (GradPoint & 0xF0 && !isFonted)
-			return new SingleTextLine(TextOverride, CXpos, CYpos, XUnitSize, YUnitSize, SpaceWidth, LineWidth, RGBAColor);
-		if (!isFonted) return new SingleTextLine(TextOverride, CXpos, CYpos, XUnitSize, YUnitSize, SpaceWidth, LineWidth, RGBAColor, new DWORD(gRGBAColor), ((BasePoint & 0xF) << 4) | (GradPoint & 0xF));
-		return new SingleTextLine(TextOverride, CXpos, CYpos, XUnitSize, YUnitSize, SpaceWidth, LineWidth, RGBAColor, nullptr, 0xF, true);
+			ptr = new SingleTextLine(TextOverride, CXpos, CYpos, XUnitSize, YUnitSize, SpaceWidth, LineWidth, RGBAColor);
+		else if (!isFonted) 
+			ptr = new SingleTextLine(TextOverride, CXpos, CYpos, XUnitSize, YUnitSize, SpaceWidth, LineWidth, RGBAColor, new DWORD(gRGBAColor), ((BasePoint & 0xF) << 4) | (GradPoint & 0xF));
+		else 
+			ptr = new SingleTextLine(TextOverride, CXpos, CYpos, XUnitSize, YUnitSize, SpaceWidth, LineWidth, RGBAColor, nullptr, 0xF, true);
+		RGBAColor = default_RGBAC;
+		gRGBAColor = default_gRGBAC;
+		return ptr;
 	}
 	void SetNewPos(float NewXPos, float NewYPos) {
 		this->CXpos = NewXPos;
@@ -2689,6 +2703,7 @@ struct SingleTextLineSettings {
 
 struct HandleableUIPart {
 	recursive_mutex Lock;
+	BIT Enabled;
 	~HandleableUIPart() {}
 	HandleableUIPart() {}
 	BIT virtual MouseHandler(float mx, float my, CHAR Button/*-1 left, 1 right*/,CHAR State /*-1 down, 1 up*/) = 0;
@@ -2698,6 +2713,15 @@ struct HandleableUIPart {
 	void virtual SafeChangePosition_Argumented(BYTE, float, float) = 0; 
 	void virtual SafeStringReplace(string) = 0;
 	void virtual KeyboardHandler(char CH) = 0;
+	void Enable() {
+		Enabled = true;
+	}
+	void Disable() {
+		Enabled = false;
+	}
+	void Invert_Enable() {
+		Enabled ^= true;
+	}
 	inline DWORD virtual TellType() {
 		return TT_UNSPECIFIED;
 	}
@@ -3071,6 +3095,7 @@ struct Button : HandleableUIPart {
 		this->HoveredRGBABackground = HoveredRGBABackground;
 		this->Hovered = 0;
 		this->OnClick = OnClick;
+		this->Enabled = true;
 	}
 	Button(string ButtonText,SingleTextLineSettings *ButtonTextSTLS, void(*OnClick)(), float Xpos, float Ypos, float Width, float Height, BYTE BorderWidth, DWORD RGBABackground, DWORD RGBABorder, DWORD HoveredRGBAColor, DWORD HoveredRGBABackground, DWORD HoveredRGBABorder, SingleTextLineSettings *Tip,string TipText = " ") {
 		ButtonTextSTLS->SetNewPos(Xpos, Ypos);
@@ -3093,9 +3118,14 @@ struct Button : HandleableUIPart {
 		this->HoveredRGBABackground = HoveredRGBABackground;
 		this->Hovered = 0;
 		this->OnClick = OnClick;
+		this->Enabled = true;
 	}
 	BIT MouseHandler(float mx, float my, CHAR Button/*-1 left, 1 right, 0 move*/, CHAR State /*-1 down, 1 up*/)  override {
 		Lock.lock();
+		if (!Enabled) {
+			Lock.unlock();
+			return 0;
+		}
 		mx = Xpos - mx;
 		my = Ypos - my;
 		if (Hovered) {
@@ -3162,6 +3192,10 @@ struct Button : HandleableUIPart {
 	}
 	void Draw() {
 		Lock.lock();
+		if (!Enabled) {
+			Lock.unlock();
+			return;
+		}
 		if (Hovered) {
 			if ((BYTE)HoveredRGBABackground) {
 				GLCOLOR(HoveredRGBABackground);
@@ -5135,16 +5169,16 @@ struct Graphing : HandleableUIPart {
 	SingleTextLine* STL_Info;
 	float Width, TargetHeight, ScaleCoef, Shift;
 	BIT AutoAdjusting, IsHovered, IsEnabled;
-	DWORD Color;
-	Graphing(float CXpos, float CYpos, float Width, float TargetHeight, float ScaleCoef, BIT AutoAdjusting, DWORD Color, ordered_map_type* Graph, SingleTextLineSettings* STLS, BIT IsEnabled) :
-		CXpos(CXpos), CYpos(CYpos), Width(Width), TargetHeight(TargetHeight), ScaleCoef(ScaleCoef), Color(Color), AutoAdjusting(AutoAdjusting), Graph(Graph), IsEnabled(IsEnabled)
+	DWORD Color, NearestLineColor, PointColor, SelectionColor;
+	Graphing(float CXpos, float CYpos, float Width, float TargetHeight, float ScaleCoef, BIT AutoAdjusting, DWORD Color, DWORD TextColor, DWORD NearestLineColor, DWORD PointColor, DWORD SelectionColor, ordered_map_type* Graph, SingleTextLineSettings* STLS, BIT IsEnabled) :
+		CXpos(CXpos), CYpos(CYpos), Width(Width), TargetHeight(TargetHeight), ScaleCoef(ScaleCoef), Color(Color), AutoAdjusting(AutoAdjusting), Graph(Graph), IsEnabled(IsEnabled), NearestLineColor(NearestLineColor), PointColor(PointColor), SelectionColor(SelectionColor)
 	{
 		HorizontalScaling = 1;
 		CentralPoint = 0;
 		IsHovered = false;
 		MYpos = MXpos = Shift = 0;
 		AssignedXSelection_ByKey = 0;
-		STLS->RGBAColor = 0xFFFFFFFF;
+		STLS->RGBAColor = TextColor;
 		STLS->SetNewPos(CXpos, CYpos - 0.5f*TargetHeight + 5.f);
 		STL_Info = STLS->CreateOne("_");
 	}
@@ -5191,7 +5225,7 @@ struct Graphing : HandleableUIPart {
 			glVertex2f(CXpos + 0.5f * Width, (IsLastLoopComplete)? prev_value : t_prev_value);
 			glEnd();
 			if (AssignedXSelection_ByKey > 0.5f) {
-				GLCOLOR(0xFFFFFF1F);
+				GLCOLOR(SelectionColor);
 				float last_tempo_pos_x = ((AssignedXSelection_ByKey - begin) / (end - begin) - 0.5f + CentralPoint) * HorizontalScaling;
 				if (last_tempo_pos_x >= -0.5f) {
 					last_tempo_pos_x = ((last_tempo_pos_x < 0.5f) ? last_tempo_pos_x : 0.5f) * Width;
@@ -5209,11 +5243,10 @@ struct Graphing : HandleableUIPart {
 					ScaleCoef /= (max_value - min_value);
 				}
 			}
-			//printf("SH:%f\tSC:%f\n", Shift, ScaleCoef);
 			if (IsHovered) {
 				float cur_x =  (((MXpos - CXpos) / Width) / HorizontalScaling - CentralPoint + 0.5f) * (end - begin) + begin;
 				glLineWidth(1);
-				GLCOLOR(0xFFFFFF3F);
+				GLCOLOR(Color);
 				glBegin(GL_LINE_LOOP);
 				glVertex2f(CXpos - 0.5f * Width, CYpos + TargetHeight * 0.5f);
 				glVertex2f(CXpos + 0.5f * Width, CYpos + TargetHeight * 0.5f);
@@ -5231,12 +5264,12 @@ struct Graphing : HandleableUIPart {
 				float last_tempo_pos_y = CYpos - 0.5f * TargetHeight + (ScaleCoef * lesser_one->second + Shift) * TargetHeight;
 				if (abs(last_tempo_pos_x) <= 0.5f) {
 					last_tempo_pos_x = last_tempo_pos_x * Width + CXpos;
-					GLCOLOR(0x7FAFFFAF);
+					GLCOLOR(NearestLineColor);
 					glLineWidth(3);
 					glVertex2f(last_tempo_pos_x, CYpos - TargetHeight * 0.5f);
 					glVertex2f(last_tempo_pos_x, CYpos + TargetHeight * 0.5f);
 					glEnd();
-					GLCOLOR(0xFFFFFFFF);
+					GLCOLOR(PointColor);
 					glPointSize(3);
 					glBegin(GL_POINTS);
 					glVertex2f(last_tempo_pos_x, last_tempo_pos_y);
@@ -5844,6 +5877,7 @@ namespace PropsAndSets {
 	string *PPQN=new string(""), *OFFSET = new string(""), *TEMPO = new string("");
 	int currentID=-1,CaTID=-1,VMID=-1,PMID=-1;
 	SingleMIDIInfoCollector* SMICptr = nullptr;
+	string CSV_DELIM = ",";
 	void OGPInMIDIList(int ID) {
 		if (ID<_Data.Files.size() && ID>=0) {
 			currentID = ID;
@@ -5888,14 +5922,26 @@ namespace PropsAndSets {
 			return;
 		}
 		auto UIElement = (Graphing<SingleMIDIInfoCollector::tempo_graph>*)(*(*WH)["SMIC"])["TEMPO_GRAPH"];
-		UIElement->Graph = nullptr;
-		if (SMICptr)
-			delete SMICptr;
+		if (SMICptr) {
+			UIElement->Lock.lock();
+			UIElement->Lock.unlock();
+			UIElement->Graph = nullptr;
+			//delete SMICptr;
+		}
 		SMICptr = new SingleMIDIInfoCollector(_Data.Files[currentID].Filename, _Data.Files[currentID].OldPPQN);
 		thread th([]() {
 			thread ith([]() {
+				//PG_EXP
+				auto PG_Exp = (*(*WH)["SMIC"])["PG_EXP"];
+				auto TG_Exp = (*(*WH)["SMIC"])["TG_EXP"];
+				auto ITicks = (*(*WH)["SMIC"])["INTEGRATE_TICKS"];
+				auto ITime = (*(*WH)["SMIC"])["INTEGRATE_TIME"];
 				auto ErrorLine = (TextBox*)(*(*WH)["SMIC"])["FEL"];
 				auto InfoLine = (TextBox*)(*(*WH)["SMIC"])["FLL"];
+				PG_Exp->Disable();
+				TG_Exp->Disable();
+				ITicks->Disable();
+				ITime->Disable();
 				while (!SMICptr->Finished){
 					if (ErrorLine->Text != SMICptr->ErrorLine)
 						ErrorLine->SafeStringReplace(SMICptr->ErrorLine);
@@ -5904,6 +5950,10 @@ namespace PropsAndSets {
 					Sleep(100);
 				}
 				InfoLine->SafeStringReplace("Finished");
+				PG_Exp->Enable();
+				TG_Exp->Enable();
+				ITicks->Enable();
+				ITime->Enable();
 			});
 			ith.detach();
 			SMICptr->Lookup();
@@ -5931,13 +5981,49 @@ namespace PropsAndSets {
 			UIElement_PG->IsEnabled ^= true;
 		}
 		void EnableTG() {
-			auto UIElement_PG = (Graphing<SingleMIDIInfoCollector::polyphony_graph>*)(*(*WH)["SMIC"])["TEMPO_GRAPH"];
+			auto UIElement_TG = (Graphing<SingleMIDIInfoCollector::tempo_graph>*)(*(*WH)["SMIC"])["TEMPO_GRAPH"];
 			auto UIElement_Butt = (Button*)(*(*WH)["SMIC"])["TG_SWITCH"];
-			if (UIElement_PG->IsEnabled)
+			if (UIElement_TG->IsEnabled)
 				UIElement_Butt->SafeStringReplace("Enable graph A");
 			else
 				UIElement_Butt->SafeStringReplace("Disable graph A");
-			UIElement_PG->IsEnabled ^= true;
+			UIElement_TG->IsEnabled ^= true;
+		}
+		void ExportTG() {
+			thread th([]() {
+				WH->MainWindow_ID = "SMIC";
+				WH->DisableAllWindows();
+				auto InfoLine = (TextBox*)(*(*WH)["SMIC"])["FLL"];
+				InfoLine->SafeStringReplace("Graph A is exporting...");
+				ofstream out(SMICptr->FileName+L".tg.csv");
+				out << "\"tick\"" << CSV_DELIM << " \"tempo\"" << '\n';
+				for (auto cur_pair : SMICptr->TempoMap) 
+					out << "\"" << cur_pair.first << "\"" << CSV_DELIM << "\"" << cur_pair.second << "\"" << '\n';
+				out.close();
+				WH->MainWindow_ID = "MAIN";
+				WH->EnableWindow("MAIN");
+				WH->EnableWindow("SMIC");
+				InfoLine->SafeStringReplace("Graph A was successfully exported...");
+			});
+			th.detach();
+		}
+		void ExportPG() {
+			thread th([]() {
+				WH->MainWindow_ID = "SMIC";
+				WH->DisableAllWindows();
+				auto InfoLine = (TextBox*)(*(*WH)["SMIC"])["FLL"];
+				InfoLine->SafeStringReplace("Graph B is exporting...");
+				ofstream out(SMICptr->FileName + L".pg.csv");
+				out << "\"tick\"" << CSV_DELIM << " \"PolyphonyDerivative\"" << '\n';
+				for (auto cur_pair : SMICptr->PolyphonyFiniteDifference)
+					out << "\"" << cur_pair.first << "\"" << CSV_DELIM << "\"" << cur_pair.second << "\"" << '\n';
+				out.close();
+				WH->MainWindow_ID = "MAIN";
+				WH->EnableWindow("MAIN");
+				WH->EnableWindow("SMIC");
+				InfoLine->SafeStringReplace("Graph B was successfully exported...");
+			});
+			th.detach();
 		}
 	}
 	void OR() {
@@ -6718,25 +6804,27 @@ void Init() {///SetIsFontedVar
 	
 	(*WH)["SMRP_CONTAINER"] = T;
 
-	T = new MoveableWindow("MIDI Info Collector", System_White, -150, 200, 300, 400, 0x3F3F3FCF, 0x7F7F7F7F);
-	(*T)["FLL"] = new TextBox("--File log line--", System_White, 0, -WindowHeapSize + 185, 15, 285, 10, 0, 0, 0, _Align::left);
+	T = new MoveableWindow("MIDI Info Collector", System_Black, -150, 200, 300, 400, 0xFFFFFFCF, 0x7F7F7F7F);
+	(*T)["FLL"] = new TextBox("--File log line--", System_Black, 0, -WindowHeapSize + 185, 15, 285, 10, 0, 0, 0, _Align::left);
 	(*T)["FEL"] = new TextBox("--File error line--", System_Red, 0, -WindowHeapSize + 175, 15, 285, 10, 0, 0, 0, _Align::left);
 	(*T)["TEMPO_GRAPH"] = new Graphing<SingleMIDIInfoCollector::tempo_graph>(
-		0, -WindowHeapSize + 145, 285, 50, (1. / 20000.), true, 0x7FAFFFCF, nullptr, System_White, true
+		0, -WindowHeapSize + 145, 285, 50, (1. / 20000.), true, 0x007FFFFF, 0x000000FF, 0xFF7F00FF, 0xFF00FFFF, 0x7F7F7F7F, nullptr, System_Black, false
 	);
 	(*T)["POLY_GRAPH"] = new Graphing<SingleMIDIInfoCollector::polyphony_graph>(
-		0, -WindowHeapSize + 95, 285, 50, (1. / 20000.), true, 0x7FAFFFCF, nullptr, System_White, false
+		0, -WindowHeapSize + 95, 285, 50, (1. / 20000.), true, 0x007FFFFF, 0x000000FF, 0xFF7F00FF, 0xFF00FFFF, 0x7F7F7F7F, nullptr, System_Black, false
 	);
-	(*T)["PG_SWITCH"] = new Button("Enable graph B", System_White, PropsAndSets::SMIC::EnablePG, 37.5, 60 - WindowHeapSize, 70, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, nullptr);
-	(*T)["TG_SWITCH"] = new Button("Enable graph A", System_White, PropsAndSets::SMIC::EnableTG, -37.5, 60 - WindowHeapSize, 70, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, nullptr);
-	(*T)["TOTAL_INFO"] = new TextBox("----", System_White, 0, -150, 35, 285, 10, 0, 0, 0, _Align::left);
-	(*T)["INT_MIN"] = new InputField("0", -132.5, 40 - WindowHeapSize, 10, 20, System_White, NULL, 0x007FFFFF, System_White, "Minutes", 3, _Align::center, _Align::left, InputField::Type::NaturalNumbers);
-	(*T)["INT_SEC"] = new InputField("0", -107.5, 40 - WindowHeapSize, 10, 20, System_White, NULL, 0x007FFFFF, System_White, "Seconds", 2, _Align::center, _Align::left, InputField::Type::NaturalNumbers);
-	(*T)["INT_MSC"] = new InputField("000", -80, 40 - WindowHeapSize, 10, 25, System_White, NULL, 0x007FFFFF, System_White, "Milliseconds", 3, _Align::center, _Align::left, InputField::Type::NaturalNumbers);
-	(*T)["INTEGRATE_TICKS"] = new Button("Integrate ticks", System_White, nullptr, -25, 40 - WindowHeapSize, 70, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, System_White, "Result is the closest tick to that time.");
-	(*T)["INT_TIC"] = new InputField("0", -105, 20 - WindowHeapSize, 10, 75, System_White, NULL, 0x007FFFFF, System_White, "Ticks", 17, _Align::center, _Align::left, InputField::Type::NaturalNumbers);
-	(*T)["INTEGRATE_TIME"] = new Button("Integrate time", System_White, nullptr, -25, 20 - WindowHeapSize, 70, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, System_White, "Result is the time of that tick.");
-	
+	(*T)["PG_SWITCH"] = new Button("Enable graph B", System_Black, PropsAndSets::SMIC::EnablePG, 37.5, 60 - WindowHeapSize, 70, 10, 1, 0xAFAFAFAF, 0x000000FF, 0xFFFFFFFF, 0x000000FF, 0x007FFFFF, nullptr);
+	(*T)["TG_SWITCH"] = new Button("Enable graph A", System_Black, PropsAndSets::SMIC::EnableTG, -37.5, 60 - WindowHeapSize, 70, 10, 1, 0xAFAFAFAF, 0x000000FF, 0xFFFFFFFF, 0x000000FF, 0x007FFFFF, nullptr);
+	(*T)["PG_EXP"] = new Button("Export B .csv", System_Black, PropsAndSets::SMIC::ExportPG, 110, 60 - WindowHeapSize, 65, 10, 1, 0xAFAFAFAF, 0x000000FF, 0xFFFFFFFF, 0x000000FF, 0x007FFFFF, nullptr);
+	(*T)["TG_EXP"] = new Button("Export A .csv", System_Black, PropsAndSets::SMIC::ExportTG, -110, 60 - WindowHeapSize, 65, 10, 1, 0xAFAFAFAF, 0x000000FF, 0xFFFFFFFF, 0x000000FF, 0x007FFFFF, nullptr);
+	(*T)["TOTAL_INFO"] = new TextBox("----", System_Black, 0, -150, 35, 285, 10, 0, 0, 0, _Align::left);
+	(*T)["INT_MIN"] = new InputField("0", -132.5, 40 - WindowHeapSize, 10, 20, System_Black, NULL, 0x000000FF, System_Black, "Minutes", 3, _Align::center, _Align::left, InputField::Type::NaturalNumbers);
+	(*T)["INT_SEC"] = new InputField("0", -107.5, 40 - WindowHeapSize, 10, 20, System_Black, NULL, 0x000000FF, System_Black, "Seconds", 2, _Align::center, _Align::left, InputField::Type::NaturalNumbers);
+	(*T)["INT_MSC"] = new InputField("000", -80, 40 - WindowHeapSize, 10, 25, System_Black, NULL, 0x000000FF, System_Black, "Milliseconds", 3, _Align::center, _Align::left, InputField::Type::NaturalNumbers);
+	(*T)["INTEGRATE_TICKS"] = new Button("Integrate ticks", System_Black, nullptr, -25, 40 - WindowHeapSize, 70, 10, 1, 0xAFAFAFAF, 0x000000FF, 0xFFFFFFFF, 0x000000FF, 0x007FFFFF, System_White, "Result is the closest tick to that time.");
+	(*T)["INT_TIC"] = new InputField("0", -105, 20 - WindowHeapSize, 10, 75, System_Black, NULL, 0x000000FF, System_Black, "Ticks", 17, _Align::center, _Align::left, InputField::Type::NaturalNumbers);
+	(*T)["INTEGRATE_TIME"] = new Button("Integrate time", System_Black, nullptr, -25, 20 - WindowHeapSize, 70, 10, 1, 0xAFAFAFAF, 0x000000FF, 0xFFFFFFFF, 0x000000FF, 0x007FFFFF, System_White, "Result is the time of that tick.");
+	(*T)["DELIM"] = new InputField(",", 137.5, 40 - WindowHeapSize, 10, 7.5, System_Black, &(PropsAndSets::CSV_DELIM), 0x000000FF, System_Black, "Delimiter", 1, _Align::center, _Align::right, InputField::Type::Text);
 
 	(*WH)["SMIC"] = T;
 
