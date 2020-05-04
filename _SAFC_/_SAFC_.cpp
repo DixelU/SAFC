@@ -5168,11 +5168,12 @@ struct Graphing : HandleableUIPart {
 	ordered_map_type* Graph;
 	SingleTextLine* STL_Info;
 	float Width, TargetHeight, ScaleCoef, Shift;
-	BIT AutoAdjusting, IsHovered, IsEnabled;
+	BIT AutoAdjusting, IsHovered;
 	DWORD Color, NearestLineColor, PointColor, SelectionColor;
-	Graphing(float CXpos, float CYpos, float Width, float TargetHeight, float ScaleCoef, BIT AutoAdjusting, DWORD Color, DWORD TextColor, DWORD NearestLineColor, DWORD PointColor, DWORD SelectionColor, ordered_map_type* Graph, SingleTextLineSettings* STLS, BIT IsEnabled) :
-		CXpos(CXpos), CYpos(CYpos), Width(Width), TargetHeight(TargetHeight), ScaleCoef(ScaleCoef), Color(Color), AutoAdjusting(AutoAdjusting), Graph(Graph), IsEnabled(IsEnabled), NearestLineColor(NearestLineColor), PointColor(PointColor), SelectionColor(SelectionColor)
+	Graphing(float CXpos, float CYpos, float Width, float TargetHeight, float ScaleCoef, BIT AutoAdjusting, DWORD Color, DWORD TextColor, DWORD NearestLineColor, DWORD PointColor, DWORD SelectionColor, ordered_map_type* Graph, SingleTextLineSettings* STLS, BIT Enabled) :
+		CXpos(CXpos), CYpos(CYpos), Width(Width), TargetHeight(TargetHeight), ScaleCoef(ScaleCoef), Color(Color), AutoAdjusting(AutoAdjusting), Graph(Graph), NearestLineColor(NearestLineColor), PointColor(PointColor), SelectionColor(SelectionColor)
 	{
+		this->Enabled = Enabled;
 		HorizontalScaling = 1;
 		CentralPoint = 0;
 		IsHovered = false;
@@ -5185,9 +5186,14 @@ struct Graphing : HandleableUIPart {
 	~Graphing() {
 		delete STL_Info;
 	}
+	void Reset() {
+		HorizontalScaling = 1;
+		CentralPoint = 0;
+		IsHovered = false;
+	}
 	void Draw() override {
 		Lock.lock();
-		if (IsEnabled && Graph && Graph->size()) {
+		if (Enabled && Graph && Graph->size()) {
 			float begin = Graph->begin()->first;
 			float end = Graph->rbegin()->first;
 			float max_value = -1e31f, min_value = 1e31f;
@@ -5240,7 +5246,7 @@ struct Graphing : HandleableUIPart {
 			if (AutoAdjusting) {
 				if (min_value != max_value) {
 					Shift = (Shift - min_value);
-					ScaleCoef /= (max_value - min_value);
+					ScaleCoef = max(ScaleCoef / (max_value - min_value),0.0001f);
 				}
 			}
 			if (IsHovered) {
@@ -5281,7 +5287,7 @@ struct Graphing : HandleableUIPart {
 				if(STL_Info->_CurrentText != "-:-")
 					STL_Info->SafeStringReplace("-:-");
 		}
-		else if(IsEnabled) {
+		else if(Enabled) {
 			if (STL_Info->_CurrentText != "NULL Graph")
 				STL_Info->SafeStringReplace("NULL Graph");
 		}
@@ -5327,7 +5333,7 @@ struct Graphing : HandleableUIPart {
 		Lock.unlock();
 	}
 	void KeyboardHandler(CHAR CH) override {
-		if (!IsHovered || !IsEnabled)
+		if (!IsHovered || !Enabled)
 			return;
 		Lock.lock();
 		switch (CH) {
@@ -5930,14 +5936,30 @@ namespace PropsAndSets {
 		}
 		SMICptr = new SingleMIDIInfoCollector(_Data.Files[currentID].Filename, _Data.Files[currentID].OldPPQN);
 		thread th([]() {
+			WH->MainWindow_ID = "SMIC";
+			WH->DisableAllWindows();
 			thread ith([]() {
-				//PG_EXP
 				auto PG_Exp = (*(*WH)["SMIC"])["PG_EXP"];
 				auto TG_Exp = (*(*WH)["SMIC"])["TG_EXP"];
 				auto ITicks = (*(*WH)["SMIC"])["INTEGRATE_TICKS"];
 				auto ITime = (*(*WH)["SMIC"])["INTEGRATE_TIME"];
 				auto ErrorLine = (TextBox*)(*(*WH)["SMIC"])["FEL"];
 				auto InfoLine = (TextBox*)(*(*WH)["SMIC"])["FLL"];
+				auto UIMinutes = (InputField*)(*(*WH)["SMIC"])["INT_MIN"];
+				auto UISeconds = (InputField*)(*(*WH)["SMIC"])["INT_SEC"];
+				auto UIMilliseconds = (InputField*)(*(*WH)["SMIC"])["INT_MSC"];
+				auto UITicks = (InputField*)(*(*WH)["SMIC"])["INT_TIC"];
+				auto UIElement_TG = (Graphing<SingleMIDIInfoCollector::tempo_graph>*)(*(*WH)["SMIC"])["TEMPO_GRAPH"];
+				auto UIElement_PG = (Graphing<SingleMIDIInfoCollector::polyphony_graph>*)(*(*WH)["SMIC"])["POLY_GRAPH"];
+				UIElement_PG->Enabled = false;
+				UIElement_PG->Reset();
+				UIElement_TG->Enabled = false;
+				UIElement_TG->Reset();
+				InfoLine->SafeStringReplace("Please wait...");
+				UIMinutes->SafeStringReplace("0");
+				UISeconds->SafeStringReplace("0");
+				UIMilliseconds->SafeStringReplace("0");
+				UITicks->SafeStringReplace("0");
 				PG_Exp->Disable();
 				TG_Exp->Disable();
 				ITicks->Disable();
@@ -5966,6 +5988,9 @@ namespace PropsAndSets {
 				"Total (real) tracks: " + to_string(SMICptr->Tracks.size()) + "; ... "
 				);
 
+			WH->MainWindow_ID = "MAIN";
+			WH->EnableWindow("MAIN");
+			WH->EnableWindow("SMIC");
 		});
 		th.detach();
 		WH->EnableWindow("SMIC");
@@ -5974,20 +5999,20 @@ namespace PropsAndSets {
 		void EnablePG() {
 			auto UIElement_PG = (Graphing<SingleMIDIInfoCollector::polyphony_graph>*)(*(*WH)["SMIC"])["POLY_GRAPH"];
 			auto UIElement_Butt = (Button*)(*(*WH)["SMIC"])["PG_SWITCH"];
-			if (UIElement_PG->IsEnabled)
+			if (UIElement_PG->Enabled)
 				UIElement_Butt->SafeStringReplace("Enable graph B");
 			else
 				UIElement_Butt->SafeStringReplace("Disable graph B");
-			UIElement_PG->IsEnabled ^= true;
+			UIElement_PG->Enabled ^= true;
 		}
 		void EnableTG() {
 			auto UIElement_TG = (Graphing<SingleMIDIInfoCollector::tempo_graph>*)(*(*WH)["SMIC"])["TEMPO_GRAPH"];
 			auto UIElement_Butt = (Button*)(*(*WH)["SMIC"])["TG_SWITCH"];
-			if (UIElement_TG->IsEnabled)
+			if (UIElement_TG->Enabled)
 				UIElement_Butt->SafeStringReplace("Enable graph A");
 			else
 				UIElement_Butt->SafeStringReplace("Disable graph A");
-			UIElement_TG->IsEnabled ^= true;
+			UIElement_TG->Enabled ^= true;
 		}
 		void ExportTG() {
 			thread th([]() {
@@ -5996,7 +6021,7 @@ namespace PropsAndSets {
 				auto InfoLine = (TextBox*)(*(*WH)["SMIC"])["FLL"];
 				InfoLine->SafeStringReplace("Graph A is exporting...");
 				ofstream out(SMICptr->FileName+L".tg.csv");
-				out << "\"tick\"" << CSV_DELIM << " \"tempo\"" << '\n';
+				out << "\"tick\"" << CSV_DELIM << "\"tempo\"" << '\n';
 				for (auto cur_pair : SMICptr->TempoMap) 
 					out << "\"" << cur_pair.first << "\"" << CSV_DELIM << "\"" << cur_pair.second << "\"" << '\n';
 				out.close();
@@ -6014,7 +6039,7 @@ namespace PropsAndSets {
 				auto InfoLine = (TextBox*)(*(*WH)["SMIC"])["FLL"];
 				InfoLine->SafeStringReplace("Graph B is exporting...");
 				ofstream out(SMICptr->FileName + L".pg.csv");
-				out << "\"tick\"" << CSV_DELIM << " \"PolyphonyDerivative\"" << '\n';
+				out << "\"tick\"" << CSV_DELIM << "\"Polyphony differences\"" << '\n';
 				for (auto cur_pair : SMICptr->PolyphonyFiniteDifference)
 					out << "\"" << cur_pair.first << "\"" << CSV_DELIM << "\"" << cur_pair.second << "\"" << '\n';
 				out.close();
@@ -6024,6 +6049,103 @@ namespace PropsAndSets {
 				InfoLine->SafeStringReplace("Graph B was successfully exported...");
 			});
 			th.detach();
+		}
+		void DiffirentiateTicks() {
+			thread th([]() {
+				WH->MainWindow_ID = "SMIC";
+				WH->DisableAllWindows();
+				auto InfoLine = (*(*WH)["SMIC"])["FLL"];
+				auto UITicks = (InputField*)(*(*WH)["SMIC"])["INT_TIC"];
+				auto UIOutput = (TextBox*)(*(*WH)["SMIC"])["ANSWER"];
+				InfoLine->SafeStringReplace("Integration has begun");
+
+				INT64 ticks_limit = 0;
+				if (UITicks->CurrentString.size())
+					ticks_limit = stoi(UITicks->CurrentString);
+
+				INT64 prev_tick = 0, cur_tick = 0;
+				double cur_seconds = 0;
+				double prev_second = 0;
+				double PPQ = SMICptr->PPQ;
+				INT64 last_tick = (*SMICptr->TempoMap.rbegin()).first;
+				for (auto cur_pair : SMICptr->TempoMap/*; cur_pair != SMICptr->TempoMap.end(); cur_pair++*/) {
+					cur_tick = cur_pair.first;
+					double cur_tempo = cur_pair.second;
+					cur_seconds += (cur_tick - prev_tick) * (60 / (cur_tempo * PPQ));
+					if (cur_tick > ticks_limit || cur_tick == last_tick)
+						break;
+					prev_second = cur_seconds;
+					prev_tick = cur_tick;
+				}
+				auto cur = cur_tick - prev_tick;
+				ticks_limit -= prev_tick;
+				double rate = ((cur) ? ((double)ticks_limit / cur) : 0);
+				double seconds_ans = (cur_seconds - prev_second) * rate + prev_second;
+				cout << seconds_ans << endl;
+				double milliseconds_ans = seconds_ans;
+				double minutes_ans = 0;
+				milliseconds_ans = modf(milliseconds_ans, &seconds_ans);
+				seconds_ans = modf(seconds_ans / 60, &minutes_ans)*60;
+				//swap(seconds_ans, minutes_ans);
+				//seconds_ans *= 60;
+				milliseconds_ans *= 1000;
+
+				UIOutput->SafeStringReplace(
+					"Min: " + to_string((int)(minutes_ans)) + 
+					"\nSec: " + to_string((int)(seconds_ans)) +
+					"\nMsec: "+ to_string((int)(milliseconds_ans))
+					);
+
+				WH->MainWindow_ID = "MAIN";
+				WH->EnableWindow("MAIN");
+				WH->EnableWindow("SMIC");
+				InfoLine->SafeStringReplace("Integration was succsessfully finished");
+				});
+			th.detach();
+		}
+		void IntegrateTime() {
+			WH->MainWindow_ID = "SMIC";
+			WH->DisableAllWindows();
+			auto InfoLine = (*(*WH)["SMIC"])["FLL"];
+			auto UIMinutes = (InputField*)(*(*WH)["SMIC"])["INT_MIN"];
+			auto UISeconds = (InputField*)(*(*WH)["SMIC"])["INT_SEC"];
+			auto UIMilliseconds = (InputField*)(*(*WH)["SMIC"])["INT_MSC"];
+			auto UIOutput = (TextBox*)(*(*WH)["SMIC"])["ANSWER"];
+			InfoLine->SafeStringReplace("Integration has begun");
+
+			double seconds_limit = 0;
+			if (UIMinutes->CurrentString.size())
+				seconds_limit += stoi(UIMinutes->CurrentString)*60.; 
+			if (UISeconds->CurrentString.size())
+				seconds_limit += stoi(UISeconds->CurrentString);
+			if (UIMilliseconds->CurrentString.size())
+				seconds_limit += stoi(UIMilliseconds->CurrentString)/1000.;
+
+			INT64 prev_tick = 0, cur_tick = 0;
+			double cur_seconds = 0;
+			double prev_second = 0;
+			double PPQ = SMICptr->PPQ;
+			INT64 last_tick = (*SMICptr->TempoMap.rbegin()).first;
+			for (auto cur_pair : SMICptr->TempoMap/*; cur_pair != SMICptr->TempoMap.end(); cur_pair++*/) {
+				cur_tick = cur_pair.first;
+				double cur_tempo = cur_pair.second;
+				cur_seconds += (cur_tick - prev_tick) * (60 / (cur_tempo * PPQ));
+				if (cur_seconds > seconds_limit || cur_tick == last_tick)
+					break;
+				prev_second = cur_seconds;
+				prev_tick = cur_tick;
+			}
+			cur_seconds -= prev_second;
+			seconds_limit -= prev_second;
+			auto rate = (seconds_limit == 0) ? 0 : seconds_limit / cur_seconds;
+			INT64 tick = (cur_tick - prev_tick) * rate + prev_tick;
+
+			UIOutput->SafeStringReplace("Tick: " + to_string(tick));
+
+			WH->MainWindow_ID = "MAIN";
+			WH->EnableWindow("MAIN");
+			WH->EnableWindow("SMIC");
+			InfoLine->SafeStringReplace("Integration was succsessfully finished");
 		}
 	}
 	void OR() {
@@ -6821,10 +6943,11 @@ void Init() {///SetIsFontedVar
 	(*T)["INT_MIN"] = new InputField("0", -132.5, 40 - WindowHeapSize, 10, 20, System_Black, NULL, 0x000000FF, System_Black, "Minutes", 3, _Align::center, _Align::left, InputField::Type::NaturalNumbers);
 	(*T)["INT_SEC"] = new InputField("0", -107.5, 40 - WindowHeapSize, 10, 20, System_Black, NULL, 0x000000FF, System_Black, "Seconds", 2, _Align::center, _Align::left, InputField::Type::NaturalNumbers);
 	(*T)["INT_MSC"] = new InputField("000", -80, 40 - WindowHeapSize, 10, 25, System_Black, NULL, 0x000000FF, System_Black, "Milliseconds", 3, _Align::center, _Align::left, InputField::Type::NaturalNumbers);
-	(*T)["INTEGRATE_TICKS"] = new Button("Integrate ticks", System_Black, nullptr, -25, 40 - WindowHeapSize, 70, 10, 1, 0xAFAFAFAF, 0x000000FF, 0xFFFFFFFF, 0x000000FF, 0x007FFFFF, System_White, "Result is the closest tick to that time.");
+	(*T)["INTEGRATE_TICKS"] = new Button("Integrate ticks", System_Black, PropsAndSets::SMIC::IntegrateTime, -25, 40 - WindowHeapSize, 70, 10, 1, 0xAFAFAFAF, 0x000000FF, 0xFFFFFFFF, 0x000000FF, 0x007FFFFF, System_White, "Result is the closest tick to that time.");
 	(*T)["INT_TIC"] = new InputField("0", -105, 20 - WindowHeapSize, 10, 75, System_Black, NULL, 0x000000FF, System_Black, "Ticks", 17, _Align::center, _Align::left, InputField::Type::NaturalNumbers);
-	(*T)["INTEGRATE_TIME"] = new Button("Integrate time", System_Black, nullptr, -25, 20 - WindowHeapSize, 70, 10, 1, 0xAFAFAFAF, 0x000000FF, 0xFFFFFFFF, 0x000000FF, 0x007FFFFF, System_White, "Result is the time of that tick.");
+	(*T)["INTEGRATE_TIME"] = new Button("Integrate time", System_Black, PropsAndSets::SMIC::DiffirentiateTicks, -25, 20 - WindowHeapSize, 70, 10, 1, 0xAFAFAFAF, 0x000000FF, 0xFFFFFFFF, 0x000000FF, 0x007FFFFF, System_White, "Result is the time of that tick.");
 	(*T)["DELIM"] = new InputField(",", 137.5, 40 - WindowHeapSize, 10, 7.5, System_Black, &(PropsAndSets::CSV_DELIM), 0x000000FF, System_Black, "Delimiter", 1, _Align::center, _Align::right, InputField::Type::Text);
+	(*T)["ANSWER"] = new TextBox("----", System_Black, -66.25, -30, 25, 152.5, 10, 0, 0, 0, _Align::center, TextBox::VerticalOverflow::recalibrate);
 
 	(*WH)["SMIC"] = T;
 
