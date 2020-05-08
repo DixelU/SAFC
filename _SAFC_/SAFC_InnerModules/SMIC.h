@@ -201,6 +201,7 @@ struct SingleMIDIInfoCollector {
 			}
 		}
 		TempoMap[LastTick] = TempoMap.rbegin()->second;
+		PolyphonyFiniteDifference[LastTick + 1] = 0;
 		Finished = true;
 		Processing = false;
 		file_input.close();
