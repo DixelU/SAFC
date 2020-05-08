@@ -809,7 +809,6 @@ namespace PropsAndSets {
 				auto InfoLine = (TextBox*)(*(*WH)["SMIC"])["FLL"];
 				InfoLine->SafeStringReplace("Graph B is exporting...");
 				ofstream out(SMICptr->FileName + L".pg.csv");
-				out << "tick" << CSV_DELIM << "NoteOffs" << CSV_DELIM << "NoteOns" << '\n';
 				out << "tick" << CSV_DELIM << "NoteOffs" << CSV_DELIM << "NoteOns" << CSV_DELIM << "PolyphonyDifference" << '\n';
 				for (auto cur_pair : SMICptr->PolyphonyFiniteDifference)
 					out << cur_pair.first << CSV_DELIM << cur_pair.second.NoteOff << CSV_DELIM << cur_pair.second.NoteOn << CSV_DELIM << cur_pair.second << '\n';
