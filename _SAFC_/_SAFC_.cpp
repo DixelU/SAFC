@@ -705,6 +705,8 @@ namespace PropsAndSets {
 				auto InfoLine = (TextBox*)(*(*WH)["SMIC"])["FLL"];
 				auto UIMinutes = (InputField*)(*(*WH)["SMIC"])["INT_MIN"];
 				auto UISeconds = (InputField*)(*(*WH)["SMIC"])["INT_SEC"];
+				auto UIT = (InputField*)(*(*WH)["SMIC"])["TG_SWITCH"];
+				auto UIP= (InputField*)(*(*WH)["SMIC"])["PG_SWITCH"];
 				auto UIMilliseconds = (InputField*)(*(*WH)["SMIC"])["INT_MSC"];
 				auto UITicks = (InputField*)(*(*WH)["SMIC"])["INT_TIC"];
 				auto UIElement_TG = (Graphing<SingleMIDIInfoCollector::tempo_graph>*)(*(*WH)["SMIC"])["TEMPO_GRAPH"];
@@ -713,6 +715,8 @@ namespace PropsAndSets {
 				UIElement_PG->Reset();
 				UIElement_TG->Enabled = false;
 				UIElement_TG->Reset();
+				UIP->SafeStringReplace("Enable graph B");
+				UIT->SafeStringReplace("Enable graph A");
 				InfoLine->SafeStringReplace("Please wait...");
 				UIMinutes->SafeStringReplace("0");
 				UISeconds->SafeStringReplace("0");
@@ -790,6 +794,14 @@ namespace PropsAndSets {
 			});
 			th.detach();
 		}
+		void ResetTG() {//TEMPO_GRAPH
+			auto UIElement_TG = (Graphing<SingleMIDIInfoCollector::tempo_graph>*)(*(*WH)["SMIC"])["TEMPO_GRAPH"];
+			UIElement_TG->Reset();
+		}
+		void ResetPG() {//TEMPO_GRAPH
+			auto UIElement_PG = (Graphing<SingleMIDIInfoCollector::tempo_graph>*)(*(*WH)["SMIC"])["POLY_GRAPH"];
+			UIElement_PG->Reset();
+		}
 		void ExportPG() {
 			thread th([]() {
 				WH->MainWindow_ID = "SMIC";
@@ -798,8 +810,9 @@ namespace PropsAndSets {
 				InfoLine->SafeStringReplace("Graph B is exporting...");
 				ofstream out(SMICptr->FileName + L".pg.csv");
 				out << "tick" << CSV_DELIM << "NoteOffs" << CSV_DELIM << "NoteOns" << '\n';
+				out << "tick" << CSV_DELIM << "NoteOffs" << CSV_DELIM << "NoteOns" << CSV_DELIM << "PolyphonyDifference" << '\n';
 				for (auto cur_pair : SMICptr->PolyphonyFiniteDifference)
-					out << cur_pair.first << CSV_DELIM << cur_pair.second.NoteOff << CSV_DELIM << cur_pair.second.NoteOn << '\n';
+					out << cur_pair.first << CSV_DELIM << cur_pair.second.NoteOff << CSV_DELIM << cur_pair.second.NoteOn << CSV_DELIM << cur_pair.second << '\n';
 				out.close();
 				WH->MainWindow_ID = "MAIN";
 				WH->EnableWindow("MAIN");
@@ -1697,6 +1710,8 @@ void Init() {///SetIsFontedVar
 	(*T)["TG_SWITCH"] = new Button("Enable graph A", System_Black, PropsAndSets::SMIC::EnableTG, -37.5, 60 - WindowHeapSize, 70, 10, 1, 0xAFAFAFAF, 0x000000FF, 0xFFFFFFFF, 0x000000FF, 0x007FFFFF, nullptr);
 	(*T)["PG_EXP"] = new Button("Export B .csv", System_Black, PropsAndSets::SMIC::ExportPG, 110, 60 - WindowHeapSize, 65, 10, 1, 0xAFAFAFAF, 0x000000FF, 0xFFFFFFFF, 0x000000FF, 0x007FFFFF, nullptr);
 	(*T)["TG_EXP"] = new Button("Export A .csv", System_Black, PropsAndSets::SMIC::ExportTG, -110, 60 - WindowHeapSize, 65, 10, 1, 0xAFAFAFAF, 0x000000FF, 0xFFFFFFFF, 0x000000FF, 0x007FFFFF, nullptr);
+	(*T)["TG_RESET"] = new Button("Reset graph A", System_Black, PropsAndSets::SMIC::ResetTG, -110, 40 - WindowHeapSize, 65, 10, 1, 0xAFAFAFAF, 0x000000FF, 0xFFFFFFFF, 0x000000FF, 0x007FFFFF, nullptr);
+	(*T)["PG_RESET"] = new Button("Reset graph B", System_Black, PropsAndSets::SMIC::ResetPG, -37.5, 40 - WindowHeapSize, 65, 10, 1, 0xAFAFAFAF, 0x000000FF, 0xFFFFFFFF, 0x000000FF, 0x007FFFFF, nullptr);
 	(*T)["TOTAL_INFO"] = new TextBox("----", System_Black, 0, -150, 35, 285, 10, 0, 0, 0, _Align::left);
 	(*T)["INT_MIN"] = new InputField("0", -132.5, 40 - WindowHeapSize, 10, 20, System_Black, NULL, 0x000000FF, System_Black, "Minutes", 3, _Align::center, _Align::left, InputField::Type::NaturalNumbers);
 	(*T)["INT_SEC"] = new InputField("0", -107.5, 40 - WindowHeapSize, 10, 20, System_Black, NULL, 0x000000FF, System_Black, "Seconds", 2, _Align::center, _Align::left, InputField::Type::NaturalNumbers);

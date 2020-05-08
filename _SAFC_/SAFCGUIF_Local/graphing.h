@@ -4,16 +4,25 @@
 
 #include "../SAFGUIF/SAFGUIF.h"
 #include "../SAFC_InnerModules/SAFC_IM.h"
+/*
+#ifndef __X64
+using local_fp_type = float;
+constexpr float __epsilon = FLT_EPSILON;
+#else
+*/
+using local_fp_type = double;
+constexpr double __epsilon = DBL_EPSILON;
+//#endif
 
 template<typename ordered_map_type = std::map<int, int>>
 struct Graphing : HandleableUIPart {
 	float CXpos, CYpos;
 	float MYpos, MXpos;
-	float HorizontalScaling, CentralPoint;
-	float AssignedXSelection_ByKey;
+	local_fp_type HorizontalScaling, CentralPoint;
+	local_fp_type AssignedXSelection_ByKey;
 	ordered_map_type* Graph;
 	SingleTextLine* STL_Info;
-	float Width, TargetHeight, ScaleCoef, Shift;
+	local_fp_type Width, TargetHeight, ScaleCoef, Shift;
 	BIT AutoAdjusting, IsHovered;
 	DWORD Color, NearestLineColor, PointColor, SelectionColor;
 	Graphing(float CXpos, float CYpos, float Width, float TargetHeight, float ScaleCoef, BIT AutoAdjusting, DWORD Color, DWORD TextColor, DWORD NearestLineColor, DWORD PointColor, DWORD SelectionColor, ordered_map_type* Graph, SingleTextLineSettings* STLS, BIT Enabled) :
@@ -40,21 +49,21 @@ struct Graphing : HandleableUIPart {
 	void Draw() override {
 		Lock.lock();
 		if (Enabled && Graph && Graph->size()) {
-			float begin = Graph->begin()->first;
-			float end = Graph->rbegin()->first;
-			float max_value = -1e31f, min_value = 1e31f;
-			float prev_value = CYpos - 0.5 * TargetHeight + (ScaleCoef * Graph->begin()->second + Shift) * TargetHeight;
-			float t_prev_value = prev_value;
+			local_fp_type begin = Graph->begin()->first;
+			local_fp_type end = Graph->rbegin()->first;
+			local_fp_type max_value = -1e31f, min_value = 1e31f;
+			local_fp_type prev_value = CYpos - 0.5 * TargetHeight + (ScaleCoef * Graph->begin()->second + Shift) * TargetHeight;
+			local_fp_type t_prev_value = prev_value;
 			BIT IsFirstLine = true;
 			BIT IsLastLoopComplete = false;
 			GLCOLOR(Color);
 			glBegin(GL_LINE_STRIP);
 			for (auto T : *Graph) {
 				IsLastLoopComplete = false;
-				float cur_pos = T.first;
-				float cur_value = T.second;
-				float cur_y = ScaleCoef * (cur_value)+Shift;
-				float cur_x = ((cur_pos - begin) / (end - begin) - 0.5f + CentralPoint) * HorizontalScaling;
+				local_fp_type cur_pos = T.first;
+				local_fp_type cur_value = T.second;
+				local_fp_type cur_y = ScaleCoef * (cur_value)+Shift;
+				local_fp_type cur_x = ((cur_pos - begin) / (end - begin) - 0.5f + CentralPoint) * HorizontalScaling;
 				t_prev_value = std::clamp(prev_value, CYpos - 0.5f * TargetHeight, CYpos + 0.5f * TargetHeight);
 				prev_value = CYpos - 0.5f * TargetHeight + cur_y * TargetHeight;
 				if (cur_x < -0.5f)
@@ -67,8 +76,7 @@ struct Graphing : HandleableUIPart {
 					min_value = cur_y;
 				if (IsFirstLine) {
 					IsFirstLine = false;
-					if (t_prev_value)
-						glVertex2f(CXpos - 0.5f * Width, t_prev_value);
+					glVertex2f(CXpos - 0.5f * Width, t_prev_value);
 				}
 				glVertex2f(CXpos + cur_x * Width, t_prev_value);
 				glVertex2f(CXpos + cur_x * Width, prev_value);
@@ -78,7 +86,7 @@ struct Graphing : HandleableUIPart {
 			glEnd();
 			if (AssignedXSelection_ByKey > 0.5f) {
 				GLCOLOR(SelectionColor);
-				float last_tempo_pos_x = ((AssignedXSelection_ByKey - begin) / (end - begin) - 0.5f + CentralPoint) * HorizontalScaling;
+				local_fp_type last_tempo_pos_x = ((AssignedXSelection_ByKey - begin) / (end - begin) - 0.5f + CentralPoint) * HorizontalScaling;
 				if (last_tempo_pos_x >= -0.5f) {
 					last_tempo_pos_x = ((last_tempo_pos_x < 0.5f) ? last_tempo_pos_x : 0.5f) * Width;
 					glBegin(GL_POLYGON);
@@ -92,11 +100,12 @@ struct Graphing : HandleableUIPart {
 			if (AutoAdjusting) {
 				if (min_value != max_value) {
 					Shift = (Shift - min_value);
-					ScaleCoef = max(ScaleCoef / (max_value - min_value), 0.0001f);
+					ScaleCoef = std::max(ScaleCoef / (max_value - min_value), __epsilon*4);
 				}
 			}
+			//std::cout << "min: " << min_value << " max: " << max_value << " shift: " << Shift << " ScaleC: " << ScaleCoef << std::endl;
 			if (IsHovered) {
-				float cur_x = (((MXpos - CXpos) / Width) / HorizontalScaling - CentralPoint + 0.5f) * (end - begin) + begin;
+				local_fp_type cur_x = (((MXpos - CXpos) / Width) / HorizontalScaling - CentralPoint + 0.5f) * (end - begin) + begin;
 				glLineWidth(1);
 				GLCOLOR(Color);
 				glBegin(GL_LINE_LOOP);
@@ -112,8 +121,8 @@ struct Graphing : HandleableUIPart {
 				auto lesser_one = equal_u_bound;
 				if (equal_u_bound != Graph->begin())
 					lesser_one--;
-				float last_tempo_pos_x = ((lesser_one->first - begin) / (end - begin) - 0.5f + CentralPoint) * HorizontalScaling;
-				float last_tempo_pos_y = CYpos - 0.5f * TargetHeight + (ScaleCoef * lesser_one->second + Shift) * TargetHeight;
+				local_fp_type last_tempo_pos_x = ((lesser_one->first - begin) / (end - begin) - 0.5f + CentralPoint) * HorizontalScaling;
+				local_fp_type last_tempo_pos_y = CYpos - 0.5f * TargetHeight + (ScaleCoef * lesser_one->second + Shift) * TargetHeight;
 				if (abs(last_tempo_pos_x) <= 0.5f) {
 					last_tempo_pos_x = last_tempo_pos_x * Width + CXpos;
 					GLCOLOR(NearestLineColor);
