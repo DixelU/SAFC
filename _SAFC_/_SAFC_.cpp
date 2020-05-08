@@ -1704,7 +1704,7 @@ void Init() {///SetIsFontedVar
 	(*T)["INTEGRATE_TICKS"] = new Button("Integrate ticks", System_Black, PropsAndSets::SMIC::IntegrateTime, -25, 40 - WindowHeapSize, 70, 10, 1, 0xAFAFAFAF, 0x000000FF, 0xFFFFFFFF, 0x000000FF, 0x007FFFFF, System_White, "Result is the closest tick to that time.");
 	(*T)["INT_TIC"] = new InputField("0", -105, 20 - WindowHeapSize, 10, 75, System_Black, NULL, 0x000000FF, System_Black, "Ticks", 17, _Align::center, _Align::left, InputField::Type::NaturalNumbers);
 	(*T)["INTEGRATE_TIME"] = new Button("Integrate time", System_Black, PropsAndSets::SMIC::DiffirentiateTicks, -25, 20 - WindowHeapSize, 70, 10, 1, 0xAFAFAFAF, 0x000000FF, 0xFFFFFFFF, 0x000000FF, 0x007FFFFF, System_White, "Result is the time of that tick.");
-	(*T)["DELIM"] = new InputField(",", 137.5, 40 - WindowHeapSize, 10, 7.5, System_Black, &(PropsAndSets::CSV_DELIM), 0x000000FF, System_Black, "Delimiter", 1, _Align::center, _Align::right, InputField::Type::Text);
+	(*T)["DELIM"] = new InputField(";", 137.5, 40 - WindowHeapSize, 10, 7.5, System_Black, &(PropsAndSets::CSV_DELIM), 0x000000FF, System_Black, "Delimiter", 1, _Align::center, _Align::right, InputField::Type::Text);
 	(*T)["ANSWER"] = new TextBox("----", System_Black, -66.25, -30, 25, 152.5, 10, 0, 0, 0, _Align::center, TextBox::VerticalOverflow::recalibrate);
 
 	(*WH)["SMIC"] = T;
