@@ -126,9 +126,6 @@
     <ClInclude Include="SAFC_InnerModules\SMRP.h">
       <Filter>Файлы заголовков\MIDI Processing</Filter>
     </ClInclude>
-    <ClInclude Include="SAFC_InnerModules\xz_file_buffer.h">
-      <Filter>Файлы заголовков</Filter>
-    </ClInclude>
     <ClInclude Include="SAFCGUIF_Local\CATh.h">
       <Filter>Файлы заголовков\SAFGUIF\Specific</Filter>
     </ClInclude>
@@ -143,6 +140,9 @@
     </ClInclude>
     <ClInclude Include="SAFCGUIF_Local\BAWC.h">
       <Filter>Файлы заголовков\SAFGUIF\Specific</Filter>
+    </ClInclude>
+    <ClInclude Include="SAFGUIF\fonted_manip.h">
+      <Filter>Файлы заголовков</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

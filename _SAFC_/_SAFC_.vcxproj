@@ -249,6 +249,7 @@
     <ClInclude Include="SAFGUIF\button_settings.h" />
     <ClInclude Include="SAFGUIF\charmap.h" />
     <ClInclude Include="SAFGUIF\checkbox.h" />
+    <ClInclude Include="SAFGUIF\fonted_manip.h" />
     <ClInclude Include="SAFGUIF\handleable_ui_part.h" />
     <ClInclude Include="SAFGUIF\header_utils.h" />
     <ClInclude Include="SAFGUIF\input_field.h" />

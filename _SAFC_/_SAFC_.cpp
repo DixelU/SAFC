@@ -1,5 +1,4 @@
-﻿//#include "httplib.h"
-#include <algorithm>
+﻿#include <algorithm>
 #include <cstdlib>
 #include <wchar.h>
 #include <io.h>
@@ -28,7 +27,6 @@
 
 #include <WinSock2.h>
 #include <WinInet.h>
-//#define WIN32_LEAN_AND_MEAN
 
 #pragma comment (lib, "Version.lib")//Urlmon.lib
 #pragma comment (lib, "Urlmon.lib")//Urlmon.lib
@@ -47,15 +45,12 @@
 #include "JSON/JSONValue.cpp"
 
 #include "btree/btree_map.h"
-
+#include "SAFGUIF/fonted_manip.h"
 #include "SAFGUIF/SAFGUIF.h"
 #include "SAFC_InnerModules/SAFC_IM.h"
 #include "SAFCGUIF_Local/SAFGUIF_L.h"
 
 using namespace std;
-
-const char* WINDOWTITLE = "SAFC\0";
-wstring RegPath = L"Software\\SAFC\\";
 
 std::tuple<WORD, WORD, WORD, WORD> ___GetCurFileVersion() {
 	constexpr int
@@ -124,8 +119,8 @@ bool SAFC_Update(const wstring& latest_release) {
 		cout << strerror(errno) << endl;
 		_wrename((pathway + L"freeglut.dll").c_str(), (pathway + L"_f").c_str());
 		cout << strerror(errno) << endl;
-		_wrename((pathway + L"glew32.dll").c_str(), (pathway + L"_g").c_str()); 
-		cout << strerror(errno) << endl; 
+		//_wrename((pathway + L"glew32.dll").c_str(), (pathway + L"_g").c_str()); 
+		//cout << strerror(errno) << endl; 
 		//wcout << pathway << endl;
 		if (!errno) {
 			wstring dir = pathway.substr(0, pathway.length() - 1);
@@ -282,46 +277,6 @@ size_t GetAvailableMemory(){
 	}
 	return ret;
 }
-BIT RestoreIsFontedVar() {
-	bool RK_OP = false;
-	WinReg::RegKey RK;
-	try {
-		RK.Open(HKEY_CURRENT_USER, RegPath);
-		RK_OP = true;
-	}
-	catch (...) {
-		cout << "RK opening failed\n";
-	}
-	if (RK_OP) {
-		try {
-			is_fonted = RK.GetDwordValue(L"FONTS_ENABLED");
-		}
-		catch (...) { cout << "Exception thrown while restoring FONTS_ENABLED from registry\n"; }
-	}
-	if (RK_OP)
-		RK.Close();
-	return false;
-}
-void SetIsFontedVar(BIT VAL) {
-	bool RK_OP = false;
-	WinReg::RegKey RK;
-	try {
-		RK.Open(HKEY_CURRENT_USER, RegPath);
-		RK_OP = true;
-	}
-	catch (...) {
-		cout << "RK opening failed\n";
-	}
-	if (RK_OP) {
-		try {
-			RK.SetDwordValue(L"FONTS_ENABLED", VAL);
-		}
-		catch (...) { cout << "Exception thrown while saving FONTS_ENABLED from registry\n"; }
-	}
-	if (RK_OP)
-		RK.Close();
-}
-BIT _______unused = RestoreIsFontedVar();
 
 //////////////////////////////
 ////TRUE USAGE STARTS HERE////
@@ -1353,16 +1308,12 @@ void OnRemAllModules() {
 
 namespace Settings {
 	INT ShaderMode = 0;
-	float SinewaveWidth=0., Basewave=1., Param3=1.;
 	WinReg::RegKey RK_Access;
 	void OnSettings() {
 		WH->EnableWindow("APP_SETTINGS");//_Data.DetectedThreads
 		//WH->ThrowAlert("Please read the docs! Changing some of these settings might cause graphics driver failure!","Warning!",SpecialSigns::DrawExTriangle,1,0x007FFFFF,0x7F7F7FFF);
 		auto pptr = (*WH)["APP_SETTINGS"];
-		((InputField*)(*pptr)["AS_SHADERMODE"])->UpdateInputString(to_string(ShaderMode));
-		((InputField*)(*pptr)["AS_SWW"])->UpdateInputString(to_string(SinewaveWidth));
-		((InputField*)(*pptr)["AS_BW"])->UpdateInputString(to_string(Basewave));
-		((InputField*)(*pptr)["AS_P3"])->UpdateInputString(to_string(Param3));
+		((InputField*)(*pptr)["AS_BCKGID"])->UpdateInputString(to_string(ShaderMode));
 		((InputField*)(*pptr)["AS_ROT_ANGLE"])->UpdateInputString(to_string(ROT_ANGLE));
 		((InputField*)(*pptr)["AS_THREADS_COUNT"])->UpdateInputString(to_string(_Data.DetectedThreads));
 
@@ -1388,37 +1339,13 @@ namespace Settings {
 		auto pptr = (*WH)["APP_SETTINGS"];
 		string T;
 
-		T = ((InputField*)(*pptr)["AS_SHADERMODE"])->CurrentString;
-		cout << "AS_SHADERMODE " << T << endl;
+		T = ((InputField*)(*pptr)["AS_BCKGID"])->CurrentString;
+		cout << "AS_BCKGID " << T << endl;
 		if (T.size()) {
 			ShaderMode = stoi(T); 
-			if (RK_OP)TRY_CATCH(RK_Access.SetDwordValue(L"AS_SHADERMODE",ShaderMode);,"Failed on setting AS_SHADERMODE")
+			if (RK_OP)TRY_CATCH(RK_Access.SetDwordValue(L"AS_BCKGID",ShaderMode);,"Failed on setting AS_BCKGID")
 		}
 		cout << ShaderMode << endl;
-
-		T = ((InputField*)(*pptr)["AS_SWW"])->CurrentString;
-		cout << "AS_SWW " << T << endl;
-		if (T.size()){
-			SinewaveWidth = stof(T);
-			if (RK_OP)TRY_CATCH(RK_Access.SetDwordValue(L"AS_SWW", *((DWORD*)&SinewaveWidth)); , "Failed on setting AS_SWW")
-		}
-		cout << SinewaveWidth << endl;
-
-		T = ((InputField*)(*pptr)["AS_BW"])->CurrentString;
-		cout << "AS_BW " << T << endl;
-		if (T.size()) {
-			Basewave = stof(T);
-			if (RK_OP)TRY_CATCH(RK_Access.SetDwordValue(L"AS_BW", *((DWORD*)&Basewave));, "Failed on setting AS_BW")
-		}
-		cout << Basewave << endl;
-
-		T = ((InputField*)(*pptr)["AS_P3"])->CurrentString;
-		cout << "AS_P3 " << T << endl;
-		if (T.size()) {
-			Param3 = stof(T);
-			if (RK_OP)TRY_CATCH(RK_Access.SetDwordValue(L"AS_P3", *((DWORD*)&Param3));, "Failed on setting AS_P3")
-		}
-		cout << Param3 << endl;
 
 		T = ((InputField*)(*pptr)["AS_ROT_ANGLE"])->CurrentString;
 		cout << "ROT_ANGLE " << T << endl;
@@ -1455,7 +1382,7 @@ namespace Settings {
 
 		((InputField*)(*pptr)["AS_FONT_NAME"])->PutIntoSource();
 		wstring ws(FONTNAME.begin(), FONTNAME.end());
-		if (RK_OP)TRY_CATCH(RK_Access.SetStringValue(L"COLLAPSEDFONTNAME", ws.c_str());, "Failed on setting AS_SHADERMODE")
+		if (RK_OP)TRY_CATCH(RK_Access.SetStringValue(L"COLLAPSEDFONTNAME", ws.c_str());, "Failed on setting AS_BCKGID")
 		if(RK_OP)
 			Settings::RK_Access.Close();
 	}
@@ -1603,24 +1530,9 @@ void RestoreRegSettings() {
 	catch (...) { cout << "Exception thrown while opening RK\n"; }
 	if (Opened) {
 		try {
-			Settings::ShaderMode = Settings::RK_Access.GetDwordValue(L"AS_SHADERMODE");
+			Settings::ShaderMode = Settings::RK_Access.GetDwordValue(L"AS_BCKGID");
 		}
-		catch (...) { cout << "Exception thrown while restoring AS_SHADERMODE from registry\n"; }
-		try {
-			DWORD B = Settings::RK_Access.GetDwordValue(L"AS_SWW");
-			Settings::SinewaveWidth = *(float*)&B;
-		}
-		catch (...) { cout << "Exception thrown while restoring AS_SWW from registry\n"; }
-		try {
-			DWORD B = Settings::RK_Access.GetDwordValue(L"AS_BW");
-			Settings::Basewave = *(float*)&B;
-		}
-		catch (...) { cout << "Exception thrown while restoring AS_BW from registry\n"; }
-		try {
-			DWORD B = Settings::RK_Access.GetDwordValue(L"AS_P3");
-			Settings::Param3 = *(float*)&B;
-		}
-		catch (...) { cout << "Exception thrown while restoring AS_P3 from registry\n"; }
+		catch (...) { cout << "Exception thrown while restoring AS_BCKGID from registry\n"; }
 		try {
 			_Data.DetectedThreads = Settings::RK_Access.GetDwordValue(L"AS_THREADS_COUNT");
 		}
@@ -1756,31 +1668,29 @@ void Init() {///SetIsFontedVar
 
 	T = new MoveableWindow("App settings", System_White, -100, 100, 200, 220, 0x3F3F3FCF, 0x7F7F7F7F);
 
-	(*T)["AS_SHADERMODE"] = new InputField(to_string(Settings::ShaderMode), -87.5 + WindowHeapSize, 85 - WindowHeapSize, 10, 30, System_White, NULL, 0x007FFFFF, System_White, "Shader ID", 2, _Align::center, _Align::left, InputField::Type::NaturalNumbers);
-	(*T)["AS_SWW"] = new InputField(to_string(Settings::SinewaveWidth), -47.5 + WindowHeapSize, 85 - WindowHeapSize, 10, 40, System_White, NULL, 0x007FFFFF, System_White, "Wave \"height\"", 8, _Align::center, _Align::left, InputField::Type::FP_Any);
-	(*T)["AS_BW"] = new InputField(to_string(Settings::Basewave), -2.5 + WindowHeapSize, 85 - WindowHeapSize, 10, 40, System_White, NULL, 0x007FFFFF, System_White, "Base level", 8, _Align::center, _Align::center, InputField::Type::FP_Any);
-	(*T)["AS_P3"] = new InputField(to_string(Settings::Basewave), 42.5 + WindowHeapSize, 85 - WindowHeapSize, 10, 40, System_White, NULL, 0x007FFFFF, System_White, "3rd parameter", 8, _Align::center, _Align::right, InputField::Type::FP_Any);
-	(*T)["AS_SHADERWARNING"] = new TextBox("Shader settings", System_White, 0, 85 - WindowHeapSize, 30, 200, 12, 0xFF7F001F, 0xFF7F007F, 1, _Align::center);
+	(*T)["AS_BCKGID"] = new InputField(to_string(Settings::ShaderMode), -35, 55 - WindowHeapSize, 10, 30, System_White, NULL, 0x007FFFFF, System_White, "Background ID", 2, _Align::center, _Align::right, InputField::Type::NaturalNumbers);
+
+	(*T)["AS_GLOBALSETTINGS"] = new TextBox("Global settings for new MIDIs", System_White, 0, 85 - WindowHeapSize, 30, 200, 12, 0x007FFF1F, 0x007FFF7F, 1, _Align::center);
 	(*T)["AS_APPLY"] = Butt = new Button("Apply", System_White, Settings::OnSetApply, 85 - WindowHeapSize, -87.5 - WindowHeapSize, 40, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, NULL, "_");
 	(*T)["AS_EN_FONT"] = Butt = new Button((is_fonted)?"Disable fonts":"Enable fonts", System_White, Settings::ChangeIsFontedVar, 72.5 - WindowHeapSize, -67.5 - WindowHeapSize, 65, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, System_White, " ");
 	(*T)["AS_ROT_ANGLE"] = new InputField(to_string(ROT_ANGLE), -87.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 30, System_White, NULL, 0x007FFFFF, System_White, "Rotation angle", 6, _Align::center, _Align::left, InputField::Type::FP_Any);
-	(*T)["AS_THREADS_COUNT"] = new InputField(to_string(_Data.DetectedThreads), -57.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 20, System_White, NULL, 0x007FFFFF, System_White, "Threads count", 2, _Align::center, _Align::left, InputField::Type::NaturalNumbers);
 	(*T)["AS_FONT_SIZE"] = new WheelVariableChanger(Settings::ApplyFSWheel, -37.5, -82.5, lFontSymbolsInfo::Size, 1, System_White, "Font size", "Delta", WheelVariableChanger::Type::addictable);
 	(*T)["AS_FONT_P"] = new WheelVariableChanger(Settings::ApplyRelWheel, -37.5, -22.5, lFONT_HEIGHT_TO_WIDTH, 0.01, System_White, "Font rel.", "Delta", WheelVariableChanger::Type::addictable);
 	(*T)["AS_FONT_NAME"] = new InputField(FONTNAME, 52.5 - WindowHeapSize, 55 - WindowHeapSize, 10, 100, _STLS_WhiteSmall, &FONTNAME, 0x007FFFFF, System_White, "Font name", 32, _Align::center, _Align::left, InputField::Type::Text);
 
-	(*T)["BOOL_REM_TRCKS"] = new CheckBox(-97.5 + WindowHeapSize, 35 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, System_White, _Align::left, "DV: Remove empty tracks");
-	(*T)["BOOL_REM_REM"] = new CheckBox(-82.5 + WindowHeapSize, 35 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, System_White, _Align::left, "DV: Remove merge \"remnants\"");
-	(*T)["BOOL_PIANO_ONLY"] = new CheckBox(-67.5 + WindowHeapSize, 35 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, System_White, _Align::left, "DV: All instuments to piano");
-	(*T)["BOOL_IGN_TEMPO"] = new CheckBox(-52.5 + WindowHeapSize, 35 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::left, "DV: Ignore tempo events");
-	(*T)["BOOL_IGN_PITCH"] = new CheckBox(-37.5 + WindowHeapSize, 35 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::center, "DV: Ignore pitch bending events");
-	(*T)["BOOL_IGN_NOTES"] = new CheckBox(-22.5 + WindowHeapSize, 35 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::center, "DV: Ignore note events");
-	(*T)["BOOL_IGN_ALL_EX_TPS"] = new CheckBox(-7.5 + WindowHeapSize, 35 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::center, "DV: Ignore everything except specified");
+	(*T)["BOOL_REM_TRCKS"] = new CheckBox(-97.5 + WindowHeapSize, 85 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, System_White, _Align::left, "DV: Remove empty tracks");
+	(*T)["BOOL_REM_REM"] = new CheckBox(-82.5 + WindowHeapSize, 85 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, System_White, _Align::left, "DV: Remove merge \"remnants\"");
+	(*T)["BOOL_PIANO_ONLY"] = new CheckBox(-67.5 + WindowHeapSize, 85 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, System_White, _Align::left, "DV: All instuments to piano");
+	(*T)["BOOL_IGN_TEMPO"] = new CheckBox(-52.5 + WindowHeapSize, 85 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::left, "DV: Ignore tempo events");
+	(*T)["BOOL_IGN_PITCH"] = new CheckBox(-37.5 + WindowHeapSize, 85 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::center, "DV: Ignore pitch bending events");
+	(*T)["BOOL_IGN_NOTES"] = new CheckBox(-22.5 + WindowHeapSize, 85 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::center, "DV: Ignore note events");
+	(*T)["BOOL_IGN_ALL_EX_TPS"] = new CheckBox(-7.5 + WindowHeapSize, 85 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::center, "DV: Ignore everything except specified");
 
-	(*T)["BOOL_APPLY_TO_ALL_MIDIS"] = Butt = new Button("A2A", System_White, Settings::ApplyToAll, 80 - WindowHeapSize, 35 - WindowHeapSize, 15, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, System_White, "The same as A2A in MIDI's props.");
+	(*T)["BOOL_APPLY_TO_ALL_MIDIS"] = Butt = new Button("A2A", System_White, Settings::ApplyToAll, 80 - WindowHeapSize, 85 - WindowHeapSize, 15, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, System_White, "The same as A2A in MIDI's props.");
 	Butt->Tip->SafeChangePosition_Argumented(_Align::right, 87.5 - WindowHeapSize, Butt->Tip->CYpos);
 
-	(*T)["INPLACE_MERGE"] = new CheckBox(97.5 - WindowHeapSize, 35 - WindowHeapSize, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, 0, System_White, _Align::right, "DV: Enable/disable inplace merge");
+	(*T)["INPLACE_MERGE"] = new CheckBox(97.5 - WindowHeapSize, 85 - WindowHeapSize, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, 0, System_White, _Align::right, "DV: Enable/disable inplace merge");
+	(*T)["AS_THREADS_COUNT"] = new InputField(to_string(_Data.DetectedThreads), 57.5 - WindowHeapSize, 85 - WindowHeapSize, 10, 20, System_White, NULL, 0x007FFFFF, System_White, "Threads count", 2, _Align::center, _Align::left, InputField::Type::NaturalNumbers);
 
 	(*WH)["APP_SETTINGS"] = T;
 
@@ -1827,8 +1737,6 @@ void Init() {///SetIsFontedVar
 	//WH->EnableWindow("SMPAS");//Debug line
 	//WH->EnableWindow("PROMPT");////DEBUUUUG
 
-	//ThrowAlert_Warning("aksdlkadskl\nalksd;laksd");
-
 	DragAcceptFiles(hWnd, TRUE);
 	OleInitialize(NULL);
 	cout << "Registering Drag&Drop: " << (RegisterDragDrop(hWnd, &DNDH_Global)) << endl;
@@ -1836,87 +1744,9 @@ void Init() {///SetIsFontedVar
 	SAFC_VersionCheck();
 }
 
-
 ///////////////////////////////////////
 /////////////END OF USE////////////////
 ///////////////////////////////////////
-
-const GLchar *vertex_shader[] = {
-	"#version 120\n",
-	"void main(void) {\n",//rand(gl_FragCoord.xy + vec2(Time,2.*Time))/2.
-	"    vec4 pos = ftransform();\n",
-	//"    pos = pos*sin(pos.x-pos.y);\n",
-	//"    pos.x += recalc(rand(pos.xy + vec2(Time,2.*Time))*1.,-1,1)/625.;\n",
-	//"    pos.y += recalc(rand(pos.xy + vec2(2.*Time,Time))*1.,-1,1)/625.;\n",
-	"    gl_Position = pos;\n",
-	"    gl_FrontColor = gl_Color;\n",
-	"}"
-};
-
-const GLchar *fragment_shader[] = { //uniform float time;
-	"#version 120\n",
-	"uniform float Time = 0.;\n",//
-	"uniform float SinewaveWidth = 0.;\n",//
-	"uniform float Basewave = 1.;\n",//
-	"uniform float Param3 = 1.;\n",//
-	"uniform int Mode = 0;\n",//
-	"uniform vec2 MousePos;\n",//
-	"uniform vec2 resolution;\n",//
-	"float rand(vec2 co){\n",
-	"    float a = 12.9898;\n",
-	"    float b = 78.233;\n",
-	"    float c = 43758.5453;\n",
-	"    float dt= dot(co.xy ,vec2(a,b));\n",
-	"    float sn= mod(dt,3.14);\n",
-	"    return fract(sin(sn) * c);\n",
-	"}\n",
-	"vec3 palette( in float t, in vec3 a, in vec3 b, in vec3 c, in vec3 d ){\n",
-	"    return a + b*cos( 6.28318*(c*t+d) );\n",
-	"}\n",
-	"vec4 spirals(float Time, vec2 p){\n",
-	"	float col;\n",
-	"        for(float i = 0.25; i < 15.0; i++){\n",
-	"		p.x += 0.25 / (i) * sin(i * 4.0 * p.y + Time + cos(Time / (15. * i + SinewaveWidth*tan(i)) * i));\n",
-	"     		p.y -= 0.1 / (i)* cos(i * 8.0 * p.x + Time + sin((Time / (30. * i) + SinewaveWidth*atan(i)) * i));\n",
-	"     	}\n",
-	"     	col = abs(p.y * p.x)/(max(abs(Basewave),0.1)*sign(Basewave)*10.);\n",
-	"	return vec4(palette(col, vec3(0.5, 0.5, 0.5), vec3(0.5, 0.5, 0.5), vec3(1.0, 1.0, 1.0), vec3(0.00, 0.10, 0.20)), 1.0) + vec4(0.2,0.1,0.1,0.1);\n",
-	"}"
-	"vec4 flare(float Time, vec2 p, float y, float param1 , float param2){\n",
-	"	p = ( p / resolution.xy ) - y;\n",
-	"	float sx = param2 * (p.x + 1.) * sin(cos( 5.0 * p.x - 1. * Time));\n",
-	"	float dy = param1 / ( 250. * abs(p.y - sx));\n",
-	"	dy += 1./ (60. * length(p - vec2(p.x, 0.))/param1);\n",
-	"	p.x = (p.x + 0.24) * dy;\n",
-	"	return vec4( p.x*p.x, dy*0.3, dy, 1.0 );\n",
-	"}",
-	"vec4 flare2(float Time, vec2 p, float y, float param1 , float param2, float source_alpha){\n",
-	"	vec2 sp = (p.xy * 2.0 - resolution.xy) / min(resolution.x, resolution.y);\n",
-	"	sp.y = -dot(sp,sp);\n",
-	"	float color = param2;\n",
-	"	for (int i = 0; i < 20; i++) {\n",
-	"		float t = float(i)+sin(Time*param1*0.1+float(i));\n",
-	"		color += 0.025/distance(sp,vec2(sp.x,cos(t+sp.x)));\n",
-	"	}\n",
-	"	return color*vec4(vec3((sp.x)*0.1, 0.05, -(sp.x)*0.1), 1.0-source_alpha);"
-	"}",
-	"void main() {\n",
-	"	 vec4 Color; float Transp = gl_Color[3];\n",
-	"    //if (Mode==1)Color = pow(gl_Color,vec4(Basewave + rand(gl_FragCoord.xy + vec2(Time,2.*Time))*SinewaveWidth));\n",
-	"    //else if(Mode==2)Color = pow(gl_Color,normalize(vec4(gl_FragCoord.xyz,Param3)));\n",
-	"    //else if(Mode==3)Color = pow(gl_Color,vec4(sin(Time*4. + gl_FragCoord.y/200.)*SinewaveWidth + Basewave + SinewaveWidth));\n",
-	//"    else if(Mode==4)Color = (SinewaveWidth + 1.)*gl_Color - (Basewave)*spirals(Time, gl_FragCoord.xy / 1600.);\n",
-	"    //else if(Mode==4)Color = pow(gl_Color,spirals(Time, gl_FragCoord.xy / (resolution.x * Param3 * 3.)));\n",
-	"    //else if(Mode==5)Color = pow(flare(Time, gl_FragCoord.xy, MousePos.y/resolution.y*1.8*Param3 + 0.5, Basewave, SinewaveWidth+0.15),vec4(1.)-gl_Color);\n",
-	"    //else if(Mode==6)Color = gl_Color * (Param3 * 20.) * flare2(Time, gl_FragCoord.xy, MousePos.y/resolution.y*1.8*Param3 + 0.5, Basewave + 1., SinewaveWidth+0.15,Transp);\n",
-	"	 //else\n",
-	"	     Color = gl_Color;\n",
-	"	 Color.w = Transp;\n",
-	"    gl_FragColor = Color;\n",
-	"}"
-};
-
-shader_prog *SP;
 
 void onTimer(int v);
 void mDisplay() {
@@ -1926,14 +1756,6 @@ void mDisplay() {
 	glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 	if (FIRSTBOOT) {
 		FIRSTBOOT = 0;
-
-		//Settings::ShaderMode = rand() & 3;
-		if (glCreateShader) {
-			SP = new shader_prog(vertex_shader, fragment_shader);
-			cout << "GLEW is working! Yeee ( -3-)\n";
-		}
-		else 
-			cout << "GLEW is not initialised ( o.o)\n";
 
 		WH = new WindowsHandler();
 		Init();
@@ -1946,19 +1768,7 @@ void mDisplay() {
 		ANIMATION_IS_ACTIVE = !ANIMATION_IS_ACTIVE;
 		onTimer(0);
 	}
-	if (SP) {
-		glUniform1f(glGetUniformLocation(SP->prog, "Time"), TimerV / 100.f);
-		glUniform1i(glGetUniformLocation(SP->prog, "Mode"), Settings::ShaderMode);
-		glUniform1f(glGetUniformLocation(SP->prog, "SinewaveWidth"), Settings::SinewaveWidth);
-		glUniform1f(glGetUniformLocation(SP->prog, "Basewave"), Settings::Basewave);
-		glUniform1f(glGetUniformLocation(SP->prog, "Param3"), Settings::Param3);
-		glUniform2f(glGetUniformLocation(SP->prog, "MousePos"), MXPOS, MYPOS);
-		glUniform2f(glGetUniformLocation(SP->prog, "resolution"), WindX, WindY);
-		SP->use(); 
-	}
-	if (APRIL_FOOL) {
-		Settings::ShaderMode = 1;
-		Settings::Basewave = 3.5f;
+	if (APRIL_FOOL || Settings::ShaderMode==69) {
 		glBegin(GL_QUADS);
 		glColor4f(1, 0, 1, (DRAG_OVER) ? 0.25f : 1);
 		glVertex2f(0 - RANGE * (WindX / WINDXSIZE), 0 - RANGE * (WindY / WINDYSIZE));
@@ -2077,7 +1887,6 @@ void mSpecialKey(int Key,int x, int y) {
 }
 void mExit(int a) {
 	Settings::RK_Access.Close();
-	if (SP)(~(*SP));
 }
 
 int main(int argc, char ** argv) {
@@ -2120,11 +1929,6 @@ int main(int argc, char ** argv) {
 	glHint(GL_LINE_SMOOTH_HINT, GL_NICEST);//GL_FASTEST//GL_NICEST
 	glHint(GL_POINT_SMOOTH_HINT, GL_NICEST);
 	glHint(GL_POLYGON_SMOOTH_HINT, GL_NICEST);
-
-	glewExperimental = GL_TRUE;
-	DWORD glewInitVal;
-	if (glewInitVal = glewInit())
-		cout << "Something is wrong with glew. Code: " << glewInitVal << endl;
 
 	glutMouseFunc(mClick);
 	glutReshapeFunc(OnResize);

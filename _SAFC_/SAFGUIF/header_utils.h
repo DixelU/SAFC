@@ -2,13 +2,6 @@
 #ifndef SAFGUIF_HEADER
 #define SAFGUIF_HEADER
 
-#include "glew.h"
-#ifndef __X64
-#pragma comment (lib, "glew32.lib")
-#else
-#pragma comment (lib, "lib_x64\\glew32.lib")
-#endif
-
 #include "glut.h"
 #include "freeglut.h"
 #ifndef __X64
@@ -17,7 +10,7 @@
 #pragma comment (lib, "lib_x64\\freeglut.lib")
 #endif
 
-#include "shader_smpclass.h"
+//#include "shader_smpclass.h"
 
 #include "consts.h"
 
@@ -33,6 +26,8 @@ typedef bool BIT;
 #define BEG_RANGE 200
 FLOAT RANGE = BEG_RANGE, MXPOS = 0.f, MYPOS = 0.f;
 
+const char* WINDOWTITLE = "SAFC\0";
+std::wstring RegPath = L"Software\\SAFC\\";
 
 std::string FONTNAME = "Arial";
 BIT is_fonted = 0;
