@@ -19,6 +19,9 @@
     <Filter Include="Файлы заголовков\MIDI Processing">
       <UniqueIdentifier>{294818bf-9e52-4327-8c00-d895b0067147}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Файлы заголовков\SAFGUIF\Specific">
+      <UniqueIdentifier>{05cbd868-f101-4136-8d0b-2bbc53b83065}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="consts.h">
@@ -45,9 +48,6 @@
     <ClInclude Include="SAFGUIF\button_settings.h">
       <Filter>Файлы заголовков\SAFGUIF</Filter>
     </ClInclude>
-    <ClInclude Include="SAFCGUIF_Local\CATh.h">
-      <Filter>Файлы заголовков\SAFGUIF</Filter>
-    </ClInclude>
     <ClInclude Include="SAFGUIF\charmap.h">
       <Filter>Файлы заголовков\SAFGUIF</Filter>
     </ClInclude>
@@ -72,16 +72,10 @@
     <ClInclude Include="SAFGUIF\SAFGUIF.h">
       <Filter>Файлы заголовков\SAFGUIF</Filter>
     </ClInclude>
-    <ClInclude Include="SAFCGUIF_Local\SAFGUIF_L.h">
-      <Filter>Файлы заголовков\SAFGUIF</Filter>
-    </ClInclude>
     <ClInclude Include="SAFGUIF\single_text_line_settings.h">
       <Filter>Файлы заголовков\SAFGUIF</Filter>
     </ClInclude>
     <ClInclude Include="SAFGUIF\single_text_line.h">
-      <Filter>Файлы заголовков\SAFGUIF</Filter>
-    </ClInclude>
-    <ClInclude Include="SAFCGUIF_Local\SMRPVis.h">
       <Filter>Файлы заголовков\SAFGUIF</Filter>
     </ClInclude>
     <ClInclude Include="SAFGUIF\snp_list.h">
@@ -104,9 +98,6 @@
     </ClInclude>
     <ClInclude Include="SAFGUIF\wheel_variable_changer.h">
       <Filter>Файлы заголовков\SAFGUIF</Filter>
-    </ClInclude>
-    <ClInclude Include="SAFCGUIF_Local\BAWC.h">
-      <Filter>Файлы заголовков\MIDI Processing</Filter>
     </ClInclude>
     <ClInclude Include="bbb_ffio.h">
       <Filter>Файлы заголовков\MIDI Processing</Filter>
@@ -135,8 +126,23 @@
     <ClInclude Include="SAFC_InnerModules\SMRP.h">
       <Filter>Файлы заголовков\MIDI Processing</Filter>
     </ClInclude>
+    <ClInclude Include="SAFC_InnerModules\xz_file_buffer.h">
+      <Filter>Файлы заголовков</Filter>
+    </ClInclude>
+    <ClInclude Include="SAFCGUIF_Local\CATh.h">
+      <Filter>Файлы заголовков\SAFGUIF\Specific</Filter>
+    </ClInclude>
     <ClInclude Include="SAFCGUIF_Local\PLC_Vol.h">
-      <Filter>Файлы заголовков\SAFGUIF</Filter>
+      <Filter>Файлы заголовков\SAFGUIF\Specific</Filter>
+    </ClInclude>
+    <ClInclude Include="SAFCGUIF_Local\SAFGUIF_L.h">
+      <Filter>Файлы заголовков\SAFGUIF\Specific</Filter>
+    </ClInclude>
+    <ClInclude Include="SAFCGUIF_Local\SMRPVis.h">
+      <Filter>Файлы заголовков\SAFGUIF\Specific</Filter>
+    </ClInclude>
+    <ClInclude Include="SAFCGUIF_Local\BAWC.h">
+      <Filter>Файлы заголовков\SAFGUIF\Specific</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

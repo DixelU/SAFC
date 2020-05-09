@@ -640,6 +640,7 @@ void OnAdd() {
 namespace PropsAndSets {
 	string *PPQN=new string(""), *OFFSET = new string(""), *TEMPO = new string("");
 	int currentID=-1,CaTID=-1,VMID=-1,PMID=-1;
+	BIT ForPersonalUse = true;
 	SingleMIDIInfoCollector* SMICptr = nullptr;
 	string CSV_DELIM = ";";
 	void OGPInMIDIList(int ID) {
@@ -697,7 +698,7 @@ namespace PropsAndSets {
 			WH->MainWindow_ID = "SMIC";
 			WH->DisableAllWindows();
 			thread ith([]() {
-				auto PG_Exp = (*(*WH)["SMIC"])["PG_EXP"];
+				auto All_Exp = (*(*WH)["SMIC"])["ALL_EXP"];
 				auto TG_Exp = (*(*WH)["SMIC"])["TG_EXP"];
 				auto ITicks = (*(*WH)["SMIC"])["INTEGRATE_TICKS"];
 				auto ITime = (*(*WH)["SMIC"])["INTEGRATE_TIME"];
@@ -725,7 +726,7 @@ namespace PropsAndSets {
 				UISeconds->SafeStringReplace("0");
 				UIMilliseconds->SafeStringReplace("0");
 				UITicks->SafeStringReplace("0");
-				PG_Exp->Disable();
+				All_Exp->Disable();
 				TG_Exp->Disable();
 				ITicks->Disable();
 				ITime->Disable();
@@ -737,7 +738,7 @@ namespace PropsAndSets {
 					Sleep(100);
 				}
 				InfoLine->SafeStringReplace("Finished");
-				PG_Exp->Enable();
+				All_Exp->Enable();
 				TG_Exp->Enable();
 				ITicks->Enable();
 				ITime->Enable();
@@ -779,6 +780,22 @@ namespace PropsAndSets {
 				UIElement_Butt->SafeStringReplace("Disable graph A");
 			UIElement_TG->Enabled ^= true;
 		}
+		void ResetTG() {//TEMPO_GRAPH
+			auto UIElement_TG = (Graphing<SingleMIDIInfoCollector::tempo_graph>*)(*(*WH)["SMIC"])["TEMPO_GRAPH"];
+			UIElement_TG->Reset();
+		}
+		void ResetPG() {//TEMPO_GRAPH
+			auto UIElement_PG = (Graphing<SingleMIDIInfoCollector::tempo_graph>*)(*(*WH)["SMIC"])["POLY_GRAPH"];
+			UIElement_PG->Reset();
+		}
+		void SwitchPersonalUse() {//PERSONALUSE
+			auto UIElement_Butt = (Button*)(*(*WH)["SMIC"])["PERSONALUSE"];
+			ForPersonalUse ^= true;
+			if (ForPersonalUse) 
+				UIElement_Butt->SafeStringReplace(".csv");
+			else 
+				UIElement_Butt->SafeStringReplace(".atraw");
+		}
 		void ExportTG() {
 			thread th([]() {
 				WH->MainWindow_ID = "SMIC";
@@ -797,24 +814,97 @@ namespace PropsAndSets {
 			});
 			th.detach();
 		}
-		void ResetTG() {//TEMPO_GRAPH
-			auto UIElement_TG = (Graphing<SingleMIDIInfoCollector::tempo_graph>*)(*(*WH)["SMIC"])["TEMPO_GRAPH"];
-			UIElement_TG->Reset();
-		}
-		void ResetPG() {//TEMPO_GRAPH
-			auto UIElement_PG = (Graphing<SingleMIDIInfoCollector::tempo_graph>*)(*(*WH)["SMIC"])["POLY_GRAPH"];
-			UIElement_PG->Reset();
-		}
-		void ExportPG() {
+		void ExportAll() {
 			thread th([]() {
 				WH->MainWindow_ID = "SMIC";
 				WH->DisableAllWindows();
 				auto InfoLine = (TextBox*)(*(*WH)["SMIC"])["FLL"];
-				InfoLine->SafeStringReplace("Graph B is exporting...");
-				ofstream out(SMICptr->FileName + L".pg.csv");
-				out << "tick" << CSV_DELIM << "NoteOffs" << CSV_DELIM << "NoteOns" << CSV_DELIM << "PolyphonyFiniteDifference" << '\n';
+				InfoLine->SafeStringReplace("Collecting data for exporting...");
+
+				using line_data = struct {
+					INT64 NoteOns;
+					INT64 NoteOffs;
+					INT64 Polyphony;
+					double Seconds;
+					double Tempo;
+				};
+
+				INT64 Polyphony = 0;
+				WORD PPQ = SMICptr->PPQ; 
+				INT64 last_tick = 0;
+				string header = ""; 
+				double tempo = 0;
+				double seconds = 0;
+				double seconds_per_tick = 0;
+				header = (
+					  "Tick" + CSV_DELIM
+					+ "NoteOffs" + CSV_DELIM 
+					+ "NoteOns" + CSV_DELIM
+					+ "Polyphony" + CSV_DELIM
+					+ "Time(seconds)" + CSV_DELIM
+					+ "Tempo"
+					+ "\n");
+				btree::btree_map<INT64, line_data> info;
 				for (auto cur_pair : SMICptr->PolyphonyFiniteDifference)
-					out << cur_pair.first << CSV_DELIM << cur_pair.second.NoteOff << CSV_DELIM << cur_pair.second.NoteOn << CSV_DELIM << cur_pair.second << '\n';
+					info[cur_pair.first] = line_data({
+						cur_pair.second.NoteOn,cur_pair.second.NoteOff,(Polyphony += cur_pair.second), 0., 0.
+					}); 
+				auto it_ptree = SMICptr->PolyphonyFiniteDifference.begin();
+				for (auto cur_pair : SMICptr->TempoMap) {
+					while (it_ptree != SMICptr->PolyphonyFiniteDifference.end() && it_ptree->first < cur_pair.first ) {
+						seconds += seconds_per_tick * (it_ptree->first - last_tick);
+						last_tick = it_ptree->first;
+						auto& t = info[it_ptree->first];
+						Polyphony = t.Polyphony;
+						t.Seconds = seconds;
+						t.Tempo = tempo;
+						it_ptree++;
+					}
+					if (it_ptree->first == cur_pair.first) 
+						info[it_ptree->first].Tempo = cur_pair.second;
+					else {
+						seconds += seconds_per_tick * (cur_pair.first - last_tick);
+						info[cur_pair.first] = line_data({
+						 0,0,Polyphony, seconds, cur_pair.second
+							});
+					}
+					last_tick = cur_pair.first;
+					tempo = cur_pair.second;
+					seconds_per_tick = (60 / (tempo * PPQ));
+				}
+				while (it_ptree != SMICptr->PolyphonyFiniteDifference.end()) {
+					seconds += seconds_per_tick * (it_ptree->first - last_tick);
+					last_tick = it_ptree->first;
+					auto& t = info[it_ptree->first];
+					Polyphony = t.Polyphony;
+					t.Seconds = seconds;
+					t.Tempo = tempo;
+					it_ptree++;
+				}
+				ofstream out(SMICptr->FileName +  ((ForPersonalUse) ? L".a.csv" : L".atraw"),
+					((ForPersonalUse)? (std::ios::out ):(std::ios::out | std::ios::binary))
+					);
+				if (ForPersonalUse) {
+					out << header;
+					for (auto cur_pair : info) {
+						out << cur_pair.first << CSV_DELIM
+							<< cur_pair.second.NoteOffs << CSV_DELIM
+							<< cur_pair.second.NoteOns << CSV_DELIM
+							<< cur_pair.second.Polyphony << CSV_DELIM
+							<< cur_pair.second.Seconds << CSV_DELIM
+							<< cur_pair.second.Tempo << endl;
+					}
+				}
+				else {
+					for (auto cur_pair : info) {
+						out.write((const char*)(&cur_pair.first), 8);
+						out.write((const char*)(&cur_pair.second.NoteOffs), 8);
+						out.write((const char*)(&cur_pair.second.NoteOns), 8);
+						out.write((const char*)(&cur_pair.second.Polyphony), 8);
+						out.write((const char*)(&cur_pair.second.Seconds), 8);
+						out.write((const char*)(&cur_pair.second.Tempo), 8);
+					}
+				}
 				out.close();
 				WH->MainWindow_ID = "MAIN";
 				WH->EnableWindow("MAIN");
@@ -1707,19 +1797,21 @@ void Init() {///SetIsFontedVar
 	(*T)["POLY_GRAPH"] = new Graphing<SingleMIDIInfoCollector::polyphony_graph>(
 		0, -WindowHeapSize + 95, 285, 50, (1. / 20000.), true, 0x007FFFFF, 0x000000FF, 0xFF7F00FF, 0xFF00FFFF, 0x7F7F7F7F, nullptr, System_Black, false
 	);
-	(*T)["PG_SWITCH"] = new Button("Enable graph B", System_Black, PropsAndSets::SMIC::EnablePG, 37.5, 60 - WindowHeapSize, 70, 10, 1, 0xAFAFAFAF, 0x000000FF, 0xFFFFFFFF, 0x000000FF, 0x007FFFFF, nullptr);
-	(*T)["TG_SWITCH"] = new Button("Enable graph A", System_Black, PropsAndSets::SMIC::EnableTG, -37.5, 60 - WindowHeapSize, 70, 10, 1, 0xAFAFAFAF, 0x000000FF, 0xFFFFFFFF, 0x000000FF, 0x007FFFFF, nullptr);
-	(*T)["PG_EXP"] = new Button("Export B .csv", System_Black, PropsAndSets::SMIC::ExportPG, 110, 60 - WindowHeapSize, 65, 10, 1, 0xAFAFAFAF, 0x000000FF, 0xFFFFFFFF, 0x000000FF, 0x007FFFFF, nullptr);
-	(*T)["TG_EXP"] = new Button("Export A .csv", System_Black, PropsAndSets::SMIC::ExportTG, -110, 60 - WindowHeapSize, 65, 10, 1, 0xAFAFAFAF, 0x000000FF, 0xFFFFFFFF, 0x000000FF, 0x007FFFFF, nullptr);
+	(*T)["PG_SWITCH"] = new Button("Enable graph B", System_Black, PropsAndSets::SMIC::EnablePG, 37.5, 60 - WindowHeapSize, 70, 10, 1, 0xAFAFAFAF, 0x000000FF, 0xFFFFFFFF, 0x000000FF, 0x007FFFFF, System_Black, "Polyphony differences graph");
+	(*T)["TG_SWITCH"] = new Button("Enable graph A", System_Black, PropsAndSets::SMIC::EnableTG, -37.5, 60 - WindowHeapSize, 70, 10, 1, 0xAFAFAFAF, 0x000000FF, 0xFFFFFFFF, 0x000000FF, 0x007FFFFF, System_Black, "Tempo graph");
+	(*T)["ALL_EXP"] = new Button("Export all", System_Black, PropsAndSets::SMIC::ExportAll, 110, 60 - WindowHeapSize, 65, 10, 1, 0xAFAFAFAF, 0x000000FF, 0xFFFFFFFF, 0x000000FF, 0x007FFFFF, nullptr);
+	(*T)["TG_EXP"] = new Button("Export Tempo", System_Black, PropsAndSets::SMIC::ExportTG, -110, 60 - WindowHeapSize, 65, 10, 1, 0xAFAFAFAF, 0x000000FF, 0xFFFFFFFF, 0x000000FF, 0x007FFFFF, nullptr);
 	(*T)["TG_RESET"] = new Button("Reset graph A", System_Black, PropsAndSets::SMIC::ResetTG, 45, 40 - WindowHeapSize, 65, 10, 1, 0xAFAFAFAF, 0x000000FF, 0xFFFFFFFF, 0x000000FF, 0x007FFFFF, nullptr);
 	(*T)["PG_RESET"] = new Button("Reset graph B", System_Black, PropsAndSets::SMIC::ResetPG, 45, 20 - WindowHeapSize, 65, 10, 1, 0xAFAFAFAF, 0x000000FF, 0xFFFFFFFF, 0x000000FF, 0x007FFFFF, nullptr);
+	(*T)["PERSONALUSE"] = Butt = new Button(".csv", System_Black, PropsAndSets::SMIC::SwitchPersonalUse, 105, 40 - WindowHeapSize, 45, 10, 1, 0xAFAFAFAF, 0x000000FF, 0xFFFFFFFF, 0x000000FF, 0x007FFFFF, System_Black, "Switches output format for `export all`");
+	Butt->Tip->SafeChangePosition_Argumented(_Align::right, Butt->Xpos + Butt->Width*0.5, Butt->Tip->CYpos);
 	(*T)["TOTAL_INFO"] = new TextBox("----", System_Black, 0, -150, 35, 285, 10, 0, 0, 0, _Align::left);
 	(*T)["INT_MIN"] = new InputField("0", -132.5, 40 - WindowHeapSize, 10, 20, System_Black, NULL, 0x000000FF, System_Black, "Minutes", 3, _Align::center, _Align::left, InputField::Type::NaturalNumbers);
 	(*T)["INT_SEC"] = new InputField("0", -107.5, 40 - WindowHeapSize, 10, 20, System_Black, NULL, 0x000000FF, System_Black, "Seconds", 2, _Align::center, _Align::left, InputField::Type::NaturalNumbers);
 	(*T)["INT_MSC"] = new InputField("000", -80, 40 - WindowHeapSize, 10, 25, System_Black, NULL, 0x000000FF, System_Black, "Milliseconds", 3, _Align::center, _Align::left, InputField::Type::NaturalNumbers);
-	(*T)["INTEGRATE_TICKS"] = new Button("Integrate ticks", System_Black, PropsAndSets::SMIC::IntegrateTime, -27.5, 40 - WindowHeapSize, 70, 10, 1, 0xAFAFAFAF, 0x000000FF, 0xFFFFFFFF, 0x000000FF, 0x007FFFFF, System_White, "Result is the closest tick to that time.");
+	(*T)["INTEGRATE_TICKS"] = new Button("Integrate ticks", System_Black, PropsAndSets::SMIC::IntegrateTime, -27.5, 40 - WindowHeapSize, 70, 10, 1, 0xAFAFAFAF, 0x000000FF, 0xFFFFFFFF, 0x000000FF, 0x007FFFFF, System_Black, "Result is the closest tick to that time.");
 	(*T)["INT_TIC"] = new InputField("0", -105, 20 - WindowHeapSize, 10, 75, System_Black, NULL, 0x000000FF, System_Black, "Ticks", 17, _Align::center, _Align::left, InputField::Type::NaturalNumbers);
-	(*T)["INTEGRATE_TIME"] = new Button("Integrate time", System_Black, PropsAndSets::SMIC::DiffirentiateTicks, -27.5, 20 - WindowHeapSize, 70, 10, 1, 0xAFAFAFAF, 0x000000FF, 0xFFFFFFFF, 0x000000FF, 0x007FFFFF, System_White, "Result is the time of that tick.");
+	(*T)["INTEGRATE_TIME"] = new Button("Integrate time", System_Black, PropsAndSets::SMIC::DiffirentiateTicks, -27.5, 20 - WindowHeapSize, 70, 10, 1, 0xAFAFAFAF, 0x000000FF, 0xFFFFFFFF, 0x000000FF, 0x007FFFFF, System_Black, "Result is the time of that tick.");
 	(*T)["DELIM"] = new InputField(";", 137.5, 40 - WindowHeapSize, 10, 7.5, System_Black, &(PropsAndSets::CSV_DELIM), 0x000000FF, System_Black, "Delimiter", 1, _Align::center, _Align::right, InputField::Type::Text);
 	(*T)["ANSWER"] = new TextBox("----", System_Black, -66.25, -30, 25, 152.5, 10, 0, 0, 0, _Align::center, TextBox::VerticalOverflow::recalibrate);
 
