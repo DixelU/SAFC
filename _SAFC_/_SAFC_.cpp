@@ -885,13 +885,14 @@ namespace PropsAndSets {
 				double cur_seconds = 0;
 				double prev_second = 0;
 				double PPQ = SMICptr->PPQ;
+				double prev_tempo = 120;
 				INT64 last_tick = (*SMICptr->TempoMap.rbegin()).first;
 				for (auto cur_pair : SMICptr->TempoMap/*; cur_pair != SMICptr->TempoMap.end(); cur_pair++*/) {
 					cur_tick = cur_pair.first;
-					double cur_tempo = cur_pair.second;
-					cur_seconds += (cur_tick - prev_tick) * (60 / (cur_tempo * PPQ));
+					cur_seconds += (cur_tick - prev_tick) * (60 / (prev_tempo * PPQ));
 					if (cur_tick > ticks_limit || cur_tick == last_tick)
 						break;
+					prev_tempo = cur_pair.second;
 					prev_second = cur_seconds;
 					prev_tick = cur_tick;
 				}
@@ -942,13 +943,14 @@ namespace PropsAndSets {
 			double cur_seconds = 0;
 			double prev_second = 0;
 			double PPQ = SMICptr->PPQ;
+			double prev_tempo = 120;
 			INT64 last_tick = (*SMICptr->TempoMap.rbegin()).first;
 			for (auto cur_pair : SMICptr->TempoMap/*; cur_pair != SMICptr->TempoMap.end(); cur_pair++*/) {
 				cur_tick = cur_pair.first;
-				double cur_tempo = cur_pair.second;
-				cur_seconds += (cur_tick - prev_tick) * (60 / (cur_tempo * PPQ));
+				cur_seconds += (cur_tick - prev_tick) * (60 / (prev_tempo * PPQ));
 				if (cur_seconds > seconds_limit || cur_tick == last_tick)
 					break;
+				prev_tempo = cur_pair.second;
 				prev_second = cur_seconds;
 				prev_tick = cur_tick;
 			}
