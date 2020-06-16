@@ -22,15 +22,18 @@ struct conditional {
 	T value;
 	conditional() : value(), is(false) {}
 	conditional(const T& value) : value(value), is(false) {}
-	operator BIT() const {
+	inline operator BIT() const {
 		return is;
 	}
-	T operator = (const T& value) {
+	inline T operator = (const T& value) {
 		is = true;
 		return (this->value = value);
 	}
-	T& operator()() {
+	inline T& operator()() {
 		return value;
+	}
+	inline void reset() {
+		is = false;
 	}
 };
 
@@ -46,7 +49,7 @@ struct SingleMIDIReProcessor {
 	BIT Finished;
 	BIT Processing;
 	BIT InQueueToInplaceMerge;
-	INT64 Start, Length;
+	INT64 SelectionStart, SelectionLength;
 	BYTE_PLC_Core* VolumeMapCore;
 	_14BIT_PLC_Core* PitchMapCore;
 	CutAndTransposeKeys* KeyConverter;
@@ -58,7 +61,7 @@ struct SingleMIDIReProcessor {
 	static void ostream_write(std::vector<BYTE>& vec, std::ostream& out) {
 		out.write(((char*)vec.data()), vec.size());;
 	}
-	SingleMIDIReProcessor(std::wstring filename, DWORD Settings, DWORD Tempo, DWORD GlobalOffset, WORD PPQN, DWORD ThreadID, BYTE_PLC_Core* VolumeMapCore, _14BIT_PLC_Core* PitchMapCore, CutAndTransposeKeys* KeyConverter, std::wstring RPostfix = L"_.mid", BIT InplaceMerge = 0, UINT64 FileSize = 0, INT64 Start = 0, INT64 Length = -1, BIT CurFromStart = false) {
+	SingleMIDIReProcessor(std::wstring filename, DWORD Settings, DWORD Tempo, DWORD GlobalOffset, WORD PPQN, DWORD ThreadID, BYTE_PLC_Core* VolumeMapCore, _14BIT_PLC_Core* PitchMapCore, CutAndTransposeKeys* KeyConverter, std::wstring RPostfix = L"_.mid", BIT InplaceMerge = 0, UINT64 FileSize = 0, INT64 SelectionStart = 0, INT64 SelectionLength = -1, BIT CurFromStart = false) {
 		this->ThreadID = ThreadID;
 		this->FileName = filename;
 		this->BoolSettings = Settings;
@@ -76,11 +79,11 @@ struct SingleMIDIReProcessor {
 		this->TrackCount = 0;
 		this->Processing = 0;
 		this->FilePosition = 0;
-		this->Start = Start;
-		this->Length = Length;
+		this->SelectionStart = SelectionStart;
+		this->SelectionLength = SelectionLength;
 		this->CutFromStart = CutFromStart;
 	}
-	SingleMIDIReProcessor(std::wstring filename, DWORD Settings, DWORD Tempo, DWORD GlobalOffset, WORD PPQN, DWORD ThreadID, PLC<BYTE, BYTE>* VolumeMapCore, PLC<WORD, WORD>* PitchMapCore, CutAndTransposeKeys* KeyConverter, std::wstring RPostfix = L"_.mid", BIT InplaceMerge = 0, UINT64 FileSize = 0, INT64 Start = 0, INT64 Length = -1, BIT CurFromStart = false) {
+	SingleMIDIReProcessor(std::wstring filename, DWORD Settings, DWORD Tempo, DWORD GlobalOffset, WORD PPQN, DWORD ThreadID, PLC<BYTE, BYTE>* VolumeMapCore, PLC<WORD, WORD>* PitchMapCore, CutAndTransposeKeys* KeyConverter, std::wstring RPostfix = L"_.mid", BIT InplaceMerge = 0, UINT64 FileSize = 0, INT64 SelectionStart = 0, INT64 SelectionLength = -1, BIT CurFromStart = false) {
 		this->ThreadID = ThreadID;
 		this->FileName = filename;
 		this->BoolSettings = Settings;
@@ -104,8 +107,8 @@ struct SingleMIDIReProcessor {
 		this->TrackCount = 0;
 		this->Processing = 0;
 		this->FilePosition = 0;
-		this->Start = Start;
-		this->Length = Length;
+		this->SelectionStart = SelectionStart;
+		this->SelectionLength = SelectionLength;
 		this->CutFromStart = CutFromStart;
 	}
 #define PCLOG true
@@ -124,8 +127,10 @@ struct SingleMIDIReProcessor {
 		conditional<WORD> CurrentNoteAftertouch[16];
 		for (auto& v : CurHolded)
 			v = 0;
-		bool ActiveSelection = Length > 0;
+		bool ActiveSelection = SelectionLength > 0;
 		DWORD EventCounter = 0, Header/*,MultitaskTVariable*/, UnholdedCount = 0;
+		const DWORD BoolSettingsBuffer = BoolSettings;
+		const DWORD BSB_IgnoreAllSetting = SMP_BOOL_SETTINGS_IGNORE_TEMPOS | SMP_BOOL_SETTINGS_IGNORE_ALL_BUT_TEMPOS_NOTES_AND_PITCH | SMP_BOOL_SETTINGS_IGNORE_PITCHES | SMP_BOOL_SETTINGS_IGNORE_NOTES;
 		WORD OldPPQN;
 		double DeltaTimeTranq = 0, TDeltaTime = 0, PPQNIncreaseAmount = 1;
 		BYTE Tempo1, Tempo2, Tempo3;
@@ -171,41 +176,50 @@ struct SingleMIDIReProcessor {
 			for (int i = 0; i < 4 && file_input.good(); i++)
 				file_input.get();
 
-			if (file_input.eof())break;
+			if (file_input.eof())
+				break;
+
+			/*swap settings*/
+			if (ActiveSelection) {
+				BoolSettings |= BSB_IgnoreAllSetting;
+			}
 
 			INT64 CurTick = 0;//understandable
 			bool Entered = false, Exited = false;
 			INT64 TickTranq = 0;
 			TrackEnded = false;
 
-			DeltaTimeTranq += GlobalOffset;
+			DeltaTimeTranq = GlobalOffset * PPQNIncreaseAmount;
 			///Parsing events
 			while (file_input.good() && !file_input.eof()) {
 				if (KeyConverter) {//?
 					Header = 0;
 					NULL;
 				}
-				///Deltatime recalculation
-				DWORD vlv = 0, tvlv;
-				DWORD deltatimesize = 0, true_delta;
 
 				BYTE byte1, byte2, byte3; // arguments of events
+
+				///Deltatime recalculation
+				DWORD LastDeltaTime = 0, tvlv;
+				DWORD DeltaTimeSize = 0;
+
 				IO = 0;
-				do {
+				do {//reading LastDeltaTime
 					IO = file_input.get();
-					vlv = vlv << 7 | IO & 0x7F;
+					LastDeltaTime = LastDeltaTime << 7 | IO & 0x7F;
 				} while (IO & 0x80 && !file_input.eof());
 				//DWORD file_pos = fi.tellg();
-				DeltaTimeTranq += ((double)vlv * PPQNIncreaseAmount) + TickTranq;
-				DeltaTimeTranq -= (tvlv = (vlv = (DWORD)DeltaTimeTranq));
-				CurTick += vlv - TickTranq;//adding to the "current tick"
-				///pushing proto vlv to track 
+				DeltaTimeTranq += ((double)(LastDeltaTime) * PPQNIncreaseAmount) + TickTranq;
+				DeltaTimeTranq -= (tvlv = (LastDeltaTime = (INT64)DeltaTimeTranq));
+				CurTick += LastDeltaTime - TickTranq;//adding to the "current tick"
 
 				if (ActiveSelection) {
-					if (!Entered && CurTick >= Start) {
-						//printf("Entered# Cur:%li \t Edge:%li \t VLV:%i\n", CurTick, Start, vlv);
+					if (!Entered && CurTick >= SelectionStart) {
+						//printf("Entered# Cur:%li \t Edge:%li \t VLV:%i\n", CurTick, SelectionStart, LastDeltaTime);
 						Entered = true;
 						bool EscapeFlag = true;
+						if (ActiveSelection)
+							BoolSettings = BoolSettingsBuffer;
 						for (auto& v : CurHolded) {//in case if none of the notes are pressed
 							if (v) {
 								EscapeFlag = false;
@@ -213,14 +227,28 @@ struct SingleMIDIReProcessor {
 								break;
 							}
 						}
+						if (CurrentTempo)
+							EscapeFlag = false;
+						for (int CurrentChannel = 0; CurrentChannel < 16; CurrentChannel++) {
+							if (
+								CurrentChannelAftertouch[CurrentChannel] ||
+								CurrentController[CurrentChannel] ||
+								CurrentNoteAftertouch[CurrentChannel] ||
+								CurrentPitch[CurrentChannel] ||
+								CurrentProgram[CurrentChannel]
+								) {
+								EscapeFlag = false;
+								break;
+							}
+						}
 						if (EscapeFlag)
 							goto EscapeFromEntered;
-						INT64 tStartTick = tvlv - (CurTick - (Start));
+						INT64 tStartTick = tvlv - (CurTick - (SelectionStart));
 						DWORD tSZ = 0;
-						bool Flag_FirstRun = false;
-						vlv = tvlv - tStartTick;
-						tvlv = vlv;
-						//printf("Entered# VLV:%i \t TStart:%li\n", vlv, tStartTick);
+						bool Flag_NotFirstRun = false;
+						LastDeltaTime = tvlv - tStartTick;
+						tvlv = LastDeltaTime;
+						//printf("Entered# VLV:%i \t TStart:%li\n", LastDeltaTime, tStartTick);
 						do {
 							tSZ++;
 							Track.push_back(tStartTick & 0x7F);
@@ -233,10 +261,70 @@ struct SingleMIDIReProcessor {
 						for (DWORD i = 2; i <= tSZ; i++) {
 							Track[Track.size() - i] |= 0x80;///hack (going from 2 instead of going from one)
 						}
+
+						if (CurrentTempo) {
+							if (Flag_NotFirstRun) 
+								Track.push_back(0);
+							else 
+								Flag_NotFirstRun = true;
+							Track.push_back(0xFF);
+							Track.push_back(0x51);
+							Track.push_back(0x03);
+							Track.push_back((CurrentTempo() >> 16)&0xFF);
+							Track.push_back((CurrentTempo() >> 8)&0xFF);
+							Track.push_back(CurrentTempo() & 0xFF);
+						}
+						for (int CurrentChannel = 0; CurrentChannel < 16; CurrentChannel++) {
+							if (CurrentChannelAftertouch[CurrentChannel]) {//stuff
+								if (Flag_NotFirstRun)
+									Track.push_back(0);
+								else
+									Flag_NotFirstRun = true;
+								Track.push_back(0xD0 | CurrentChannel);
+								Track.push_back(CurrentChannelAftertouch[CurrentChannel]());
+							}
+							if (CurrentProgram[CurrentChannel]) {//stuff
+								if (Flag_NotFirstRun)
+									Track.push_back(0);
+								else
+									Flag_NotFirstRun = true;
+								Track.push_back(0xC0 | CurrentChannel);
+								Track.push_back(CurrentProgram[CurrentChannel]());
+							}
+							if (CurrentPitch[CurrentChannel]) {//stuff
+								if (Flag_NotFirstRun)
+									Track.push_back(0);
+								else
+									Flag_NotFirstRun = true;
+								Track.push_back(0xE0 | CurrentChannel);
+								Track.push_back(CurrentPitch[CurrentChannel]() >> 8);
+								Track.push_back(CurrentPitch[CurrentChannel]() & 0xFF);
+							}
+							if (CurrentController[CurrentChannel]) {//stuff
+								if (Flag_NotFirstRun)
+									Track.push_back(0);
+								else
+									Flag_NotFirstRun = true;
+								Track.push_back(0xB0 | CurrentChannel);
+								Track.push_back(CurrentController[CurrentChannel]() >> 8);
+								Track.push_back(CurrentController[CurrentChannel]() & 0xFF);
+							}
+							if (CurrentNoteAftertouch[CurrentChannel]) {//stuff
+								if (Flag_NotFirstRun)
+									Track.push_back(0);
+								else
+									Flag_NotFirstRun = true;
+								Track.push_back(0xA0 | CurrentChannel);
+								Track.push_back(CurrentNoteAftertouch[CurrentChannel]() >> 8);
+								Track.push_back(CurrentNoteAftertouch[CurrentChannel]() & 0xFF);
+							}
+						}
 						for (int k = 0; k < 4096; k++) {//multichanneled tracks.
 							for (int polyphony = 0; polyphony < CurHolded[k]; polyphony++) {
-								if (Flag_FirstRun)Track.push_back(0);
-								else Flag_FirstRun = true;
+								if (Flag_NotFirstRun)
+									Track.push_back(0);
+								else 
+									Flag_NotFirstRun = true;
 								Track.push_back((k & 0xF) | 0x90);
 								Track.push_back(k >> 4);
 								Track.push_back(1);
@@ -244,8 +332,8 @@ struct SingleMIDIReProcessor {
 						}
 					}
 				EscapeFromEntered:
-					if (Entered && !Exited && (CurTick >= (Start + Length))) {
-						//printf("Exited#  Cur:%li \t Edge:%li \t VLV:%i\n", CurTick, Start + Length, vlv);
+					if (Entered && !Exited && (CurTick >= (SelectionStart + SelectionLength))) {
+						//printf("Exited#  Cur:%li \t Edge:%li \t VLV:%i\n", CurTick, SelectionStart + SelectionLength, LastDeltaTime);
 						Exited = true;
 						bool EscapeFlag = true;
 						for (auto& v : CurHolded) {
@@ -255,14 +343,16 @@ struct SingleMIDIReProcessor {
 								break;
 							}
 						}
+						if (ActiveSelection) // end of cut
+							BoolSettings |= BSB_IgnoreAllSetting;
 						if (EscapeFlag)
 							goto ActiveSelectionBorderEscapePoint;
-						INT64 tStartTick = tvlv - (CurTick - (Start + Length));
+						INT64 tStartTick = tvlv - (CurTick - (SelectionStart + SelectionLength));
 						DWORD tSZ = 0;
 						bool Flag_FirstRun = false;
-						vlv = tvlv - tStartTick;
-						tvlv = vlv;
-						//printf("Exited#  VLV:%i \t TStart:%li\n", vlv, tStartTick);
+						LastDeltaTime = tvlv - tStartTick;
+						tvlv = LastDeltaTime;
+						//printf("Exited#  VLV:%i \t TStart:%li\n", LastDeltaTime, tStartTick);
 						do {
 							tSZ++;
 							Track.push_back(tStartTick & 0x7F);
@@ -275,6 +365,7 @@ struct SingleMIDIReProcessor {
 						for (DWORD i = 2; i <= tSZ; i++) {
 							Track[Track.size() - i] |= 0x80;///hack (going from 2 instead of going from one)
 						}
+
 						for (int k = 0; k < 4096; k++) {
 							for (int polyphony = 0; polyphony < CurHolded[k]; polyphony++) {
 								if (Flag_FirstRun)Track.push_back(0);
@@ -287,18 +378,22 @@ struct SingleMIDIReProcessor {
 					}
 				}
 			ActiveSelectionBorderEscapePoint:
+
+				///pushing proto LastDeltaTime to track 
 				do {
-					deltatimesize++;
+					DeltaTimeSize++;
 					Track.push_back(tvlv & 0x7F);
 					tvlv >>= 7;
 				} while (tvlv);
+
 				///making magic with it...
-				for (DWORD i = 0; i < (deltatimesize >> 1); i++) {
-					std::swap(Track[Track.size() - 1 - i], Track[Track.size() - deltatimesize + i]);
+				for (DWORD i = 0; i < (DeltaTimeSize >> 1); i++) {
+					std::swap(Track[Track.size() - 1 - i], Track[Track.size() - DeltaTimeSize + i]);
 				}
-				for (DWORD i = 2; i <= deltatimesize; i++) {
+				for (DWORD i = 2; i <= DeltaTimeSize; i++) {
 					Track[Track.size() - i] |= 0x80;///hack (going from 2 instead of going from one)
 				}
+
 				IO = file_input.get();
 				if (IO == 0xFF) {//I love metaevents :d
 					RSB = 0;
@@ -325,7 +420,7 @@ struct SingleMIDIReProcessor {
 							LogLine = "Track " + std::to_string(TrackCount) + " deleted!";
 						}
 						else {
-							Track.insert(Track.end() - deltatimesize - 3, UnLoad.begin(), UnLoad.end());
+							Track.insert(Track.end() - DeltaTimeSize - 3, UnLoad.begin(), UnLoad.end());
 							UnLoad.clear();
 							file_output.put('M'); file_output.put('T'); file_output.put('r'); file_output.put('k');
 							file_output.put(Track.size() >> 24);///size of track
@@ -344,12 +439,12 @@ struct SingleMIDIReProcessor {
 					else {//other meta events
 						if (!(BoolSettings & SMP_BOOL_SETTINGS_IGNORE_ALL_BUT_TEMPOS_NOTES_AND_PITCH)) {
 							tvlv = 0;
-							DWORD vlvsize = 0;
+							DWORD MetaVLVSize = 0;
 							TYPEIO = IO;
 							do {
 								IO = file_input.get();
 								Track.push_back(IO);
-								vlvsize++;
+								MetaVLVSize++;
 								tvlv = (tvlv << 7) | (IO & 0x7F);
 							} while (IO & 0x80);
 							if (TYPEIO != 0x51) {
@@ -358,13 +453,13 @@ struct SingleMIDIReProcessor {
 							}
 							else {//tempo events
 								if (BoolSettings & SMP_BOOL_SETTINGS_IGNORE_TEMPOS) {//deleting
-									TickTranq = vlv;
-									for (int i = -2 - vlvsize; i < (INT32)deltatimesize; i++)
+									TickTranq = LastDeltaTime;
+									for (int i = -2 - MetaVLVSize; i < (int)DeltaTimeSize; i++)
 										Track.pop_back();
 									byte1 = file_input.get();
 									byte2 = file_input.get();
 									byte3 = file_input.get();
-									CurrentTempo = ((byte1 << 16) | (byte2 << 8) | byte3);
+									CurrentTempo = (((DWORD)byte1 << 16) | ((DWORD)byte2 << 8) | (DWORD)byte3);
 									continue;
 								}
 								else {
@@ -372,75 +467,77 @@ struct SingleMIDIReProcessor {
 										file_input.get();
 										file_input.get();
 										file_input.get();
-										CurrentTempo = (60000000 / NewTempo);
-										Track.push_back(Tempo1);
-										Track.push_back(Tempo2);
-										Track.push_back(Tempo3);
+										Track.push_back(byte1 = Tempo1);
+										Track.push_back(byte2 = Tempo2);
+										Track.push_back(byte3 = Tempo3);
+										CurrentTempo = (((DWORD)byte1 << 16) | ((DWORD)byte2 << 8) | (DWORD)byte3);
 										EventCounter++;
 									}
 									else {
 										Track.push_back(byte1 = file_input.get());
 										Track.push_back(byte2 = file_input.get());
 										Track.push_back(byte3 = file_input.get());
-										CurrentTempo = ((byte1 << 16) | (byte2 << 8) | byte3);
+										CurrentTempo = (((DWORD)byte1 << 16) | ((DWORD)byte2 << 8) | (DWORD)byte3);
 										EventCounter++;
 									}
 								}
+								//printf("M %i %i\n", CurTick,CurrentTempo());
 							}
 						}
 						else {
 							tvlv = 0;
-							DWORD vlvsize = 0;
+							DWORD MetaVLVSize = 0;
 							TYPEIO = IO;
 							do {
 								IO = file_input.get();
 								Track.push_back(IO);
-								vlvsize++;
+								MetaVLVSize++;
 								tvlv = (tvlv << 7) | (IO & 0x7F);
 							} while (IO & 0x80);
 							if (TYPEIO != 0x51) {//deleting
-								TickTranq = vlv;
-								for (int i = -2 - vlvsize; i < (INT32)deltatimesize; i++)
+								TickTranq = LastDeltaTime;
+								for (int i = -2 - MetaVLVSize; i < (int)DeltaTimeSize; i++)
 									Track.pop_back();
 								for (int i = 0; i < tvlv; i++)
 									file_input.get();
 								continue;
 							}
-							else {
+							else {//tempo 
 								if (BoolSettings & SMP_BOOL_SETTINGS_IGNORE_TEMPOS) {
-									TickTranq = vlv;
-									for (int i = -2 - vlvsize; i < (INT32)deltatimesize; i++)
+									TickTranq = LastDeltaTime;
+									for (int i = -2 - MetaVLVSize; i < (INT32)DeltaTimeSize; i++)
 										Track.pop_back();
 									byte1 = file_input.get();
 									byte2 = file_input.get();
 									byte3 = file_input.get();
-									CurrentTempo = ((byte1 << 16) | (byte2 << 8) | byte3);
+									CurrentTempo = (((DWORD)byte1 << 16) | ((DWORD)byte2 << 8) | (DWORD)byte3);
 									continue;
 								}
-								if (NewTempo) {
+								else if (NewTempo) {
 									file_input.get();
 									file_input.get();
 									file_input.get();
-									CurrentTempo = (60000000 / NewTempo);
-									Track.push_back(Tempo1);
-									Track.push_back(Tempo2);
-									Track.push_back(Tempo3);
+									Track.push_back(byte1 = Tempo1);
+									Track.push_back(byte2 = Tempo2);
+									Track.push_back(byte3 = Tempo3);
+									CurrentTempo = (((DWORD)byte1 << 16) | ((DWORD)byte2 << 8) | (DWORD)byte3);
 									EventCounter++;
 								}
 								else {
 									Track.push_back(byte1 = file_input.get());
 									Track.push_back(byte2 = file_input.get());
 									Track.push_back(byte3 = file_input.get());
-									CurrentTempo = ((byte1 << 16) | (byte2 << 8) | byte3);
+									CurrentTempo = (((DWORD)byte1 << 16) | ((DWORD)byte2 << 8) | (DWORD)byte3);
 									EventCounter++;
 								}
+								//printf("N %i %i\n", CurTick, CurrentTempo());
 							}
 						}
 					}
 				}
 				else if (IO >= 0x80 && IO <= 0x9F) {///notes
 					RSB = IO;
-					if (!(BoolSettings & SMP_BOOL_SETTINGS_IGNORE_NOTES) || Length > 0) {
+					if (!(BoolSettings & SMP_BOOL_SETTINGS_IGNORE_NOTES) || SelectionLength > 0) {
 						bool DeleteEvent = BoolSettings & SMP_BOOL_SETTINGS_IGNORE_NOTES, isnoteon = (RSB >= 0x90);
 						BYTE Key = file_input.get();
 						Track.push_back(IO);///Event|Channel data
@@ -483,13 +580,13 @@ struct SingleMIDIReProcessor {
 									UnholdedCount++;
 									if (STRICT_WARNINGS)
 										WarningLine = "OFF of nonON Note: " + std::to_string(UnholdedCount);
-									//cout << vlv << ":" << TickTranq << endl;
+									//cout << LastDeltaTime << ":" << TickTranq << endl;
 								}
 							}
 						}
 						if (DeleteEvent) {///deletes the note from the point of writing the key data.
-							TickTranq = vlv;
-							for (int q = -2; q < (INT32)deltatimesize; q++) {
+							TickTranq = LastDeltaTime;
+							for (int q = -2; q < (INT32)DeltaTimeSize; q++) {
 								Track.pop_back();
 							}
 							continue;
@@ -500,8 +597,8 @@ struct SingleMIDIReProcessor {
 						EventCounter++;
 					}
 					else {
-						TickTranq = vlv;
-						for (int i = 0; i < (INT32)deltatimesize; i++)
+						TickTranq = LastDeltaTime;
+						for (int i = 0; i < (INT32)DeltaTimeSize; i++)
 							Track.pop_back();
 						file_input.get(); file_input.get();///for 1st and 2nd parameter
 						continue;
@@ -525,14 +622,14 @@ struct SingleMIDIReProcessor {
 						EventCounter++;
 					}
 					else {
-						TickTranq = vlv;
-						for (int i = 0; i < (INT32)deltatimesize; i++)
+						TickTranq = LastDeltaTime;
+						for (int i = 0; i < (INT32)DeltaTimeSize; i++)
 							Track.pop_back();
 						byte1 = file_input.get(); 
 						byte2 = file_input.get();///for 1st and 2nd parameter
 						continue;
 					}
-					CurrentPitch[IO & 0xF] = ((byte1 << 8) | byte2);
+					CurrentPitch[IO & 0xF] = (((DWORD)byte1 << 8) | (DWORD)byte2);
 				}
 				else if ((IO >= 0xA0 && IO <= 0xAF)) {///note aftertouch :t
 					RSB = IO;
@@ -543,14 +640,14 @@ struct SingleMIDIReProcessor {
 						EventCounter++;
 					}
 					else {
-						TickTranq = vlv;
-						for (int i = 0; i < (INT32)deltatimesize; i++)
+						TickTranq = LastDeltaTime;
+						for (int i = 0; i < (INT32)DeltaTimeSize; i++)
 							Track.pop_back();
 						byte1 = file_input.get(); 
 						byte2 = file_input.get();
 						continue;
 					}
-					CurrentNoteAftertouch[IO & 0xF] = ((byte1 << 8) | byte2);
+					CurrentNoteAftertouch[IO & 0xF] = (((DWORD)byte1 << 8) | (DWORD)byte2);
 				}
 				else if ((IO >= 0xB0 && IO <= 0xBF)) {///controller :t
 					RSB = IO;
@@ -561,14 +658,14 @@ struct SingleMIDIReProcessor {
 						EventCounter++;
 					}
 					else {
-						TickTranq = vlv;
-						for (int i = 0; i < (INT32)deltatimesize; i++)
+						TickTranq = LastDeltaTime;
+						for (int i = 0; i < (INT32)DeltaTimeSize; i++)
 							Track.pop_back();
 						byte1 = file_input.get();
 						byte2 = file_input.get();
 						continue;
 					}
-					CurrentController[IO & 0xF] = ((byte1 << 8) | byte2);
+					CurrentController[IO & 0xF] = (((DWORD)byte1 << 8) | (DWORD)byte2);
 				}
 				else if ((IO >= 0xC0 && IO <= 0xCF)) {///program change
 					RSB = IO;
@@ -581,13 +678,13 @@ struct SingleMIDIReProcessor {
 						EventCounter++;
 					}
 					else {
-						TickTranq = vlv;
-						for (int i = 0; i < (INT32)deltatimesize; i++)
+						TickTranq = LastDeltaTime;
+						for (int i = 0; i < (INT32)DeltaTimeSize; i++)
 							Track.pop_back();
 						byte1 = file_input.get();///for its single parameter
 						continue;
 					}
-					CurrentProgram[IO & 0xF] = byte1;
+					CurrentProgram[IO & 0xF] = (DWORD)byte1;
 				}
 				else if (IO >= 0xD0 && IO <= 0xDF) {///Channel aftertouch :D
 					RSB = IO;
@@ -598,13 +695,13 @@ struct SingleMIDIReProcessor {
 						EventCounter++;
 					}
 					else {
-						TickTranq = vlv;
-						for (int i = 0; i < (INT32)deltatimesize; i++)
+						TickTranq = LastDeltaTime;
+						for (int i = 0; i < (INT32)DeltaTimeSize; i++)
 							Track.pop_back();
 						byte1 =	file_input.get();
 						continue;
 					}
-					CurrentChannelAftertouch[IO & 0xF] = byte1;
+					CurrentChannelAftertouch[IO & 0xF] = (DWORD)byte1;
 				}
 				else if (IO == 0xF0 || IO == 0xF7) {
 					DWORD vlvsize = 0;
@@ -623,10 +720,11 @@ struct SingleMIDIReProcessor {
 						EventCounter++;
 					}
 					else {
-						TickTranq = vlv;
-						for (int i = -1 - vlvsize; i < (INT32)deltatimesize; i++)
+						TickTranq = LastDeltaTime;
+						for (int i = -1 - vlvsize; i < (INT32)DeltaTimeSize; i++)
 							Track.pop_back();
-						for (int i = 0; i < tvlv; i++)file_input.get();
+						for (int i = 0; i < tvlv; i++)
+							file_input.get();
 						continue;
 					}
 				}
@@ -687,8 +785,8 @@ struct SingleMIDIReProcessor {
 								}
 							}
 							if (DeleteEvent) {///deletes the note from the point of writing the key data.
-								TickTranq = vlv;
-								for (int q = -2; q < (INT32)deltatimesize; q++) {
+								TickTranq = LastDeltaTime;
+								for (int q = -2; q < (INT32)DeltaTimeSize; q++) {
 									Track.pop_back();
 								}
 								continue;
@@ -699,8 +797,8 @@ struct SingleMIDIReProcessor {
 							EventCounter++;
 						}
 						else {
-							TickTranq = vlv;
-							for (int i = 0; i < (INT32)deltatimesize; i++)
+							TickTranq = LastDeltaTime;
+							for (int i = 0; i < (INT32)DeltaTimeSize; i++)
 								Track.pop_back();
 							file_input.get();///for 2nd parameter
 							continue;
@@ -723,14 +821,14 @@ struct SingleMIDIReProcessor {
 							EventCounter++;
 						}
 						else {
-							TickTranq = vlv;
-							for (int i = 0; i < (INT32)deltatimesize; i++)
+							TickTranq = LastDeltaTime;
+							for (int i = 0; i < (INT32)DeltaTimeSize; i++)
 								Track.pop_back();
 							byte1 = IO;
 							byte2 = file_input.get();///for 2nd parameter
 							continue;
 						}
-						CurrentPitch[RSB & 0xF] = ((byte1 << 8) | byte2);
+						CurrentPitch[RSB & 0xF] = (((DWORD)byte1 << 8) | (DWORD)byte2);
 					}
 					else if ((RSB >= 0xA0 && RSB <= 0xAF)) {///note aftertouch :t
 						//RSB = IO;
@@ -741,14 +839,14 @@ struct SingleMIDIReProcessor {
 							EventCounter++;
 						}
 						else {
-							TickTranq = vlv;
-							for (int i = 0; i < (INT32)deltatimesize; i++)
+							TickTranq = LastDeltaTime;
+							for (int i = 0; i < (INT32)DeltaTimeSize; i++)
 								Track.pop_back();
 							byte1 = IO;
 							byte2 = file_input.get();
 							continue;
 						}
-						CurrentNoteAftertouch[RSB & 0xF] = ((byte1 << 8) | byte2);
+						CurrentNoteAftertouch[RSB & 0xF] = (((DWORD)byte1 << 8) | (DWORD)byte2);
 					}
 					else if ((RSB >= 0xB0 && RSB <= 0xBF)) {///controller :t
 						//RSB = IO;
@@ -759,14 +857,14 @@ struct SingleMIDIReProcessor {
 							EventCounter++;
 						}
 						else {
-							TickTranq = vlv;
-							for (int i = 0; i < (INT32)deltatimesize; i++)
+							TickTranq = LastDeltaTime;
+							for (int i = 0; i < (INT32)DeltaTimeSize; i++)
 								Track.pop_back();
 							byte1 = IO;
 							byte2 = file_input.get();
 							continue;
 						}
-						CurrentController[RSB & 0xF] = ((byte1 << 8) | byte2);
+						CurrentController[RSB & 0xF] = (((DWORD)byte1 << 8) | (DWORD)byte2);
 					}
 					else if ((RSB >= 0xC0 && RSB <= 0xCF)) {///program change
 						if (!(BoolSettings & SMP_BOOL_SETTINGS_IGNORE_ALL_BUT_TEMPOS_NOTES_AND_PITCH)) {
@@ -778,14 +876,14 @@ struct SingleMIDIReProcessor {
 							EventCounter++;
 						}
 						else {
-							TickTranq = vlv;
-							for (int i = 0; i < (INT32)deltatimesize; i++)
+							TickTranq = LastDeltaTime;
+							for (int i = 0; i < (INT32)DeltaTimeSize; i++)
 								Track.pop_back();
 							byte1 = IO;
 							continue;
 							//fi.get();///for its single parameter
 						}
-						CurrentProgram[RSB & 0xF] = byte1;
+						CurrentProgram[RSB & 0xF] = (DWORD)byte1;
 					}
 					else if (RSB >= 0xD0 && RSB <= 0xDF) {///????:D
 						if (!(BoolSettings & SMP_BOOL_SETTINGS_IGNORE_ALL_BUT_TEMPOS_NOTES_AND_PITCH)) {
@@ -794,12 +892,12 @@ struct SingleMIDIReProcessor {
 							EventCounter++;
 						}
 						else {
-							TickTranq = vlv;
-							for (int i = 0; i < (INT32)deltatimesize; i++)
+							TickTranq = LastDeltaTime;
+							for (int i = 0; i < (INT32)DeltaTimeSize; i++)
 								Track.pop_back();
 							continue;
 						}
-						CurrentChannelAftertouch[RSB & 0xF] = IO;
+						CurrentChannelAftertouch[RSB & 0xF] = (DWORD)IO;
 					}
 					else {
 						ErrorLine = "Track corruption. Pos:" + std::to_string(file_input.tellg());
@@ -835,7 +933,7 @@ struct SingleMIDIReProcessor {
 							TrackEnded = true;
 						}
 						else {
-							Track.insert(Track.end() - deltatimesize - 3, UnLoad.begin(), UnLoad.end());
+							Track.insert(Track.end() - DeltaTimeSize - 3, UnLoad.begin(), UnLoad.end());
 							UnLoad.clear();
 							file_output.put('M'); file_output.put('T'); file_output.put('r'); file_output.put('k');
 							file_output.put(Track.size() >> 24);///size of track
@@ -855,6 +953,17 @@ struct SingleMIDIReProcessor {
 				}
 				TickTranq = 0;
 			}
+			if (ActiveSelection) {
+				BoolSettings = BoolSettingsBuffer;
+			}
+			CurrentTempo.reset();
+			for (int CurrentChannel = 0; CurrentChannel < 16; CurrentChannel++) {
+				CurrentChannelAftertouch[CurrentChannel].reset();
+				CurrentController[CurrentChannel].reset();
+				CurrentNoteAftertouch[CurrentChannel].reset();
+				CurrentPitch[CurrentChannel].reset();
+				CurrentProgram[CurrentChannel].reset();
+			}
 			FilePosition = file_input.tellg();
 		}
 		file_input.close();
@@ -867,4 +976,5 @@ struct SingleMIDIReProcessor {
 		Finished = 1;
 	}
 };
+
 #endif 
