@@ -2,6 +2,7 @@
 #ifndef SAF_SMRP
 #define SAF_SMRP
 
+
 #include <Windows.h>
 #include <string>
 #include <vector>
@@ -14,6 +15,24 @@
 #include "PLC.h"
 #include "CAT.h"
 #include "../bbb_ffio.h"
+
+template<typename T>
+struct conditional {
+	BIT is;
+	T value;
+	conditional() : value(), is(false) {}
+	conditional(const T& value) : value(value), is(false) {}
+	operator BIT() const {
+		return is;
+	}
+	T operator = (const T& value) {
+		is = true;
+		return (this->value = value);
+	}
+	T& operator()() {
+		return value;
+	}
+};
 
 struct SingleMIDIReProcessor {
 	DWORD ThreadID;
@@ -95,7 +114,14 @@ struct SingleMIDIReProcessor {
 		std::ofstream file_output(this->FileName + Postfix, std::ios::binary | std::ios::out);
 		std::vector<BYTE> Track;///quite memory expensive...
 		std::vector<BYTE> UnLoad;
+		std::vector<BYTE> CorruptData;
 		std::array<DWORD, 4096> CurHolded;
+		conditional<DWORD> CurrentTempo;
+		conditional<WORD> CurrentPitch[16];
+		conditional<BYTE> CurrentProgram[16];
+		conditional<BYTE> CurrentChannelAftertouch[16];
+		conditional<WORD> CurrentController[16];
+		conditional<WORD> CurrentNoteAftertouch[16];
 		for (auto& v : CurHolded)
 			v = 0;
 		bool ActiveSelection = Length > 0;
@@ -109,11 +135,10 @@ struct SingleMIDIReProcessor {
 		TrackCount = 0x0;
 		Processing = 0x1;
 		Track.reserve(10000000);//just in case...
-
 		if (NewTempo) {
-			Tempo1 = ((60000000 / NewTempo) >> 16),
-				Tempo2 = (((60000000 / NewTempo) >> 8) & 0xFF),
-				Tempo3 = ((60000000 / NewTempo) & 0xFF);
+			Tempo1 = ((60000000 / NewTempo) >> 16);
+			Tempo2 = (((60000000 / NewTempo) >> 8) & 0xFF);
+			Tempo3 = ((60000000 / NewTempo) & 0xFF);
 		}
 		///processing starts here///
 		for (int i = 0; i < 12 && file_input.good(); i++)
@@ -162,7 +187,9 @@ struct SingleMIDIReProcessor {
 				}
 				///Deltatime recalculation
 				DWORD vlv = 0, tvlv;
-				DWORD size = 0, true_delta;
+				DWORD deltatimesize = 0, true_delta;
+
+				BYTE byte1, byte2, byte3; // arguments of events
 				IO = 0;
 				do {
 					IO = file_input.get();
@@ -261,15 +288,15 @@ struct SingleMIDIReProcessor {
 				}
 			ActiveSelectionBorderEscapePoint:
 				do {
-					size++;
+					deltatimesize++;
 					Track.push_back(tvlv & 0x7F);
 					tvlv >>= 7;
 				} while (tvlv);
 				///making magic with it...
-				for (DWORD i = 0; i < (size >> 1); i++) {
-					std::swap(Track[Track.size() - 1 - i], Track[Track.size() - size + i]);
+				for (DWORD i = 0; i < (deltatimesize >> 1); i++) {
+					std::swap(Track[Track.size() - 1 - i], Track[Track.size() - deltatimesize + i]);
 				}
-				for (DWORD i = 2; i <= size; i++) {
+				for (DWORD i = 2; i <= deltatimesize; i++) {
 					Track[Track.size() - i] |= 0x80;///hack (going from 2 instead of going from one)
 				}
 				IO = file_input.get();
@@ -298,7 +325,7 @@ struct SingleMIDIReProcessor {
 							LogLine = "Track " + std::to_string(TrackCount) + " deleted!";
 						}
 						else {
-							Track.insert(Track.end() - size - 3, UnLoad.begin(), UnLoad.end());
+							Track.insert(Track.end() - deltatimesize - 3, UnLoad.begin(), UnLoad.end());
 							UnLoad.clear();
 							file_output.put('M'); file_output.put('T'); file_output.put('r'); file_output.put('k');
 							file_output.put(Track.size() >> 24);///size of track
@@ -329,12 +356,15 @@ struct SingleMIDIReProcessor {
 								for (int i = 0; i < tvlv; i++)
 									Track.push_back(file_input.get());
 							}
-							else {
+							else {//tempo events
 								if (BoolSettings & SMP_BOOL_SETTINGS_IGNORE_TEMPOS) {//deleting
 									TickTranq = vlv;
-									for (int i = -2 - vlvsize; i < (INT32)size; i++)
+									for (int i = -2 - vlvsize; i < (INT32)deltatimesize; i++)
 										Track.pop_back();
-									for (int i = 0; i < tvlv; i++)file_input.get();
+									byte1 = file_input.get();
+									byte2 = file_input.get();
+									byte3 = file_input.get();
+									CurrentTempo = ((byte1 << 16) | (byte2 << 8) | byte3);
 									continue;
 								}
 								else {
@@ -342,15 +372,17 @@ struct SingleMIDIReProcessor {
 										file_input.get();
 										file_input.get();
 										file_input.get();
+										CurrentTempo = (60000000 / NewTempo);
 										Track.push_back(Tempo1);
 										Track.push_back(Tempo2);
 										Track.push_back(Tempo3);
 										EventCounter++;
 									}
 									else {
-										Track.push_back(file_input.get());
-										Track.push_back(file_input.get());
-										Track.push_back(file_input.get());
+										Track.push_back(byte1 = file_input.get());
+										Track.push_back(byte2 = file_input.get());
+										Track.push_back(byte3 = file_input.get());
+										CurrentTempo = ((byte1 << 16) | (byte2 << 8) | byte3);
 										EventCounter++;
 									}
 								}
@@ -366,27 +398,40 @@ struct SingleMIDIReProcessor {
 								vlvsize++;
 								tvlv = (tvlv << 7) | (IO & 0x7F);
 							} while (IO & 0x80);
-							if (TYPEIO != 0x51 || BoolSettings & SMP_BOOL_SETTINGS_IGNORE_TEMPOS) {//deleting
+							if (TYPEIO != 0x51) {//deleting
 								TickTranq = vlv;
-								for (int i = -2 - vlvsize; i < (INT32)size; i++)
+								for (int i = -2 - vlvsize; i < (INT32)deltatimesize; i++)
 									Track.pop_back();
-								for (int i = 0; i < tvlv; i++)file_input.get();
+								for (int i = 0; i < tvlv; i++)
+									file_input.get();
 								continue;
 							}
 							else {
+								if (BoolSettings & SMP_BOOL_SETTINGS_IGNORE_TEMPOS) {
+									TickTranq = vlv;
+									for (int i = -2 - vlvsize; i < (INT32)deltatimesize; i++)
+										Track.pop_back();
+									byte1 = file_input.get();
+									byte2 = file_input.get();
+									byte3 = file_input.get();
+									CurrentTempo = ((byte1 << 16) | (byte2 << 8) | byte3);
+									continue;
+								}
 								if (NewTempo) {
 									file_input.get();
 									file_input.get();
 									file_input.get();
+									CurrentTempo = (60000000 / NewTempo);
 									Track.push_back(Tempo1);
 									Track.push_back(Tempo2);
 									Track.push_back(Tempo3);
 									EventCounter++;
 								}
 								else {
-									Track.push_back(file_input.get());
-									Track.push_back(file_input.get());
-									Track.push_back(file_input.get());
+									Track.push_back(byte1 = file_input.get());
+									Track.push_back(byte2 = file_input.get());
+									Track.push_back(byte3 = file_input.get());
+									CurrentTempo = ((byte1 << 16) | (byte2 << 8) | byte3);
 									EventCounter++;
 								}
 							}
@@ -444,7 +489,7 @@ struct SingleMIDIReProcessor {
 						}
 						if (DeleteEvent) {///deletes the note from the point of writing the key data.
 							TickTranq = vlv;
-							for (int q = -2; q < (INT32)size; q++) {
+							for (int q = -2; q < (INT32)deltatimesize; q++) {
 								Track.pop_back();
 							}
 							continue;
@@ -456,7 +501,7 @@ struct SingleMIDIReProcessor {
 					}
 					else {
 						TickTranq = vlv;
-						for (int i = 0; i < (INT32)size; i++)
+						for (int i = 0; i < (INT32)deltatimesize; i++)
 							Track.pop_back();
 						file_input.get(); file_input.get();///for 1st and 2nd parameter
 						continue;
@@ -470,70 +515,96 @@ struct SingleMIDIReProcessor {
 							WORD PitchBend = file_input.get() << 7;
 							PitchBend |= file_input.get() & 0x7F;
 							PitchBend = (*PitchMapCore)[PitchBend];
-							Track.push_back((PitchBend >> 7) & 0x7F);
-							Track.push_back(PitchBend & 0x7F);
+							Track.push_back(byte1 = ((PitchBend >> 7) & 0x7F));
+							Track.push_back(byte2 = (PitchBend & 0x7F));
 						}
 						else {
-							Track.push_back(file_input.get() & 0x7F);
-							Track.push_back(file_input.get() & 0x7F);
+							Track.push_back(byte1 = (file_input.get() & 0x7F));
+							Track.push_back(byte2 = (file_input.get() & 0x7F));
 						}
 						EventCounter++;
 					}
 					else {
 						TickTranq = vlv;
-						for (int i = 0; i < (INT32)size; i++)
+						for (int i = 0; i < (INT32)deltatimesize; i++)
 							Track.pop_back();
-						file_input.get(); file_input.get();///for 1st and 2nd parameter
+						byte1 = file_input.get(); 
+						byte2 = file_input.get();///for 1st and 2nd parameter
 						continue;
 					}
+					CurrentPitch[IO & 0xF] = ((byte1 << 8) | byte2);
 				}
-				else if ((IO >= 0xA0 && IO <= 0xBF)) {///idk :t
+				else if ((IO >= 0xA0 && IO <= 0xAF)) {///note aftertouch :t
 					RSB = IO;
 					if (!(BoolSettings & SMP_BOOL_SETTINGS_IGNORE_ALL_BUT_TEMPOS_NOTES_AND_PITCH)) {
 						Track.push_back(IO);///event type
-						Track.push_back(file_input.get());///1st parameter
-						Track.push_back(file_input.get());///2nd parameter
+						Track.push_back(byte1 = file_input.get());///1st parameter
+						Track.push_back(byte2 = file_input.get());///2nd parameter
 						EventCounter++;
 					}
 					else {
 						TickTranq = vlv;
-						for (int i = 0; i < (INT32)size; i++)
+						for (int i = 0; i < (INT32)deltatimesize; i++)
 							Track.pop_back();
-						file_input.get(); file_input.get();
+						byte1 = file_input.get(); 
+						byte2 = file_input.get();
 						continue;
 					}
+					CurrentNoteAftertouch[IO & 0xF] = ((byte1 << 8) | byte2);
+				}
+				else if ((IO >= 0xB0 && IO <= 0xBF)) {///controller :t
+					RSB = IO;
+					if (!(BoolSettings & SMP_BOOL_SETTINGS_IGNORE_ALL_BUT_TEMPOS_NOTES_AND_PITCH)) {
+						Track.push_back(IO);///event type
+						Track.push_back(byte1 = file_input.get());///1st parameter
+						Track.push_back(byte2 = file_input.get());///2nd parameter
+						EventCounter++;
+					}
+					else {
+						TickTranq = vlv;
+						for (int i = 0; i < (INT32)deltatimesize; i++)
+							Track.pop_back();
+						byte1 = file_input.get();
+						byte2 = file_input.get();
+						continue;
+					}
+					CurrentController[IO & 0xF] = ((byte1 << 8) | byte2);
 				}
 				else if ((IO >= 0xC0 && IO <= 0xCF)) {///program change
 					RSB = IO;
 					if (!(BoolSettings & SMP_BOOL_SETTINGS_IGNORE_ALL_BUT_TEMPOS_NOTES_AND_PITCH)) {
 						Track.push_back(IO);///event type
-						if (BoolSettings & SMP_BOOL_SETTINGS_ALL_INSTRUMENTS_TO_PIANO)Track.push_back(file_input.get() & 0);///1st parameter
-						else Track.push_back(file_input.get() & 0x7F);
+						if (BoolSettings & SMP_BOOL_SETTINGS_ALL_INSTRUMENTS_TO_PIANO)
+							Track.push_back(byte1 = (file_input.get() & 0));///1st parameter
+						else 
+							Track.push_back(byte1 = (file_input.get() & 0x7F));
 						EventCounter++;
 					}
 					else {
 						TickTranq = vlv;
-						for (int i = 0; i < (INT32)size; i++)
+						for (int i = 0; i < (INT32)deltatimesize; i++)
 							Track.pop_back();
-						file_input.get();///for its single parameter
+						byte1 = file_input.get();///for its single parameter
 						continue;
 					}
+					CurrentProgram[IO & 0xF] = byte1;
 				}
-				else if (IO >= 0xD0 && IO <= 0xDF) {///????:D
+				else if (IO >= 0xD0 && IO <= 0xDF) {///Channel aftertouch :D
 					RSB = IO;
 					if (!(BoolSettings & SMP_BOOL_SETTINGS_IGNORE_ALL_BUT_TEMPOS_NOTES_AND_PITCH)) {
 						Track.push_back(IO);///event type
-						Track.push_back(file_input.get() & 0x7F);
+						Track.push_back(byte1 = (file_input.get() & 0x7F));
 						//fi.get();
 						EventCounter++;
 					}
 					else {
 						TickTranq = vlv;
-						file_input.get();///...:D
-						for (int i = 0; i < (INT32)size; i++)
+						for (int i = 0; i < (INT32)deltatimesize; i++)
 							Track.pop_back();
+						byte1 =	file_input.get();
 						continue;
 					}
+					CurrentChannelAftertouch[IO & 0xF] = byte1;
 				}
 				else if (IO == 0xF0 || IO == 0xF7) {
 					DWORD vlvsize = 0;
@@ -553,7 +624,7 @@ struct SingleMIDIReProcessor {
 					}
 					else {
 						TickTranq = vlv;
-						for (int i = -1 - vlvsize; i < (INT32)size; i++)
+						for (int i = -1 - vlvsize; i < (INT32)deltatimesize; i++)
 							Track.pop_back();
 						for (int i = 0; i < tvlv; i++)file_input.get();
 						continue;
@@ -617,7 +688,7 @@ struct SingleMIDIReProcessor {
 							}
 							if (DeleteEvent) {///deletes the note from the point of writing the key data.
 								TickTranq = vlv;
-								for (int q = -2; q < (INT32)size; q++) {
+								for (int q = -2; q < (INT32)deltatimesize; q++) {
 									Track.pop_back();
 								}
 								continue;
@@ -629,7 +700,7 @@ struct SingleMIDIReProcessor {
 						}
 						else {
 							TickTranq = vlv;
-							for (int i = 0; i < (INT32)size; i++)
+							for (int i = 0; i < (INT32)deltatimesize; i++)
 								Track.pop_back();
 							file_input.get();///for 2nd parameter
 							continue;
@@ -642,52 +713,79 @@ struct SingleMIDIReProcessor {
 								WORD PitchBend = IO << 7;
 								PitchBend |= file_input.get() & 0x7F;
 								PitchBend = (*PitchMapCore)[PitchBend];
-								Track.push_back((PitchBend >> 7) & 0x7F);
-								Track.push_back(PitchBend & 0x7F);
+								Track.push_back(byte1 = ((PitchBend >> 7) & 0x7F));
+								Track.push_back(byte2 = (PitchBend & 0x7F));
 							}
 							else {
-								Track.push_back(IO);
-								Track.push_back(file_input.get() & 0x7F);
+								Track.push_back(byte1 = IO);
+								Track.push_back(byte2 = (file_input.get() & 0x7F));
 							}
 							EventCounter++;
 						}
 						else {
 							TickTranq = vlv;
-							for (int i = 0; i < (INT32)size; i++)
+							for (int i = 0; i < (INT32)deltatimesize; i++)
 								Track.pop_back();
-							file_input.get();///for 2nd parameter
+							byte1 = IO;
+							byte2 = file_input.get();///for 2nd parameter
 							continue;
 						}
+						CurrentPitch[RSB & 0xF] = ((byte1 << 8) | byte2);
 					}
-					else if ((RSB >= 0xA0 && RSB <= 0xBF)) {///idk :t
+					else if ((RSB >= 0xA0 && RSB <= 0xAF)) {///note aftertouch :t
+						//RSB = IO;
 						if (!(BoolSettings & SMP_BOOL_SETTINGS_IGNORE_ALL_BUT_TEMPOS_NOTES_AND_PITCH)) {
 							Track.push_back(RSB);///event type
-							Track.push_back(IO);///1st parameter
-							Track.push_back(file_input.get());///2nd parameter
+							Track.push_back(byte1 = IO);///1st parameter
+							Track.push_back(byte2 = file_input.get());///2nd parameter
 							EventCounter++;
 						}
 						else {
 							TickTranq = vlv;
-							for (int i = 0; i < (INT32)size; i++)
+							for (int i = 0; i < (INT32)deltatimesize; i++)
 								Track.pop_back();
-							file_input.get();
+							byte1 = IO;
+							byte2 = file_input.get();
 							continue;
 						}
+						CurrentNoteAftertouch[RSB & 0xF] = ((byte1 << 8) | byte2);
+					}
+					else if ((RSB >= 0xB0 && RSB <= 0xBF)) {///controller :t
+						//RSB = IO;
+						if (!(BoolSettings & SMP_BOOL_SETTINGS_IGNORE_ALL_BUT_TEMPOS_NOTES_AND_PITCH)) {
+							Track.push_back(RSB);///event type
+							Track.push_back(byte1 = IO);///1st parameter
+							Track.push_back(byte2 = file_input.get());///2nd parameter
+							EventCounter++;
+						}
+						else {
+							TickTranq = vlv;
+							for (int i = 0; i < (INT32)deltatimesize; i++)
+								Track.pop_back();
+							byte1 = IO;
+							byte2 = file_input.get();
+							continue;
+						}
+						CurrentController[RSB & 0xF] = ((byte1 << 8) | byte2);
 					}
 					else if ((RSB >= 0xC0 && RSB <= 0xCF)) {///program change
 						if (!(BoolSettings & SMP_BOOL_SETTINGS_IGNORE_ALL_BUT_TEMPOS_NOTES_AND_PITCH)) {
 							Track.push_back(RSB);///event type
-							if (BoolSettings & SMP_BOOL_SETTINGS_ALL_INSTRUMENTS_TO_PIANO)Track.push_back(file_input.get() & 0);///1st parameter
-							else Track.push_back(IO);///////////////////////////////aksjdhkahkfjhak
+							if (BoolSettings & SMP_BOOL_SETTINGS_ALL_INSTRUMENTS_TO_PIANO)
+								Track.push_back(byte1 = (file_input.get() & 0));///1st parameter
+							else 
+								Track.push_back(byte1 = IO);//
 							EventCounter++;
 						}
 						else {
 							TickTranq = vlv;
-							for (int i = 0; i < (INT32)size; i++)
+							for (int i = 0; i < (INT32)deltatimesize; i++)
 								Track.pop_back();
+							byte1 = IO;
 							continue;
 							//fi.get();///for its single parameter
 						}
+						CurrentProgram[RSB & 0xF] = byte1;
 					}
 					else if (RSB >= 0xD0 && RSB <= 0xDF) {///????:D
 						if (!(BoolSettings & SMP_BOOL_SETTINGS_IGNORE_ALL_BUT_TEMPOS_NOTES_AND_PITCH)) {
@@ -697,18 +795,24 @@ struct SingleMIDIReProcessor {
 						}
 						else {
 							TickTranq = vlv;
-							for (int i = 0; i < (INT32)size; i++)
+							for (int i = 0; i < (INT32)deltatimesize; i++)
 								Track.pop_back();
 							continue;
 						}
+						CurrentChannelAftertouch[RSB & 0xF] = IO;
 					}
 					else {
 						ErrorLine = "Track corruption. Pos:" + std::to_string(file_input.tellg());
 						//ThrowAlert_Error(ErrorLine);
 						RSB = 0;
 						DWORD T = 0;
+						BYTE TempIOByte;
+						CorruptData.clear();
+						CorruptData.push_back(IO);
 						while (T != 0x2FFF00 && file_input.good() && !file_input.eof()) {
-							T = ((T << 8) | file_input.get()) & 0xFFFFFF;
+							TempIOByte = file_input.get();
+							CorruptData.push_back(TempIOByte);
+							T = ((T << 8) | TempIOByte) & 0xFFFFFF;
 						}
 						Track.push_back(0x2F);
 						Track.push_back(0xFF);
@@ -731,7 +835,7 @@ struct SingleMIDIReProcessor {
 							TrackEnded = true;
 						}
 						else {
-							Track.insert(Track.end() - size - 3, UnLoad.begin(), UnLoad.end());
+							Track.insert(Track.end() - deltatimesize - 3, UnLoad.begin(), UnLoad.end());
 							UnLoad.clear();
 							file_output.put('M'); file_output.put('T'); file_output.put('r'); file_output.put('k');
 							file_output.put(Track.size() >> 24);///size of track

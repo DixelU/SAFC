@@ -111,9 +111,6 @@
     <ClInclude Include="SAFC_InnerModules\MCTM.h">
       <Filter>Файлы заголовков\MIDI Processing</Filter>
     </ClInclude>
-    <ClInclude Include="OR.h">
-      <Filter>Файлы заголовков\MIDI Processing</Filter>
-    </ClInclude>
     <ClInclude Include="SAFC_InnerModules\PLC.h">
       <Filter>Файлы заголовков\MIDI Processing</Filter>
     </ClInclude>
@@ -121,9 +118,6 @@
       <Filter>Файлы заголовков\MIDI Processing</Filter>
     </ClInclude>
     <ClInclude Include="SAFC_InnerModules\SMIC.h">
-      <Filter>Файлы заголовков\MIDI Processing</Filter>
-    </ClInclude>
-    <ClInclude Include="SAFC_InnerModules\SMRP.h">
       <Filter>Файлы заголовков\MIDI Processing</Filter>
     </ClInclude>
     <ClInclude Include="SAFCGUIF_Local\CATh.h">
@@ -143,6 +137,15 @@
     </ClInclude>
     <ClInclude Include="SAFGUIF\fonted_manip.h">
       <Filter>Файлы заголовков</Filter>
+    </ClInclude>
+    <ClInclude Include="BWMR.h">
+      <Filter>Файлы заголовков</Filter>
+    </ClInclude>
+    <ClInclude Include="SAFC_InnerModules\HTDBR.h">
+      <Filter>Файлы заголовков\MIDI Processing</Filter>
+    </ClInclude>
+    <ClInclude Include="SAFC_InnerModules\SMRP.h">
+      <Filter>Файлы заголовков\MIDI Processing</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

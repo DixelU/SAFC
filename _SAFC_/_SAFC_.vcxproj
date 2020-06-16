@@ -228,8 +228,8 @@
   <ItemGroup>
     <ClInclude Include="allocator.h" />
     <ClInclude Include="bbb_ffio.h" />
+    <ClInclude Include="BWMR.h" />
     <ClInclude Include="consts.h" />
-    <ClInclude Include="OR.h" />
     <ClInclude Include="resource.h" />
     <ClInclude Include="SAFCGUIF_Local\BAWC.h" />
     <ClInclude Include="SAFCGUIF_Local\CATh.h" />
@@ -238,6 +238,7 @@
     <ClInclude Include="SAFCGUIF_Local\PLC_Vol.h" />
     <ClInclude Include="SAFCGUIF_Local\SAFGUIF_L.h" />
     <ClInclude Include="SAFCGUIF_Local\SMRPVis.h" />
+    <ClInclude Include="SAFC_InnerModules\HTDBR.h" />
     <ClInclude Include="SAFC_InnerModules\CAT.h" />
     <ClInclude Include="SAFC_InnerModules\FMC.h" />
     <ClInclude Include="SAFC_InnerModules\MCTM.h" />
