@@ -1435,17 +1435,24 @@ void OnStart() {
 	}
 	GlobalMCTM = _Data.MCTM_Constructor();
 	printf("MCTM constructed\n");
+	std::chrono::steady_clock::time_point START = std::chrono::high_resolution_clock::now();
 	GlobalMCTM->ProcessMIDIs();
 	printf("MCTM Processing has begun\n");
 	MoveableWindow *MW;
 	INT32 ID = 0;
 	if (WH) {
-		Sleep(100);
+		std::this_thread::sleep_for(std::chrono::milliseconds(100));
 		MW = (*WH)["SMRP_CONTAINER"];
 		for (auto El : MW->WindowActivities) {
 			if (El.first.substr(0, 6) == "SMRP_C")
 				MW->DeleteUIElementByName(El.first);
 		}
+
+		auto ptr = (InputField*)(*MW)["TIMER"];
+		auto now = std::chrono::high_resolution_clock::now();
+		auto difference = std::chrono::duration_cast<std::chrono::duration<double>>(now - START);
+		ptr->SafeStringReplace(to_string(difference.count()) + " s");
+
 		for (ID = 0; ID < GlobalMCTM->Cur_Processing.size(); ID++) {
 			cout << ID << endl;
 			if (!GlobalMCTM->Cur_Processing[ID])
@@ -1460,7 +1467,7 @@ void OnStart() {
 				auto pVIS = ((SMRP_Vis*)(*MW)[SID]);
 				while (GlobalMCTM->Cur_Processing[ID]) {
 					pVIS->SMRP = GlobalMCTM->Cur_Processing[ID];
-					Sleep(100);
+					std::this_thread::sleep_for(std::chrono::milliseconds(50));
 				}
 				cout << ID << " Processing stopped" << endl;
 			}, GlobalMCTM, MW, ID);
@@ -1480,7 +1487,7 @@ void OnStart() {
 			(*MW)["RM"] = new BoolAndWORDChecker(100., 0., System_White, &(pMCTM->IntermediateRegularFlag), &(pMCTM->IRTrackCount));
 			thread ILO([](MIDICollectionThreadedMerger *pMCTM, SAFCData *SD, MoveableWindow *MW) {
 				while (!pMCTM->CheckRIMerge()) {
-					Sleep(100);
+					std::this_thread::sleep_for(std::chrono::milliseconds(50));
 				}
 				cout << "RI: Out from sleep!\n";
 				MW->DeleteUIElementByName("IM");
@@ -1492,19 +1499,23 @@ void OnStart() {
 		}, GlobalMCTM, &_Data, MW);
 		LO.detach();
 
-		thread FLO([](MIDICollectionThreadedMerger *pMCTM, MoveableWindow *MW) {
+		thread FLO([](MIDICollectionThreadedMerger *pMCTM, MoveableWindow *MW, std::chrono::steady_clock::time_point START) {
+			auto ptr = (InputField*)(*MW)["TIMER"];
 			while (!pMCTM->CompleteFlag) {
-				Sleep(100);
+				auto now = std::chrono::high_resolution_clock::now();
+				auto difference = std::chrono::duration_cast<std::chrono::duration<double>>(now - START);
+				ptr->SafeStringReplace(to_string(difference.count())+" s");
+				std::this_thread::sleep_for(std::chrono::milliseconds(50));
 			}
 			cout << "F: Out from sleep!!!\n";
 			MW->DeleteUIElementByName("FM");
 
-			WH->DisableWindow(WH->MainWindow_ID);
+			WH->DisableWindow(WH->MainWindow_ID); 
 			WH->MainWindow_ID = "MAIN";
 			//WH->DisableAllWindows();
 			WH->EnableWindow("MAIN");
 			//pMCTM->ResetEverything();
-		},GlobalMCTM,MW);
+		},GlobalMCTM,MW, START);
 		FLO.detach();
 
 	}
@@ -1698,6 +1709,8 @@ void Init() {///SetIsFontedVar
 
 	T = new MoveableWindow("SMRP Container", System_White, -300, 300, 600, 600, 0x000000CF, 0xFFFFFF7F);
 	
+	(*T)["TIMER"] = new InputField("0 s", 0, 195, 10, 50, System_White, NULL, 0, System_White, "Timer", 12, _Align::center, _Align::center, InputField::Type::Text);
+
 	(*WH)["SMRP_CONTAINER"] = T;
 
 	T = new MoveableWindow("MIDI Info Collector", System_Black, -150, 200, 300, 400, 0xFFFFFFCF, 0x7F7F7F7F);
