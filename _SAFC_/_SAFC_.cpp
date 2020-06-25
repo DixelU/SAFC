@@ -35,6 +35,7 @@
 
 #include "allocator.h"
 #include "WinReg.h"
+#include "resource.h"
 
 #include <stack>
 #include "bbb_ffio.h"
@@ -92,7 +93,7 @@ std::wstring ExtractDirectory(const std::wstring& path) {
 }
 bool SAFC_Update(const wstring& latest_release) {
 #ifndef __X64
-	constexpr wchar_t* archive_name = (wchar_t* const)L"SAFC32.7z";;
+	constexpr wchar_t* const archive_name = (wchar_t* const)L"SAFC32.7z";;
 #else
 	constexpr wchar_t* const archive_name = (wchar_t* const)L"SAFC64.7z";
 #endif
@@ -293,10 +294,10 @@ struct FileSettings {////per file settings
 	string AppearanceFilename,AppearancePath,FileNamePostfix;
 	WORD NewPPQN,OldPPQN,OldTrackNumber,MergeMultiplier;
 	INT16 GroupID;
-	INT32 NewTempo;
+	FLOAT NewTempo;
 	UINT64 FileSize;
-	INT64 Start, Length;
-	BIT IsMIDI, InplaceMergeEnabled;
+	INT64 SelectionStart, SelectionLength;
+	BIT IsMIDI, InplaceMergeEnabled, OffsetResetOnSelection;
 	CutAndTransposeKeys *KeyMap;
 	PLC<BYTE, BYTE> *VolumeMap;
 	PLC<WORD, WORD> *PitchBendMap;
@@ -325,8 +326,9 @@ struct FileSettings {////per file settings
 		KeyMap = NULL;
 		FileSize = FMIC.FileSize;
 		GroupID = NewTempo = 0;
-		Start = 0;
-		Length = -1;
+		OffsetResetOnSelection = false;
+		SelectionStart = 0;
+		SelectionLength = -1;
 		BoolSettings = DefaultBoolSettings;
 		FileNamePostfix = "_.mid";//_FILENAMEWITHEXTENSIONSTRING_.mid
 		WFileNamePostfix = L"_.mid";
@@ -340,7 +342,7 @@ struct FileSettings {////per file settings
 		SwitchBoolSetting(SMP_BoolSetting);
 	}
 	SingleMIDIReProcessor* BuildSMRP() {
-		SingleMIDIReProcessor *SMRP = new SingleMIDIReProcessor(this->Filename, this->BoolSettings, this->NewTempo, this->OffsetTicks, this->NewPPQN, this->GroupID, this->VolumeMap, this->PitchBendMap, this->KeyMap, this->WFileNamePostfix, this->InplaceMergeEnabled, this->FileSize, this->Start, this->Length);
+		SingleMIDIReProcessor *SMRP = new SingleMIDIReProcessor(this->Filename, this->BoolSettings, this->NewTempo, this->OffsetTicks, this->NewPPQN, this->GroupID, this->VolumeMap, this->PitchBendMap, this->KeyMap, this->WFileNamePostfix, this->InplaceMergeEnabled, this->FileSize, this->SelectionStart, this->SelectionLength);
 		SMRP->AppearanceFilename = this->AppearanceFilename;
 		return SMRP;
 	}
@@ -361,7 +363,7 @@ struct SAFCData {////overall settings and storing perfile settings....
 	wstring SaveDirectory;
 	WORD GlobalPPQN;
 	DWORD GlobalOffset;
-	DWORD GlobalNewTempo;
+	FLOAT GlobalNewTempo;
 	BIT IncrementalPPQN;
 	BIT InplaceMergeFlag;
 	WORD DetectedThreads;
@@ -419,7 +421,7 @@ struct SAFCData {////overall settings and storing perfile settings....
 			Files[i].OffsetTicks = Offset;
 		GlobalOffset = Offset;
 	}
-	void SetGlobalTempo(INT32 NewTempo) {
+	void SetGlobalTempo(FLOAT NewTempo) {
 		for (int i = 0; i < Files.size(); i++)
 			Files[i].NewTempo = NewTempo;
 		GlobalNewTempo = NewTempo;
@@ -603,13 +605,14 @@ namespace PropsAndSets {
 			currentID = ID;
 			auto PASWptr = (*WH)["SMPAS"];
 			((TextBox*)((*PASWptr)["FileName"]))->SafeStringReplace("..." + _Data[ID].AppearanceFilename);
+			((InputField*)((*PASWptr)["PPQN"]))->UpdateInputString();
 			((InputField*)((*PASWptr)["PPQN"]))->SafeStringReplace(to_string((_Data[ID].NewPPQN)? _Data[ID].NewPPQN : _Data[ID].OldPPQN));
 			((InputField*)((*PASWptr)["TEMPO"]))->SafeStringReplace(to_string(_Data[ID].NewTempo));
 			((InputField*)((*PASWptr)["OFFSET"]))->SafeStringReplace(to_string(_Data[ID].OffsetTicks));
 			((InputField*)((*PASWptr)["GROUPID"]))->SafeStringReplace(to_string(_Data[ID].GroupID));
 
-			((InputField*)((*PASWptr)["SELECT_START"]))->SafeStringReplace(to_string(_Data[ID].Start));
-			((InputField*)((*PASWptr)["SELECT_LENGTH"]))->SafeStringReplace(to_string(_Data[ID].Length));
+			((InputField*)((*PASWptr)["SELECT_START"]))->SafeStringReplace(to_string(_Data[ID].SelectionStart));
+			((InputField*)((*PASWptr)["SELECT_LENGTH"]))->SafeStringReplace(to_string(_Data[ID].SelectionLength));
 
 			((CheckBox*)((*PASWptr)["BOOL_REM_TRCKS"]))->State = _Data[ID].BoolSettings&_BoolSettings::remove_empty_tracks;
 			((CheckBox*)((*PASWptr)["BOOL_REM_REM"]))->State = _Data[ID].BoolSettings&_BoolSettings::remove_remnants;
@@ -878,8 +881,7 @@ namespace PropsAndSets {
 				InfoLine->SafeStringReplace("Integration has begun");
 
 				INT64 ticks_limit = 0;
-				if (UITicks->CurrentString.size())
-					ticks_limit = stoi(UITicks->CurrentString);
+				ticks_limit = stoi(UITicks->GetCurrentInput("0"));
 
 				INT64 prev_tick = 0, cur_tick = 0;
 				double cur_seconds = 0;
@@ -932,12 +934,9 @@ namespace PropsAndSets {
 			InfoLine->SafeStringReplace("Integration has begun");
 
 			double seconds_limit = 0;
-			if (UIMinutes->CurrentString.size())
-				seconds_limit += stoi(UIMinutes->CurrentString)*60.; 
-			if (UISeconds->CurrentString.size())
-				seconds_limit += stoi(UISeconds->CurrentString);
-			if (UIMilliseconds->CurrentString.size())
-				seconds_limit += stoi(UIMilliseconds->CurrentString)/1000.;
+			seconds_limit += stoi(UIMinutes->GetCurrentInput("0"))*60.;
+			seconds_limit += stoi(UISeconds->GetCurrentInput("0"));
+			seconds_limit += stoi(UIMilliseconds->GetCurrentInput("0"))/1000.;
 
 			INT64 prev_tick = 0, cur_tick = 0;
 			double cur_seconds = 0;
@@ -967,37 +966,6 @@ namespace PropsAndSets {
 			InfoLine->SafeStringReplace("Integration was succsessfully finished");
 		}
 	}
-	void OR() {
-		if (currentID > -1) {
-			/*auto Win = (*WH)["OR"];
-			OR::OverlapsRemover *_OR = new OR::OverlapsRemover(_Data[currentID].FileSize);
-			thread th([&](OR::OverlapsRemover *OR, DWORD id) {
-				OR->Load(_Data[id].Filename);
-			}, _OR, currentID);
-			th.detach();
-			thread _th([&](OR::OverlapsRemover *OR, MoveableWindow *MW) {
-				while (true) {
-					Sleep(33);
-					((TextBox*)(*MW)["TEXT"])->SafeStringReplace(OR->s_out);
-					if (OR->Finished)
-						break;
-				}
-				delete OR;
-				}, _OR, Win);
-			_th.detach();
-			Win->SafeWindowRename(
-				_Data[currentID].AppearanceFilename.size() <= 40 ? 
-					_Data[currentID].AppearanceFilename :
-					_Data[currentID].AppearanceFilename.substr(40)
-			);
-			WH->EnableWindow("OR");*/
-		}
-	}
-	void SR() {
-		if (currentID > -1) {
-
-		}
-	}
 	void OnApplySettings() {
 		if (currentID < 0 && currentID >= _Data.Files.size()) {
 			ThrowAlert_Error("You cannot apply current settings to file with ID " + to_string(currentID));
@@ -1007,25 +975,25 @@ namespace PropsAndSets {
 		string CurStr="";
 		auto SMPASptr = (*WH)["SMPAS"];
 
-		CurStr = ((InputField*)(*SMPASptr)["PPQN"])->CurrentString; 
+		CurStr = ((InputField*)(*SMPASptr)["PPQN"])->GetCurrentInput("0");
 		if (CurStr.size()) {
 			T = stoi(CurStr);
 			if (T)_Data[currentID].NewPPQN = T;
 		}
 
-		CurStr = ((InputField*)(*SMPASptr)["TEMPO"])->CurrentString;
+		CurStr = ((InputField*)(*SMPASptr)["TEMPO"])->GetCurrentInput("0");
 		if (CurStr.size()) {
-			T = stoi(CurStr);
-			_Data[currentID].NewTempo = T;
+			FLOAT F = stof(CurStr);
+			_Data[currentID].NewTempo = F;
 		}
 
-		CurStr = ((InputField*)(*SMPASptr)["OFFSET"])->CurrentString;
+		CurStr = ((InputField*)(*SMPASptr)["OFFSET"])->GetCurrentInput("0");
 		if (CurStr.size()) {
 			T = stoi(CurStr);
 			_Data[currentID].OffsetTicks = T;
 		}
 
-		CurStr = ((InputField*)(*SMPASptr)["GROUPID"])->CurrentString;
+		CurStr = ((InputField*)(*SMPASptr)["GROUPID"])->GetCurrentInput("0");
 		if (CurStr.size()) {
 			T = stoi(CurStr);
 			if (T != _Data[currentID].GroupID) {
@@ -1034,16 +1002,16 @@ namespace PropsAndSets {
 			}
 		}
 
-		CurStr = ((InputField*)(*SMPASptr)["SELECT_START"])->CurrentString;
+		CurStr = ((InputField*)(*SMPASptr)["SELECT_START"])->GetCurrentInput("0");
 		if (CurStr.size()) {
 			T = stoll(CurStr);
-			if (T) _Data[currentID].Start = T;
+			_Data[currentID].SelectionStart = T;
 		}
 
-		CurStr = ((InputField*)(*SMPASptr)["SELECT_LENGTH"])->CurrentString;
+		CurStr = ((InputField*)(*SMPASptr)["SELECT_LENGTH"])->GetCurrentInput("-1");
 		if (CurStr.size()) {
 			T = stoll(CurStr);
-			if (T) _Data[currentID].Length = T;
+			_Data[currentID].SelectionLength = T;
 		}
 
 		_Data[currentID].SetBoolSetting(_BoolSettings::remove_empty_tracks, (((CheckBox*)(*SMPASptr)["BOOL_REM_TRCKS"])->State));
@@ -1147,7 +1115,7 @@ namespace PropsAndSets {
 			if (VM->PLC_bb) {
 				auto IFDeg = ((InputField*)(*Wptr)["VM_DEGREE"]);
 				float Degree=1.;
-				if (IFDeg->CurrentString.size())Degree = stof(IFDeg->CurrentString);
+				Degree = stof(IFDeg->GetCurrentInput("0"));
 				VM->PLC_bb->ConversionMap.clear();
 				VM->PLC_bb->ConversionMap[127] = 127;
 				for (int i = 0; i < 128; i++) {
@@ -1240,7 +1208,7 @@ void OnRemAll() {
 
 void OnSubmitGlobalPPQN() {
 	auto pptr = (*WH)["PROMPT"];
-	string t = ((InputField*)(*pptr)["FLD"])->CurrentString;
+	string t = ((InputField*)(*pptr)["FLD"])->GetCurrentInput("0");
 	WORD PPQN = (t.size())?stoi(t):_Data.GlobalPPQN;
 	_Data.SetGlobalPPQN(PPQN, true);
 	WH->DisableWindow("PROMPT");
@@ -1252,7 +1220,7 @@ void OnGlobalPPQN() {
 
 void OnSubmitGlobalOffset() {
 	auto pptr = (*WH)["PROMPT"];
-	string t = ((InputField*)(*pptr)["FLD"])->CurrentString;
+	string t = ((InputField*)(*pptr)["FLD"])->GetCurrentInput("0");
 	DWORD O = (t.size()) ? stoi(t) : _Data.GlobalOffset;
 	_Data.SetGlobalOffset(O);
 	WH->DisableWindow("PROMPT");
@@ -1265,14 +1233,14 @@ void OnGlobalOffset() {
 
 void OnSubmitGlobalTempo() {
 	auto pptr = (*WH)["PROMPT"];
-	string t = ((InputField*)(*pptr)["FLD"])->CurrentString;
-	INT32 Tempo = (t.size()) ? stoi(t) : _Data.GlobalNewTempo;
+	string t = ((InputField*)(*pptr)["FLD"])->GetCurrentInput("0");
+	FLOAT Tempo = (t.size()) ? stof(t) : _Data.GlobalNewTempo;
 	_Data.SetGlobalTempo(Tempo);
 	WH->DisableWindow("PROMPT");
 	//PropsAndSets::OGPInMIDIList(PropsAndSets::currentID);
 }
 void OnGlobalTempo() {
-	WH->ThrowPrompt("Sets specific tempo value to every MIDI\n(in settings)", "Global S. Tempo\0", OnSubmitGlobalTempo, _Align::center, InputField::Type::WholeNumbers, to_string(_Data.GlobalNewTempo), 8);
+	WH->ThrowPrompt("Sets specific tempo value to every MIDI\n(in settings)", "Global S. Tempo\0", OnSubmitGlobalTempo, _Align::center, InputField::Type::FP_PositiveNumbers, to_string(_Data.GlobalNewTempo), 8);
 }
 
 void _OnResolve() {
@@ -1341,7 +1309,7 @@ namespace Settings {
 		auto pptr = (*WH)["APP_SETTINGS"];
 		string T;
 
-		T = ((InputField*)(*pptr)["AS_BCKGID"])->CurrentString;
+		T = ((InputField*)(*pptr)["AS_BCKGID"])->GetCurrentInput("0");
 		cout << "AS_BCKGID " << T << endl;
 		if (T.size()) {
 			ShaderMode = stoi(T); 
@@ -1349,14 +1317,14 @@ namespace Settings {
 		}
 		cout << ShaderMode << endl;
 
-		T = ((InputField*)(*pptr)["AS_ROT_ANGLE"])->CurrentString;
+		T = ((InputField*)(*pptr)["AS_ROT_ANGLE"])->GetCurrentInput("0");
 		cout << "ROT_ANGLE " << T << endl;
 		if (T.size() && !is_fonted) {
 			ROT_ANGLE = stof(T);
 		}
 		cout << ROT_ANGLE << endl;
 
-		T = ((InputField*)(*pptr)["AS_THREADS_COUNT"])->CurrentString;
+		T = ((InputField*)(*pptr)["AS_THREADS_COUNT"])->GetCurrentInput(to_string(_Data.DetectedThreads));
 		cout << "AS_THREADS_COUNT " << T << endl;
 		if (T.size()) {
 			_Data.DetectedThreads = stoi(T);
@@ -1614,7 +1582,7 @@ void Init() {///SetIsFontedVar
 	T = new MoveableWindow("Props. and sets.", System_White, -100, 100, 200, 200, 0x3F3F3FCF, 0x7F7F7F7F);
 	(*T)["FileName"] = new TextBox("_", System_White, 0, 88.5 - WindowHeapSize, 6, 200 - 1.5*WindowHeapSize, 7.5, 0, 0, 0, _Align::left, TextBox::VerticalOverflow::cut); 
 	(*T)["PPQN"] = new InputField(" ", -90 + WindowHeapSize, 75 - WindowHeapSize, 10, 25, System_White, PropsAndSets::PPQN, 0x007FFFFF, System_White, "PPQN is lesser than 65536.", 5, _Align::center, _Align::left, InputField::Type::NaturalNumbers);
-	(*T)["TEMPO"] = new InputField(" ", -45 + WindowHeapSize, 75 - WindowHeapSize, 10, 55, System_White, PropsAndSets::TEMPO, 0x007FFFFF, System_White, "Specific tempo override field", 7, _Align::center, _Align::left, InputField::Type::NaturalNumbers);
+	(*T)["TEMPO"] = new InputField(" ", -45 + WindowHeapSize, 75 - WindowHeapSize, 10, 55, System_White, PropsAndSets::TEMPO, 0x007FFFFF, System_White, "Specific tempo override field", 8, _Align::center, _Align::left, InputField::Type::FP_PositiveNumbers);
 	(*T)["OFFSET"] = new InputField(" ", 17.5 + WindowHeapSize, 75 - WindowHeapSize, 10, 60, System_White, PropsAndSets::OFFSET, 0x007FFFFF, System_White, "Offset from begining in ticks", 10, _Align::center, _Align::right, InputField::Type::NaturalNumbers);
 
 	(*T)["BOOL_REM_TRCKS"] = new CheckBox(-97.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, System_White, _Align::left, "Remove empty tracks");
@@ -1908,6 +1876,7 @@ int main(int argc, char ** argv) {
 	_wremove(L"_s");
 	_wremove(L"_f");
 	_wremove(L"_g");
+
 	ios_base::sync_with_stdio(false);//why not
 #ifdef _DEBUG 
 	ShowWindow(GetConsoleWindow(), SW_SHOW);

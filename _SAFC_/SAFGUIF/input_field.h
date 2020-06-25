@@ -65,6 +65,51 @@ struct InputField : HandleableUIPart {
 			return 0;
 		}
 	}
+	inline static bool CheckStringOnType(const std::string& String, InputField::Type CheckType) {
+		bool first_symb = true;
+		bool met_minus = false;
+		bool met_point = false;
+		for (const auto& ch : String) {
+			switch (CheckType) {
+			case InputField::NaturalNumbers:
+				if (!(ch >= '0' && ch <= '9'))
+					return false;
+				break;
+			case InputField::WholeNumbers:
+				if (!((ch >= '0' && ch <= '9'))) {
+					if (first_symb && !met_minus && ch == '-')
+						met_minus = true;
+					else
+						return false;
+				}
+				break;
+			case InputField::FP_PositiveNumbers:
+				if (!((ch >= '0' && ch <= '9'))) {
+					if (!met_point && ch == '.')
+						met_point = true;
+					else
+						return false;
+				}
+				break;
+			case InputField::FP_Any:
+				if (!((ch >= '0' && ch <= '9'))) {
+					if (!met_point && ch == '.')
+						met_point = true;
+					else if (first_symb && !met_minus && ch == '-')
+						met_minus = true;
+					else
+						return false;
+				}
+				break;
+			case InputField::Text:
+				break;
+			default:
+				break;
+			}
+			first_symb = false;
+		}
+		return !first_symb;
+	}
 	void SafeMove(float dx, float dy) {
 		Lock.lock();
 		STL->SafeMove(dx, dy);
@@ -88,7 +133,8 @@ struct InputField : HandleableUIPart {
 	}
 	void UpdateInputString(std::string NewString = "") {
 		Lock.lock();
-		if (NewString.size())CurrentString = "";
+		if (NewString.size())
+			CurrentString = "";
 		float x = Xpos - ((InputAlign == _Align::left) ? 1 : ((InputAlign == _Align::right) ? -1 : 0)) * (0.5f * Width - STL->_XUnitSize);
 		this->STL->SafeStringReplace((NewString.size()) ? NewString.substr(0, this->MaxChars) : CurrentString);
 		this->STL->SafeChangePosition_Argumented(InputAlign, x, Ypos);
@@ -129,6 +175,16 @@ struct InputField : HandleableUIPart {
 			CurrentString = "";
 		}
 		Lock.unlock();
+	}
+	std::string GetCurrentInput(std::string Replacement) {
+		if (InputField::CheckStringOnType(CurrentString, InputType))
+			return CurrentString;
+		if (STL && InputField::CheckStringOnType(STL->_CurrentText, InputType))
+			return STL->_CurrentText;
+		if (InputField::CheckStringOnType(Replacement, InputType))
+			return Replacement;
+		else
+			return "0";
 	}
 	void KeyboardHandler(char CH) {
 		Lock.lock();
@@ -189,7 +245,7 @@ struct InputField : HandleableUIPart {
 		Lock.lock();
 		CurrentString = NewString.substr(0, this->MaxChars);
 		UpdateInputString(NewString);
-		FirstInput = 1;
+		FirstInput = true;
 		Lock.unlock();
 	}
 	void Draw() override {
@@ -211,4 +267,4 @@ struct InputField : HandleableUIPart {
 	}
 };
 
-#endif // !SAFGUIF_IF
+#endif // !SAFGUIF_IF 

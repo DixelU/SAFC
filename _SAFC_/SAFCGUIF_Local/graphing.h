@@ -136,7 +136,7 @@ struct Graphing : HandleableUIPart {
 					glVertex2f(last_tempo_pos_x, last_tempo_pos_y);
 					glEnd();
 				}
-				STL_Info->SafeStringReplace(to_string(lesser_one->first) + " : " + to_string(lesser_one->second));
+				STL_Info->SafeStringReplace(std::to_string(lesser_one->first) + " : " + std::to_string(lesser_one->second));
 			}
 			else
 				if (STL_Info->_CurrentText != "-:-")

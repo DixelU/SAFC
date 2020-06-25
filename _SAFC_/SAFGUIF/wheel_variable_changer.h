@@ -83,8 +83,8 @@ struct WheelVariableChanger :HandleableUIPart {
 		SafeChangePosition(NewX + CW, NewY + CH);
 	}
 	void CheckupInputs() {
-		variable = stod(var_if->STL->_CurrentText);
-		factor = stod(fac_if->STL->_CurrentText);
+		variable = stod(var_if->GetCurrentInput("0"));
+		factor = stod(fac_if->GetCurrentInput("0"));
 	}
 	void KeyboardHandler(CHAR CH) override {
 		fac_if->KeyboardHandler(CH);

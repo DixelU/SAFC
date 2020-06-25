@@ -13,6 +13,40 @@
 #undef APSTUDIO_READONLY_SYMBOLS
 
 /////////////////////////////////////////////////////////////////////////////
+// Нейтральный resources
+
+#if !defined(AFX_RESOURCE_DLL) || defined(AFX_TARG_NEU)
+LANGUAGE LANG_NEUTRAL, SUBLANG_NEUTRAL
+#pragma code_page(1251)
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// DLL
+//
+
+#if defined(APSTUDIO_INVOKED) || defined(WIN32)
+#if defined(APSTUDIO_INVOKED)
+FREEGLUT32$(WIN32)      DLL                     "freeglut.dll"
+
+#else
+FREEGLUT32              DLL                     "freeglut.dll"
+
+#endif
+#endif
+#if defined(APSTUDIO_INVOKED) || defined(__X64)
+#if defined(APSTUDIO_INVOKED)
+FREEGLUT64$(__X64)      DLL                     "lib_x64\\freeglut.dll"
+
+#else
+FREEGLUT64              DLL                     "lib_x64\\freeglut.dll"
+
+#endif
+#endif
+#endif    // Нейтральный resources
+/////////////////////////////////////////////////////////////////////////////
+
+
+/////////////////////////////////////////////////////////////////////////////
 // Русский (Россия) resources
 
 #if !defined(AFX_RESOURCE_DLL) || defined(AFX_TARG_RUS)
@@ -63,8 +97,8 @@ END
 //
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 1,2,1,4
- PRODUCTVERSION 1,2,1,4
+ FILEVERSION 1,2,2,0
+ PRODUCTVERSION 1,2,2,0
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
  FILEFLAGS 0x1L
@@ -81,12 +115,12 @@ BEGIN
         BEGIN
             VALUE "CompanyName", "SAF"
             VALUE "FileDescription", "SAF Converter"
-            VALUE "FileVersion", "1.2.1.4"
+            VALUE "FileVersion", "1.2.2.0"
             VALUE "InternalName", "SAFC"
             VALUE "LegalCopyright", "Copyright (C) 2019"
             VALUE "OriginalFilename", "Simple AF Converter"
             VALUE "ProductName", "SAFC"
-            VALUE "ProductVersion", "1.2.1.4"
+            VALUE "ProductVersion", "1.2.2.0"
         END
     END
     BLOCK "VarFileInfo"

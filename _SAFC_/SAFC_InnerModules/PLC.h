@@ -23,7 +23,7 @@ struct PLC {
 	}
 	typevalue AskForValue(typekey key) {
 
-		typename map<typekey, typevalue>::iterator L, U;
+		typename std::map<typekey, typevalue>::iterator L, U;
 		if (ConversionMap.empty())return typevalue(key);
 		if (ConversionMap.size() == 1)return (*ConversionMap.begin()).second;
 		if ((L = ConversionMap.find(key)) != ConversionMap.end()) {
