@@ -979,6 +979,7 @@ namespace PropsAndSets {
 		if (CurStr.size()) {
 			T = stoi(CurStr);
 			if (T)_Data[currentID].NewPPQN = T;
+			else _Data[currentID].NewPPQN = _Data.GlobalPPQN;
 		}
 
 		CurStr = ((InputField*)(*SMPASptr)["TEMPO"])->GetCurrentInput("0");

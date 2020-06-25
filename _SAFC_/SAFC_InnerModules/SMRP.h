@@ -160,7 +160,7 @@ struct SingleMIDIReProcessor {
 		Processing = 0x1;
 		Track.reserve(10000000);//just in case...
 		if (NewTempo > 3.5763f) {
-			FLOAT LNT = 60000000 / NewTempo;
+			FLOAT LNT = 60000000.f / NewTempo;
 			Tempo1 = (((DWORD)LNT) >> 16);
 			Tempo2 = ((((DWORD)LNT) >> 8) & 0xFF);
 			Tempo3 = (((DWORD)LNT) & 0xFF);
@@ -221,7 +221,7 @@ struct SingleMIDIReProcessor {
 			INT64 TickTranq = 0;
 			TrackEnded = false;
 
-			DeltaTimeTranq = GlobalOffset * PPQNIncreaseAmount;
+			DeltaTimeTranq = GlobalOffset;
 			///Parsing events
 			while (file_input.good() && !file_input.eof()) {
 				if (KeyConverter) {//?
