@@ -2,6 +2,8 @@
 #ifndef SAF_MRWF
 #define SAF_MRWF 
 
+#include <Windows.h>
+
 #include <algorithm>
 #include <iostream>
 #include <cassert>
@@ -107,6 +109,88 @@ namespace mrwf {
 				break;
 			}
 			return { true , inp_value };
+		}
+	};
+
+	template<typename data_type>
+	struct check_node {
+		enum class check_type { always, equals, totally_equals, lesser, bigger, never };
+		check_type ctype;
+		data_type root_value;
+		check_node(data_type root_value = data_type(), check_type ctype = check_type::always) : root_value(root_value), ctype(ctype) {}
+		inline bool operator()(const data_type& inp_value) const {
+			switch (ctype) {
+			case check_type::always:
+				break;
+			case check_type::equals:
+				if (!(root_value < inp_value && inp_value < root_value))
+					return false;
+				break;
+			case check_type::totally_equals:
+				if (!(root_value == inp_value))
+					return false;
+				break;
+			case check_type::lesser:
+				if (!(inp_value < root_value))
+					return false;
+				break;
+			case check_type::bigger:
+				if (!(root_value < inp_value))
+					return false;
+				break;
+			default:
+				return false;
+				break;
+			}
+			return true;
+		}
+	};
+
+	template<typename data_type>
+	struct check_expr {
+		std::vector<std::vector<check_node>> expr; // DNF // 
+		check_expr(const std::vector<std::vector<check_node>>& expr) : expr(expr) {}
+		inline bool operator()(const data_type& inp_value) const {
+			bool flag = false;
+			for (const auto& v : expr) {
+				bool co_check = true;
+				for (const auto& el : v) 
+					co_check &= v(inp_type);
+				flag |= co_check;
+			}
+		}
+	};
+
+	template<typename data_type, size_t size>
+	struct multivalued_intersect_modifier {
+		enum class type { replace, add, mult };
+		type mtype;
+		data_type data;
+		check_expr check;
+		size_t check_ptr;
+		size_t value_ptr;
+		bool continueable;
+		multivalued_intersect_modifier(const check_expr& check, const data_type& data, size_t check_ptr, size_t value_ptr, bool continueable = false) :
+			data(data), check(check), check_ptr(check_ptr), value_ptr(value_ptr) { }
+		inline bool operator()(const std::array<data_type&, size>& arr) const {
+			if (check(arr[check_ptr])) {
+				switch (m_type) {
+				case type::add:
+					arr[value_ptr] += modifier;
+					break;
+				case type::multiply:
+					arr[value_ptr] *= modifier;
+					break;
+				case type::replace:
+					arr[value_ptr] = modifier;
+					break;
+				default:
+					break;
+				}
+				return true;
+			}
+			else 
+				return continueable;
 		}
 	};
 
@@ -775,8 +859,22 @@ namespace mrwf {
 			locker.lock();
 			if (modifiers->empty())
 				return;
-			for (const auto& ev : events_list) 
+			for (const auto& ev : events_list)
 				ev->is_enabled() = modifiers->apply((midi_event*)ev);
+			for (const auto& ev : noteon_ptrs)
+				ev->is_enabled() = modifiers->apply((noteon*)ev);
+			for (const auto& ev : noteoff_ptrs)
+				ev->is_enabled() = modifiers->apply((noteoff*)ev);
+			for (const auto& ev : note_aftertouch_ptrs)
+				ev->is_enabled() = modifiers->apply((note_aftertouch*)ev);
+			for (const auto& ev : note_aftertouch_ptrs)
+				ev->is_enabled() = modifiers->apply((note_aftertouch*)ev);
+			for (const auto& ev : note_aftertouch_ptrs)
+				ev->is_enabled() = modifiers->apply((note_aftertouch*)ev);
+			for (const auto& ev : note_aftertouch_ptrs)
+				ev->is_enabled() = modifiers->apply((note_aftertouch*)ev);
+			for (const auto& ev : note_aftertouch_ptrs)
+				ev->is_enabled() = modifiers->apply((note_aftertouch*)ev);
 			
 			
 			locker.unlock();

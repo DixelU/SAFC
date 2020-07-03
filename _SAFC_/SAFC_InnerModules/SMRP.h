@@ -516,10 +516,7 @@ struct SingleMIDIReProcessor {
 						else if (!(BoolSettingsBuffer & SMP_BOOL_SETTINGS_IGNORE_NOTES)) {
 							for (size_t k = 0; k < 4096; k++) {//in case of having not enough note offs
 								for (int i = 0; i < CurHolded[k]; i++) {
-									if (PushFlag)
-										UnLoad.push_back(0);
-									else
-										PushFlag = true;
+									UnLoad.push_back(0);
 									UnLoad.push_back((k & 0xF) | 0x80);
 									UnLoad.push_back(k >> 4);
 									UnLoad.push_back(0x40);
