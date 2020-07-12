@@ -19,5 +19,6 @@
 #include "moveable_window.h"
 #include "stls_presets.h"
 #include "windows_handler.h"
+#include "editbox.h"
 
 #endif // !SAFGUIF_INCLUDE

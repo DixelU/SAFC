@@ -182,7 +182,8 @@ struct TextBox : HandleableUIPart {
 			glVertex2f(Xpos - (Width * 0.5f), Ypos - (0.5f * Height));
 			glEnd();
 		}
-		for (int i = 0; i < Lines.size(); i++) Lines[i]->Draw();
+		for (int i = 0; i < Lines.size(); i++) 
+			Lines[i]->Draw();
 		Lock.unlock();
 	}
 	inline DWORD TellType() override {

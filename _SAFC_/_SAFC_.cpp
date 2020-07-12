@@ -1711,7 +1711,15 @@ void Init() {///SetIsFontedVar
 
 	(*WH)["SMIC"] = T;
 
+	T = new MoveableWindow("Test", System_White, -150, 150, 300, 300, 0x0000000F, 0x7F7F7F7F, 0x000000FF);
+
+	(*T)["BRUH"] = new EditBox("bruh\nbruhst\nlaksdlaklsdkl\n2134093840if04", System_White, 0, 0, 200, 200, 10, 0, 0xFFFFFFFF, 2);
+
+	(*WH)["BRUH"] = T;
+
+
 	WH->EnableWindow("MAIN");
+	//WH->EnableWindow("BRUH");
 	//WH->EnableWindow("SMIC");
 	//WH->EnableWindow("OR");
 	//WH->EnableWindow("SMRP_CONTAINER");
@@ -1859,12 +1867,24 @@ void mDrag(int x, int y) {
 	mMotion(x, y);
 }
 void mSpecialKey(int Key,int x, int y) {
-	//cout << "Spec: " << Key << endl;
-	if (Key == GLUT_KEY_DOWN) {
+	auto modif = glutGetModifiers();
+	if (!(modif & GLUT_ACTIVE_ALT)) {
+		switch (Key) {
+		case GLUT_KEY_DOWN:		if (WH)WH->KeyboardHandler(1);
+			break;
+		case GLUT_KEY_UP:		if (WH)WH->KeyboardHandler(2);
+			break;
+		case GLUT_KEY_LEFT:		if (WH)WH->KeyboardHandler(3);
+			break;
+		case GLUT_KEY_RIGHT:	if (WH)WH->KeyboardHandler(4);
+			break;
+		}
+	}
+	if (modif == GLUT_ACTIVE_ALT && Key == GLUT_KEY_DOWN) {
 		RANGE *= 1.1;
 		OnResize(WindX, WindY);
 	}
-	else if(Key == GLUT_KEY_UP){
+	else if(modif == GLUT_ACTIVE_ALT && Key == GLUT_KEY_UP) {
 		RANGE /= 1.1;
 		OnResize(WindX, WindY);
 	}

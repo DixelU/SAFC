@@ -868,13 +868,13 @@ namespace mrwf {
 			for (const auto& ev : note_aftertouch_ptrs)
 				ev->is_enabled() = modifiers->apply((note_aftertouch*)ev);
 			for (const auto& ev : note_aftertouch_ptrs)
-				ev->is_enabled() = modifiers->apply((note_aftertouch*)ev);
+				ev->is_enabled() = modifiers->apply((controller*)ev);
 			for (const auto& ev : note_aftertouch_ptrs)
-				ev->is_enabled() = modifiers->apply((note_aftertouch*)ev);
+				ev->is_enabled() = modifiers->apply((channel_aftertouch*)ev);
 			for (const auto& ev : note_aftertouch_ptrs)
-				ev->is_enabled() = modifiers->apply((note_aftertouch*)ev);
+				ev->is_enabled() = modifiers->apply((program_change*)ev);
 			for (const auto& ev : note_aftertouch_ptrs)
-				ev->is_enabled() = modifiers->apply((note_aftertouch*)ev);
+				ev->is_enabled() = modifiers->apply((pitch_change*)ev);
 			
 			
 			locker.unlock();

@@ -6,6 +6,7 @@
 #define TT_SELPROPLIST 0b10000
 #define TT_CHECKBOX 0b100000
 #define TT_GRAPH 0b1000000
+#define TT_EDITBOX 0b10000000
 
 enum _TellType {
 	unspecified = TT_UNSPECIFIED,
@@ -15,7 +16,8 @@ enum _TellType {
 	textbox = TT_TEXTBOX,
 	selectable_properted_list = TT_SELPROPLIST,
 	checkbox = TT_CHECKBOX,
-	graph = TT_GRAPH
+	graph = TT_GRAPH,
+	editbox = TT_EDITBOX
 };
 
 #define GLOBAL_LEFT 0b0001

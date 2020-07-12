@@ -147,6 +147,12 @@
     <ClInclude Include="SAFC_InnerModules\SMRP.h">
       <Filter>Файлы заголовков\MIDI Processing</Filter>
     </ClInclude>
+    <ClInclude Include="SAFGUIF\editbox.h">
+      <Filter>Файлы заголовков\SAFGUIF</Filter>
+    </ClInclude>
+    <ClInclude Include="extended_tinyexpr.h">
+      <Filter>Файлы заголовков</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="_SAFC_.cpp">

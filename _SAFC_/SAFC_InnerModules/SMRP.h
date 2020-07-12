@@ -146,7 +146,7 @@ struct SingleMIDIReProcessor {
 		};
 		for (auto& v : CurHolded)
 			v = 0;
-		bool ActiveSelection = SelectionLength > 0;
+		const bool ActiveSelection = SelectionLength > 0;
 		DWORD EventCounter = 0, Header/*,MultitaskTVariable*/, UnholdedCount = 0;
 		const DWORD BoolSettingsBuffer = BoolSettings;
 		const DWORD BSB_IgnoreAllSetting = SMP_BOOL_SETTINGS_IGNORE_TEMPOS | SMP_BOOL_SETTINGS_IGNORE_ALL_BUT_TEMPOS_NOTES_AND_PITCH | SMP_BOOL_SETTINGS_IGNORE_PITCHES | SMP_BOOL_SETTINGS_IGNORE_NOTES;
@@ -272,8 +272,6 @@ struct SingleMIDIReProcessor {
 								break;
 							}
 						}
-						if (EscapeFlag)
-							goto EscapeFromEntered;
 
 						INT64 tStartTick = L_VLV - (CurTick - (SelectionStart));
 						DWORD tSZ = 0;
@@ -284,6 +282,9 @@ struct SingleMIDIReProcessor {
 						if (ResetDeltatimesOutsideOfTheRange)
 							tStartTick = 0;
 
+						if (EscapeFlag) {
+							goto EscapeFromEntered;
+						}
 						tSZ = push_vlv(tStartTick, Track);
 
 						if (CurrentTempo && !(BoolSettingsBuffer & SMP_BOOL_SETTINGS_IGNORE_TEMPOS)) {
@@ -513,7 +514,7 @@ struct SingleMIDIReProcessor {
 							if (!PushFlag)
 								UnLoad.resize(UnloadSize);
 						}
-						else if (!(BoolSettingsBuffer & SMP_BOOL_SETTINGS_IGNORE_NOTES)) {
+						if (!(BoolSettingsBuffer & SMP_BOOL_SETTINGS_IGNORE_NOTES)) {
 							for (size_t k = 0; k < 4096; k++) {//in case of having not enough note offs
 								for (int i = 0; i < CurHolded[k]; i++) {
 									UnLoad.push_back(0);

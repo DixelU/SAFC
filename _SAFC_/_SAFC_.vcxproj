@@ -234,6 +234,7 @@
     <ClInclude Include="bbb_ffio.h" />
     <ClInclude Include="BWMR.h" />
     <ClInclude Include="consts.h" />
+    <ClInclude Include="extended_tinyexpr.h" />
     <ClInclude Include="resource.h" />
     <ClInclude Include="SAFCGUIF_Local\BAWC.h" />
     <ClInclude Include="SAFCGUIF_Local\CATh.h" />
@@ -254,6 +255,7 @@
     <ClInclude Include="SAFGUIF\button_settings.h" />
     <ClInclude Include="SAFGUIF\charmap.h" />
     <ClInclude Include="SAFGUIF\checkbox.h" />
+    <ClInclude Include="SAFGUIF\editbox.h" />
     <ClInclude Include="SAFGUIF\fonted_manip.h" />
     <ClInclude Include="SAFGUIF\handleable_ui_part.h" />
     <ClInclude Include="SAFGUIF\header_utils.h" />
