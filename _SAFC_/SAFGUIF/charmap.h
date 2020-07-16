@@ -20,8 +20,8 @@ void InitASCIIMap() {
 		ASCII['%'] = "7487 3623 91";
 		ASCII['&'] = "37954126";
 		ASCII['\''] = "85";
-		ASCII['('] = "842";
-		ASCII[')'] = "862";
+		ASCII['('] = "842~";
+		ASCII[')'] = "862~";
 		ASCII['*'] = "67 58 94~";
 		ASCII['+'] = "46 82";
 		ASCII[','] = "15~";
@@ -71,9 +71,9 @@ void InitASCIIMap() {
 		ASCII['X'] = "73 91";
 		ASCII['Y'] = "752 95";
 		ASCII['Z'] = "7913 46";
-		ASCII['['] = "9823";
+		ASCII['['] = "9823~";
 		ASCII['\\'] = "72";
-		ASCII[']'] = "7821";
+		ASCII[']'] = "7821~";
 		ASCII['^'] = "486";
 		ASCII['_'] = "13";
 		ASCII['`'] = "75";
@@ -103,7 +103,7 @@ void InitASCIIMap() {
 		ASCII['x'] = "16 34";
 		ASCII['y'] = "75 91#";
 		ASCII['z'] = "4613";
-		ASCII['{'] = "9854523";
+		ASCII['{'] = "9854523~";
 		ASCII['|'] = "82";
 		ASCII['}'] = "7856521";
 		ASCII['~'] = "4859~";

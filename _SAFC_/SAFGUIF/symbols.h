@@ -81,6 +81,8 @@ struct DottedSymbol {
 				break;
 			}
 		}
+		if (is_fonted)
+			VerticalFlag = 0;
 		glColor4ub(R, G, B, A);
 		glLineWidth(LineWidth);
 		glPointSize(LineWidth);
@@ -100,7 +102,8 @@ struct DottedSymbol {
 		for (int i = 0; i < PointPlacement.size(); ++i)
 			glVertex2f(Xpos + Points[PointPlacement[i] - '1'].x, Ypos + Points[PointPlacement[i] - '1'].y + VerticalFlag);
 		glEnd();
-		if (BACK)RenderWay.back() = BACK;
+		if (BACK)
+			RenderWay.back() = BACK;
 	}
 	void SafePositionChange(float NewXPos, float NewYPos) {
 		SafeCharMove(NewXPos - Xpos, NewYPos - Ypos);
@@ -310,10 +313,8 @@ struct BiColoredDottedSymbol : DottedSymbol {
 				break;
 			}
 		}
-		if (RenderWay.back() == '#') {
-			RenderWay.back() = ' ';
-			VerticalFlag = Points->y - Points[4].y;
-		}
+		if (is_fonted)
+			VerticalFlag = 0;
 		BYTE IO;
 		glLineWidth(LineWidth);
 		glPointSize(LineWidth);
@@ -337,7 +338,8 @@ struct BiColoredDottedSymbol : DottedSymbol {
 			glVertex2f(Xpos + Points[IO].x, Ypos + Points[IO].y + VerticalFlag);
 		}
 		glEnd();
-		if (BACK)RenderWay.back() = BACK;
+		if (BACK)
+			RenderWay.back() = BACK;
 	}
 };
 

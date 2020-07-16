@@ -1,4 +1,5 @@
-﻿#include <algorithm>
+﻿#define NOMINMAX
+#include <algorithm>
 #include <cstdlib>
 #include <wchar.h>
 #include <io.h>
@@ -24,6 +25,7 @@
 #include <deque>
 #include <array>
 #include <thread>
+#include <boost/algorithm/string.hpp>
 
 #include <WinSock2.h>
 #include <WinInet.h>
@@ -51,7 +53,7 @@
 #include "SAFC_InnerModules/SAFC_IM.h"
 #include "SAFCGUIF_Local/SAFGUIF_L.h"
 
-using namespace std;
+//using namespace std;
 
 std::tuple<WORD, WORD, WORD, WORD> ___GetCurFileVersion() {
 	constexpr int
@@ -91,7 +93,7 @@ std::wstring ExtractDirectory(const std::wstring& path) {
 	constexpr wchar_t delim = (L"\\")[0];
 	return path.substr(0, path.find_last_of(delim) + 1);
 }
-bool SAFC_Update(const wstring& latest_release) {
+bool SAFC_Update(const std::wstring& latest_release) {
 #ifndef __X64
 	constexpr wchar_t* const archive_name = (wchar_t* const)L"SAFC32.7z";;
 #else
@@ -101,14 +103,14 @@ bool SAFC_Update(const wstring& latest_release) {
 	bool flag = false;
 	//GetCurrentDirectoryW(MAX_PATH, current_file_path);
 	GetModuleFileNameW(NULL, current_file_path, MAX_PATH);
-	wstring executablepath = current_file_path;
-	wstring filename = ExtractDirectory(current_file_path);
-	wstring pathway = filename;
+	std::wstring executablepath = current_file_path;
+	std::wstring filename = ExtractDirectory(current_file_path);
+	std::wstring pathway = filename;
 	filename += L"update.7z";
 	//wsprintfW(current_file_path, L"%S%S", filename.c_str(), L"update.7z\0");
-	wstring link = L"https://github.com/DixelU/SAFC/releases/download/" + latest_release + L"/" + archive_name;
+	std::wstring link = L"https://github.com/DixelU/SAFC/releases/download/" + latest_release + L"/" + archive_name;
 	HRESULT co_res = URLDownloadToFileW(NULL, link.c_str(), filename.c_str(), 0, NULL);
-	const vector<pair<wstring, wstring>> unpack_lines = {
+	const std::vector<std::pair<std::wstring, std::wstring>> unpack_lines = {
 		{L"C:\\Program Files\\7-Zip\\7z.exe", (L"x -y \"" + filename + L"\"")},
 		{L"C:\\Program Files (x86)\\7-Zip\\7z.exe", (L"x -y \"" + filename + L"\"")},
 		{L"C:\\Program Files\\WinRAR\\WinRAR.exe", (L"x -y \"" + filename + L"\"")},
@@ -117,19 +119,19 @@ bool SAFC_Update(const wstring& latest_release) {
 	if (co_res == S_OK) { 
 		errno = 0;
 		_wrename((pathway + L"SAFC.exe").c_str(), (pathway + L"_s").c_str());
-		cout << strerror(errno) << endl;
+		std::cout << strerror(errno) << std::endl;
 		_wrename((pathway + L"freeglut.dll").c_str(), (pathway + L"_f").c_str());
-		cout << strerror(errno) << endl;
+		std::cout << strerror(errno) << std::endl;
 		//_wrename((pathway + L"glew32.dll").c_str(), (pathway + L"_g").c_str()); 
 		//cout << strerror(errno) << endl; 
 		//wcout << pathway << endl;
 		if (!errno) {
-			wstring dir = pathway.substr(0, pathway.length() - 1);
+			std::wstring dir = pathway.substr(0, pathway.length() - 1);
 			for (auto& line : unpack_lines) {
-				wstring t = (L"\"" + line.first + L"\" " + line.second);
+				std::wstring t = (L"\"" + line.first + L"\" " + line.second);
 
 				if (_waccess(line.first.c_str(), 0)) {
-					wcout << L"Unable to find: " << line.first << endl;
+					std::wcout << L"Unable to find: " << line.first << std::endl;
 					continue;
 				}
 
@@ -151,7 +153,7 @@ bool SAFC_Update(const wstring& latest_release) {
 					flag = true;
 					break;
 				}
-				wcout << L"Failed: " << t << endl;
+				std::wcout << L"Failed: " << t << std::endl;
 			}
 			if (!flag) {
 				ThrowAlert_Error("Extraction:\nAutoupdate requres latest 7-Zip or WinRAR installed to default directory.\n");
@@ -161,7 +163,7 @@ bool SAFC_Update(const wstring& latest_release) {
 			}
 		}
 		else {
-			ThrowAlert_Error(string("Autoudate error:\n") + strerror(errno));
+			ThrowAlert_Error(std::string("Autoudate error:\n") + strerror(errno));
 			_wrename((pathway + L"_s").c_str(), (pathway + L"SAFC.exe").c_str());
 			_wrename((pathway + L"_f").c_str(), (pathway + L"freeglut.dll").c_str());
 			_wrename((pathway + L"_g").c_str(), (pathway + L"glew32.dll").c_str());
@@ -169,11 +171,11 @@ bool SAFC_Update(const wstring& latest_release) {
 		_wremove(filename.c_str());
 	}
 	else
-		ThrowAlert_Error("Autoupdate error: #" + to_string(co_res));
+		ThrowAlert_Error("Autoupdate error: #" + std::to_string(co_res));
 	return flag;
 }
 void SAFC_VersionCheck() {
-	thread version_checker([]() {
+	std::thread version_checker([]() {
 		bool flag = false;
 		_wremove(L"_s");
 		_wremove(L"_f");
@@ -181,15 +183,15 @@ void SAFC_VersionCheck() {
 		constexpr wchar_t* SAFC_tags_link = (wchar_t* const)L"https://api.github.com/repos/DixelU/SAFC/tags";
 		wchar_t current_file_path[MAX_PATH];
 		GetModuleFileNameW(NULL, current_file_path, MAX_PATH);
-		wstring executablepath = current_file_path;
-		wstring filename = ExtractDirectory(current_file_path);
-		wstring pathway = filename;
+		std::wstring executablepath = current_file_path;
+		std::wstring filename = ExtractDirectory(current_file_path);
+		std::wstring pathway = filename;
 		filename += L"tags.json";
 		HRESULT res = URLDownloadToFileW(NULL, SAFC_tags_link, filename.c_str(), 0, NULL);
 		if (res == S_OK) {
 			auto [maj, min, ver, build] = ___GetCurFileVersion();
-			ifstream input(filename);
-			string temp_buffer;
+			std::ifstream input(filename);
+			std::string temp_buffer;
 			std::getline(input, temp_buffer);
 			input.close();
 			auto JSON_Value = JSON::Parse(temp_buffer.c_str());
@@ -200,32 +202,30 @@ void SAFC_VersionCheck() {
 					if (FirstElement->AsObject().end() != Name &&
 						Name->second->IsString()) {
 						auto git_latest_version = Name->second->AsString();
-						std::wcout << L"Git latest version: " << git_latest_version << endl;
+						std::wcout << L"Git latest version: " << git_latest_version << std::endl;
 						bool was_digit = false;
 						WORD version_partied[4] = {0,0,0,0};
 						int cur_index = -1;
 						if (git_latest_version.size() <= 100) {
-							for (auto& ch : git_latest_version) {
-								if (isdigit(ch)) {
-									if (!was_digit) {
-										was_digit = true;
-										if (cur_index < 4)
-											cur_index++;
-										else
-											break;
-									}
-									version_partied[cur_index] *= 10;
-									version_partied[cur_index] += (ch - '0') % 10;
+							std::vector<std::string> ans;
+							boost::algorithm::split(ans, git_latest_version, boost::is_any_of("."));
+							int index = 0;
+							for (auto& num_val : ans) {
+								try {
+									version_partied[index] = std::stoi(num_val);
 								}
-								else {
-									was_digit = false;
+								catch (...) {
+									break;
 								}
+								if (index == 3)
+									break;
+								index++;
 							}
 							if (maj < version_partied[0] ||
 								maj == version_partied[0] && min < version_partied[1] ||
 								maj == version_partied[0] && min == version_partied[1] && ver < version_partied[2] ||
 								maj == version_partied[0] && min == version_partied[1] && ver == version_partied[2] && build < version_partied[3]) {
-								ThrowAlert_Warning("Update found! The app might restart soon...\nUpdate: " + string(git_latest_version.begin(), git_latest_version.end()));
+								ThrowAlert_Warning("Update found! The app might restart soon...\nUpdate: " + std::string(git_latest_version.begin(), git_latest_version.end()));
 								flag = SAFC_Update(git_latest_version);
 								if (flag)
 									ThrowAlert_Warning("SAFC will restart in 3 seconds..."); 
@@ -289,9 +289,9 @@ ButtonSettings
 DWORD DefaultBoolSettings = _BoolSettings::remove_remnants | /*_BoolSettings::remove_empty_tracks*/ 0 | _BoolSettings::all_instruments_to_piano;
 
 struct FileSettings {////per file settings
-	wstring Filename;
-	wstring PostprocessedFile_Name, WFileNamePostfix;;
-	string AppearanceFilename,AppearancePath,FileNamePostfix;
+	std::wstring Filename;
+	std::wstring PostprocessedFile_Name, WFileNamePostfix;;
+	std::string AppearanceFilename,AppearancePath,FileNamePostfix;
 	WORD NewPPQN,OldPPQN,OldTrackNumber,MergeMultiplier;
 	INT16 GroupID;
 	FLOAT NewTempo;
@@ -307,7 +307,7 @@ struct FileSettings {////per file settings
 		if (VolumeMap)delete VolumeMap;
 		if (PitchBendMap)delete PitchBendMap;
 	}
-	FileSettings(wstring Filename) {
+	FileSettings(const std::wstring& Filename) {
 		this->Filename = Filename;
 		AppearanceFilename = AppearancePath = "";
 		auto pos = Filename.rfind('\\');
@@ -316,7 +316,7 @@ struct FileSettings {////per file settings
 		for (int i = 0; i < Filename.size(); i++) 
 			AppearancePath.push_back((char)(Filename[i] & 0xFF));
 		//cout << AppearancePath << " ::\n";
-		FastMIDIInfoCollector FMIC(Filename);
+		FastMIDIChecker FMIC(Filename);
 		this->IsMIDI = FMIC.IsAcssessable && FMIC.IsMIDI;
 		OldPPQN = FMIC.PPQN;
 		OldTrackNumber = FMIC.ExpectedTrackNumber;
@@ -359,8 +359,8 @@ struct _SFD_RSP {
 	}
 };
 struct SAFCData {////overall settings and storing perfile settings....
-	vector<FileSettings> Files;
-	wstring SaveDirectory;
+	std::vector<FileSettings> Files;
+	std::wstring SaveDirectory;
 	WORD GlobalPPQN;
 	DWORD GlobalOffset;
 	FLOAT GlobalNewTempo;
@@ -387,8 +387,8 @@ struct SAFCData {////overall settings and storing perfile settings....
 			Files.front().GroupID = 0;
 			return;
 		}
-		vector<_SFD_RSP> Sizes;
-		vector<INT64> SumSize;
+		std::vector<_SFD_RSP> Sizes;
+		std::vector<INT64> SumSize;
 		INT64 T=0;
 		for (int i = 0; i < Files.size(); i++) {
 			Sizes.push_back(_SFD_RSP(i, Files[i].FileSize));
@@ -400,7 +400,7 @@ struct SAFCData {////overall settings and storing perfile settings....
 
 		for (int i = 0; i < SumSize.size(); i++) {
 			Files[Sizes[i].ID].GroupID = (WORD)(ceil(((float)SumSize[i] / ((float)SumSize.back()))*ThreadsCount) - 1.);
-			cout << "Thread " << Files[Sizes[i].ID].GroupID << ": " << Sizes[i].FileSize << ":\t" << Sizes[i].ID << endl;
+			std::cout << "Thread " << Files[Sizes[i].ID].GroupID << ": " << Sizes[i].FileSize << ":\t" << Sizes[i].ID << std::endl;
 		}
 	}
 	void SetGlobalPPQN(WORD NewPPQN=0,BIT ForceGlobalPPQNOverride=false) {
@@ -432,7 +432,7 @@ struct SAFCData {////overall settings and storing perfile settings....
 		}
 	}
 	MIDICollectionThreadedMerger* MCTM_Constructor() {
-		vector<SingleMIDIReProcessor*> SMRPv;
+		std::vector<SingleMIDIReProcessor*> SMRPv;
 		for (int i = 0; i < Files.size(); i++)
 			SMRPv.push_back(Files[i].BuildSMRP());
 		MIDICollectionThreadedMerger *MCTM = new MIDICollectionThreadedMerger(SMRPv,GlobalPPQN,SaveDirectory);
@@ -446,20 +446,20 @@ struct SAFCData {////overall settings and storing perfile settings....
 SAFCData _Data;
 MIDICollectionThreadedMerger *GlobalMCTM = NULL;
 
-void ThrowAlert_Error(string AlertText) {
+void ThrowAlert_Error(std::string AlertText) {
 	if (WH)
 		WH->ThrowAlert(AlertText, "ERROR!", SpecialSigns::DrawExTriangle, 1, 0xFFAF00FF, 0xFF);
 }
 
-void ThrowAlert_Warning(string AlertText) {
+void ThrowAlert_Warning(std::string AlertText) {
 	if (WH)
 		WH->ThrowAlert(AlertText, "Warning!", SpecialSigns::DrawExTriangle, 1, 0x7F7F7FFF, 0xFFFFFFAF);
 }
 
-vector<wstring> MOFD(const wchar_t* Title) {
+std::vector<std::wstring> MOFD(const wchar_t* Title) {
 	OPENFILENAME ofn;       // common dialog box structure
 	wchar_t szFile[50000];       // buffer for file name
-	vector<wstring> InpLinks;
+	std::vector<std::wstring> InpLinks;
 	ZeroMemory(&ofn, sizeof(ofn));
 	ZeroMemory(szFile, 50000);
 	ofn.lStructSize = sizeof(ofn);
@@ -475,7 +475,7 @@ vector<wstring> MOFD(const wchar_t* Title) {
 	ofn.lpstrInitialDir = NULL;
 	ofn.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST | OFN_ALLOWMULTISELECT | OFN_EXPLORER;
 	if (GetOpenFileName(&ofn)) {
-		wstring Link = L"", Gen = L"";
+		std::wstring Link = L"", Gen = L"";
 		int i = 0, counter = 0;
 		for (; i < 600 && szFile[i] != '\0'; i++) {
 			Link.push_back(szFile[i]);
@@ -516,10 +516,10 @@ vector<wstring> MOFD(const wchar_t* Title) {
 		case FNERR_INVALIDFILENAME:	 ThrowAlert_Error("FNERR_INVALIDFILENAME\n"); break;
 		case FNERR_SUBCLASSFAILURE:	 ThrowAlert_Error("FNERR_SUBCLASSFAILURE\n"); break;
 		}
-		return vector<wstring>{L""};
+		return std::vector<std::wstring>{L""};
 	}
 }
-wstring SOFD(const wchar_t* Title) {
+std::wstring SOFD(const wchar_t* Title) {
 	wchar_t filename[MAX_PATH];
 	OPENFILENAME ofn;
 	ZeroMemory(&filename, sizeof(filename));
@@ -535,7 +535,7 @@ wstring SOFD(const wchar_t* Title) {
 	ofn.lpstrFileTitle = NULL;
 	ofn.nMaxFileTitle = 0;
 	ofn.lpstrInitialDir = NULL;
-	if (GetSaveFileName(&ofn)) return wstring(filename);
+	if (GetSaveFileName(&ofn)) return std::wstring(filename);
 	else {
 		switch (CommDlgExtendedError()) {
 		case CDERR_DIALOGFAILURE:		 ThrowAlert_Error("CDERR_DIALOGFAILURE\n");   break;
@@ -563,7 +563,7 @@ wstring SOFD(const wchar_t* Title) {
 #define _WH(Window,Element) ((*(*WH)[Window])[Element])//...uh
 #define _WH_t(Window,Element,Type) ((Type)_WH(Window,Element))
 
-void AddFiles(vector<wstring> Filenames) {
+void AddFiles(std::vector<std::wstring> Filenames) {
 	WH->DisableAllWindows();
 	for (int i = 0; i < Filenames.size(); i++) {
 		if (Filenames[i].empty())continue;
@@ -576,8 +576,8 @@ void AddFiles(vector<wstring> Filenames) {
 			_Data.Files.back().InplaceMergeEnabled = _Data.InplaceMergeFlag;
 			for (int q = 0; q < _Data.Files.size(); q++) {
 				if (_Data[q].Filename == _Data.Files.back().Filename) {
-					_Data[q].FileNamePostfix = to_string(Counter) + "_.mid";
-					_Data[q].WFileNamePostfix = to_wstring(Counter) + L"_.mid";
+					_Data[q].FileNamePostfix = std::to_string(Counter) + "_.mid";
+					_Data[q].WFileNamePostfix = std::to_wstring(Counter) + L"_.mid";
 					Counter++;
 				}
 			}
@@ -591,28 +591,28 @@ void AddFiles(vector<wstring> Filenames) {
 }
 void OnAdd() {
 	//throw "";
-	vector<wstring> Filenames = MOFD(L"Select midi files");
+	std::vector<std::wstring> Filenames = MOFD(L"Select midi files");
 	AddFiles(Filenames);
 }
 namespace PropsAndSets {
-	string *PPQN=new string(""), *OFFSET = new string(""), *TEMPO = new string("");
+	std::string* PPQN = new std::string(""), * OFFSET = new std::string(""), * TEMPO = new std::string("");
 	int currentID=-1,CaTID=-1,VMID=-1,PMID=-1;
 	BIT ForPersonalUse = true;
 	SingleMIDIInfoCollector* SMICptr = nullptr;
-	string CSV_DELIM = ";";
+	std::string CSV_DELIM = ";";
 	void OGPInMIDIList(int ID) {
 		if (ID<_Data.Files.size() && ID>=0) {
 			currentID = ID;
 			auto PASWptr = (*WH)["SMPAS"];
 			((TextBox*)((*PASWptr)["FileName"]))->SafeStringReplace("..." + _Data[ID].AppearanceFilename);
 			((InputField*)((*PASWptr)["PPQN"]))->UpdateInputString();
-			((InputField*)((*PASWptr)["PPQN"]))->SafeStringReplace(to_string((_Data[ID].NewPPQN)? _Data[ID].NewPPQN : _Data[ID].OldPPQN));
-			((InputField*)((*PASWptr)["TEMPO"]))->SafeStringReplace(to_string(_Data[ID].NewTempo));
-			((InputField*)((*PASWptr)["OFFSET"]))->SafeStringReplace(to_string(_Data[ID].OffsetTicks));
-			((InputField*)((*PASWptr)["GROUPID"]))->SafeStringReplace(to_string(_Data[ID].GroupID));
+			((InputField*)((*PASWptr)["PPQN"]))->SafeStringReplace(std::to_string((_Data[ID].NewPPQN)? _Data[ID].NewPPQN : _Data[ID].OldPPQN));
+			((InputField*)((*PASWptr)["TEMPO"]))->SafeStringReplace(std::to_string(_Data[ID].NewTempo));
+			((InputField*)((*PASWptr)["OFFSET"]))->SafeStringReplace(std::to_string(_Data[ID].OffsetTicks));
+			((InputField*)((*PASWptr)["GROUPID"]))->SafeStringReplace(std::to_string(_Data[ID].GroupID));
 
-			((InputField*)((*PASWptr)["SELECT_START"]))->SafeStringReplace(to_string(_Data[ID].SelectionStart));
-			((InputField*)((*PASWptr)["SELECT_LENGTH"]))->SafeStringReplace(to_string(_Data[ID].SelectionLength));
+			((InputField*)((*PASWptr)["SELECT_START"]))->SafeStringReplace(std::to_string(_Data[ID].SelectionStart));
+			((InputField*)((*PASWptr)["SELECT_LENGTH"]))->SafeStringReplace(std::to_string(_Data[ID].SelectionLength));
 
 			((CheckBox*)((*PASWptr)["BOOL_REM_TRCKS"]))->State = _Data[ID].BoolSettings&_BoolSettings::remove_empty_tracks;
 			((CheckBox*)((*PASWptr)["BOOL_REM_REM"]))->State = _Data[ID].BoolSettings&_BoolSettings::remove_remnants;
@@ -626,9 +626,9 @@ namespace PropsAndSets {
 
 
 			((TextBox*)((*PASWptr)["CONSTANT_PROPS"]))->SafeStringReplace(
-				"File size: " + to_string(_Data[ID].FileSize) + "b\n" +
-				"Old PPQN: " + to_string(_Data[ID].OldPPQN) + "\n" +
-				"Track number (header info): " + to_string(_Data[ID].OldTrackNumber) + "\n" +
+				"File size: " + std::to_string(_Data[ID].FileSize) + "b\n" +
+				"Old PPQN: " + std::to_string(_Data[ID].OldPPQN) + "\n" +
+				"Track number (header info): " + std::to_string(_Data[ID].OldTrackNumber) + "\n" +
 				"\"Remnant\" file postfix: " + _Data[ID].FileNamePostfix
 			);
 
@@ -641,7 +641,7 @@ namespace PropsAndSets {
 	void InitializeCollecting() {
 		//ThrowAlert_Warning("Still testing :)");
 		if (currentID < 0 && currentID >= _Data.Files.size()) {
-			ThrowAlert_Error("How you've managed to select the midi beyond the list? O.o\n" + to_string(currentID));
+			ThrowAlert_Error("How you've managed to select the midi beyond the list? O.o\n" + std::to_string(currentID));
 			return;
 		}
 		auto UIElement = (Graphing<SingleMIDIInfoCollector::tempo_graph>*)(*(*WH)["SMIC"])["TEMPO_GRAPH"];
@@ -652,10 +652,10 @@ namespace PropsAndSets {
 			//delete SMICptr;
 		}
 		SMICptr = new SingleMIDIInfoCollector(_Data.Files[currentID].Filename, _Data.Files[currentID].OldPPQN);
-		thread th([]() {
+		std::thread th([]() {
 			WH->MainWindow_ID = "SMIC";
 			WH->DisableAllWindows();
-			thread ith([]() {
+			std::thread ith([]() {
 				auto All_Exp = (*(*WH)["SMIC"])["ALL_EXP"];
 				auto TG_Exp = (*(*WH)["SMIC"])["TG_EXP"];
 				auto ITicks = (*(*WH)["SMIC"])["INTEGRATE_TICKS"];
@@ -709,7 +709,7 @@ namespace PropsAndSets {
 			UIElement_PG->Graph = &(SMICptr->PolyphonyFiniteDifference);
 			auto UIElement_TB = (TextBox*)(*(*WH)["SMIC"])["TOTAL_INFO"];
 			UIElement_TB->SafeStringReplace(
-				"Total (real) tracks: " + to_string(SMICptr->Tracks.size()) + "; ... "
+				"Total (real) tracks: " + std::to_string(SMICptr->Tracks.size()) + "; ... "
 				);
 
 			WH->MainWindow_ID = "MAIN";
@@ -755,12 +755,12 @@ namespace PropsAndSets {
 				UIElement_Butt->SafeStringReplace(".atraw");
 		}
 		void ExportTG() {
-			thread th([]() {
+			std::thread th([]() {
 				WH->MainWindow_ID = "SMIC";
 				WH->DisableAllWindows();
 				auto InfoLine = (TextBox*)(*(*WH)["SMIC"])["FLL"];
 				InfoLine->SafeStringReplace("Graph A is exporting...");
-				ofstream out(SMICptr->FileName+L".tg.csv");
+				std::ofstream out(SMICptr->FileName+L".tg.csv");
 				out << "tick" << CSV_DELIM << "tempo" << '\n';
 				for (auto cur_pair : SMICptr->TempoMap)
 					out << cur_pair.first << CSV_DELIM << cur_pair.second << '\n';
@@ -773,7 +773,7 @@ namespace PropsAndSets {
 			th.detach();
 		}
 		void ExportAll() {
-			thread th([]() {
+			std::thread th([]() {
 				WH->MainWindow_ID = "SMIC";
 				WH->DisableAllWindows();
 				auto InfoLine = (TextBox*)(*(*WH)["SMIC"])["FLL"];
@@ -790,7 +790,7 @@ namespace PropsAndSets {
 				INT64 Polyphony = 0;
 				WORD PPQ = SMICptr->PPQ; 
 				INT64 last_tick = 0;
-				string header = ""; 
+				std::string header = "";
 				double tempo = 0;
 				double seconds = 0;
 				double seconds_per_tick = 0;
@@ -839,7 +839,7 @@ namespace PropsAndSets {
 					t.Tempo = tempo;
 					it_ptree++;
 				}
-				ofstream out(SMICptr->FileName +  ((ForPersonalUse) ? L".a.csv" : L".atraw"),
+				std::ofstream out(SMICptr->FileName +  ((ForPersonalUse) ? L".a.csv" : L".atraw"),
 					((ForPersonalUse)? (std::ios::out ):(std::ios::out | std::ios::binary))
 					);
 				if (ForPersonalUse) {
@@ -850,7 +850,7 @@ namespace PropsAndSets {
 							<< cur_pair.second.NoteOns << CSV_DELIM
 							<< cur_pair.second.Polyphony << CSV_DELIM
 							<< cur_pair.second.Seconds << CSV_DELIM
-							<< cur_pair.second.Tempo << endl;
+							<< cur_pair.second.Tempo << std::endl;
 					}
 				}
 				else {
@@ -872,7 +872,7 @@ namespace PropsAndSets {
 			th.detach();
 		}
 		void DiffirentiateTicks() {
-			thread th([]() {
+			std::thread th([]() {
 				WH->MainWindow_ID = "SMIC";
 				WH->DisableAllWindows();
 				auto InfoLine = (*(*WH)["SMIC"])["FLL"];
@@ -881,7 +881,7 @@ namespace PropsAndSets {
 				InfoLine->SafeStringReplace("Integration has begun");
 
 				INT64 ticks_limit = 0;
-				ticks_limit = stoi(UITicks->GetCurrentInput("0"));
+				ticks_limit = std::stoi(UITicks->GetCurrentInput("0"));
 
 				INT64 prev_tick = 0, cur_tick = 0;
 				double cur_seconds = 0;
@@ -911,9 +911,9 @@ namespace PropsAndSets {
 				milliseconds_ans *= 1000;
 
 				UIOutput->SafeStringReplace(
-					"Min: " + to_string((int)(minutes_ans)) + 
-					"\nSec: " + to_string((int)(seconds_ans)) +
-					"\nMsec: "+ to_string((int)(milliseconds_ans))
+					"Min: " + std::to_string((int)(minutes_ans)) +
+					"\nSec: " + std::to_string((int)(seconds_ans)) +
+					"\nMsec: "+ std::to_string((int)(milliseconds_ans))
 					);
 
 				WH->MainWindow_ID = "MAIN";
@@ -934,9 +934,9 @@ namespace PropsAndSets {
 			InfoLine->SafeStringReplace("Integration has begun");
 
 			double seconds_limit = 0;
-			seconds_limit += stoi(UIMinutes->GetCurrentInput("0"))*60.;
-			seconds_limit += stoi(UISeconds->GetCurrentInput("0"));
-			seconds_limit += stoi(UIMilliseconds->GetCurrentInput("0"))/1000.;
+			seconds_limit += std::stoi(UIMinutes->GetCurrentInput("0"))*60.;
+			seconds_limit += std::stoi(UISeconds->GetCurrentInput("0"));
+			seconds_limit += std::stoi(UIMilliseconds->GetCurrentInput("0"))/1000.;
 
 			INT64 prev_tick = 0, cur_tick = 0;
 			double cur_seconds = 0;
@@ -958,7 +958,7 @@ namespace PropsAndSets {
 			auto rate = (seconds_limit == 0) ? 0 : seconds_limit / cur_seconds;
 			INT64 tick = (cur_tick - prev_tick) * rate + prev_tick;
 
-			UIOutput->SafeStringReplace("Tick: " + to_string(tick));
+			UIOutput->SafeStringReplace("Tick: " + std::to_string(tick));
 
 			WH->MainWindow_ID = "MAIN";
 			WH->EnableWindow("MAIN");
@@ -968,16 +968,16 @@ namespace PropsAndSets {
 	}
 	void OnApplySettings() {
 		if (currentID < 0 && currentID >= _Data.Files.size()) {
-			ThrowAlert_Error("You cannot apply current settings to file with ID " + to_string(currentID));
+			ThrowAlert_Error("You cannot apply current settings to file with ID " + std::to_string(currentID));
 			return;
 		}
 		INT32 T;
-		string CurStr="";
+		std::string CurStr="";
 		auto SMPASptr = (*WH)["SMPAS"];
 
 		CurStr = ((InputField*)(*SMPASptr)["PPQN"])->GetCurrentInput("0");
 		if (CurStr.size()) {
-			T = stoi(CurStr);
+			T = std::stoi(CurStr);
 			if (T)_Data[currentID].NewPPQN = T;
 			else _Data[currentID].NewPPQN = _Data.GlobalPPQN;
 		}
@@ -1027,7 +1027,7 @@ namespace PropsAndSets {
 	}
 	void OnApplyBS2A() {
 		if (currentID < 0 && currentID >= _Data.Files.size()) {
-			ThrowAlert_Error("You cannot apply current settings to file with ID " + to_string(currentID));
+			ThrowAlert_Error("You cannot apply current settings to file with ID " + std::to_string(currentID));
 			return;
 		}
 		OnApplySettings();
@@ -1116,7 +1116,7 @@ namespace PropsAndSets {
 			if (VM->PLC_bb) {
 				auto IFDeg = ((InputField*)(*Wptr)["VM_DEGREE"]);
 				float Degree=1.;
-				Degree = stof(IFDeg->GetCurrentInput("0"));
+				Degree = std::stof(IFDeg->GetCurrentInput("0"));
 				VM->PLC_bb->ConversionMap.clear();
 				VM->PLC_bb->ConversionMap[127] = 127;
 				for (int i = 0; i < 128; i++) {
@@ -1209,39 +1209,39 @@ void OnRemAll() {
 
 void OnSubmitGlobalPPQN() {
 	auto pptr = (*WH)["PROMPT"];
-	string t = ((InputField*)(*pptr)["FLD"])->GetCurrentInput("0");
+	std::string t = ((InputField*)(*pptr)["FLD"])->GetCurrentInput("0");
 	WORD PPQN = (t.size())?stoi(t):_Data.GlobalPPQN;
 	_Data.SetGlobalPPQN(PPQN, true);
 	WH->DisableWindow("PROMPT");
 	//PropsAndSets::OGPInMIDIList(PropsAndSets::currentID);
 }
 void OnGlobalPPQN() {
-	WH->ThrowPrompt("New value will be assigned to every MIDI\n(in settings)", "Global PPQN", OnSubmitGlobalPPQN, _Align::center, InputField::Type::NaturalNumbers, to_string(_Data.GlobalPPQN), 5);
+	WH->ThrowPrompt("New value will be assigned to every MIDI\n(in settings)", "Global PPQN", OnSubmitGlobalPPQN, _Align::center, InputField::Type::NaturalNumbers, std::to_string(_Data.GlobalPPQN), 5);
 }
 
 void OnSubmitGlobalOffset() {
 	auto pptr = (*WH)["PROMPT"];
-	string t = ((InputField*)(*pptr)["FLD"])->GetCurrentInput("0");
-	DWORD O = (t.size()) ? stoi(t) : _Data.GlobalOffset;
+	std::string t = ((InputField*)(*pptr)["FLD"])->GetCurrentInput("0");
+	DWORD O = (t.size()) ? std::stoi(t) : _Data.GlobalOffset;
 	_Data.SetGlobalOffset(O);
 	WH->DisableWindow("PROMPT");
 	//PropsAndSets::OGPInMIDIList(PropsAndSets::currentID);
 }
 void OnGlobalOffset() {
-	WH->ThrowPrompt("Sets new global Offset", "Global Offset", OnSubmitGlobalOffset, _Align::center, InputField::Type::NaturalNumbers, to_string(_Data.GlobalOffset), 10);
-	cout << _Data.GlobalOffset << to_string(_Data.GlobalOffset) << endl;
+	WH->ThrowPrompt("Sets new global Offset", "Global Offset", OnSubmitGlobalOffset, _Align::center, InputField::Type::NaturalNumbers, std::to_string(_Data.GlobalOffset), 10);
+	std::cout << _Data.GlobalOffset << std::to_string(_Data.GlobalOffset) << std::endl;
 }
 
 void OnSubmitGlobalTempo() {
 	auto pptr = (*WH)["PROMPT"];
-	string t = ((InputField*)(*pptr)["FLD"])->GetCurrentInput("0");
-	FLOAT Tempo = (t.size()) ? stof(t) : _Data.GlobalNewTempo;
+	std::string t = ((InputField*)(*pptr)["FLD"])->GetCurrentInput("0");
+	FLOAT Tempo = (t.size()) ? std::stof(t) : _Data.GlobalNewTempo;
 	_Data.SetGlobalTempo(Tempo);
 	WH->DisableWindow("PROMPT");
 	//PropsAndSets::OGPInMIDIList(PropsAndSets::currentID);
 }
 void OnGlobalTempo() {
-	WH->ThrowPrompt("Sets specific tempo value to every MIDI\n(in settings)", "Global S. Tempo\0", OnSubmitGlobalTempo, _Align::center, InputField::Type::FP_PositiveNumbers, to_string(_Data.GlobalNewTempo), 8);
+	WH->ThrowPrompt("Sets specific tempo value to every MIDI\n(in settings)", "Global S. Tempo\0", OnSubmitGlobalTempo, _Align::center, InputField::Type::FP_PositiveNumbers, std::to_string(_Data.GlobalNewTempo), 8);
 }
 
 void _OnResolve() {
@@ -1284,9 +1284,9 @@ namespace Settings {
 		WH->EnableWindow("APP_SETTINGS");//_Data.DetectedThreads
 		//WH->ThrowAlert("Please read the docs! Changing some of these settings might cause graphics driver failure!","Warning!",SpecialSigns::DrawExTriangle,1,0x007FFFFF,0x7F7F7FFF);
 		auto pptr = (*WH)["APP_SETTINGS"];
-		((InputField*)(*pptr)["AS_BCKGID"])->UpdateInputString(to_string(ShaderMode));
-		((InputField*)(*pptr)["AS_ROT_ANGLE"])->UpdateInputString(to_string(ROT_ANGLE));
-		((InputField*)(*pptr)["AS_THREADS_COUNT"])->UpdateInputString(to_string(_Data.DetectedThreads));
+		((InputField*)(*pptr)["AS_BCKGID"])->UpdateInputString(std::to_string(ShaderMode));
+		((InputField*)(*pptr)["AS_ROT_ANGLE"])->UpdateInputString(std::to_string(ROT_ANGLE));
+		((InputField*)(*pptr)["AS_THREADS_COUNT"])->UpdateInputString(std::to_string(_Data.DetectedThreads));
 
 		((CheckBox*)((*pptr)["BOOL_REM_TRCKS"]))->State = DefaultBoolSettings & _BoolSettings::remove_empty_tracks;
 		((CheckBox*)((*pptr)["BOOL_REM_REM"]))->State = DefaultBoolSettings & _BoolSettings::remove_remnants;
@@ -1305,34 +1305,34 @@ namespace Settings {
 			RK_OP = true;
 		}
 		catch (...) {
-			cout << "RK opening failed\n";
+			std::cout << "RK opening failed\n";
 		}
 		auto pptr = (*WH)["APP_SETTINGS"];
-		string T;
+		std::string T;
 
 		T = ((InputField*)(*pptr)["AS_BCKGID"])->GetCurrentInput("0");
-		cout << "AS_BCKGID " << T << endl;
+		std::cout << "AS_BCKGID " << T << std::endl;
 		if (T.size()) {
-			ShaderMode = stoi(T); 
+			ShaderMode = std::stoi(T);
 			if (RK_OP)TRY_CATCH(RK_Access.SetDwordValue(L"AS_BCKGID",ShaderMode);,"Failed on setting AS_BCKGID")
 		}
-		cout << ShaderMode << endl;
+		std::cout << ShaderMode << std::endl;
 
 		T = ((InputField*)(*pptr)["AS_ROT_ANGLE"])->GetCurrentInput("0");
-		cout << "ROT_ANGLE " << T << endl;
+		std::cout << "ROT_ANGLE " << T << std::endl;
 		if (T.size() && !is_fonted) {
 			ROT_ANGLE = stof(T);
 		}
-		cout << ROT_ANGLE << endl;
+		std::cout << ROT_ANGLE << std::endl;
 
-		T = ((InputField*)(*pptr)["AS_THREADS_COUNT"])->GetCurrentInput(to_string(_Data.DetectedThreads));
-		cout << "AS_THREADS_COUNT " << T << endl;
+		T = ((InputField*)(*pptr)["AS_THREADS_COUNT"])->GetCurrentInput(std::to_string(_Data.DetectedThreads));
+		std::cout << "AS_THREADS_COUNT " << T << std::endl;
 		if (T.size()) {
 			_Data.DetectedThreads = stoi(T);
 			_Data.ResolveSubdivisionProblem_GroupIDAssign();
 			if (RK_OP)TRY_CATCH(RK_Access.SetDwordValue(L"AS_THREADS_COUNT", _Data.DetectedThreads);, "Failed on setting AS_THREADS_COUNT")
 		}
-		cout << _Data.DetectedThreads << endl;
+		std::cout << _Data.DetectedThreads << std::endl;
 
 		DefaultBoolSettings = (DefaultBoolSettings & (~_BoolSettings::remove_empty_tracks)) | (_BoolSettings::remove_empty_tracks * (!!((CheckBox*)(*pptr)["BOOL_REM_TRCKS"])->State));
 		DefaultBoolSettings = (DefaultBoolSettings & (~_BoolSettings::remove_remnants)) | (_BoolSettings::remove_remnants * (!!((CheckBox*)(*pptr)["BOOL_REM_REM"])->State));
@@ -1352,7 +1352,7 @@ namespace Settings {
 		if (RK_OP)TRY_CATCH(RK_Access.SetDwordValue(L"AS_INPLACE_FLAG", _Data.InplaceMergeFlag); , "Failed on setting AS_INPLACE_FLAG")
 
 		((InputField*)(*pptr)["AS_FONT_NAME"])->PutIntoSource();
-		wstring ws(FONTNAME.begin(), FONTNAME.end());
+		std::wstring ws(FONTNAME.begin(), FONTNAME.end());
 		if (RK_OP)TRY_CATCH(RK_Access.SetStringValue(L"COLLAPSEDFONTNAME", ws.c_str());, "Failed on setting AS_BCKGID")
 		if(RK_OP)
 			Settings::RK_Access.Close();
@@ -1377,8 +1377,8 @@ namespace Settings {
 	}
 }
 
-pair<float, float> GetPositionForOneOf(INT32 Position, INT32 Amount, float UnitSize, float HeightRel) {
-	pair<float, float> T(0,0);
+std::pair<float, float> GetPositionForOneOf(INT32 Position, INT32 Amount, float UnitSize, float HeightRel) {
+	std::pair<float, float> T(0,0);
 	INT32 SideAmount = ceil(sqrt(Amount));
 	T.first = (0 - (Position%SideAmount) + ((SideAmount - 1) / 2.f))*UnitSize;
 	T.second = (0 - (Position / SideAmount) + ((SideAmount - 1) / 2.f))*UnitSize * HeightRel;
@@ -1420,45 +1420,45 @@ void OnStart() {
 		auto ptr = (InputField*)(*MW)["TIMER"];
 		auto now = std::chrono::high_resolution_clock::now();
 		auto difference = std::chrono::duration_cast<std::chrono::duration<double>>(now - START);
-		ptr->SafeStringReplace(to_string(difference.count()) + " s");
+		ptr->SafeStringReplace(std::to_string(difference.count()) + " s");
 
 		for (ID = 0; ID < GlobalMCTM->Cur_Processing.size(); ID++) {
-			cout << ID << endl;
+			std::cout << ID << std::endl;
 			if (!GlobalMCTM->Cur_Processing[ID])
 				continue;
 			auto Q = GetPositionForOneOf(ID, GlobalMCTM->Cur_Processing.size(),140,0.7);
 			auto Vis = new SMRP_Vis(Q.first, Q.second, System_White);
-			string temp = "";
-			MW->AddUIElement(temp = "SMRP_C" + to_string(ID), Vis);
-			thread TH([](MIDICollectionThreadedMerger *pMCTM, MoveableWindow *MW, DWORD ID) {
-				string SID = "SMRP_C" + to_string(ID);
-				cout << SID << " Processing started" << endl;
+			std::string temp = "";
+			MW->AddUIElement(temp = "SMRP_C" + std::to_string(ID), Vis);
+			std::thread TH([](MIDICollectionThreadedMerger *pMCTM, MoveableWindow *MW, DWORD ID) {
+				std::string SID = "SMRP_C" + std::to_string(ID);
+				std::cout << SID << " Processing started" << std::endl;
 				auto pVIS = ((SMRP_Vis*)(*MW)[SID]);
 				while (GlobalMCTM->Cur_Processing[ID]) {
 					pVIS->SMRP = GlobalMCTM->Cur_Processing[ID];
 					std::this_thread::sleep_for(std::chrono::milliseconds(50));
 				}
-				cout << ID << " Processing stopped" << endl;
+				std::cout << ID << " Processing stopped" << std::endl;
 			}, GlobalMCTM, MW, ID);
 			TH.detach();
 		}
 
-		thread LO([](MIDICollectionThreadedMerger *pMCTM, SAFCData *SD, MoveableWindow *MW) {
+		std::thread LO([](MIDICollectionThreadedMerger *pMCTM, SAFCData *SD, MoveableWindow *MW) {
 			while (!pMCTM->CheckSMRPFinishedFlags()) {
 				Sleep(100);
 			}
-			cout << "SMRP: Out from sleep\n";
+			std::cout << "SMRP: Out from sleep\n";
 			for (int i = 0; i <= SD->DetectedThreads; i++) {
-				MW->DeleteUIElementByName("SMRP_C" + to_string(i));
+				MW->DeleteUIElementByName("SMRP_C" + std::to_string(i));
 			}
 			MW->SafeChangePosition_Argumented(0, 0, 0);
 			(*MW)["IM"] = new BoolAndWORDChecker(-100., 0., System_White, &(pMCTM->IntermediateInplaceFlag), &(pMCTM->IITrackCount));
 			(*MW)["RM"] = new BoolAndWORDChecker(100., 0., System_White, &(pMCTM->IntermediateRegularFlag), &(pMCTM->IRTrackCount));
-			thread ILO([](MIDICollectionThreadedMerger *pMCTM, SAFCData *SD, MoveableWindow *MW) {
+			std::thread ILO([](MIDICollectionThreadedMerger *pMCTM, SAFCData *SD, MoveableWindow *MW) {
 				while (!pMCTM->CheckRIMerge()) {
 					std::this_thread::sleep_for(std::chrono::milliseconds(50));
 				}
-				cout << "RI: Out from sleep!\n";
+				std::cout << "RI: Out from sleep!\n";
 				MW->DeleteUIElementByName("IM");
 				MW->DeleteUIElementByName("RM");
 				MW->SafeChangePosition_Argumented(0, 0, 0);
@@ -1468,15 +1468,15 @@ void OnStart() {
 		}, GlobalMCTM, &_Data, MW);
 		LO.detach();
 
-		thread FLO([](MIDICollectionThreadedMerger *pMCTM, MoveableWindow *MW, std::chrono::steady_clock::time_point START) {
+		std::thread FLO([](MIDICollectionThreadedMerger *pMCTM, MoveableWindow *MW, std::chrono::steady_clock::time_point START) {
 			auto ptr = (InputField*)(*MW)["TIMER"];
 			while (!pMCTM->CompleteFlag) {
 				auto now = std::chrono::high_resolution_clock::now();
 				auto difference = std::chrono::duration_cast<std::chrono::duration<double>>(now - START);
-				ptr->SafeStringReplace(to_string(difference.count())+" s");
+				ptr->SafeStringReplace(std::to_string(difference.count())+" s");
 				std::this_thread::sleep_for(std::chrono::milliseconds(50));
 			}
-			cout << "F: Out from sleep!!!\n";
+			std::cout << "F: Out from sleep!!!\n";
 			MW->DeleteUIElementByName("FM");
 
 			WH->DisableWindow(WH->MainWindow_ID); 
@@ -1504,51 +1504,73 @@ void RestoreRegSettings() {
 	try{
 		Settings::RK_Access.Create(HKEY_CURRENT_USER, RegPath);
 	}
-	catch(...){ cout << "Exception thrown while creating registry key\n"; }
+	catch(...){ std::cout << "Exception thrown while creating registry key\n"; }
 	try {
 		Settings::RK_Access.Open(HKEY_CURRENT_USER, RegPath);
 		Opened = true;
 	}
-	catch (...) { cout << "Exception thrown while opening RK\n"; }
+	catch (...) { std::cout << "Exception thrown while opening RK\n"; }
 	if (Opened) {
 		try {
 			Settings::ShaderMode = Settings::RK_Access.GetDwordValue(L"AS_BCKGID");
 		}
-		catch (...) { cout << "Exception thrown while restoring AS_BCKGID from registry\n"; }
+		catch (...) { std::cout << "Exception thrown while restoring AS_BCKGID from registry\n"; }
 		try {
 			_Data.DetectedThreads = Settings::RK_Access.GetDwordValue(L"AS_THREADS_COUNT");
 		}
-		catch (...) { cout << "Exception thrown while restoring AS_THREADS_COUNT from registry\n"; }
+		catch (...) { std::cout << "Exception thrown while restoring AS_THREADS_COUNT from registry\n"; }
 		try {
 			DefaultBoolSettings = Settings::RK_Access.GetDwordValue(L"DEFAULT_BOOL_SETTINGS");
 		}
-		catch (...) { cout << "Exception thrown while restoring AS_INPLACE_FLAG from registry\n"; }
+		catch (...) { std::cout << "Exception thrown while restoring AS_INPLACE_FLAG from registry\n"; }
 		try {
 			_Data.InplaceMergeFlag = Settings::RK_Access.GetDwordValue(L"AS_INPLACE_FLAG");
 		}
-		catch (...) { cout << "Exception thrown while restoring INPLACE_MERGE from registry\n"; }
+		catch (...) { std::cout << "Exception thrown while restoring INPLACE_MERGE from registry\n"; }
 		try {
-			wstring ws = Settings::RK_Access.GetStringValue(L"COLLAPSEDFONTNAME");//COLLAPSEDFONTNAME
-			FONTNAME = string(ws.begin(), ws.end());
+			std::wstring ws = Settings::RK_Access.GetStringValue(L"COLLAPSEDFONTNAME");//COLLAPSEDFONTNAME
+			FONTNAME = std::string(ws.begin(), ws.end());
 		}
-		catch (...) { cout << "Exception thrown while restoring COLLAPSEDFONTNAME from registry\n"; }
+		catch (...) { std::cout << "Exception thrown while restoring COLLAPSEDFONTNAME from registry\n"; }
 		try {
 			lFontSymbolsInfo::Size = Settings::RK_Access.GetDwordValue(L"FONTSIZE");//COLLAPSEDFONTNAME
 		}
-		catch (...) { cout << "Exception thrown while restoring FONTSIZE from registry\n"; }
+		catch (...) { std::cout << "Exception thrown while restoring FONTSIZE from registry\n"; }
 		try {
 			DWORD B = Settings::RK_Access.GetDwordValue(L"FLOAT_FONTHTW");//COLLAPSEDFONTNAME
 			lFONT_HEIGHT_TO_WIDTH = *(float*)&B;
 		}
-		catch (...) { cout << "Exception thrown while restoring FLOAT_FONTHTW from registry\n"; }
+		catch (...) { std::cout << "Exception thrown while restoring FLOAT_FONTHTW from registry\n"; }
 		Settings::RK_Access.Close();
 	}
+}
+
+void __Compile() {
+	auto ptr = ((EditBox*)(*(*WH)["COMPILEW"])["TEXTAREA"]);
+	ptr->UpdateBufferedCurText();
+	auto str = ptr->_UnsafeGetCurrentText();
+	if (!str.size())
+		return;
+	std::thread th([](std::string& str) {
+		double x = 3;
+		exprtk_wrapper ew({ {"x",x} });
+		if (ew.compile(str))
+			std::cout << ew.evalute() << std::endl;
+		else {
+			auto errors = ew.get_errors();
+			for (auto& error : errors) {
+				auto& [no, pos, str1, str2] = error;
+				std::cout << no << " " << pos << " " << str1 << " " << str2 << "\n";
+			}
+		}
+	}, str);
+	th.detach();
 }
 
 void Init() {///SetIsFontedVar
 	RestoreRegSettings();
 	hDc = GetDC(hWnd);
-	_Data.DetectedThreads = min((int)thread::hardware_concurrency() - 1,(int)(ceil(GetAvailableMemory() / 2048.)));
+	_Data.DetectedThreads = std::min((int)std::thread::hardware_concurrency() - 1,(int)(ceil(GetAvailableMemory() / 2048.)));
 
 	MoveableWindow *T = new MoveableWindow("Main window", System_White, -200, 200, 400, 400, 0x3F3F3FAF, 0x7F7F7F7F);
 	SelectablePropertedList *SPL = new SelectablePropertedList(BS_List_Black_Small, NULL, PropsAndSets::OGPInMIDIList, -50, 172, 300, 12, 65, 30);
@@ -1650,12 +1672,12 @@ void Init() {///SetIsFontedVar
 
 	T = new MoveableWindow("App settings", System_White, -100, 100, 200, 220, 0x3F3F3FCF, 0x7F7F7F7F);
 
-	(*T)["AS_BCKGID"] = new InputField(to_string(Settings::ShaderMode), -35, 55 - WindowHeapSize, 10, 30, System_White, NULL, 0x007FFFFF, System_White, "Background ID", 2, _Align::center, _Align::right, InputField::Type::NaturalNumbers);
+	(*T)["AS_BCKGID"] = new InputField(std::to_string(Settings::ShaderMode), -35, 55 - WindowHeapSize, 10, 30, System_White, NULL, 0x007FFFFF, System_White, "Background ID", 2, _Align::center, _Align::right, InputField::Type::NaturalNumbers);
 
 	(*T)["AS_GLOBALSETTINGS"] = new TextBox("Global settings for new MIDIs", System_White, 0, 85 - WindowHeapSize, 30, 200, 12, 0x007FFF1F, 0x007FFF7F, 1, _Align::center);
 	(*T)["AS_APPLY"] = Butt = new Button("Apply", System_White, Settings::OnSetApply, 85 - WindowHeapSize, -87.5 - WindowHeapSize, 40, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, NULL, "_");
 	(*T)["AS_EN_FONT"] = Butt = new Button((is_fonted)?"Disable fonts":"Enable fonts", System_White, Settings::ChangeIsFontedVar, 72.5 - WindowHeapSize, -67.5 - WindowHeapSize, 65, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, System_White, " ");
-	(*T)["AS_ROT_ANGLE"] = new InputField(to_string(ROT_ANGLE), -87.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 30, System_White, NULL, 0x007FFFFF, System_White, "Rotation angle", 6, _Align::center, _Align::left, InputField::Type::FP_Any);
+	(*T)["AS_ROT_ANGLE"] = new InputField(std::to_string(ROT_ANGLE), -87.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 30, System_White, NULL, 0x007FFFFF, System_White, "Rotation angle", 6, _Align::center, _Align::left, InputField::Type::FP_Any);
 	(*T)["AS_FONT_SIZE"] = new WheelVariableChanger(Settings::ApplyFSWheel, -37.5, -82.5, lFontSymbolsInfo::Size, 1, System_White, "Font size", "Delta", WheelVariableChanger::Type::addictable);
 	(*T)["AS_FONT_P"] = new WheelVariableChanger(Settings::ApplyRelWheel, -37.5, -22.5, lFONT_HEIGHT_TO_WIDTH, 0.01, System_White, "Font rel.", "Delta", WheelVariableChanger::Type::addictable);
 	(*T)["AS_FONT_NAME"] = new InputField(FONTNAME, 52.5 - WindowHeapSize, 55 - WindowHeapSize, 10, 100, _STLS_WhiteSmall, &FONTNAME, 0x007FFFFF, System_White, "Font name", 32, _Align::center, _Align::left, InputField::Type::Text);
@@ -1672,7 +1694,7 @@ void Init() {///SetIsFontedVar
 	Butt->Tip->SafeChangePosition_Argumented(_Align::right, 87.5 - WindowHeapSize, Butt->Tip->CYpos);
 
 	(*T)["INPLACE_MERGE"] = new CheckBox(97.5 - WindowHeapSize, 85 - WindowHeapSize, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, 0, System_White, _Align::right, "DV: Enable/disable inplace merge");
-	(*T)["AS_THREADS_COUNT"] = new InputField(to_string(_Data.DetectedThreads), 57.5 - WindowHeapSize, 85 - WindowHeapSize, 10, 20, System_White, NULL, 0x007FFFFF, System_White, "Threads count", 2, _Align::center, _Align::left, InputField::Type::NaturalNumbers);
+	(*T)["AS_THREADS_COUNT"] = new InputField(std::to_string(_Data.DetectedThreads), 57.5 - WindowHeapSize, 85 - WindowHeapSize, 10, 20, System_White, NULL, 0x007FFFFF, System_White, "Threads count", 2, _Align::center, _Align::left, InputField::Type::NaturalNumbers);
 
 	(*WH)["APP_SETTINGS"] = T;
 
@@ -1713,13 +1735,15 @@ void Init() {///SetIsFontedVar
 
 	T = new MoveableWindow("Test", System_White, -150, 150, 300, 300, 0x0000000F, 0x7F7F7F7F, 0x000000FF);
 
-	(*T)["BRUH"] = new EditBox("bruh\nbruhst\nlaksdlaklsdkl\n2134093840if04", System_White, 0, 0, 200, 200, 10, 0, 0xFFFFFFFF, 2);
+	(*T)["TEXTAREA"] = new EditBox("", System_White, 0, 0, 200, 200, 10, 0, 0xFFFFFFFF, 2);
+	(*T)["BUTT"] = new Button("Compile", System_White, __Compile, -100, -135, 75, 12, 1,
+		0x000000AF, 0xFFFFFFFF, 0x000000AF, 0xFFFFFFFF, 0x7F7F7F7FF, NULL, " ");
 
-	(*WH)["BRUH"] = T;
+	(*WH)["COMPILEW"] = T;
 
 
 	WH->EnableWindow("MAIN");
-	//WH->EnableWindow("BRUH");
+	WH->EnableWindow("COMPILEW");
 	//WH->EnableWindow("SMIC");
 	//WH->EnableWindow("OR");
 	//WH->EnableWindow("SMRP_CONTAINER");
@@ -1731,7 +1755,7 @@ void Init() {///SetIsFontedVar
 
 	DragAcceptFiles(hWnd, TRUE);
 	OleInitialize(NULL);
-	cout << "Registering Drag&Drop: " << (RegisterDragDrop(hWnd, &DNDH_Global)) << endl;
+	std::cout << "Registering Drag&Drop: " << (RegisterDragDrop(hWnd, &DNDH_Global)) << std::endl;
 	
 	SAFC_VersionCheck();
 }
@@ -1847,11 +1871,8 @@ void mMotion(int ix, int iy) {
 void mKey(BYTE k, int x, int y) {
 	if (WH)WH->KeyboardHandler(k);
 
-	if (k == '=') { ANIMATION_IS_ACTIVE = !ANIMATION_IS_ACTIVE; }
-	else if (k == 27)exit(1);
-	else {
-		//cout << (int)k << ' ' << k << endl;
-	}
+	if (k == 27)
+		exit(1);
 }
 void mClick(int butt, int state, int x, int y) {
 	float fx, fy;
@@ -1898,7 +1919,7 @@ int main(int argc, char ** argv) {
 	_wremove(L"_f");
 	_wremove(L"_g");
 
-	ios_base::sync_with_stdio(false);//why not
+	std::ios_base::sync_with_stdio(false);//why not
 #ifdef _DEBUG 
 	ShowWindow(GetConsoleWindow(), SW_SHOW);
 #else // _DEBUG 
@@ -1915,7 +1936,7 @@ int main(int argc, char ** argv) {
 	srand(TIMESEED());
 	__glutInitWithExit(&argc, argv, mExit);
 	//cout << argv[0] << endl;
-	glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGBA | GLUT_ALPHA);
+	glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGBA | GLUT_ALPHA | GLUT_MULTISAMPLE);
 	glutInitWindowSize(WINDXSIZE, WINDYSIZE);
 	//glutInitWindowPosition(50, 0);
 	glutCreateWindow(WINDOWTITLE);
@@ -1929,7 +1950,8 @@ int main(int argc, char ** argv) {
 	glEnable(GL_LINE_SMOOTH);//GL_POLYGON_SMOOTH
 	glEnable(GL_POINT_SMOOTH);
 
-	glShadeModel(GL_SMOOTH);
+	glShadeModel(GL_SMOOTH); 
+	//glEnable(GLUT_MULTISAMPLE);
 
 	glHint(GL_LINE_SMOOTH_HINT, GL_NICEST);//GL_FASTEST//GL_NICEST
 	glHint(GL_POINT_SMOOTH_HINT, GL_NICEST);

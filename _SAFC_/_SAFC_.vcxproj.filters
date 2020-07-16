@@ -150,7 +150,7 @@
     <ClInclude Include="SAFGUIF\editbox.h">
       <Filter>Файлы заголовков\SAFGUIF</Filter>
     </ClInclude>
-    <ClInclude Include="extended_tinyexpr.h">
+    <ClInclude Include="exprtk_wrapper.h">
       <Filter>Файлы заголовков</Filter>
     </ClInclude>
   </ItemGroup>

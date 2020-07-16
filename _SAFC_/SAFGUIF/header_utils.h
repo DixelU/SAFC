@@ -33,7 +33,7 @@ std::string FONTNAME = "Arial";
 BIT is_fonted = 0;
 
 //#define ROT_ANGLE 0.7
-#define TRY_CATCH(code,msg) try{code}catch(...){cout<<msg<<endl;}
+#define TRY_CATCH(code,msg) try{code}catch(...){std::cout<<msg<<std::endl;}
 
 float ROT_ANGLE = 0.f;
 #define ROT_RAD ANGTORAD(ROT_ANGLE)
@@ -69,5 +69,10 @@ void ThrowAlert_Error(std::string AlertText);
 void ThrowAlert_Warning(std::string AlertText);
 void AddFiles(std::vector<std::wstring> Filenames);
 #pragma warning(disable : 4996)
+
+#define MD_CASE(value) case (value): case ((value|1))
+#define MT_CASE(value) MD_CASE(value): MD_CASE((value|2))
+#define MO_CASE(value) MT_CASE(value): MT_CASE((value|4))
+#define MH_CASE(value) MO_CASE(value): MO_CASE((value|8))
 
 #endif // !SAFGUIF_HU

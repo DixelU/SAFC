@@ -2,7 +2,6 @@
 #ifndef SAF_SMRP
 #define SAF_SMRP
 
-
 #include <Windows.h>
 #include <string>
 #include <vector>
@@ -16,6 +15,7 @@
 #include "PLC.h"
 #include "CAT.h"
 #include "../bbb_ffio.h"
+#include "../exprtk_wrapper.h"
 
 template<typename T>
 struct conditional {
@@ -40,6 +40,20 @@ struct conditional {
 	}
 };
 
+struct modifiers_wrapper {
+	exprtk_wrapper
+		*note_key_modifier, *note_velocity_modifier,
+		*noteaftertouch_key_modifier, *noteaftertouch_velocity_modifier,
+		*channelaftertocuh_value_modifier,
+		*program_modifier,
+		*pitch_modifier,
+		*controller_no_modifier, *controller_value_modifier,
+		*tempo_modifier;
+	modifiers_wrapper() {
+		note_key_modifier = note_velocity_modifier = noteaftertouch_key_modifier = noteaftertouch_velocity_modifier = channelaftertocuh_value_modifier = program_modifier = pitch_modifier = controller_no_modifier = controller_value_modifier = controller_no_modifier = tempo_modifier = nullptr;
+	}
+};
+
 struct SingleMIDIReProcessor {
 	DWORD ThreadID;
 	std::wstring FileName, Postfix;
@@ -58,12 +72,31 @@ struct SingleMIDIReProcessor {
 	CutAndTransposeKeys* KeyConverter;
 	BIT ResetDeltatimesOutsideOfTheRange;
 	UINT64 FilePosition, FileSize;
-	static void ostream_write(std::vector<BYTE>& vec, const std::vector<BYTE>::iterator& beg, const std::vector<BYTE>::iterator& end, std::ostream& out) {
+	modifiers_wrapper modifiers;
+	inline static void ostream_write(std::vector<BYTE>& vec, const std::vector<BYTE>::iterator& beg, const std::vector<BYTE>::iterator& end, std::ostream& out) {
 		out.write(((char*)vec.data()) + (beg - vec.begin()), end - beg);
 	}
-	static void ostream_write(std::vector<BYTE>& vec, std::ostream& out) {
+	inline static void ostream_write(std::vector<BYTE>& vec, std::ostream& out) {
 		out.write(((char*)vec.data()), vec.size());;
 	}
+	inline static uint8_t push_vlv(uint32_t value, std::vector<BYTE>& vec) {
+		constexpr uint8_t $7byte_mask = 0x7F, max_size = 5, $7byte_mask_size = 7;
+		constexpr uint8_t $adjacent7byte_mask = ~$7byte_mask;
+		uint8_t stack[max_size];
+		uint8_t size = 0;
+		uint8_t r_size = 0;
+		do {
+			stack[size] = (value & $7byte_mask);
+			value >>= $7byte_mask_size;
+			if (size)
+				stack[size] |= $adjacent7byte_mask;
+			size++;
+		} while (value);
+		r_size = size;
+		while (size)
+			vec.push_back(stack[--size]);
+		return r_size;
+	};
 	SingleMIDIReProcessor(std::wstring filename, DWORD Settings, FLOAT Tempo, DWORD GlobalOffset, WORD PPQN, DWORD ThreadID, BYTE_PLC_Core* VolumeMapCore, _14BIT_PLC_Core* PitchMapCore, CutAndTransposeKeys* KeyConverter, std::wstring RPostfix = L"_.mid", BIT InplaceMerge = 0, UINT64 FileSize = 0, INT64 SelectionStart = 0, INT64 SelectionLength = -1, BIT ResetDeltatimesOutsideOfTheRange = true) {
 		this->ThreadID = ThreadID;
 		this->FileName = filename;
@@ -128,22 +161,6 @@ struct SingleMIDIReProcessor {
 		conditional<BYTE> CurrentChannelAftertouch[16];
 		conditional<BYTE> CurrentController[4096];
 		conditional<BYTE> CurrentNoteAftertouch[4096];
-		auto push_vlv = [](uint32_t value, std::vector<BYTE>& vec) -> BYTE {
-			uint8_t stack[5];
-			uint8_t size = 0;
-			uint8_t r_size = 0;
-			do {
-				stack[size] = (value & 0x7F);
-				value >>= 7;
-				if (size)
-					stack[size] |= 0x80;
-				size++;
-			} while (value);
-			r_size = size;
-			while (size)
-				vec.push_back(stack[--size]);
-			return r_size;
-		};
 		for (auto& v : CurHolded)
 			v = 0;
 		const bool ActiveSelection = SelectionLength > 0;
@@ -418,7 +435,8 @@ struct SingleMIDIReProcessor {
 
 				IO = file_input.get();
 
-				if (IO == 0xFF) {//I love metaevents :d
+				switch (IO) {
+				case 0xFF: {
 					RunningStatusByte = 0;
 					Track.push_back(IO);
 					IO = file_input.get();//MetaEventType.
@@ -530,9 +548,9 @@ struct SingleMIDIReProcessor {
 						}
 						else {
 							Track.insert(Track.end() - DeltaTimeSize - 3, UnLoad.begin(), UnLoad.end());
-							file_output.put('M'); 
-							file_output.put('T'); 
-							file_output.put('r'); 
+							file_output.put('M');
+							file_output.put('T');
+							file_output.put('r');
 							file_output.put('k');
 							file_output.put(Track.size() >> 24);///size of track
 							file_output.put(Track.size() >> 16);
@@ -546,7 +564,7 @@ struct SingleMIDIReProcessor {
 						Track.clear();
 						EventCounter = 0;
 						TrackEnded = true;
-						break;
+						goto loop_break_stmp;
 					}
 					else {//other meta events
 						if (!(BoolSettings & SMP_BOOL_SETTINGS_IGNORE_ALL_BUT_TEMPOS_NOTES_AND_PITCH)) {
@@ -571,7 +589,10 @@ struct SingleMIDIReProcessor {
 									byte1 = file_input.get();
 									byte2 = file_input.get();
 									byte3 = file_input.get();
-									CurrentTempo = ((((DWORD)byte1) << 16) | (((DWORD)byte2) << 8) | (DWORD)byte3);
+									if (NewTempo > 3.5763f) 
+										CurrentTempo = ((((DWORD)Tempo1) << 16) | (((DWORD)Tempo2) << 8) | (DWORD)Tempo3);
+									else
+										CurrentTempo = ((((DWORD)byte1) << 16) | (((DWORD)byte2) << 8) | (DWORD)byte3);
 									continue;
 								}
 								else {
@@ -646,8 +667,8 @@ struct SingleMIDIReProcessor {
 							}
 						}
 					}
-				}
-				else if (IO >= 0x80 && IO <= 0x9F) {///notes
+				} break;
+				MH_CASE(0x80) : MH_CASE(0x90) : {
 					RunningStatusByte = IO;
 					bool DeleteEvent = BoolSettings & SMP_BOOL_SETTINGS_IGNORE_NOTES, isnoteon = (RunningStatusByte >= 0x90);
 					BYTE Key = file_input.get();
@@ -711,8 +732,84 @@ struct SingleMIDIReProcessor {
 						Track.push_back(Vol);
 					}
 					EventCounter++;
-				}
-				else if (IO >= 0xE0 && IO <= 0xEF) {///pitch bending event
+				} break;
+				MH_CASE(0xA0) : {
+					RunningStatusByte = IO;
+					if (!(BoolSettings & SMP_BOOL_SETTINGS_IGNORE_ALL_BUT_TEMPOS_NOTES_AND_PITCH)) {
+						Track.push_back(IO);///event type
+						Track.push_back(byte1 = file_input.get());///1st parameter//key
+						Track.push_back(byte2 = file_input.get());///2nd parameter//value
+						EventCounter++;
+						CurrentNoteAftertouch[((WORD)byte1 << 4) | (IO & 0xF)] = byte2;
+					}
+					else {
+						TickTranq = LastDeltaTime;
+						for (int i = 0; i < (INT32)DeltaTimeSize; i++)
+							Track.pop_back();
+						byte1 = file_input.get();
+						byte2 = file_input.get();
+						CurrentNoteAftertouch[((WORD)byte1 << 4) | (IO & 0xF)] = byte2;
+						continue;
+					}
+				} break;
+				MH_CASE(0xB0) : {
+					RunningStatusByte = IO;
+					if (!(BoolSettings & SMP_BOOL_SETTINGS_IGNORE_ALL_BUT_TEMPOS_NOTES_AND_PITCH)) {
+						Track.push_back(IO);///event type
+						Track.push_back(byte1 = file_input.get());///1st parameter
+						Track.push_back(byte2 = file_input.get());///2nd parameter
+						EventCounter++;
+						CurrentController[((WORD)byte1 << 4) | (IO & 0xF)] = byte2;
+					}
+					else {
+						TickTranq = LastDeltaTime;
+						for (int i = 0; i < (INT32)DeltaTimeSize; i++)
+							Track.pop_back();
+						byte1 = file_input.get();
+						byte2 = file_input.get();
+						CurrentController[((WORD)byte1 << 4) | (IO & 0xF)] = byte2;
+						continue;
+					}
+				} break;
+				MH_CASE(0xC0) : {
+					RunningStatusByte = IO;
+					if (!(BoolSettings & SMP_BOOL_SETTINGS_IGNORE_ALL_BUT_TEMPOS_NOTES_AND_PITCH)) {
+						Track.push_back(IO);///event type
+						if (BoolSettings & SMP_BOOL_SETTINGS_ALL_INSTRUMENTS_TO_PIANO)
+							Track.push_back(byte1 = (file_input.get() & 0));///1st parameter
+						else
+							Track.push_back(byte1 = (file_input.get() & 0x7F));
+						EventCounter++;
+						CurrentProgram[IO & 0xF] = byte1;
+					}
+					else {
+						TickTranq = LastDeltaTime;
+						for (int i = 0; i < (INT32)DeltaTimeSize; i++)
+							Track.pop_back();
+						byte1 = file_input.get();///for its single parameter
+						CurrentProgram[IO & 0xF] = byte1;
+						continue;
+					}
+				} break;
+				MH_CASE(0xD0) :{
+					RunningStatusByte = IO;
+					if (!(BoolSettings & SMP_BOOL_SETTINGS_IGNORE_ALL_BUT_TEMPOS_NOTES_AND_PITCH)) {
+						Track.push_back(IO);///event type
+						Track.push_back(byte1 = (file_input.get() & 0x7F));
+						//fi.get();
+						EventCounter++;
+						CurrentChannelAftertouch[IO & 0xF] = byte1;
+					}
+					else {
+						TickTranq = LastDeltaTime;
+						for (int i = 0; i < (INT32)DeltaTimeSize; i++)
+							Track.pop_back();
+						byte1 = file_input.get();
+						CurrentChannelAftertouch[IO & 0xF] = byte1;
+						continue;
+					}
+				} break;
+				MH_CASE(0xE0) : {
 					RunningStatusByte = IO;
 					if (!(BoolSettings & SMP_BOOL_SETTINGS_IGNORE_PITCHES)) {
 						Track.push_back(IO);
@@ -734,89 +831,13 @@ struct SingleMIDIReProcessor {
 						TickTranq = LastDeltaTime;
 						for (int i = 0; i < (INT32)DeltaTimeSize; i++)
 							Track.pop_back();
-						byte1 = file_input.get()&0x7F;
-						byte2 = file_input.get()&0x7F;///for 1st and 2nd parameter
+						byte1 = file_input.get() & 0x7F;
+						byte2 = file_input.get() & 0x7F;///for 1st and 2nd parameter
 						CurrentPitch[IO & 0xF] = ((((WORD)byte1) << 8) | (WORD)byte2);
 						continue;
 					}
-				}
-				else if ((IO >= 0xA0 && IO <= 0xAF)) {///note aftertouch :t
-					RunningStatusByte = IO;
-					if (!(BoolSettings & SMP_BOOL_SETTINGS_IGNORE_ALL_BUT_TEMPOS_NOTES_AND_PITCH)) {
-						Track.push_back(IO);///event type
-						Track.push_back(byte1 = file_input.get());///1st parameter//key
-						Track.push_back(byte2 = file_input.get());///2nd parameter//value
-						EventCounter++;
-						CurrentNoteAftertouch[((WORD)byte1 << 4) | (IO & 0xF)] = byte2;
-					}
-					else {
-						TickTranq = LastDeltaTime;
-						for (int i = 0; i < (INT32)DeltaTimeSize; i++)
-							Track.pop_back();
-						byte1 = file_input.get();
-						byte2 = file_input.get();
-						CurrentNoteAftertouch[((WORD)byte1 << 4) | (IO & 0xF)] = byte2;
-						continue;
-					}
-				}
-				else if ((IO >= 0xB0 && IO <= 0xBF)) {///controller :t
-					RunningStatusByte = IO;
-					if (!(BoolSettings & SMP_BOOL_SETTINGS_IGNORE_ALL_BUT_TEMPOS_NOTES_AND_PITCH)) {
-						Track.push_back(IO);///event type
-						Track.push_back(byte1 = file_input.get());///1st parameter
-						Track.push_back(byte2 = file_input.get());///2nd parameter
-						EventCounter++;
-						CurrentController[((WORD)byte1 << 4) | (IO & 0xF)] = byte2;
-					}
-					else {
-						TickTranq = LastDeltaTime;
-						for (int i = 0; i < (INT32)DeltaTimeSize; i++)
-							Track.pop_back();
-						byte1 = file_input.get();
-						byte2 = file_input.get();
-						CurrentController[((WORD)byte1 << 4) | (IO & 0xF)] = byte2;
-						continue;
-					}
-				}
-				else if ((IO >= 0xC0 && IO <= 0xCF)) {///program change
-					RunningStatusByte = IO;
-					if (!(BoolSettings & SMP_BOOL_SETTINGS_IGNORE_ALL_BUT_TEMPOS_NOTES_AND_PITCH)) {
-						Track.push_back(IO);///event type
-						if (BoolSettings & SMP_BOOL_SETTINGS_ALL_INSTRUMENTS_TO_PIANO)
-							Track.push_back(byte1 = (file_input.get() & 0));///1st parameter
-						else
-							Track.push_back(byte1 = (file_input.get() & 0x7F));
-						EventCounter++;
-						CurrentProgram[IO & 0xF] = byte1;
-					}
-					else {
-						TickTranq = LastDeltaTime;
-						for (int i = 0; i < (INT32)DeltaTimeSize; i++)
-							Track.pop_back();
-						byte1 = file_input.get();///for its single parameter
-						CurrentProgram[IO & 0xF] = byte1;
-						continue;
-					}
-				}
-				else if (IO >= 0xD0 && IO <= 0xDF) {///Channel aftertouch :D
-					RunningStatusByte = IO;
-					if (!(BoolSettings & SMP_BOOL_SETTINGS_IGNORE_ALL_BUT_TEMPOS_NOTES_AND_PITCH)) {
-						Track.push_back(IO);///event type
-						Track.push_back(byte1 = (file_input.get() & 0x7F));
-						//fi.get();
-						EventCounter++;
-						CurrentChannelAftertouch[IO & 0xF] = byte1;
-					}
-					else {
-						TickTranq = LastDeltaTime;
-						for (int i = 0; i < (INT32)DeltaTimeSize; i++)
-							Track.pop_back();
-						byte1 = file_input.get();
-						CurrentChannelAftertouch[IO & 0xF] = byte1;
-						continue;
-					}
-				}
-				else if (IO == 0xF0 || IO == 0xF7) {
+				} break;
+				case 0xF0: case 0xF7: {
 					DWORD sysexVLVsize = 0;
 					RunningStatusByte = 0;
 					L_VLV = 0;
@@ -840,180 +861,178 @@ struct SingleMIDIReProcessor {
 							file_input.get();
 						continue;
 					}
-				}
-				else {///RUNNING STATUS BYTE
-					//////////////////////////
-					//WarningLine = "Running status detected";
-					if (RunningStatusByte >= 0x80 && RunningStatusByte <= 0x9F) {///notes
-						bool DeleteEvent = (BoolSettings & SMP_BOOL_SETTINGS_IGNORE_NOTES), isnoteon = (RunningStatusByte >= 0x90);
-						BYTE Key = IO;
-						Track.push_back(RunningStatusByte);///Event|Channel data
-						if (this->KeyConverter) {////key data processing
-							auto T = (this->KeyConverter->Process(Key));
-							if (T.has_value())
-								Track.push_back(Key = T.value());
-							else {
-								Track.push_back(0);
-								DeleteEvent = true;
-							}
-						}
-						else Track.push_back(Key);///key data processing
-
-						BYTE Vol = file_input.get();
-						if (this->VolumeMapCore && isnoteon)
-							Vol = (*this->VolumeMapCore)[Vol];
-						if (!Vol && isnoteon) {
-							IO = (RunningStatusByte & 0xF) | 0x80;
-							*((&Track.back()) - 1) = IO;
-						}
-						else
-							IO = RunningStatusByte;
-
-						isnoteon = (IO >= 0x90);
-						SHORT HoldIndex = (Key << 4) | (RunningStatusByte & 0xF);
-						//printf("%X %X\n", Key, file_input.tellg());
-
-						////////added
-						if (!DeleteEvent) {
-							if (isnoteon) {//if noteon
-								CurHolded[HoldIndex]++;
-								if (ActiveSelection && (!Entered || (Entered && Exited)))
+				} break;
+				default: {
+					switch (RunningStatusByte) {
+						MH_CASE(0x80) :MH_CASE(0x90) :  {
+							bool DeleteEvent = (BoolSettings & SMP_BOOL_SETTINGS_IGNORE_NOTES), isnoteon = (RunningStatusByte >= 0x90);
+							BYTE Key = IO;
+							Track.push_back(RunningStatusByte);///Event|Channel data
+							if (this->KeyConverter) {////key data processing
+								auto T = (this->KeyConverter->Process(Key));
+								if (T.has_value())
+									Track.push_back(Key = T.value());
+								else {
+									Track.push_back(0);
 									DeleteEvent = true;
+								}
 							}
-							else {//if noteoff
-								if (CurHolded[HoldIndex]) {///can do something with ticks...
-									//INT64 StartTick = CurHolded[Key].back();
-									CurHolded[HoldIndex]--;
+							else Track.push_back(Key);///key data processing
+
+							BYTE Vol = file_input.get();
+							if (this->VolumeMapCore && isnoteon)
+								Vol = (*this->VolumeMapCore)[Vol];
+							if (!Vol && isnoteon) {
+								IO = (RunningStatusByte & 0xF) | 0x80;
+								*((&Track.back()) - 1) = IO;
+							}
+							else
+								IO = RunningStatusByte;
+
+							isnoteon = (IO >= 0x90);
+							SHORT HoldIndex = (Key << 4) | (RunningStatusByte & 0xF);
+							//printf("%X %X\n", Key, file_input.tellg());
+
+							////////added
+							if (!DeleteEvent) {
+								if (isnoteon) {//if noteon
+									CurHolded[HoldIndex]++;
 									if (ActiveSelection && (!Entered || (Entered && Exited)))
 										DeleteEvent = true;
 								}
-								else {
-									DeleteEvent = true;
-									UnholdedCount++;
-									//printf("%X %X nonholded\n", Key, file_input.tellg());
-									if (STRICT_WARNINGS)
-										WarningLine = "(RSB) OFF of nonON Note: " + std::to_string(UnholdedCount);
+								else {//if noteoff
+									if (CurHolded[HoldIndex]) {///can do something with ticks...
+										//INT64 StartTick = CurHolded[Key].back();
+										CurHolded[HoldIndex]--;
+										if (ActiveSelection && (!Entered || (Entered && Exited)))
+											DeleteEvent = true;
+									}
+									else {
+										DeleteEvent = true;
+										UnholdedCount++;
+										//printf("%X %X nonholded\n", Key, file_input.tellg());
+										if (STRICT_WARNINGS)
+											WarningLine = "(RSB) OFF of nonON Note: " + std::to_string(UnholdedCount);
+									}
 								}
 							}
-						}
-						if (DeleteEvent) {///deletes the note from the point of writing the key data.
-							if (isnoteon)//if noteon
-								CurHolded[HoldIndex]++;
-							else if(CurHolded[HoldIndex])
-								CurHolded[HoldIndex]--;
+							if (DeleteEvent) {///deletes the note from the point of writing the key data.
+								if (isnoteon)//if noteon
+									CurHolded[HoldIndex]++;
+								else if (CurHolded[HoldIndex])
+									CurHolded[HoldIndex]--;
 
-							TickTranq = LastDeltaTime;
-							for (int q = -2; q < (INT32)DeltaTimeSize; q++) {
-								Track.pop_back();
-							}
-							continue;
-						}
-						else {
-							Track.push_back(Vol);
-						}
-						EventCounter++;
-					}
-					else if (RunningStatusByte >= 0xE0 && RunningStatusByte <= 0xEF) {///pitch bending event
-						if (!(BoolSettings & SMP_BOOL_SETTINGS_IGNORE_PITCHES)) {
-							Track.push_back(RunningStatusByte);
-							if (this->PitchMapCore) {
-								WORD PitchBend = IO << 7;
-								PitchBend |= file_input.get() & 0x7F;
-								PitchBend = (*PitchMapCore)[PitchBend];
-								Track.push_back(byte1 = ((PitchBend >> 7) & 0x7F));
-								Track.push_back(byte2 = (PitchBend & 0x7F));
+								TickTranq = LastDeltaTime;
+								for (int q = -2; q < (INT32)DeltaTimeSize; q++) {
+									Track.pop_back();
+								}
+								continue;
 							}
 							else {
-								Track.push_back(byte1 = IO);
-								Track.push_back(byte2 = (file_input.get() & 0x7F));
+								Track.push_back(Vol);
 							}
 							EventCounter++;
-							CurrentPitch[RunningStatusByte & 0xF] = (((DWORD)byte1 << 8) | (DWORD)byte2);
-						}
-						else {
-							TickTranq = LastDeltaTime;
-							for (int i = 0; i < (INT32)DeltaTimeSize; i++)
-								Track.pop_back();
-							byte1 = IO;
-							byte2 = file_input.get();///for 2nd parameter
-							CurrentPitch[RunningStatusByte & 0xF] = (((DWORD)byte1 << 8) | (DWORD)byte2);
-							continue;
-						}
-					}
-					else if ((RunningStatusByte >= 0xA0 && RunningStatusByte <= 0xAF)) {///note aftertouch :t
-						//RSB = IO;
-						if (!(BoolSettings & SMP_BOOL_SETTINGS_IGNORE_ALL_BUT_TEMPOS_NOTES_AND_PITCH)) {
-							Track.push_back(RunningStatusByte);///event type
-							Track.push_back(byte1 = IO);///1st parameter
-							Track.push_back(byte2 = file_input.get());///2nd parameter
-							EventCounter++;
-							CurrentNoteAftertouch[(RunningStatusByte & 0xF) | (byte1<<4)] = byte2;
-						}
-						else {
-							TickTranq = LastDeltaTime;
-							for (int i = 0; i < (INT32)DeltaTimeSize; i++)
-								Track.pop_back();
-							byte1 = IO;
-							byte2 = file_input.get();
-							CurrentNoteAftertouch[(RunningStatusByte & 0xF) | (byte1 << 4)] = byte2;
-							continue;
-						}
-					}
-					else if ((RunningStatusByte >= 0xB0 && RunningStatusByte <= 0xBF)) {///controller :t
-						//RSB = IO;
-						if (!(BoolSettings & SMP_BOOL_SETTINGS_IGNORE_ALL_BUT_TEMPOS_NOTES_AND_PITCH)) {
-							Track.push_back(RunningStatusByte);///event type
-							Track.push_back(byte1 = IO);///1st parameter
-							Track.push_back(byte2 = file_input.get());///2nd parameter
-							EventCounter++;
-							CurrentController[(RunningStatusByte & 0xF) | (byte1 << 4)] = byte2;
-						}
-						else {
-							TickTranq = LastDeltaTime;
-							for (int i = 0; i < (INT32)DeltaTimeSize; i++)
-								Track.pop_back();
-							byte1 = IO;
-							byte2 = file_input.get();
-							CurrentController[(RunningStatusByte & 0xF) | (byte1 << 4)] = byte2;
-							continue;
-						}
-					}
-					else if ((RunningStatusByte >= 0xC0 && RunningStatusByte <= 0xCF)) {///program change
-						if (!(BoolSettings & SMP_BOOL_SETTINGS_IGNORE_ALL_BUT_TEMPOS_NOTES_AND_PITCH)) {
-							Track.push_back(RunningStatusByte);///event type
-							if (BoolSettings & SMP_BOOL_SETTINGS_ALL_INSTRUMENTS_TO_PIANO)
-								Track.push_back(byte1 = (file_input.get() & 0));///1st parameter
-							else
-								Track.push_back(byte1 = IO);//
-							EventCounter++;
-							CurrentProgram[RunningStatusByte & 0xF] = byte1;
-						}
-						else {
-							TickTranq = LastDeltaTime;
-							for (int i = 0; i < (INT32)DeltaTimeSize; i++)
-								Track.pop_back();
-							byte1 = IO;
-							CurrentProgram[RunningStatusByte & 0xF] = byte1;
-							continue;
-							//fi.get();///for its single parameter
-						}
-					}
-					else if (RunningStatusByte >= 0xD0 && RunningStatusByte <= 0xDF) {///????:D
-						if (!(BoolSettings & SMP_BOOL_SETTINGS_IGNORE_ALL_BUT_TEMPOS_NOTES_AND_PITCH)) {
-							Track.push_back(RunningStatusByte);///event type
-							Track.push_back(IO);
-							EventCounter++;
-							CurrentChannelAftertouch[RunningStatusByte & 0xF] = IO;
-						}
-						else {
-							TickTranq = LastDeltaTime;
-							for (int i = 0; i < (INT32)DeltaTimeSize; i++)
-								Track.pop_back();
-							CurrentChannelAftertouch[RunningStatusByte & 0xF] = IO;
-							continue;
-						}
-					}
-					else {
+						}break; 
+						MH_CASE(0xA0) : {
+							//RSB = IO;
+							if (!(BoolSettings & SMP_BOOL_SETTINGS_IGNORE_ALL_BUT_TEMPOS_NOTES_AND_PITCH)) {
+								Track.push_back(RunningStatusByte);///event type
+								Track.push_back(byte1 = IO);///1st parameter
+								Track.push_back(byte2 = file_input.get());///2nd parameter
+								EventCounter++;
+								CurrentNoteAftertouch[(RunningStatusByte & 0xF) | (byte1 << 4)] = byte2;
+							}
+							else {
+								TickTranq = LastDeltaTime;
+								for (int i = 0; i < (INT32)DeltaTimeSize; i++)
+									Track.pop_back();
+								byte1 = IO;
+								byte2 = file_input.get();
+								CurrentNoteAftertouch[(RunningStatusByte & 0xF) | (byte1 << 4)] = byte2;
+								continue;
+							}
+						}break; 
+						MH_CASE(0xB0) : {
+							if (!(BoolSettings & SMP_BOOL_SETTINGS_IGNORE_ALL_BUT_TEMPOS_NOTES_AND_PITCH)) {
+								Track.push_back(RunningStatusByte);///event type
+								Track.push_back(byte1 = IO);///1st parameter
+								Track.push_back(byte2 = file_input.get());///2nd parameter
+								EventCounter++;
+								CurrentController[(RunningStatusByte & 0xF) | (byte1 << 4)] = byte2;
+							}
+							else {
+								TickTranq = LastDeltaTime;
+								for (int i = 0; i < (INT32)DeltaTimeSize; i++)
+									Track.pop_back();
+								byte1 = IO;
+								byte2 = file_input.get();
+								CurrentController[(RunningStatusByte & 0xF) | (byte1 << 4)] = byte2;
+								continue;
+							}
+						}break;
+						MH_CASE(0xC0) : {
+							if (!(BoolSettings & SMP_BOOL_SETTINGS_IGNORE_ALL_BUT_TEMPOS_NOTES_AND_PITCH)) {
+								Track.push_back(RunningStatusByte);///event type
+								if (BoolSettings & SMP_BOOL_SETTINGS_ALL_INSTRUMENTS_TO_PIANO)
+									Track.push_back(byte1 = (file_input.get() & 0));///1st parameter
+								else
+									Track.push_back(byte1 = IO);//
+								EventCounter++;
+								CurrentProgram[RunningStatusByte & 0xF] = byte1;
+							}
+							else {
+								TickTranq = LastDeltaTime;
+								for (int i = 0; i < (INT32)DeltaTimeSize; i++)
+									Track.pop_back();
+								byte1 = IO;
+								CurrentProgram[RunningStatusByte & 0xF] = byte1;
+								continue;
+								//fi.get();///for its single parameter
+							}
+						}break;
+						MH_CASE(0xD0) : {
+							if (!(BoolSettings & SMP_BOOL_SETTINGS_IGNORE_ALL_BUT_TEMPOS_NOTES_AND_PITCH)) {
+								Track.push_back(RunningStatusByte);///event type
+								Track.push_back(IO);
+								EventCounter++;
+								CurrentChannelAftertouch[RunningStatusByte & 0xF] = IO;
+							}
+							else {
+								TickTranq = LastDeltaTime;
+								for (int i = 0; i < (INT32)DeltaTimeSize; i++)
+									Track.pop_back();
+								CurrentChannelAftertouch[RunningStatusByte & 0xF] = IO;
+								continue;
+							}
+						}break;
+						MH_CASE(0xE0) : {
+							if (!(BoolSettings & SMP_BOOL_SETTINGS_IGNORE_PITCHES)) {
+								Track.push_back(RunningStatusByte);
+								if (this->PitchMapCore) {
+									WORD PitchBend = IO << 7;
+									PitchBend |= file_input.get() & 0x7F;
+									PitchBend = (*PitchMapCore)[PitchBend];
+									Track.push_back(byte1 = ((PitchBend >> 7) & 0x7F));
+									Track.push_back(byte2 = (PitchBend & 0x7F));
+								}
+								else {
+									Track.push_back(byte1 = IO);
+									Track.push_back(byte2 = (file_input.get() & 0x7F));
+								}
+								EventCounter++;
+								CurrentPitch[RunningStatusByte & 0xF] = (((DWORD)byte1 << 8) | (DWORD)byte2);
+							}
+							else {
+								TickTranq = LastDeltaTime;
+								for (int i = 0; i < (INT32)DeltaTimeSize; i++)
+									Track.pop_back();
+								byte1 = IO;
+								byte2 = file_input.get();///for 2nd parameter
+								CurrentPitch[RunningStatusByte & 0xF] = (((DWORD)byte1 << 8) | (DWORD)byte2);
+								continue;
+							}
+						}break;
+					default: {
 						ErrorLine = "Track corruption. Pos:" + std::to_string(file_input.tellg());
 						//ThrowAlert_Error(ErrorLine);
 						RunningStatusByte = 0;
@@ -1073,9 +1092,16 @@ struct SingleMIDIReProcessor {
 						}
 						Track.clear();
 						EventCounter = 0;
-						break;
+						goto loop_break_stmp;
+					} break;
 					}
+				} break;
 				}
+
+				goto post_break_stmp;
+			loop_break_stmp:
+				break;
+			post_break_stmp:
 				TickTranq = 0;
 			}
 			BoolSettings = BoolSettingsBuffer;

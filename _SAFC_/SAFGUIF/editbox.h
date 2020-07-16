@@ -12,110 +12,130 @@ constexpr int eb_cursor_flash_fraction = 30;
 constexpr int eb_cursor_flash_subcycle = eb_cursor_flash_fraction / 2;
 struct EditBox : HandleableUIPart {
 private:
+	using char_pos = std::pair<std::deque<SingleTextLine*>::iterator, size_t>;
+public:
+private:
 	std::string BufferedCurText;
 	BYTE VisibilityCountDown;
 public:
 	std::deque<SingleTextLine*> Words;
-	std::pair<std::deque<SingleTextLine*>::iterator, size_t> CursorPosition;/*points at the symbol AFTER the cursor in current word?*/
+	char_pos CursorPosition;/*points at the symbol after the cursor in current word?*/
 	void (*OnEdit)();
 	SingleTextLineSettings* STLS;
 	float Xpos, Ypos, Height, Width, VerticalOffset;
 	DWORD RGBABackground, RGBABorder;
 	BYTE BorderWidth;
+
+#define CursorWordIter (*CursorPosition.first)
+
 	EditBox(std::string Text, SingleTextLineSettings* STLS, float Xpos, float Ypos, float Height, float Width, float VerticalOffset, DWORD RGBABackground, DWORD RGBABorder, BYTE BorderWidth): STLS(STLS),Xpos(Xpos),Ypos(Ypos),Height(Height), Width(Width), VerticalOffset(VerticalOffset), RGBABackground(RGBABackground), RGBABorder(RGBABorder), BorderWidth(BorderWidth), BufferedCurText(Text), VisibilityCountDown(0){
-		Words.push_back(STLS->CreateOne("\t"));
-		CursorPosition = { Words.begin(), 1 };
+		Words.push_back(STLS->CreateOne("\r"));
+		CursorPosition = { Words.begin(), 0 };
+		RearrangePositions();
 		for (auto& ch : Text)
 			WriteSymbolAtCursorPos(ch);
 	}
-	void WriteSymbolAtCursorPos(char ch) {
+	void WriteSymbolAtCursorPos(char ch, bool rearrange=true) {
 		Lock.lock();
-		std::string cur_word = (CursorPosition.first != Words.end()) ? (*CursorPosition.first)->_CurrentText : "";
+		std::string cur_word = (CursorPosition.first != Words.end()) ? CursorWordIter->_CurrentText : "";
 		float char_width = STLS->XUnitSize*2;
 		float fixed_width = (Width - 2*char_width);
 		size_t maximal_whole_word_size = (fixed_width / (char_width + STLS->SpaceWidth));
-		if ((*CursorPosition.first)->_CurrentText == "\n" && ch >= 32 && ch!=127) {
-			CursorPosition.first = Words.insert(CursorPosition.first + 1, STLS->CreateOne("\t"));
-			CursorPosition.second = 1;
-		}
-		if (ch == '\n') {
-			CursorPosition.first = Words.insert(CursorPosition.first + 1, STLS->CreateOne("\n"));
-			CursorPosition.first = Words.insert(CursorPosition.first + 1, STLS->CreateOne("\t"));
-			CursorPosition.second = 1;
-		}
-		else if (ch == ' ') {
-			(*CursorPosition.first)->SafeStringReplace(cur_word.substr(0, CursorPosition.second));
-			CursorPosition.first = Words.insert(CursorPosition.first + 1, STLS->CreateOne(" "+cur_word.substr(CursorPosition.second,0x7FFFFFFF)));
-			CursorPosition.second = 1;
-		}
-		else if (ch < 32 || ch == 127)
-			return;
-		else if (maximal_whole_word_size <= cur_word.size()) {
-			cur_word.insert(cur_word.begin() + CursorPosition.second, ch);
-			auto old = cur_word.substr(0, maximal_whole_word_size);
-			auto truncated = cur_word.substr(maximal_whole_word_size, 0x7FFFFFFF);
-			(*CursorPosition.first)->SafeStringReplace(old);
-			auto iter = Words.insert(CursorPosition.first + 1, STLS->CreateOne(truncated));
-			if (CursorPosition.second < maximal_whole_word_size) {
+		if (CursorPosition.second) {
+			if (ch == '\n' || ch == ' ') {
+				std::string str = " ";
+				str[0] = ch;
+				CursorWordIter->SafeStringReplace(cur_word.substr(0, CursorPosition.second));
+				CursorPosition.first = Words.insert(CursorPosition.first + 1, STLS->CreateOne(str));
+				CursorPosition.first = Words.insert(CursorPosition.first + 1, STLS->CreateOne(cur_word.substr(CursorPosition.second, 0x7FFFFFFF)));
+				CursorPosition.second = 0;
+			}
+			else if (ch < 32 || ch == 127) {
+				Lock.unlock();
+				return;
+			}
+			else if (cur_word.size() >= maximal_whole_word_size) {
+				cur_word.insert(cur_word.begin() + CursorPosition.second, ch);
+				CursorWordIter->SafeStringReplace(cur_word.substr(0, maximal_whole_word_size-1));
+				CursorPosition.first = Words.insert(CursorPosition.first + 1, STLS->CreateOne(cur_word.substr(maximal_whole_word_size-1, 0x7FFFFFFF)));
 				CursorPosition.second++;
+				if (CursorPosition.second < maximal_whole_word_size) 
+					CursorPosition.first--;
+				else 
+					CursorPosition.second -= maximal_whole_word_size - 1;
 			}
 			else {
-				CursorPosition.second = CursorPosition.second - maximal_whole_word_size + 1;
-				CursorPosition.first = iter;
+				cur_word.insert(cur_word.begin() + CursorPosition.second, ch);
+				CursorWordIter->SafeStringReplace(cur_word);
+				CursorPosition.second++;
 			}
 		}
 		else {
-			if (cur_word == "\t")
-				cur_word[0] = ch;
-			else
-				cur_word.insert(cur_word.begin() + CursorPosition.second, ch), CursorPosition.second++;
-			(*CursorPosition.first)->SafeStringReplace(cur_word);
+			if (ch == '\n' || ch == ' ') {
+				std::string str = " ";
+				str[0] = ch;
+				CursorPosition.first = Words.insert(CursorPosition.first, STLS->CreateOne(str));
+				CursorPosition.first++;
+				CursorPosition.second = 0;
+			}
+			else if (ch < 32 || ch == 127) {
+				Lock.unlock();
+				return;
+			}
+			else if (cur_word.size() >= maximal_whole_word_size) {
+				cur_word.insert(cur_word.begin() + 1, ch);
+				CursorWordIter->SafeStringReplace(cur_word.substr(0, maximal_whole_word_size - 1));
+				auto itt = CursorPosition.first;
+				CursorPosition.first = Words.insert(CursorPosition.first + 1, STLS->CreateOne(cur_word.substr(maximal_whole_word_size - 1, 0x7FFFFFFF))),itt;
+				CursorPosition.second++;
+				CursorPosition.first--;
+			}
+			else {
+				cur_word.insert(cur_word.begin(), ch);
+				CursorWordIter->SafeStringReplace(cur_word);
+				CursorPosition.second++;
+			}
 		}
+
 		VisibilityCountDown = eb_cursor_flash_subcycle;
-		RearrangePositions();
+		if(rearrange)
+			RearrangePositions();
 		Lock.unlock();
 	}
 	void RemoveSymbolBeforeCursorPos() {
 		Lock.lock();
-		if ((*CursorPosition.first)->_CurrentText.size() > 1) {
-			auto str = (*CursorPosition.first)->_CurrentText;
-			str.erase(str.begin() + (CursorPosition.second - 1), str.begin() + CursorPosition.second);
-			(*CursorPosition.first)->SafeStringReplace(str);
+		auto cur_pos = CursorPosition;
+		if (CursorPosition.second) {
+			std::string cur_word = CursorWordIter->_CurrentText;
+			cur_word.erase(cur_word.begin() + CursorPosition.second - 1);
+			CursorWordIter->SafeStringReplace(cur_word);
 			CursorPosition.second--;
-			if (!CursorPosition.second) {
-				if (CursorPosition.first != Words.begin()) {
-					CursorPosition.first--;
-					CursorPosition.second = (*CursorPosition.first)->_CurrentText.size();
-				}
-				else {
-					CursorPosition.second = 1;
-				}
-			}
+			RearrangePositions();
 		}
-		else {
-			CursorPosition.first = Words.erase(CursorPosition.first);
-			if (CursorPosition.first == Words.begin() || Words.begin() == Words.end()) {
-				Words.push_front(STLS->CreateOne("\t"));
-				CursorPosition.second = 1;
-				CursorPosition.first = Words.begin();
+		else if(CursorPosition.first!=Words.begin()) {
+			std::string cur_word;
+			auto it = CursorPosition.first - 1;
+			if ((*it)->_CurrentText.size()>1) {
+				cur_word = (*it)->_CurrentText;
+				cur_word.pop_back();
+				(*it)->SafeStringReplace(cur_word);
 			}
 			else {
-				CursorPosition.first--;
-				CursorPosition.second = (*CursorPosition.first)->_CurrentText.size();
+				delete (*it);
+				CursorPosition.first = Words.erase(it);
 			}
+			RearrangePositions();
 		}
-		RearrangePositions();
 		Lock.unlock();
 	}
 	void RemoveSymbolAfterCursorPos() {
 		Lock.lock();
-		if (CursorPosition.first == Words.end() - 1 && CursorPosition.second == Words.back()->_CurrentText.size()) {
+		if (CursorPosition.first == Words.end() - 1 && CursorPosition.second == Words.back()->_CurrentText.size() - 1) {
 			Lock.unlock();
 			return;
 		}
 		MoveCursorBy1(_Align::right);
 		RemoveSymbolBeforeCursorPos();
-		//MoveCursorBy1(_Align::left);
 		Lock.unlock();
 	}
 	void UpdateBufferedCurText() {
@@ -157,9 +177,12 @@ public:
 	}
 	void Clear() {
 		Lock.lock();
+		for (auto& word : Words) 
+			delete word;
 		Words.clear();
 		Words.push_back(STLS->CreateOne("\t"));
-		CursorPosition = { Words.begin(), 1 };
+		Words.push_back(STLS->CreateOne("\n"));
+		CursorPosition = { Words.begin(), 0 };
 		Lock.unlock();
 	}
 	void ReparseCurrentTextFromScratch() {
@@ -184,6 +207,9 @@ public:
 		ReparseCurrentTextFromScratch();
 		Lock.unlock();
 	}
+	inline std::string _UnsafeGetCurrentText() const {
+		return BufferedCurText;
+	}
 	void MoveCursorBy1(_Align Move) {
 		Lock.lock();
 		if ((CursorPosition.first == Words.end())) {
@@ -192,33 +218,33 @@ public:
 		}
 		auto Y = CursorPosition.first;
 		auto cur_y_coord = (*Y)->CYpos;
-		auto cur_x_coord = (*Y)->Chars[CursorPosition.second - 1]->Xpos;
+		auto cur_x_coord = (*Y)->Chars[CursorPosition.second]->Xpos;
 		switch (Move){
 		case _Align::left:
 			//printf("left %i %i\n", (*CursorPosition.first), CursorPosition.second);
-			if (CursorPosition.second>1) {
+			if (CursorPosition.second>0) {
 				CursorPosition.second--;
 			}
 			else if (CursorPosition.first != Words.begin()) {
 				CursorPosition.first--;
-				CursorPosition.second = (*CursorPosition.first)->_CurrentText.size();
+				CursorPosition.second = (*CursorPosition.first)->_CurrentText.size()-1;
 			}
 			break;
 		case _Align::right:
 			//printf("right %i %i\n", (*CursorPosition.first), CursorPosition.second);
-			if (CursorPosition.second < (*CursorPosition.first)->_CurrentText.size()) {
+			if (CursorPosition.second < (*CursorPosition.first)->_CurrentText.size() - 1) {
 				CursorPosition.second++;
 			}
 			else if (CursorPosition.first != Words.end()-1) {
 				CursorPosition.first++;
-				CursorPosition.second = 1;
+				CursorPosition.second = 0;
 			}
 			break;
 		case _Align::top:
 			//printf("top %i %i\n", (*CursorPosition.first), CursorPosition.second);
 			do {MoveCursorBy1(_Align::left);} while (
-				!(CursorPosition.first == Words.begin() && CursorPosition.second == 1) && (
-					cur_x_coord + STLS->XUnitSize * 0.5 < (*CursorPosition.first)->Chars[CursorPosition.second - 1]->Xpos ||
+				!(CursorPosition.first == Words.begin() && CursorPosition.second == 0) && (
+					cur_x_coord + STLS->XUnitSize * 0.5 < (*CursorPosition.first)->Chars[CursorPosition.second]->Xpos ||
 					cur_y_coord == (*CursorPosition.first)->CYpos
 				));
 			break;
@@ -226,8 +252,8 @@ public:
 			//printf("bottom %i %i\n", (*CursorPosition.first), CursorPosition.second);
 			do {MoveCursorBy1(_Align::right);} while (
 				//printf("%f %f\n", cur_x_coord - STLS->XUnitSize * 0.5, (*CursorPosition.first)->Chars[CursorPosition.second - 1]->Xpos);
-				!(CursorPosition.first == Words.end() - 1 && CursorPosition.second == Words.back()->_CurrentText.size()) && (
-					cur_x_coord - STLS->XUnitSize*0.5 > (*CursorPosition.first)->Chars[CursorPosition.second - 1]->Xpos ||
+				!(CursorPosition.first == Words.end() - 1 && CursorPosition.second == Words.back()->_CurrentText.size()-1) && (
+					cur_x_coord - STLS->XUnitSize*0.5 > (*CursorPosition.first)->Chars[CursorPosition.second]->Xpos ||
 					cur_y_coord == (*CursorPosition.first)->CYpos
 				));
 			break;
@@ -313,11 +339,12 @@ public:
 		}
 		if ((TimerV % eb_cursor_flash_fraction > eb_cursor_flash_subcycle) || VisibilityCountDown) {
 			if (CursorPosition.first != Words.end()) {
-				auto t = (*CursorPosition.first)->Chars[CursorPosition.second - 1];
+				const float fonted_fix = (is_fonted ? 0.75f : 1.5f);
+				auto t = (*CursorPosition.first)->Chars[CursorPosition.second];
 				GLCOLOR(STLS->RGBAColor);
 				glBegin(GL_LINES);
-				glVertex2f(t->Xpos + STLS->XUnitSize + STLS->SpaceWidth * 0.5, t->Ypos + STLS->YUnitSize * 1.5);
-				glVertex2f(t->Xpos + STLS->XUnitSize + STLS->SpaceWidth * 0.5, t->Ypos - STLS->YUnitSize * 1.5);
+				glVertex2f(t->Xpos - STLS->XUnitSize - STLS->SpaceWidth * 0.5f, t->Ypos + STLS->YUnitSize * fonted_fix);
+				glVertex2f(t->Xpos - STLS->XUnitSize - STLS->SpaceWidth * 0.5f, t->Ypos - STLS->YUnitSize * fonted_fix);
 				glEnd();
 			}
 		}
@@ -342,6 +369,7 @@ public:
 	inline DWORD TellType() override {
 		return TT_EDITBOX;
 	}
+#undef CursorWordIter
 };
 
 #endif

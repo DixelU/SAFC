@@ -112,6 +112,7 @@
       <AdditionalUsingDirectories>
       </AdditionalUsingDirectories>
       <AdditionalIncludeDirectories>O:\boost</AdditionalIncludeDirectories>
+      <AdditionalOptions>/bigobj %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -138,6 +139,7 @@
       <FloatingPointModel>Fast</FloatingPointModel>
       <RuntimeTypeInfo>true</RuntimeTypeInfo>
       <AdditionalIncludeDirectories>O:\boost</AdditionalIncludeDirectories>
+      <AdditionalOptions>/bigobj %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -234,7 +236,7 @@
     <ClInclude Include="bbb_ffio.h" />
     <ClInclude Include="BWMR.h" />
     <ClInclude Include="consts.h" />
-    <ClInclude Include="extended_tinyexpr.h" />
+    <ClInclude Include="exprtk_wrapper.h" />
     <ClInclude Include="resource.h" />
     <ClInclude Include="SAFCGUIF_Local\BAWC.h" />
     <ClInclude Include="SAFCGUIF_Local\CATh.h" />

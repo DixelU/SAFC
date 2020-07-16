@@ -21,7 +21,6 @@ struct MIDICollectionThreadedMerger {
 	WORD IRTrackCount;
 	WORD IITrackCount;
 	std::vector<SingleMIDIReProcessor*> SMRP, Cur_Processing;
-
 	struct DegeneratedTrackIterator {
 		INT64 CurPosition;
 		INT64 CurTick;
@@ -90,7 +89,7 @@ struct MIDICollectionThreadedMerger {
 				else if ((TrackData[CurPosition] >= 0xC0 && TrackData[CurPosition] <= 0xDF))
 					CurPosition += 2;
 				else if (true)
-					ThrowAlert_Error("DTI Failure at " + std::to_string(CurPosition) + ". Type: " + std::to_string(TrackData[CurPosition]) + ". Tell developer about it and give hime source midi\n");
+					ThrowAlert_Error("DTI Failure at " + std::to_string(CurPosition) + ". Type: " + std::to_string(TrackData[CurPosition]) + ". Tell developer about it and give him source midi\n");
 			}
 			else Processing = false;
 		}
@@ -105,25 +104,14 @@ struct MIDICollectionThreadedMerger {
 			UINT64 LocalTick = CurTick;
 			BYTE DeltaLen = 0;
 			while (output_noteon_wall && LocalTick > LocalDeltaTimeTrunkEdge) {//fillers
-				out.push_back(0xBC);//vlv
-				out.push_back(0x80);
-				out.push_back(0x80);
-				out.push_back(0x00);
+				SingleMIDIReProcessor::SingleMIDIReProcessor::push_vlv(LocalDeltaTimeTrunkEdge, out);
 				out.push_back(0xFF);//empty text event
 				out.push_back(0x01);
 				out.push_back(0x00);
 				LocalTick -= LocalDeltaTimeTrunkEdge;
 			}
 			if (output_noteon_wall) {
-				do {
-					DeltaLen++;
-					out.push_back(LocalTick & 0x7F);
-					LocalTick >>= 7;
-				} while (LocalTick);
-				for (DWORD q = 0; q < (DeltaLen >> 1); q++)
-					std::swap(out[out.size() - 1 - q], out[out.size() - DeltaLen + q]);
-				for (DWORD q = 2; q <= DeltaLen; q++)
-					out[out.size() - q] |= 0x80;
+				DeltaLen = SingleMIDIReProcessor::push_vlv(LocalTick, out);
 			}
 			else
 				out.push_back(0);
@@ -271,22 +259,9 @@ struct MIDICollectionThreadedMerger {
 						eventevalution:///becasue why not
 							EVENTTYPE = (pfiv.get());
 
-							if (1 || EVENTTYPE > 0x9F) {
-								//NotNoteEvents_ProcessedFlag = 1;
-								DeltaLen = 0;
-								do {
-									DeltaLen++;
-									Track.push_back(InTrackDelta & 0x7F);
-									InTrackDelta >>= 7;
-								} while (InTrackDelta);
+							DeltaLen = SingleMIDIReProcessor::push_vlv(InTrackDelta, Track);
+							InTrackDelta = 0;
 
-								for (DWORD q = 0; q < (DeltaLen >> 1); q++) {
-									std::swap(Track[Track.size() - 1 - q], Track[Track.size() - DeltaLen + q]);
-								}
-								for (DWORD q = 2; q <= DeltaLen; q++) {
-									Track[Track.size() - q] |= 0x80;///hack (going from 2 instead of going from one)
-								}
-							}
 							if (EVENTTYPE == 0xFF) {///meta
 								Track.push_back(EVENTTYPE);
 								Track.push_back(pfiv.get());
@@ -361,18 +336,10 @@ struct MIDICollectionThreadedMerger {
 						///while it's zero delta time
 					}
 					if (!ActiveTrackReading && !Track.empty()) {
-						DeltaLen = 0;///Hack from main reprocessor algo
-						do {
-							DeltaLen++;
-							Track.push_back(InTrackDelta & 0x7F);
-							InTrackDelta >>= 7;
-						} while (InTrackDelta);
-						for (DWORD q = 0; q < (DeltaLen >> 1); q++) {
-							std::swap(Track[Track.size() - 1 - q], Track[Track.size() - DeltaLen + q]);
-						}
-						for (DWORD q = 2; q <= DeltaLen; q++) {
-							Track[Track.size() - q] |= 0x80;
-						}
+
+						DeltaLen = SingleMIDIReProcessor::push_vlv(InTrackDelta, Track);
+						InTrackDelta = 0;
+
 						Track.push_back(0xFF);
 						Track.push_back(0x2F);
 						Track.push_back(0x00);

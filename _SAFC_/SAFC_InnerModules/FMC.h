@@ -10,12 +10,12 @@
 #include "BS.h"
 #include "MCTM.h"
 
-struct FastMIDIInfoCollector {
+struct FastMIDIChecker {
 	std::wstring File;
 	BIT IsAcssessable, IsMIDI;
 	WORD PPQN, ExpectedTrackNumber;
 	UINT64 FileSize;
-	FastMIDIInfoCollector(std::wstring File) {
+	FastMIDIChecker(std::wstring File) {
 		this->File = File;
 		std::ifstream f(File, std::ios::in);
 		if (f)IsAcssessable = 1;
