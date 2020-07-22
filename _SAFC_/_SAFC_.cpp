@@ -1733,6 +1733,7 @@ void Init() {///SetIsFontedVar
 
 	(*WH)["SMIC"] = T;
 
+	/*
 	T = new MoveableWindow("Test", System_White, -150, 150, 300, 300, 0x0000000F, 0x7F7F7F7F, 0x000000FF);
 
 	(*T)["TEXTAREA"] = new EditBox("", System_White, 0, 0, 200, 200, 10, 0, 0xFFFFFFFF, 2);
@@ -1740,10 +1741,10 @@ void Init() {///SetIsFontedVar
 		0x000000AF, 0xFFFFFFFF, 0x000000AF, 0xFFFFFFFF, 0x7F7F7F7FF, NULL, " ");
 
 	(*WH)["COMPILEW"] = T;
-
+	*/
 
 	WH->EnableWindow("MAIN");
-	WH->EnableWindow("COMPILEW");
+	//WH->EnableWindow("COMPILEW");
 	//WH->EnableWindow("SMIC");
 	//WH->EnableWindow("OR");
 	//WH->EnableWindow("SMRP_CONTAINER");

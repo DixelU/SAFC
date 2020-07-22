@@ -863,6 +863,7 @@ struct SingleMIDIReProcessor {
 					}
 				} break;
 				default: {
+					//printf("RSB: %li\n", file_input.tellg());
 					switch (RunningStatusByte) {
 						MH_CASE(0x80) :MH_CASE(0x90) :  {
 							bool DeleteEvent = (BoolSettings & SMP_BOOL_SETTINGS_IGNORE_NOTES), isnoteon = (RunningStatusByte >= 0x90);
@@ -974,7 +975,7 @@ struct SingleMIDIReProcessor {
 							if (!(BoolSettings & SMP_BOOL_SETTINGS_IGNORE_ALL_BUT_TEMPOS_NOTES_AND_PITCH)) {
 								Track.push_back(RunningStatusByte);///event type
 								if (BoolSettings & SMP_BOOL_SETTINGS_ALL_INSTRUMENTS_TO_PIANO)
-									Track.push_back(byte1 = (file_input.get() & 0));///1st parameter
+									Track.push_back(byte1 = 0);///1st parameter
 								else
 									Track.push_back(byte1 = IO);//
 								EventCounter++;
@@ -1034,6 +1035,7 @@ struct SingleMIDIReProcessor {
 						}break;
 					default: {
 						ErrorLine = "Track corruption. Pos:" + std::to_string(file_input.tellg());
+						printf("%s\n", ErrorLine.c_str());
 						//ThrowAlert_Error(ErrorLine);
 						RunningStatusByte = 0;
 						DWORD T = 0;
