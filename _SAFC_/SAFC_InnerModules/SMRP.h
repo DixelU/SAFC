@@ -15,7 +15,6 @@
 #include "PLC.h"
 #include "CAT.h"
 #include "../bbb_ffio.h"
-#include "../exprtk_wrapper.h"
 
 template<typename T>
 struct conditional {
@@ -40,20 +39,6 @@ struct conditional {
 	}
 };
 
-struct modifiers_wrapper {
-	exprtk_wrapper
-		*note_key_modifier, *note_velocity_modifier,
-		*noteaftertouch_key_modifier, *noteaftertouch_velocity_modifier,
-		*channelaftertocuh_value_modifier,
-		*program_modifier,
-		*pitch_modifier,
-		*controller_no_modifier, *controller_value_modifier,
-		*tempo_modifier;
-	modifiers_wrapper() {
-		note_key_modifier = note_velocity_modifier = noteaftertouch_key_modifier = noteaftertouch_velocity_modifier = channelaftertocuh_value_modifier = program_modifier = pitch_modifier = controller_no_modifier = controller_value_modifier = controller_no_modifier = tempo_modifier = nullptr;
-	}
-};
-
 struct SingleMIDIReProcessor {
 	DWORD ThreadID;
 	std::wstring FileName, Postfix;
@@ -66,13 +51,13 @@ struct SingleMIDIReProcessor {
 	BIT Finished;
 	BIT Processing;
 	BIT InQueueToInplaceMerge;
+	BYTE ProgramToOverride;
 	INT64 SelectionStart, SelectionLength;
 	BYTE_PLC_Core* VolumeMapCore;
 	_14BIT_PLC_Core* PitchMapCore;
 	CutAndTransposeKeys* KeyConverter;
 	BIT ResetDeltatimesOutsideOfTheRange;
 	UINT64 FilePosition, FileSize;
-	modifiers_wrapper modifiers;
 	inline static void ostream_write(std::vector<BYTE>& vec, const std::vector<BYTE>::iterator& beg, const std::vector<BYTE>::iterator& end, std::ostream& out) {
 		out.write(((char*)vec.data()) + (beg - vec.begin()), end - beg);
 	}

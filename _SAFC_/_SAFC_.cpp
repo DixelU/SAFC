@@ -1545,28 +1545,6 @@ void RestoreRegSettings() {
 	}
 }
 
-void __Compile() {
-	auto ptr = ((EditBox*)(*(*WH)["COMPILEW"])["TEXTAREA"]);
-	ptr->UpdateBufferedCurText();
-	auto str = ptr->_UnsafeGetCurrentText();
-	if (!str.size())
-		return;
-	std::thread th([](std::string& str) {
-		double x = 3;
-		exprtk_wrapper ew({ {"x",x} });
-		if (ew.compile(str))
-			std::cout << ew.evalute() << std::endl;
-		else {
-			auto errors = ew.get_errors();
-			for (auto& error : errors) {
-				auto& [no, pos, str1, str2] = error;
-				std::cout << no << " " << pos << " " << str1 << " " << str2 << "\n";
-			}
-		}
-	}, str);
-	th.detach();
-}
-
 void Init() {///SetIsFontedVar
 	RestoreRegSettings();
 	hDc = GetDC(hWnd);

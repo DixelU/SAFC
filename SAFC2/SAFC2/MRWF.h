@@ -19,6 +19,11 @@
 namespace mrwf {
 #define MULTICHANNEL_CASE(channel) case (channel<<8)|0x0:case (channel<<8)|0x1:case (channel<<8)|0x2:case (channel<<8)|0x3:case (channel<<8)|0x4:case (channel<<8)|0x5:case (channel<<8)|0x6:case (channel<<8)|0x7:case (channel<<8)|0x8:case (channel<<8)|0x9:case (channel<<8)|0xA:case (channel<<8)|0xB:case (channel<<8)|0xC:case (channel<<8)|0xD:case (channel<<8)|0xE:case (channel<<8)|0xF:
 
+	template<typename data_type, size_t block_size = 1024u>
+	struct blocked_list {
+		data_type inner_array[block_size];
+	};
+
 	template<typename data_type>
 	struct value_modifier {
 		enum class type { replace, add, mult };

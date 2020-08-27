@@ -236,7 +236,6 @@
     <ClInclude Include="bbb_ffio.h" />
     <ClInclude Include="BWMR.h" />
     <ClInclude Include="consts.h" />
-    <ClInclude Include="exprtk_wrapper.h" />
     <ClInclude Include="resource.h" />
     <ClInclude Include="SAFCGUIF_Local\BAWC.h" />
     <ClInclude Include="SAFCGUIF_Local\CATh.h" />
