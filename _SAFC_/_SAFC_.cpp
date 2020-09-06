@@ -202,7 +202,7 @@ void SAFC_VersionCheck() {
 						if (FirstElement->AsObject().end() != Name &&
 							Name->second->IsString()) {
 							auto git_latest_version = Name->second->AsString();
-							std::wcout << L"Git latest version: " << git_latest_version << std::endl;
+							//std::wcout << L"Git latest version: " << git_latest_version << std::endl;
 							bool was_digit = false;
 							WORD version_partied[4] = { 0,0,0,0 };
 							int cur_index = -1;
@@ -222,8 +222,8 @@ void SAFC_VersionCheck() {
 										break;
 									index++;
 								}
-								//std::wcout << version_partied[0] << L" " << version_partied[1] << L" " << version_partied[2] << L" " << version_partied[3] << L"\n";
-								//std::wcout << maj << L" " << min << L" " << ver << L" " << build << L"\n";
+								std::wcout << L"Git latest version: v" << version_partied[0] << L"." << version_partied[1] << L"." << version_partied[2] << L"." << version_partied[3] << L"\n";
+								std::wcout << L"Current vesion: v" << maj << L"." << min << L"." << ver << L"." << build << L"\n";
 								if (maj < version_partied[0] ||
 									maj == version_partied[0] && min < version_partied[1] ||
 									maj == version_partied[0] && min == version_partied[1] && ver < version_partied[2] ||
