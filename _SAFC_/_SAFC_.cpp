@@ -120,8 +120,8 @@ bool SAFC_Update(const std::wstring& latest_release) {
 		errno = 0;
 		_wrename((pathway + L"SAFC.exe").c_str(), (pathway + L"_s").c_str());
 		std::cout << strerror(errno) << std::endl;
-		_wrename((pathway + L"freeglut.dll").c_str(), (pathway + L"_f").c_str());
-		std::cout << strerror(errno) << std::endl;
+		//_wrename((pathway + L"freeglut.dll").c_str(), (pathway + L"_f").c_str());
+		//std::cout << strerror(errno) << std::endl;
 		//_wrename((pathway + L"glew32.dll").c_str(), (pathway + L"_g").c_str()); 
 		//cout << strerror(errno) << endl; 
 		//wcout << pathway << endl;
@@ -188,56 +188,60 @@ void SAFC_VersionCheck() {
 		std::wstring pathway = filename;
 		filename += L"tags.json";
 		HRESULT res = URLDownloadToFileW(NULL, SAFC_tags_link, filename.c_str(), 0, NULL);
-		if (res == S_OK) {
-			auto [maj, min, ver, build] = ___GetCurFileVersion();
-			std::ifstream input(filename);
-			std::string temp_buffer;
-			std::getline(input, temp_buffer);
-			input.close();
-			auto JSON_Value = JSON::Parse(temp_buffer.c_str());
-			if (JSON_Value->IsArray()) {
-				auto FirstElement = JSON_Value->AsArray()[0];
-				if (FirstElement->IsObject()) {
-					auto Name = FirstElement->AsObject().find(L"name");
-					if (FirstElement->AsObject().end() != Name &&
-						Name->second->IsString()) {
-						auto git_latest_version = Name->second->AsString();
-						std::wcout << L"Git latest version: " << git_latest_version << std::endl;
-						bool was_digit = false;
-						WORD version_partied[4] = {0,0,0,0};
-						int cur_index = -1;
-						if (git_latest_version.size() <= 100) {
-							std::vector<std::string> ans;
-							boost::algorithm::split(ans, git_latest_version, boost::is_any_of("."));
-							int index = 0;
-							for (auto& num_val : ans) {
-								try {
-									version_partied[index] = std::stoi(num_val);
+		try {
+			if (res == S_OK) {
+				auto [maj, min, ver, build] = ___GetCurFileVersion();
+				std::ifstream input(filename);
+				std::string temp_buffer;
+				std::getline(input, temp_buffer);
+				input.close();
+				auto JSON_Value = JSON::Parse(temp_buffer.c_str());
+				if (JSON_Value->IsArray()) {
+					auto FirstElement = JSON_Value->AsArray()[0];
+					if (FirstElement->IsObject()) {
+						auto Name = FirstElement->AsObject().find(L"name");
+						if (FirstElement->AsObject().end() != Name &&
+							Name->second->IsString()) {
+							auto git_latest_version = Name->second->AsString();
+							std::wcout << L"Git latest version: " << git_latest_version << std::endl;
+							bool was_digit = false;
+							WORD version_partied[4] = { 0,0,0,0 };
+							int cur_index = -1;
+							if (git_latest_version.size() <= 100) {
+								std::vector<std::string> ans;
+								boost::algorithm::split(ans, git_latest_version, boost::is_any_of("."));
+								int index = 0;
+								for (auto& num_val : ans) {
+									try {
+										version_partied[index] = std::stoi(num_val);
+									}
+									catch (...) {
+										break;
+									}
+									if (index == 3)
+										break;
+									index++;
 								}
-								catch (...) {
-									break;
+								if (maj < version_partied[0] ||
+									maj == version_partied[0] && min < version_partied[1] ||
+									maj == version_partied[0] && min == version_partied[1] && ver < version_partied[2] ||
+									maj == version_partied[0] && min == version_partied[1] && ver == version_partied[2] && build < version_partied[3]) {
+									ThrowAlert_Warning("Update found! The app might restart soon...\nUpdate: " + std::string(git_latest_version.begin(), git_latest_version.end()));
+									flag = SAFC_Update(git_latest_version);
+									if (flag)
+										ThrowAlert_Warning("SAFC will restart in 3 seconds...");
 								}
-								if (index == 3)
-									break;
-								index++;
-							}
-							if (maj < version_partied[0] ||
-								maj == version_partied[0] && min < version_partied[1] ||
-								maj == version_partied[0] && min == version_partied[1] && ver < version_partied[2] ||
-								maj == version_partied[0] && min == version_partied[1] && ver == version_partied[2] && build < version_partied[3]) {
-								ThrowAlert_Warning("Update found! The app might restart soon...\nUpdate: " + std::string(git_latest_version.begin(), git_latest_version.end()));
-								flag = SAFC_Update(git_latest_version);
-								if (flag)
-									ThrowAlert_Warning("SAFC will restart in 3 seconds..."); 
 							}
 						}
 					}
 				}
 			}
+			else
+				ThrowAlert_Warning("Most likely your internet connection is unstable\nSAFC cannot check for updates");
 		}
-		else 
-			ThrowAlert_Warning("Most likely your internet connection is unstable\nSAFC cannot check for updates");
-
+		catch (...) {
+			ThrowAlert_Warning("SAFC just almost crashed while checking the update...\nTell developer about that");
+		}
 		_wremove(filename.c_str());
 		if (flag) {
 			Sleep(3000);

@@ -2,15 +2,8 @@
 #ifndef SAFGUIF_HEADER
 #define SAFGUIF_HEADER
 
-#include "glut.h"
-#include "freeglut.h"
-#ifndef __X64
-#pragma comment (lib, "freeglut.lib")
-#else
-#pragma comment (lib, "lib_x64\\freeglut.lib")
-#endif
-
-//#include "shader_smpclass.h"
+#include <GL/glew.h>
+#include <GL/freeglut.h>
 
 #include "consts.h"
 

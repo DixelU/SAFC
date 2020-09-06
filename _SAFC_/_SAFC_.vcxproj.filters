@@ -166,12 +166,4 @@
       <Filter>Файлы ресурсов</Filter>
     </Image>
   </ItemGroup>
-  <ItemGroup>
-    <None Include="freeglut.dll">
-      <Filter>Файлы ресурсов</Filter>
-    </None>
-    <None Include="lib_x64\freeglut.dll">
-      <Filter>Файлы ресурсов</Filter>
-    </None>
-  </ItemGroup>
 </Project>
