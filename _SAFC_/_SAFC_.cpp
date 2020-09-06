@@ -55,40 +55,38 @@
 
 //using namespace std;
 
-std::tuple<WORD, WORD, WORD, WORD> ___GetCurFileVersion() {
-	constexpr int
-		filename_len = 500;
-	wchar_t		szExeFileName[filename_len];
-	DWORD		verHandle = 0;
-	UINT		size = 0;
-	LPBYTE		lpBuffer = NULL;
-	GetModuleFileNameW(NULL, szExeFileName, filename_len);
-	DWORD		verSize = GetFileVersionInfoSizeW(szExeFileName, &verHandle);
-	if (verSize != 0) {
-		LPSTR verData = new char[verSize];
-		if (GetFileVersionInfoW(szExeFileName, verHandle, verSize, verData)) {
-			if (VerQueryValueW(verData, L"\\", (VOID FAR * FAR*) & lpBuffer, &size)) {
-				if (size) {
-					VS_FIXEDFILEINFO* verInfo = (VS_FIXEDFILEINFO*)lpBuffer;
-					if (verInfo->dwSignature == 0xfeef04bd) {
-						delete[] verData;
-
-						// Doesn't matter if you are on 32 bit or 64 bit,
-						// DWORD is always 32 bits, so first two revision numbers
-						// come from dwFileVersionMS, last two come from dwFileVersionLS
-						return {
-							HIWORD(verInfo->dwProductVersionMS),
-							LOWORD(verInfo->dwProductVersionMS),
-							HIWORD(verInfo->dwProductVersionLS),
-							LOWORD(verInfo->dwProductVersionLS) };
-					}
-				}
-			}
-			delete[] verData;
-		}
-	}
-	return { 0,0,0,0 };
+std::tuple<WORD, WORD, WORD, WORD> ___GetVersion() {
+	// get the filename of the executable containing the version resource
+	TCHAR szFilename[MAX_PATH + 1] = { 0 };
+	if (GetModuleFileName(NULL, szFilename, MAX_PATH) == 0) 
+		return {0,0,0,0};
+	// allocate a block of memory for the version info
+	DWORD dummy;
+	DWORD dwSize = GetFileVersionInfoSize(szFilename, &dummy);
+	if (dwSize == 0) 
+		return { 0,0,0,0 };
+	std::vector<BYTE> data(dwSize);
+	// load the version info
+	if (!GetFileVersionInfo(szFilename, 0, dwSize, &data[0])) 
+		return { 0,0,0,0 };
+	// get the name and version strings
+	LPVOID pvProductName = NULL;
+	unsigned int iProductNameLen = 0;
+	LPVOID pvProductVersion = NULL;
+	unsigned int iProductVersionLen = 0;
+	////////////////////////////////////
+	UINT                uiVerLen = 0;
+	VS_FIXEDFILEINFO* pFixedInfo = 0;     // pointer to fixed file info structure
+	// get the fixed file info (language-independent) 
+	if (VerQueryValue(&data[0], TEXT("\\"), (void**)&pFixedInfo, (UINT*)&uiVerLen) == 0) 
+		return { 0,0,0,0 };
+	return {
+		HIWORD(pFixedInfo->dwProductVersionMS),
+		LOWORD(pFixedInfo->dwProductVersionMS),
+		HIWORD(pFixedInfo->dwProductVersionLS),
+		LOWORD(pFixedInfo->dwProductVersionLS) };
 }
+
 std::wstring ExtractDirectory(const std::wstring& path) {
 	constexpr wchar_t delim = (L"\\")[0];
 	return path.substr(0, path.find_last_of(delim) + 1);
@@ -174,6 +172,7 @@ bool SAFC_Update(const std::wstring& latest_release) {
 		ThrowAlert_Error("Autoupdate error: #" + std::to_string(co_res));
 	return flag;
 }
+
 void SAFC_VersionCheck() {
 	std::thread version_checker([]() {
 		bool flag = false;
@@ -190,7 +189,7 @@ void SAFC_VersionCheck() {
 		HRESULT res = URLDownloadToFileW(NULL, SAFC_tags_link, filename.c_str(), 0, NULL);
 		try {
 			if (res == S_OK) {
-				auto [maj, min, ver, build] = ___GetCurFileVersion();
+				auto [maj, min, ver, build] = ___GetVersion();
 				std::ifstream input(filename);
 				std::string temp_buffer;
 				std::getline(input, temp_buffer);
@@ -209,7 +208,8 @@ void SAFC_VersionCheck() {
 							int cur_index = -1;
 							if (git_latest_version.size() <= 100) {
 								std::vector<std::string> ans;
-								boost::algorithm::split(ans, git_latest_version, boost::is_any_of("."));
+								std::wstring git_version_numbers_only = git_latest_version.substr(1);//v?.?.?.?
+								boost::algorithm::split(ans, git_version_numbers_only, boost::is_any_of("."));
 								int index = 0;
 								for (auto& num_val : ans) {
 									try {
@@ -222,6 +222,8 @@ void SAFC_VersionCheck() {
 										break;
 									index++;
 								}
+								//std::wcout << version_partied[0] << L" " << version_partied[1] << L" " << version_partied[2] << L" " << version_partied[3] << L"\n";
+								//std::wcout << maj << L" " << min << L" " << ver << L" " << build << L"\n";
 								if (maj < version_partied[0] ||
 									maj == version_partied[0] && min < version_partied[1] ||
 									maj == version_partied[0] && min == version_partied[1] && ver < version_partied[2] ||
