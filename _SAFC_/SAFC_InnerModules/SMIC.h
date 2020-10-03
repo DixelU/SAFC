@@ -91,7 +91,7 @@ struct SingleMIDIInfoCollector {
 	void Lookup() {
 		Processing = true;
 		bbb_ffr file_input(FileName.c_str());
-		std::array<DWORD, 4096> CurHolded;
+		//std::array<DWORD, 4096> CurHolded;
 		DWORD MTRK = 0, vlv = 0;
 		UINT64 LastTick = 0;
 		UINT64 CurTick = 0;
@@ -175,7 +175,7 @@ struct SingleMIDIInfoCollector {
 						file_input.get();
 				}
 				else {
-					BYTE FirstParam = EventType;
+					//BYTE FirstParam = EventType;
 					EventType = RSB;
 					if (EventType >= 0x80 && EventType <= 0x9F) {
 						int change = (EventType & 0x10) ? 1 : -1;

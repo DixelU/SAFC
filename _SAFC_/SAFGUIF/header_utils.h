@@ -11,7 +11,7 @@
 #include <string>
 #include <vector>
 
-#define NULL nullptr
+//#define NULL nullptr
 
 typedef unsigned char BYTE;
 typedef bool BIT;
@@ -49,6 +49,8 @@ HWND hWnd;
 HDC hDc;
 auto HandCursor = ::LoadCursor(NULL, IDC_HAND), AllDirectCursor = ::LoadCursor(NULL, IDC_CROSS);///AAAAAAAAAAA
 //const float singlepixwidth = (float)RANGE / WINDXSIZE;
+
+BIT AutoUpdatesCheck = true;
 
 void absoluteToActualCoords(int ix, int iy, float& x, float& y);
 void inline rotate(float& x, float& y);

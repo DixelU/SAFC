@@ -100,7 +100,7 @@ struct MIDICollectionThreadedMerger {
 		}
 		void PutCurrentHoldedNotes(std::vector<BYTE>& out, bool output_noteon_wall) {
 			constexpr DWORD LocalDeltaTimeTrunkEdge = 0xF000000;//BC808000 in vlv
-			bool first_nonzero_delta_output = output_noteon_wall;
+			//bool first_nonzero_delta_output = output_noteon_wall;
 			UINT64 LocalTick = CurTick;
 			BYTE DeltaLen = 0;
 			while (output_noteon_wall && LocalTick > LocalDeltaTimeTrunkEdge) {//fillers
@@ -224,7 +224,8 @@ struct MIDICollectionThreadedMerger {
 			file_output.put(PPQN);
 			while (ActiveStreamFlag) {
 				///reading tracks
-				DWORD Header = 0, DIO, DeltaLen = 0, POS = 0;
+				DWORD Header = 0, DIO, DeltaLen = 0;
+				//DWORD POS = 0;
 				UINT64 InTrackDelta = 0;
 				BIT ITD_Flag = 1 /*, NotNoteEvents_ProcessedFlag = 0*/;
 				for (int i = 0; i < fiv.size(); i++) {
@@ -318,7 +319,7 @@ struct MIDICollectionThreadedMerger {
 							ActiveTrackReading = 1;
 							ddt--;
 							continue;
-						file_eof:
+						//file_eof:
 							ddt = -1;
 							continue;
 						}
@@ -346,7 +347,7 @@ struct MIDICollectionThreadedMerger {
 					}
 				}
 				ActiveTrackReading = 1;
-				constexpr INT32 EDGE = 0x7F000000;
+				constexpr UINT32 EDGE = 0x7F000000;
 				if (Track.size() > 0xFFFFFFFFu)
 					std::cout << "TrackSize overflow!!!\n";
 				else if (Track.empty())continue;
@@ -439,8 +440,7 @@ struct MIDICollectionThreadedMerger {
 				(*FinishedFlag) = 1; /// Will this work?
 				return;
 			}
-			WORD T = 0;
-			BIT FirstFlag = 1;
+			//BIT FirstFlag = 1;
 			const size_t buffer_size = 20000000;
 			BYTE* buffer = new BYTE[buffer_size];
 			std::ofstream file_output(_SaveTo + L".R.mid", std::ios::binary | std::ios::out);

@@ -128,7 +128,7 @@ struct TextBox : HandleableUIPart {
 	}
 	void RecalculateAvailableSpaceForText() {
 		Lock.lock();
-		SymbolsPerLine = floor((Width + STLS->XUnitSize * 2) / (STLS->XUnitSize * 2 + STLS->SpaceWidth));
+		SymbolsPerLine = std::floor((Width + STLS->XUnitSize * 2) / (STLS->XUnitSize * 2 + STLS->SpaceWidth));
 		Lock.unlock();
 	}
 	void SafeMove(float dx, float dy) {

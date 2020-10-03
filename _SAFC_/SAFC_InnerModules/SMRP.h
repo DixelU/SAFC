@@ -153,7 +153,7 @@ struct SingleMIDIReProcessor {
 		const DWORD BoolSettingsBuffer = BoolSettings;
 		const DWORD BSB_IgnoreAllSetting = SMP_BOOL_SETTINGS_IGNORE_TEMPOS | SMP_BOOL_SETTINGS_IGNORE_ALL_BUT_TEMPOS_NOTES_AND_PITCH | SMP_BOOL_SETTINGS_IGNORE_PITCHES | SMP_BOOL_SETTINGS_IGNORE_NOTES;
 		WORD OldPPQN;
-		double DeltaTimeTranq = 0, TDeltaTime = 0, PPQNIncreaseAmount = 1;
+		double DeltaTimeTranq = 0, PPQNIncreaseAmount = 1;
 		BYTE Tempo1 = 0, Tempo2 = 0, Tempo3 = 0;
 		BYTE IO = 0, MetaEventType = 0;//register?
 		BYTE RunningStatusByte = 0;

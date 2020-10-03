@@ -258,7 +258,7 @@ struct BiColoredDottedSymbol : DottedSymbol {
 				t = (Red * t + (1.f - t) * gRed);
 				if (t < 0)t = 0;
 				if (t > 255)t = 255;
-				gR[(x + 1) + (3 * (y + 1))] = round(t);
+				gR[(x + 1) + (3 * (y + 1))] = std::round(t);
 			}
 		}
 		///G
@@ -268,7 +268,7 @@ struct BiColoredDottedSymbol : DottedSymbol {
 				t = (Green * t + (1.f - t) * gGreen);
 				if (t < 0)t = 0;
 				if (t > 255)t = 255;
-				gG[(x + 1) + (3 * (y + 1))] = round(t);
+				gG[(x + 1) + (3 * (y + 1))] = std::round(t);
 			}
 		}
 		///B
@@ -278,7 +278,7 @@ struct BiColoredDottedSymbol : DottedSymbol {
 				t = (Blue * t + (1.f - t) * gBlue);
 				if (t < 0)t = 0;
 				if (t > 255)t = 255;
-				gB[(x + 1) + (3 * (y + 1))] = round(t);
+				gB[(x + 1) + (3 * (y + 1))] = std::round(t);
 			}
 		}
 		///A
@@ -288,7 +288,7 @@ struct BiColoredDottedSymbol : DottedSymbol {
 				t = (Alpha * t + (1.f - t) * gAlpha);
 				if (t < 0)t = 0;
 				if (t > 255)t = 255;
-				gA[(x + 1) + (3 * (y + 1))] = round(t);
+				gA[(x + 1) + (3 * (y + 1))] = std::round(t);
 			}
 		}
 	}

@@ -55,7 +55,7 @@ struct DragNDropHandler : IDropTarget {
 	HRESULT STDMETHODCALLTYPE Drop(IDataObject* dataObject, DWORD keyState, POINTL mousePos, DWORD* effect) override {
 		//MessageBox(hWnd, "drop", "Drag", MB_ICONINFORMATION);
 		//cout << "drop " << m_refCount << endl;
-		LPOLESTR szFile = 0;
+
 		FORMATETC fdrop = { CF_HDROP, 0, DVASPECT_CONTENT, -1, TYMED_HGLOBAL };
 		std::vector<std::wstring> WC(1, L"");
 
@@ -65,7 +65,6 @@ struct DragNDropHandler : IDropTarget {
 			HRESULT hr = dataObject->GetData(&fdrop, &stgMedium);
 			if (SUCCEEDED(hr)) {
 				PVOID data = GlobalLock(stgMedium.hGlobal);
-				wchar_t* ws = NULL;
 				for (int i = *((BYTE*)(data));; i += 2) {
 					WC.back().push_back(((*((BYTE*)(data)+i + 1)) << 8) | (*((BYTE*)(data)+i)));
 					if (WC.back().back() == 0 && WC.back().size() > 1) {

@@ -53,8 +53,6 @@
 #include "SAFC_InnerModules/SAFC_IM.h"
 #include "SAFCGUIF_Local/SAFGUIF_L.h"
 
-//using namespace std;
-
 std::tuple<WORD, WORD, WORD, WORD> ___GetVersion() {
 	// get the filename of the executable containing the version resource
 	TCHAR szFilename[MAX_PATH + 1] = { 0 };
@@ -69,11 +67,6 @@ std::tuple<WORD, WORD, WORD, WORD> ___GetVersion() {
 	// load the version info
 	if (!GetFileVersionInfo(szFilename, 0, dwSize, &data[0])) 
 		return { 0,0,0,0 };
-	// get the name and version strings
-	LPVOID pvProductName = NULL;
-	unsigned int iProductNameLen = 0;
-	LPVOID pvProductVersion = NULL;
-	unsigned int iProductVersionLen = 0;
 	////////////////////////////////////
 	UINT                uiVerLen = 0;
 	VS_FIXEDFILEINFO* pFixedInfo = 0;     // pointer to fixed file info structure
@@ -114,7 +107,7 @@ bool SAFC_Update(const std::wstring& latest_release) {
 		{L"C:\\Program Files\\WinRAR\\WinRAR.exe", (L"x -y \"" + filename + L"\"")},
 		{L"C:\\Program Files (x86)\\WinRAR\\WinRAR.exe", (L"x -y \"" + filename + L"\"")}
 	};
-	if (co_res == S_OK) { 
+	if (co_res == S_OK) {
 		errno = 0;
 		_wrename((pathway + L"SAFC.exe").c_str(), (pathway + L"_s").c_str());
 		std::cout << strerror(errno) << std::endl;
@@ -147,29 +140,36 @@ bool SAFC_Update(const std::wstring& latest_release) {
 				WaitForSingleObject(ShExecInfo.hProcess, INFINITE);
 				CloseHandle(ShExecInfo.hProcess);
 
-				if (!_waccess((pathway + L"SAFC.exe").c_str(), 0)) { 
+				if (!_waccess((pathway + L"SAFC.exe").c_str(), 0)) {
 					flag = true;
 					break;
 				}
 				std::wcout << L"Failed: " << t << std::endl;
 			}
 			if (!flag) {
-				ThrowAlert_Error("Extraction:\nAutoupdate requres latest 7-Zip or WinRAR installed to default directory.\n");
+				if (AutoUpdatesCheck)
+					ThrowAlert_Error("Extraction:\nAutoupdate requres latest 7-Zip or WinRAR installed to default directory.\n");
 				_wrename((pathway + L"_s").c_str(), (pathway + L"SAFC.exe").c_str());
 				_wrename((pathway + L"_f").c_str(), (pathway + L"freeglut.dll").c_str());
 				_wrename((pathway + L"_g").c_str(), (pathway + L"glew32.dll").c_str());
 			}
 		}
 		else {
-			ThrowAlert_Error(std::string("Autoudate error:\n") + strerror(errno));
+			auto error_msg = std::string("Autoudate error:\n") + strerror(errno);
+			if (AutoUpdatesCheck)
+				ThrowAlert_Error(error_msg);
+			else
+				std::cout << error_msg << std::endl;
 			_wrename((pathway + L"_s").c_str(), (pathway + L"SAFC.exe").c_str());
 			_wrename((pathway + L"_f").c_str(), (pathway + L"freeglut.dll").c_str());
 			_wrename((pathway + L"_g").c_str(), (pathway + L"glew32.dll").c_str());
 		}
 		_wremove(filename.c_str());
 	}
-	else
+	else if (AutoUpdatesCheck)
 		ThrowAlert_Error("Autoupdate error: #" + std::to_string(co_res));
+	else
+		std::cout << "Autoupdate error: #" + std::to_string(co_res) << std::endl;
 	return flag;
 }
 
@@ -203,9 +203,8 @@ void SAFC_VersionCheck() {
 							Name->second->IsString()) {
 							auto git_latest_version = Name->second->AsString();
 							//std::wcout << L"Git latest version: " << git_latest_version << std::endl;
-							bool was_digit = false;
 							WORD version_partied[4] = { 0,0,0,0 };
-							int cur_index = -1;
+							//int cur_index = -1;
 							if (git_latest_version.size() <= 100) {
 								std::vector<std::string> ans;
 								std::wstring git_version_numbers_only = git_latest_version.substr(1);//v?.?.?.?
@@ -224,10 +223,12 @@ void SAFC_VersionCheck() {
 								}
 								std::wcout << L"Git latest version: v" << version_partied[0] << L"." << version_partied[1] << L"." << version_partied[2] << L"." << version_partied[3] << L"\n";
 								std::wcout << L"Current vesion: v" << maj << L"." << min << L"." << ver << L"." << build << L"\n";
-								if (maj < version_partied[0] ||
-									maj == version_partied[0] && min < version_partied[1] ||
-									maj == version_partied[0] && min == version_partied[1] && ver < version_partied[2] ||
-									maj == version_partied[0] && min == version_partied[1] && ver == version_partied[2] && build < version_partied[3]) {
+								if (AutoUpdatesCheck && 
+									(maj < version_partied[0] ||
+										maj == version_partied[0] && min < version_partied[1] ||
+										maj == version_partied[0] && min == version_partied[1] && ver < version_partied[2] ||
+										maj == version_partied[0] && min == version_partied[1] && ver == version_partied[2] && build < version_partied[3]
+									)) {
 									ThrowAlert_Warning("Update found! The app might restart soon...\nUpdate: " + std::string(git_latest_version.begin(), git_latest_version.end()));
 									flag = SAFC_Update(git_latest_version);
 									if (flag)
@@ -238,8 +239,9 @@ void SAFC_VersionCheck() {
 					}
 				}
 			}
-			else
-				ThrowAlert_Warning("Most likely your internet connection is unstable\nSAFC cannot check for updates");
+			else if(AutoUpdatesCheck)
+				ThrowAlert_Warning("Most likely your internet connection is unstable\nSAFC cannot check for updates"),
+				std::cout<< "Most likely your internet connection is unstable\nSAFC cannot check for updates";
 		}
 		catch (...) {
 			ThrowAlert_Warning("SAFC just almost crashed while checking the update...\nTell developer about that");
@@ -256,12 +258,6 @@ void SAFC_VersionCheck() {
 }
 size_t GetAvailableMemory(){
 	size_t ret = 0;
-	DWORD v = GetVersion();
-	DWORD major = (DWORD)(LOBYTE(LOWORD(v)));
-	DWORD minor = (DWORD)(HIBYTE(LOWORD(v)));
-	DWORD build;
-	if (v < 0x80000000) build = (DWORD)(HIWORD(v));
-	else build = 0;
 
 	// because compiler static links the function...
 	BOOL(__stdcall*GMSEx)(LPMEMORYSTATUSEX) = 0;
@@ -1126,7 +1122,7 @@ namespace PropsAndSets {
 				VM->PLC_bb->ConversionMap.clear();
 				VM->PLC_bb->ConversionMap[127] = 127;
 				for (int i = 0; i < 128; i++) {
-					VM->PLC_bb->InsertNewPoint(i, ceil(pow(i / 127., Degree)*127.));
+					VM->PLC_bb->InsertNewPoint(i, std::ceil(std::pow(i / 127., Degree)*127.));
 				}
 			}
 			else 
@@ -1285,7 +1281,7 @@ void OnRemAllModules() {
 
 namespace Settings {
 	INT ShaderMode = 0;
-	WinReg::RegKey RK_Access;
+	WinReg::RegKey RegestryAccess;
 	void OnSettings() {
 		WH->EnableWindow("APP_SETTINGS");//_Data.DetectedThreads
 		//WH->ThrowAlert("Please read the docs! Changing some of these settings might cause graphics driver failure!","Warning!",SpecialSigns::DrawExTriangle,1,0x007FFFFF,0x7F7F7FFF);
@@ -1303,12 +1299,13 @@ namespace Settings {
 		((CheckBox*)((*pptr)["BOOL_IGN_ALL_EX_TPS"]))->State = DefaultBoolSettings & _BoolSettings::ignore_all_but_tempos_notes_and_pitch;
 
 		((CheckBox*)((*pptr)["INPLACE_MERGE"]))->State = _Data.InplaceMergeFlag;
+		((CheckBox*)((*pptr)["AUTOUPDATECHECK"]))->State = AutoUpdatesCheck;
 	}
 	void OnSetApply() {
-		bool RK_OP = false;
+		bool isRegestryOpened = false;
 		try {
-			Settings::RK_Access.Open(HKEY_CURRENT_USER, RegPath);
-			RK_OP = true;
+			Settings::RegestryAccess.Open(HKEY_CURRENT_USER, RegPath);
+			isRegestryOpened = true;
 		}
 		catch (...) {
 			std::cout << "RK opening failed\n";
@@ -1320,7 +1317,7 @@ namespace Settings {
 		std::cout << "AS_BCKGID " << T << std::endl;
 		if (T.size()) {
 			ShaderMode = std::stoi(T);
-			if (RK_OP)TRY_CATCH(RK_Access.SetDwordValue(L"AS_BCKGID",ShaderMode);,"Failed on setting AS_BCKGID")
+			if (isRegestryOpened)TRY_CATCH(RegestryAccess.SetDwordValue(L"AS_BCKGID",ShaderMode);,"Failed on setting AS_BCKGID")
 		}
 		std::cout << ShaderMode << std::endl;
 
@@ -1336,7 +1333,7 @@ namespace Settings {
 		if (T.size()) {
 			_Data.DetectedThreads = stoi(T);
 			_Data.ResolveSubdivisionProblem_GroupIDAssign();
-			if (RK_OP)TRY_CATCH(RK_Access.SetDwordValue(L"AS_THREADS_COUNT", _Data.DetectedThreads);, "Failed on setting AS_THREADS_COUNT")
+			if (isRegestryOpened)TRY_CATCH(RegestryAccess.SetDwordValue(L"AS_THREADS_COUNT", _Data.DetectedThreads);, "Failed on setting AS_THREADS_COUNT")
 		}
 		std::cout << _Data.DetectedThreads << std::endl;
 
@@ -1348,20 +1345,25 @@ namespace Settings {
 		DefaultBoolSettings = (DefaultBoolSettings & (~_BoolSettings::ignore_notes)) | (_BoolSettings::ignore_notes * (!!((CheckBox*)(*pptr)["BOOL_IGN_NOTES"])->State));
 		DefaultBoolSettings = (DefaultBoolSettings & (~_BoolSettings::ignore_all_but_tempos_notes_and_pitch)) | (_BoolSettings::ignore_all_but_tempos_notes_and_pitch * (!!((CheckBox*)(*pptr)["BOOL_IGN_ALL_EX_TPS"])->State));
 
-		if (RK_OP) { TRY_CATCH(RK_Access.SetDwordValue(L"DEFAULT_BOOL_SETTINGS", DefaultBoolSettings); , "Failed on setting DEFAULT_BOOL_SETTINGS") }
+		AutoUpdatesCheck = ((CheckBox*)(*pptr)["AUTOUPDATECHECK"])->State;
 
-		if (RK_OP) { TRY_CATCH(RK_Access.SetDwordValue(L"FONTSIZE", lFontSymbolsInfo::Size); , "Failed on setting FONTSIZE") }
+		if (isRegestryOpened) 
+			TRY_CATCH(RegestryAccess.SetDwordValue(L"AUTOUPDATECHECK", AutoUpdatesCheck); , "Failed on setting AUTOUPDATECHECK")
 
-		if (RK_OP) { TRY_CATCH(RK_Access.SetDwordValue(L"FLOAT_FONTHTW", *(DWORD*)(&lFONT_HEIGHT_TO_WIDTH)); , "Failed on setting FLOAT_FONTHTW") }
+		if (isRegestryOpened) { 
+			TRY_CATCH(RegestryAccess.SetDwordValue(L"DEFAULT_BOOL_SETTINGS", DefaultBoolSettings); , "Failed on setting DEFAULT_BOOL_SETTINGS") 
+			TRY_CATCH(RegestryAccess.SetDwordValue(L"FONTSIZE", lFontSymbolsInfo::Size);, "Failed on setting FONTSIZE") 
+			TRY_CATCH(RegestryAccess.SetDwordValue(L"FLOAT_FONTHTW", *(DWORD*)(&lFONT_HEIGHT_TO_WIDTH));, "Failed on setting FLOAT_FONTHTW")
+		}
 
 		_Data.InplaceMergeFlag = (((CheckBox*)(*pptr)["INPLACE_MERGE"])->State);
-		if (RK_OP)TRY_CATCH(RK_Access.SetDwordValue(L"AS_INPLACE_FLAG", _Data.InplaceMergeFlag); , "Failed on setting AS_INPLACE_FLAG")
+		if (isRegestryOpened)TRY_CATCH(RegestryAccess.SetDwordValue(L"AS_INPLACE_FLAG", _Data.InplaceMergeFlag); , "Failed on setting AS_INPLACE_FLAG")
 
 		((InputField*)(*pptr)["AS_FONT_NAME"])->PutIntoSource();
 		std::wstring ws(FONTNAME.begin(), FONTNAME.end());
-		if (RK_OP)TRY_CATCH(RK_Access.SetStringValue(L"COLLAPSEDFONTNAME", ws.c_str());, "Failed on setting AS_BCKGID")
-		if(RK_OP)
-			Settings::RK_Access.Close();
+		if (isRegestryOpened)TRY_CATCH(RegestryAccess.SetStringValue(L"COLLAPSEDFONTNAME", ws.c_str());, "Failed on setting AS_BCKGID")
+		if(isRegestryOpened)
+			Settings::RegestryAccess.Close();
 	}
 	void ChangeIsFontedVar() {
 		is_fonted = !is_fonted;
@@ -1508,53 +1510,57 @@ void OnSaveTo() {
 void RestoreRegSettings() {
 	bool Opened = false;
 	try{
-		Settings::RK_Access.Create(HKEY_CURRENT_USER, RegPath);
+		Settings::RegestryAccess.Create(HKEY_CURRENT_USER, RegPath);
 	}
 	catch(...){ std::cout << "Exception thrown while creating registry key\n"; }
 	try {
-		Settings::RK_Access.Open(HKEY_CURRENT_USER, RegPath);
+		Settings::RegestryAccess.Open(HKEY_CURRENT_USER, RegPath);
 		Opened = true;
 	}
 	catch (...) { std::cout << "Exception thrown while opening RK\n"; }
 	if (Opened) {
 		try {
-			Settings::ShaderMode = Settings::RK_Access.GetDwordValue(L"AS_BCKGID");
+			Settings::ShaderMode = Settings::RegestryAccess.GetDwordValue(L"AS_BCKGID");
 		}
 		catch (...) { std::cout << "Exception thrown while restoring AS_BCKGID from registry\n"; }
 		try {
-			_Data.DetectedThreads = Settings::RK_Access.GetDwordValue(L"AS_THREADS_COUNT");
+			AutoUpdatesCheck = Settings::RegestryAccess.GetDwordValue(L"AUTOUPDATECHECK");
+		}
+		catch (...) { std::cout << "Exception thrown while restoring AUTOUPDATECHECK from registry\n"; }
+		try {
+			_Data.DetectedThreads = Settings::RegestryAccess.GetDwordValue(L"AS_THREADS_COUNT");
 		}
 		catch (...) { std::cout << "Exception thrown while restoring AS_THREADS_COUNT from registry\n"; }
 		try {
-			DefaultBoolSettings = Settings::RK_Access.GetDwordValue(L"DEFAULT_BOOL_SETTINGS");
+			DefaultBoolSettings = Settings::RegestryAccess.GetDwordValue(L"DEFAULT_BOOL_SETTINGS");
 		}
 		catch (...) { std::cout << "Exception thrown while restoring AS_INPLACE_FLAG from registry\n"; }
 		try {
-			_Data.InplaceMergeFlag = Settings::RK_Access.GetDwordValue(L"AS_INPLACE_FLAG");
+			_Data.InplaceMergeFlag = Settings::RegestryAccess.GetDwordValue(L"AS_INPLACE_FLAG");
 		}
 		catch (...) { std::cout << "Exception thrown while restoring INPLACE_MERGE from registry\n"; }
 		try {
-			std::wstring ws = Settings::RK_Access.GetStringValue(L"COLLAPSEDFONTNAME");//COLLAPSEDFONTNAME
+			std::wstring ws = Settings::RegestryAccess.GetStringValue(L"COLLAPSEDFONTNAME");//COLLAPSEDFONTNAME
 			FONTNAME = std::string(ws.begin(), ws.end());
 		}
 		catch (...) { std::cout << "Exception thrown while restoring COLLAPSEDFONTNAME from registry\n"; }
 		try {
-			lFontSymbolsInfo::Size = Settings::RK_Access.GetDwordValue(L"FONTSIZE");//COLLAPSEDFONTNAME
+			lFontSymbolsInfo::Size = Settings::RegestryAccess.GetDwordValue(L"FONTSIZE");//COLLAPSEDFONTNAME
 		}
 		catch (...) { std::cout << "Exception thrown while restoring FONTSIZE from registry\n"; }
 		try {
-			DWORD B = Settings::RK_Access.GetDwordValue(L"FLOAT_FONTHTW");//COLLAPSEDFONTNAME
+			DWORD B = Settings::RegestryAccess.GetDwordValue(L"FLOAT_FONTHTW");//COLLAPSEDFONTNAME
 			lFONT_HEIGHT_TO_WIDTH = *(float*)&B;
 		}
 		catch (...) { std::cout << "Exception thrown while restoring FLOAT_FONTHTW from registry\n"; }
-		Settings::RK_Access.Close();
+		Settings::RegestryAccess.Close();
 	}
 }
 
 void Init() {///SetIsFontedVar
 	RestoreRegSettings();
 	hDc = GetDC(hWnd);
-	_Data.DetectedThreads = std::min((int)std::thread::hardware_concurrency() - 1,(int)(ceil(GetAvailableMemory() / 2048.)));
+	_Data.DetectedThreads = std::min((int)std::thread::hardware_concurrency() - 1,(int)(ceil(GetAvailableMemory() / 2048)));
 
 	MoveableWindow *T = new MoveableWindow("Main window", System_White, -200, 200, 400, 400, 0x3F3F3FAF, 0x7F7F7F7F);
 	SelectablePropertedList *SPL = new SelectablePropertedList(BS_List_Black_Small, NULL, PropsAndSets::OGPInMIDIList, -50, 172, 300, 12, 65, 30);
@@ -1680,6 +1686,8 @@ void Init() {///SetIsFontedVar
 	(*T)["INPLACE_MERGE"] = new CheckBox(97.5 - WindowHeapSize, 85 - WindowHeapSize, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, 0, System_White, _Align::right, "DV: Enable/disable inplace merge");
 	(*T)["AS_THREADS_COUNT"] = new InputField(std::to_string(_Data.DetectedThreads), 57.5 - WindowHeapSize, 85 - WindowHeapSize, 10, 20, System_White, NULL, 0x007FFFFF, System_White, "Threads count", 2, _Align::center, _Align::left, InputField::Type::NaturalNumbers);
 
+	(*T)["AUTOUPDATECHECK"] = new CheckBox(-97.5 + WindowHeapSize, 35 - WindowHeapSize, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, AutoUpdatesCheck, System_White, _Align::left, "Check for updates automatically");
+
 	(*WH)["APP_SETTINGS"] = T;
 
 	T = new MoveableWindow("SMRP Container", System_White, -300, 300, 600, 600, 0x000000CF, 0xFFFFFF7F);
@@ -1717,15 +1725,14 @@ void Init() {///SetIsFontedVar
 
 	(*WH)["SMIC"] = T;
 
-	/*
 	T = new MoveableWindow("Test", System_White, -150, 150, 300, 300, 0x0000000F, 0x7F7F7F7F, 0x000000FF);
 
 	(*T)["TEXTAREA"] = new EditBox("", System_White, 0, 0, 200, 200, 10, 0, 0xFFFFFFFF, 2);
-	(*T)["BUTT"] = new Button("Compile", System_White, __Compile, -100, -135, 75, 12, 1,
+	(*T)["BUTT"] = new Button("Compile", System_White, nullptr, -100, -135, 75, 12, 1,
 		0x000000AF, 0xFFFFFFFF, 0x000000AF, 0xFFFFFFFF, 0x7F7F7F7FF, NULL, " ");
 
 	(*WH)["COMPILEW"] = T;
-	*/
+
 
 	WH->EnableWindow("MAIN");
 	//WH->EnableWindow("COMPILEW");
@@ -1837,13 +1844,13 @@ void OnResize(int x, int y) {
 }
 void inline rotate(float& x, float& y) {
 	float t = x * cos(ROT_RAD) + y * sin(ROT_RAD);
-	y = 0 - x * sin(ROT_RAD) + y * cos(ROT_RAD);
+	y = 0.f - x * sin(ROT_RAD) + y * cos(ROT_RAD);
 	x = t;
 }
 void inline absoluteToActualCoords(int ix, int iy, float &x, float &y) {
-	float wx = WindX, wy = WindY,t;
-	x = ((float)(ix - wx * 0.5)) / (0.5*(wx / (RANGE*(WindX / WINDXSIZE))));
-	y = ((float)(0 - iy + wy * 0.5)) / (0.5*(wy / (RANGE*(WindY / WINDYSIZE))));
+	float wx = WindX, wy = WindY;
+	x = ((float)(ix - wx * 0.5f)) / (0.5f*(wx / (RANGE*(WindX / WINDXSIZE))));
+	y = ((float)(0 - iy + wy * 0.5f)) / (0.5f*(wy / (RANGE*(WindY / WINDYSIZE))));
 	rotate(x, y);
 }
 void mMotion(int ix, int iy) {
@@ -1896,7 +1903,7 @@ void mSpecialKey(int Key,int x, int y) {
 	}
 }
 void mExit(int a) {
-	Settings::RK_Access.Close();
+	Settings::RegestryAccess.Close();
 }
 
 int main(int argc, char ** argv) {

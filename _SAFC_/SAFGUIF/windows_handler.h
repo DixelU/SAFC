@@ -38,7 +38,7 @@ struct WindowsHandler {
 		//printf("%X\n", Button);
 		std::list<std::map<std::string, MoveableWindow*>::iterator>::iterator AWIterator = ActiveWindows.begin(), CurrentAW;
 		CurrentAW = AWIterator;
-		BIT flag = 0;
+		//BIT flag = 0;
 		if (!Button && !ActiveWindows.empty())(*ActiveWindows.begin())->second->MouseHandler(mx, my, 0, 0);
 		else {
 			while (AWIterator != ActiveWindows.end() && !((*AWIterator)->second->MouseHandler(mx, my, Button, State)) && !WindowWasDisabledDuringMouseHandling)
@@ -75,9 +75,11 @@ struct WindowsHandler {
 		AlertWptr->_NotSafeResize_Centered(alertheight, 200);
 		TextBox* AlertWTptr = (TextBox*)((*AlertWptr)["AlertText"]);
 		AlertWTptr->SafeStringReplace(AlertText);
-		if (0 && AlertWTptr->CalculatedTextHeight > AlertWTptr->Height) {
-			AlertWptr->_NotSafeResize_Centered(AlertWTptr->CalculatedTextHeight + WindowHeapSize, AlertWptr->Width);
-		}
+		/*
+			if (AlertWTptr->CalculatedTextHeight > AlertWTptr->Height) {
+				AlertWptr->_NotSafeResize_Centered(AlertWTptr->CalculatedTextHeight + WindowHeapSize, AlertWptr->Width);
+			}
+		*/
 		auto AlertWSptr = ((SpecialSignHandler*)(*AlertWptr)["AlertSign"]);
 		AlertWSptr->_ReplaceVoidFunc(SpecialSignsDrawFunc);
 		if (Update) {
