@@ -15,7 +15,9 @@
 #include "PLC.h"
 #include "CAT.h"
 #include "../bbb_ffio.h"
-
+/*
+#include "../exprtk_wrapper.h"
+*/
 template<typename T>
 struct conditional {
 	BIT is;
@@ -38,7 +40,19 @@ struct conditional {
 		this->value = 0;
 	}
 };
+/*
+struct modifiers_wrapper {
+	exprtk_wrapper
+		* notes_modifier,
+		* noteaftertouch_modifier,
+		* channelaftertocuh_modifier,
+		* program_modifier,
+		* pitch_modifier,
+		* controller_modifier,
+		* tempo_modifier;
 
+};
+*/
 struct SingleMIDIReProcessor {
 	DWORD ThreadID;
 	std::wstring FileName, Postfix;

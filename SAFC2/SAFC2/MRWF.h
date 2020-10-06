@@ -14,189 +14,24 @@
 #include <tuple>
 #include <list>
 
+#define NOMINMAX
+
 #include "bbb_ffio.h"
+#include "exprtk_wrapper.h"
 
 namespace mrwf {
 #define MULTICHANNEL_CASE(channel) case (channel<<8)|0x0:case (channel<<8)|0x1:case (channel<<8)|0x2:case (channel<<8)|0x3:case (channel<<8)|0x4:case (channel<<8)|0x5:case (channel<<8)|0x6:case (channel<<8)|0x7:case (channel<<8)|0x8:case (channel<<8)|0x9:case (channel<<8)|0xA:case (channel<<8)|0xB:case (channel<<8)|0xC:case (channel<<8)|0xD:case (channel<<8)|0xE:case (channel<<8)|0xF:
 
-	template<typename data_type, size_t block_size = 1024u>
-	struct blocked_list {
-		data_type inner_array[block_size];
-	};
-
-	template<typename data_type>
-	struct value_modifier {
-		enum class type { replace, add, mult };
-		enum class check_type{ always, equals, totally_equals, lesser, bigger, never };
-		double modifier;
-		type vm_type;
-		check_type vm_ctype;
-		data_type comparing_value;
-		bool continueable;
-		value_modifier(double modifier = 0., type vm_type = type::replace, check_type vm_ctype = check_type::always, data_type value = data_type(), bool continueable=true) :
-			modifier(modifier), vm_type(vm_type), vm_ctype(vm_ctype), value(value), continueable(continueable) {}
-		inline bool operator()(data_type& inp_value) const {
-			switch (vm_ctype) {
-			case check_type::always:
-				break;
-			case check_type::equals:
-				if (!(comparing_value < inp_value && inp_value < comparing_value))
-					return false;
-				break;
-			case check_type::totally_equals:
-				if (!(comparing_value == inp_value))
-					return false;
-				break;
-			case check_type::lesser:
-				if (!(inp_value < comparing_value))
-					return false;
-				break;
-			case check_type::bigger:
-				if (!(comparing_value < inp_value))
-					return false;
-				break;
-			case check_type::never:
-				return false;
-			default:
-				return false;
-				break;
-			}
-			switch (vm_type) {
-			case type::add:
-				inp_value += modifier;
-				break;
-			case type::multiply:
-				inp_value *= modifier;
-				break;
-			case type::replace:
-				inp_value = modifier;
-				break;
-			default:
-				break;
-			}
-			return true;
-		}
-		inline std::pair<bool, data_type> operator()(data_type inp_value, void* null) const {
-			switch (vm_ctype) {
-			case check_type::always:
-				break;
-			case check_type::equals:
-				if (!(comparing_value < inp_value && inp_value < comparing_value))
-					return { false , inp_value };
-				break;
-			case check_type::totally_equals:
-				if (!(comparing_value == inp_value))
-					return { false , inp_value };
-				break;
-			case check_type::lesser:
-				if (!(inp_value < comparing_value))
-					return { false , inp_value };
-				break;
-			case check_type::bigger:
-				if (!(comparing_value < inp_value))
-					return { false , inp_value };
-				break;
-			default:
-				return { false , inp_value };
-				break;
-			}
-			switch (vm_type) {
-			case type::add:
-				inp_value += modifier;
-				break;
-			case type::multiply:
-				inp_value *= modifier;
-				break;
-			case type::replace:
-				inp_value = modifier;
-				break;
-			default:
-				break;
-			}
-			return { true , inp_value };
-		}
-	};
-
-	template<typename data_type>
-	struct check_node {
-		enum class check_type { always, equals, totally_equals, lesser, bigger, never };
-		check_type ctype;
-		data_type root_value;
-		check_node(data_type root_value = data_type(), check_type ctype = check_type::always) : root_value(root_value), ctype(ctype) {}
-		inline bool operator()(const data_type& inp_value) const {
-			switch (ctype) {
-			case check_type::always:
-				break;
-			case check_type::equals:
-				if (!(root_value < inp_value && inp_value < root_value))
-					return false;
-				break;
-			case check_type::totally_equals:
-				if (!(root_value == inp_value))
-					return false;
-				break;
-			case check_type::lesser:
-				if (!(inp_value < root_value))
-					return false;
-				break;
-			case check_type::bigger:
-				if (!(root_value < inp_value))
-					return false;
-				break;
-			default:
-				return false;
-				break;
-			}
-			return true;
-		}
-	};
-
-	template<typename data_type>
-	struct check_expr {
-		std::vector<std::vector<check_node>> expr; // DNF // 
-		check_expr(const std::vector<std::vector<check_node>>& expr) : expr(expr) {}
-		inline bool operator()(const data_type& inp_value) const {
-			bool flag = false;
-			for (const auto& v : expr) {
-				bool co_check = true;
-				for (const auto& el : v) 
-					co_check &= v(inp_type);
-				flag |= co_check;
-			}
-		}
-	};
-
-	template<typename data_type, size_t size>
-	struct multivalued_intersect_modifier {
-		enum class type { replace, add, mult };
-		type mtype;
-		data_type data;
-		check_expr check;
-		size_t check_ptr;
-		size_t value_ptr;
-		bool continueable;
-		multivalued_intersect_modifier(const check_expr& check, const data_type& data, size_t check_ptr, size_t value_ptr, bool continueable = false) :
-			data(data), check(check), check_ptr(check_ptr), value_ptr(value_ptr) { }
-		inline bool operator()(const std::array<data_type&, size>& arr) const {
-			if (check(arr[check_ptr])) {
-				switch (m_type) {
-				case type::add:
-					arr[value_ptr] += modifier;
-					break;
-				case type::multiply:
-					arr[value_ptr] *= modifier;
-					break;
-				case type::replace:
-					arr[value_ptr] = modifier;
-					break;
-				default:
-					break;
-				}
-				return true;
-			}
-			else 
-				return continueable;
-		}
+	struct modifiers_wrapper {
+		exprtk_wrapper
+			* tick_modifier,
+			* notes_modifier,
+			* noteaftertouch_modifier,
+			* channelaftertocuh_modifier,
+			* program_modifier,
+			* pitch_modifier,
+			* controller_modifier,
+			* tempo_modifier;
 	};
 
 	namespace mrwf {
@@ -253,18 +88,21 @@ namespace mrwf {
 		uint8_t is_event_enabled;
 	public:
 		midi_event(uint64_t absolute_tick, uint32_t event_size) : event_size(event_size), absolute_tick(absolute_tick), is_event_enabled(true) {}
-		inline virtual uint8_t& get_parameter(int param_no);
-		inline virtual mrwf::type get_type() const;
-		inline virtual uint32_t get_event_size() const;
-		inline virtual void push_back_to_track(uint64_t previous_tick, std::vector<uint8_t>& output) const;
+		virtual ~midi_event() {	}
+		inline virtual uint8_t& get_parameter(int param_no) { return junk_var; };
+		inline virtual mrwf::type get_type() const { return mrwf::null; };
+		inline virtual uint32_t get_event_size() const { return 0; };
+		inline virtual void push_back_to_track(uint64_t previous_tick, std::vector<uint8_t>& output) const {};
 		inline double& get_absolute_tick() { return absolute_tick; }
 		inline const uint64_t& get_absolute_tick() const { return absolute_tick; }
+		inline const uint8_t& is_enabled() const { return is_event_enabled; }
 		inline uint8_t& is_enabled() { return is_event_enabled; }
 	};
 
 	struct noteon : midi_event {
 		uint8_t channel, key, velocity;
 		noteon(uint64_t absolute_tick, uint8_t channel, uint8_t key, uint8_t velocity) : midi_event(absolute_tick, 3), channel(channel), key(key), velocity(velocity) { }
+		~noteon() {};
 		inline uint8_t& get_parameter(int param_no) override {
 			switch (param_no) {
 			case 0:
@@ -284,7 +122,7 @@ namespace mrwf {
 			return 3;
 		}
 		inline virtual void push_back_to_track(uint64_t previous_tick, std::vector<uint8_t>& output) const override {
-			if (!is_enabled)
+			if (!is_enabled())
 				return;
 			uint64_t difference = absolute_tick - previous_tick;
 			assert(difference <= 0xFFFFFFFF);
@@ -299,6 +137,7 @@ namespace mrwf {
 	struct noteoff : midi_event {
 		uint8_t channel, key, velocity;
 		noteoff(uint64_t absolute_tick, uint8_t channel, uint8_t key, uint8_t velocity) : midi_event(absolute_tick, 3), channel(channel), key(key), velocity(velocity) { }
+		~noteoff() {}
 		inline uint8_t& get_parameter(int param_no) override {
 			switch (param_no) {
 			case 0:
@@ -318,7 +157,7 @@ namespace mrwf {
 			return 3;
 		}
 		inline virtual void push_back_to_track(uint64_t previous_tick, std::vector<uint8_t>& output) const override {
-			if (!is_enabled)
+			if (!is_enabled())
 				return;
 			uint64_t difference = absolute_tick - previous_tick;
 			assert(difference <= 0xFFFFFFFF);
@@ -333,6 +172,7 @@ namespace mrwf {
 	struct note_aftertouch : midi_event {
 		uint8_t channel, key, value;
 		note_aftertouch(uint64_t absolute_tick, uint8_t channel, uint8_t key, uint8_t value) : midi_event(absolute_tick, 3), channel(channel), key(key), value(value) { }
+		~note_aftertouch() {}
 		inline uint8_t& get_parameter(int param_no) override {
 			switch (param_no) {
 			case 0:
@@ -353,7 +193,7 @@ namespace mrwf {
 		}
 
 		inline virtual void push_back_to_track(uint64_t previous_tick, std::vector<uint8_t>& output) const override {
-			if (!is_enabled)
+			if (!is_enabled())
 				return;
 			uint64_t difference = absolute_tick - previous_tick;
 			assert(difference <= 0xFFFFFFFF);
@@ -368,6 +208,7 @@ namespace mrwf {
 	struct controller : midi_event {
 		uint8_t channel, controller_no, value;
 		controller(uint64_t absolute_tick, uint8_t channel, uint8_t controller_no, uint8_t value) : midi_event(absolute_tick, 3), channel(channel), controller_no(controller_no), value(value) { }
+		~controller() {}
 		inline uint8_t& get_parameter(int param_no) override {
 			switch (param_no) {
 			case 0:
@@ -388,7 +229,7 @@ namespace mrwf {
 		}
 
 		inline virtual void push_back_to_track(uint64_t previous_tick, std::vector<uint8_t>& output) const override {
-			if (!is_enabled)
+			if (!is_enabled())
 				return;
 			uint64_t difference = absolute_tick - previous_tick;
 			assert(difference <= 0xFFFFFFFF);
@@ -403,6 +244,7 @@ namespace mrwf {
 	struct program_change : midi_event {
 		uint8_t channel, program_no;
 		program_change(uint64_t absolute_tick, uint8_t channel, uint8_t program_no) : midi_event(absolute_tick, 2), channel(channel), program_no(program_no) { }
+		~program_change() {}
 		inline uint8_t& get_parameter(int param_no) override {
 			switch (param_no) {
 			case 0:
@@ -432,6 +274,7 @@ namespace mrwf {
 	struct channel_aftertouch : midi_event {
 		uint8_t channel, value;
 		channel_aftertouch(uint64_t absolute_tick, uint8_t channel, uint8_t value) : midi_event(absolute_tick, 2), channel(channel), value(value) { }
+		~channel_aftertouch() {}
 		inline uint8_t& get_parameter(int param_no) override {
 			switch (param_no) {
 			case 0:
@@ -449,7 +292,7 @@ namespace mrwf {
 			return 2;
 		}
 		inline virtual void push_back_to_track(uint64_t previous_tick, std::vector<uint8_t>& output) const override {
-			if (!is_enabled)
+			if (!is_enabled())
 				return;
 			uint64_t difference = absolute_tick - previous_tick;
 			assert(difference <= 0xFFFFFFFF);
@@ -463,6 +306,7 @@ namespace mrwf {
 	struct pitch_change : midi_event {
 		uint8_t channel, lsb, msb;
 		pitch_change(uint64_t absolute_tick, uint8_t channel, uint8_t lsb, uint8_t msb) : midi_event(absolute_tick, 3), channel(channel), lsb(lsb), msb(msb) { }
+		~pitch_change() {}
 		inline uint8_t& get_parameter(int param_no) override {
 			switch (param_no) {
 			case 0:
@@ -482,7 +326,7 @@ namespace mrwf {
 			return 3;
 		}
 		inline virtual void push_back_to_track(uint64_t previous_tick, std::vector<uint8_t>& output) const override {
-			if (!is_enabled)
+			if (!is_enabled())
 				return;
 			uint64_t difference = absolute_tick - previous_tick;
 			assert(difference <= 0xFFFFFFFF);
@@ -504,8 +348,11 @@ namespace mrwf {
 
 	struct meta : midi_event {
 		uint8_t meta_type;
-		std::deque<uint8_t>::iterator data;
-		meta(uint64_t absolute_tick, uint8_t meta_type, uint32_t size /*size of meta data*/, std::deque<uint8_t>::iterator data) : midi_event(absolute_tick, size), meta_type(meta_type), data(data) { }
+		uint8_t* data;
+		meta(uint64_t absolute_tick, uint8_t meta_type, uint32_t size /*size of meta data*/) : midi_event(absolute_tick, size), meta_type(meta_type), data(new uint8_t[size]) {	}
+		~meta() {
+			delete[] data;
+		}
 		inline uint8_t& get_parameter(int param_no) override {
 			switch (param_no) {
 			case 0:
@@ -521,9 +368,9 @@ namespace mrwf {
 			case 0x51:
 				return mrwf::type::tempo;
 			case 0x0A:
-				if (event_size == 0x8 && *data == 0)
+				if (event_size == 0x8 && data[0] == 0)
 					return mrwf::type::color;
-				if (event_size == 0xC && *data == 0)
+				if (event_size == 0xC && data[0] == 0)
 					return mrwf::type::grad_color;
 			default:
 				return mrwf::type::meta;
@@ -536,7 +383,7 @@ namespace mrwf {
 			return event_size;
 		}
 		inline virtual void push_back_to_track(uint64_t previous_tick, std::vector<uint8_t>& output) const override {
-			if (!is_enabled)
+			if (!is_enabled())
 				return;
 			uint64_t difference = absolute_tick - previous_tick;
 			assert(difference <= 0xFFFFFFFF);
@@ -551,8 +398,11 @@ namespace mrwf {
 
 	struct sysex : midi_event {
 		uint8_t sysex_head;
-		std::deque<uint8_t>::iterator data;
-		sysex(uint64_t absolute_tick, uint8_t sysex_head, uint32_t size /*size of meta data*/, std::deque<uint8_t>::iterator data) : midi_event(absolute_tick, size), sysex_head(sysex_head), data(data) { }
+		uint8_t* data;
+		sysex(uint64_t absolute_tick, uint8_t sysex_head, uint32_t size /*size of meta data*/) : midi_event(absolute_tick, size), sysex_head(sysex_head), data(new uint8_t[size]) { }
+		~sysex() {
+			delete[] data;
+		}
 		inline uint8_t& get_parameter(int param_no) override {
 			switch (param_no) {
 			case 0:
@@ -568,7 +418,7 @@ namespace mrwf {
 			return event_size;
 		}
 		inline virtual void push_back_to_track(uint64_t previous_tick, std::vector<uint8_t>& output) const override {
-			if (!is_enabled)
+			if (!is_enabled())
 				return;
 			uint64_t difference = absolute_tick - previous_tick;
 			assert(difference <= 0xFFFFFFFF);
@@ -582,7 +432,7 @@ namespace mrwf {
 	};
 
 	struct tempo : meta {
-		tempo(uint64_t absolute_tick, uint8_t meta_type, uint32_t size, std::deque<uint8_t>::iterator data) : meta(absolute_tick, meta_type, size, data) {}
+		tempo(uint64_t absolute_tick, uint8_t meta_type, uint32_t size) : meta(absolute_tick, meta_type, size) {}
 		inline mrwf::type get_type() const override {
 			return mrwf::type::meta;
 		}
@@ -590,7 +440,7 @@ namespace mrwf {
 			return 6;
 		}
 		inline operator float() {
-			uint32_t t = (data[0] << 16) | (data[1] << 8) | data[0];
+			uint32_t t = (data[0] << 16) | (data[1] << 8) | data[2];
 			return (60000000.f / t);
 		}
 		inline const float& operator=(const float& tempo) {
@@ -603,7 +453,7 @@ namespace mrwf {
 	};
 
 	struct single_color_event : meta {
-		single_color_event(uint64_t absolute_tick, uint8_t meta_type, uint32_t size, std::deque<uint8_t>::iterator data) : meta(absolute_tick, meta_type, size, data) {}
+		single_color_event(uint64_t absolute_tick, uint8_t meta_type, uint32_t size) : meta(absolute_tick, meta_type, size) {}
 		inline mrwf::type get_type() const override {
 			return mrwf::type::color;
 		}
@@ -617,7 +467,7 @@ namespace mrwf {
 	};
 
 	struct gradient_color_event : meta {
-		gradient_color_event(uint64_t absolute_tick, uint8_t meta_type, uint32_t size, std::deque<uint8_t>::iterator data) : meta(absolute_tick, meta_type, size, data) {}
+		gradient_color_event(uint64_t absolute_tick, uint8_t meta_type, uint32_t size) : meta(absolute_tick, meta_type, size) {}
 		inline mrwf::type get_type() const override {
 			return mrwf::type::color;
 		}
@@ -634,212 +484,11 @@ namespace mrwf {
 		uint8_t& a2() { return data[11]; }
 	};
 
-	struct event_modifiers {
-		std::vector<value_modifier<double>> tick_modifiers;
-		std::vector<value_modifier<uint8_t>> note_key_modifiers;
-		std::vector<value_modifier<uint8_t>> note_on_velocity_modifiers;
-		std::vector<value_modifier<uint8_t>> note_off_velocity_modifiers;
-		std::vector<value_modifier<uint8_t>> program_modifiers;
-		std::vector<value_modifier<uint8_t>> channel_aftertouch_modifiers;
-		std::vector<value_modifier<uint8_t>> note_aftertouch_key_modifiers;
-		std::vector<value_modifier<uint8_t>> note_aftertouch_value_modifiers;
-		std::vector<value_modifier<uint8_t>> controller_no_modifiers;
-		std::vector<value_modifier<uint8_t>> controller_value_modifiers;
-		std::vector<value_modifier<uint16_t>> pitch_modifiers;
-		std::vector<value_modifier<double>> tempo_modifiers;
-		event_modifiers() {}
-		event_modifiers(
-			const std::vector<value_modifier<double>> &tick_modifiers,
-			const std::vector<value_modifier<uint8_t>> &note_key_modifiers,
-			const std::vector<value_modifier<uint8_t>> &note_on_velocity_modifiers,
-			const std::vector<value_modifier<uint8_t>> &note_off_velocity_modifiers,
-			const std::vector<value_modifier<uint8_t>> &program_modifiers,
-			const std::vector<value_modifier<uint8_t>> &channel_aftertouch_modifiers,
-			const std::vector<value_modifier<uint8_t>> &note_aftertouch_key_modifiers,
-			const std::vector<value_modifier<uint8_t>> &note_aftertouch_value_modifiers,
-			const std::vector<value_modifier<uint8_t>> &controller_no_modifiers,
-			const std::vector<value_modifier<uint8_t>> &controller_value_modifiers,
-			const std::vector<value_modifier<uint16_t>> &pitch_modifiers,
-			const std::vector<value_modifier<double>>& tempo_modifiers
-		) : tick_modifiers(tick_modifiers), 
-			note_key_modifiers(note_key_modifiers), 
-			note_on_velocity_modifiers(note_on_velocity_modifiers),
-			note_off_velocity_modifiers(note_off_velocity_modifiers),
-			program_modifiers(program_modifiers),
-			channel_aftertouch_modifiers(channel_aftertouch_modifiers),
-			note_aftertouch_key_modifiers(note_aftertouch_key_modifiers),
-			note_aftertouch_value_modifiers(note_aftertouch_value_modifiers),
-			controller_no_modifiers(controller_no_modifiers),
-			controller_value_modifiers(controller_value_modifiers),
-			pitch_modifiers(pitch_modifiers), 
-			tempo_modifiers(tempo_modifiers)
-		{ }
-
-		[[nodiscard("You will not know if value is validated.")]]
-		inline bool apply(midi_event* ev) const {
-			if (!ev->is_enabled())
-				return false;
-			for (const auto& mod : tick_modifiers) {
-				bool ans = mod(ev->get_absolute_tick());
-				if (!ans && !mod.continueable)
-					return false;
-			}
-			return true;
-		}
-		inline void apply(noteon& ev) const {
-			if (!ev.is_enabled())
-				return;
-			for (const auto& mod : note_on_velocity_modifiers) {
-				bool ans = mod(ev.velocity);
-				if (!ans && !mod.continueable) {
-					ev.is_enabled() = false;
-					return;
-				}
-			}
-			if (!ev.velocity)
-				ev.velocity = 1;
-			for (const auto& mod : note_key_modifiers) {
-				bool ans = mod(ev.key);
-				if (!ans && !mod.continueable) {
-					ev.is_enabled() = false;
-					return;
-				}
-			}
-		}
-		inline void apply(noteoff& ev) const {
-			if (!ev.is_enabled())
-				return;
-			for (const auto& mod : note_off_velocity_modifiers) {
-				bool ans = mod(ev.velocity);
-				if (!ans && !mod.continueable) {
-					ev.is_enabled() = false;
-					return;
-				}
-			}
-			for (const auto& mod : note_key_modifiers) {
-				bool ans = mod(ev.key);
-				if (!ans && !mod.continueable) {
-					ev.is_enabled() = false;
-					return;
-				}
-			}
-		}
-		inline void apply(program_change& ev) const {
-			if (!ev.is_enabled())
-				return;
-			for (const auto& mod : program_modifiers) {
-				bool ans = mod(ev.program_no);
-				if (!ans && !mod.continueable) {
-					ev.is_enabled() = false;
-					return;
-				}
-			}
-		}
-		inline void apply(channel_aftertouch& ev) const {
-			if (!ev.is_enabled())
-				return;
-			for (const auto& mod : channel_aftertouch_modifiers) {
-				bool ans = mod(ev.value);
-				if (!ans && !mod.continueable) {
-					ev.is_enabled() = false;
-					return;
-				}
-			}
-		}
-		inline void apply(note_aftertouch& ev) const {
-			if (!ev.is_enabled())
-				return;
-			for (const auto& mod : note_aftertouch_key_modifiers) {
-				bool ans = mod(ev.key);
-				if (!ans && !mod.continueable) {
-					ev.is_enabled() = false;
-					return;
-				}
-			}
-			for (const auto& mod : note_aftertouch_value_modifiers) {
-				if (!ev.is_enabled())
-					return;
-				bool ans = mod(ev.value);
-				if (!ans && !mod.continueable) {
-					ev.is_enabled() = false;
-					return;
-				}
-			}
-		}
-		inline void apply(controller& ev) const {
-			if (!ev.is_enabled())
-				return;
-			for (const auto& mod : controller_no_modifiers) {
-				bool ans = mod(ev.controller_no);
-				if (!ans && !mod.continueable) {
-					ev.is_enabled() = false;
-					return;
-				}
-			}
-			for (const auto& mod : note_aftertouch_value_modifiers) {
-				bool ans = mod(ev.value);
-				if (!ans && !mod.continueable) {
-					ev.is_enabled() = false;
-					return;
-				}
-			}
-		}
-		inline void apply(pitch_change& ev) const {
-			if (!ev.is_enabled())
-				return;
-			for (const auto& mod : pitch_modifiers) {
-				auto [ans, value] = mod(ev, nullptr);
-				ev = value;
-				if (!ans && !mod.continueable) {
-					ev.is_enabled() = false;
-					return;
-				}
-			}
-		}
-		inline void apply(tempo& ev) const {
-			if (!ev.is_enabled())
-				return;
-			for (const auto& mod : tempo_modifiers) {
-				auto [ans, value] = mod(ev, nullptr);
-				ev = value;
-				if (!ans && !mod.continueable) {
-					ev.is_enabled() = false;
-					return;
-				}
-			}
-		}
-		inline void merge(event_modifiers& ev_mods) {
-			tick_modifiers.insert(tick_modifiers.begin(), ev_mods.tick_modifiers.begin(), ev_mods.tick_modifiers.end());
-			tempo_modifiers.insert(tempo_modifiers.begin(), ev_mods.tempo_modifiers.begin(), ev_mods.tempo_modifiers.end());
-			pitch_modifiers.insert(pitch_modifiers.begin(), ev_mods.pitch_modifiers.begin(), ev_mods.pitch_modifiers.end());
-			note_aftertouch_value_modifiers.insert(note_aftertouch_value_modifiers.begin(), ev_mods.note_aftertouch_value_modifiers.begin(), ev_mods.note_aftertouch_value_modifiers.end());
-			controller_no_modifiers.insert(controller_no_modifiers.begin(), ev_mods.controller_no_modifiers.begin(), ev_mods.controller_no_modifiers.end());
-			note_aftertouch_value_modifiers.insert(note_aftertouch_value_modifiers.begin(), ev_mods.note_aftertouch_value_modifiers.begin(), ev_mods.note_aftertouch_value_modifiers.end());
-			note_aftertouch_key_modifiers.insert(note_aftertouch_key_modifiers.begin(), ev_mods.note_aftertouch_key_modifiers.begin(), ev_mods.note_aftertouch_key_modifiers.end());
-			channel_aftertouch_modifiers.insert(channel_aftertouch_modifiers.begin(), ev_mods.channel_aftertouch_modifiers.begin(), ev_mods.channel_aftertouch_modifiers.end());
-			program_modifiers.insert(program_modifiers.begin(), ev_mods.program_modifiers.begin(), ev_mods.program_modifiers.end());
-			note_key_modifiers.insert(note_key_modifiers.begin(), ev_mods.note_key_modifiers.begin(), ev_mods.note_key_modifiers.end());
-			note_on_velocity_modifiers.insert(note_on_velocity_modifiers.begin(), ev_mods.note_on_velocity_modifiers.begin(), ev_mods.note_on_velocity_modifiers.end());
-		}
-		inline bool empty() const {
-			return tick_modifiers.empty() &&
-				note_key_modifiers.empty() &&
-				note_on_velocity_modifiers.empty() &&
-				note_off_velocity_modifiers.empty() &&
-				program_modifiers.empty() &&
-				channel_aftertouch_modifiers.empty() &&
-				note_aftertouch_key_modifiers.empty() &&
-				note_aftertouch_value_modifiers.empty() &&
-				controller_no_modifiers.empty() &&
-				controller_value_modifiers.empty() &&
-				pitch_modifiers.empty() &&
-				tempo_modifiers.empty();
-		}
-	};
-
 	struct midi_track {
 	protected:
-		std::deque<uint8_t> meta_events_data;
+		std::vector<uint8_t> meta_events_data;
+
+#define insert_here(EV_TYPENAME, EV) { auto ptr = EV; events_list.push_back(ptr); EV_TYPENAME##_ptrs.push_back(ptr); }
 
 		std::vector<midi_event*> events_list;
 
@@ -847,45 +496,20 @@ namespace mrwf {
 		std::vector<noteoff*> noteoff_ptrs;
 		std::vector<note_aftertouch*> note_aftertouch_ptrs;
 		std::vector<controller*> controller_ptrs;
-		std::vector<channel_aftertouch*> controller_ptrs;
-		std::vector<program_change*> controller_ptrs;
-		std::vector<pitch_change*> controller_ptrs;
-		std::vector<meta*> controller_ptrs;
+		std::vector<channel_aftertouch*> channel_aftertouch_ptrs;
+		std::vector<program_change*> program_change_ptrs;
+		std::vector<pitch_change*> pitch_change_ptrs;
+		std::vector<meta*> meta_ptrs;
 
 		std::array<uint32_t, 4096> polyphonies;
 
 		bbb_ffr* file_input;
 		/*sysex data is not allowed*/
 
-		event_modifiers* modifiers;
+		modifiers_wrapper modifiers;
 		std::recursive_mutex locker;
-
-		void __modify() {
-			locker.lock();
-			if (modifiers->empty())
-				return;
-			for (const auto& ev : events_list)
-				ev->is_enabled() = modifiers->apply((midi_event*)ev);
-			for (const auto& ev : noteon_ptrs)
-				ev->is_enabled() = modifiers->apply((noteon*)ev);
-			for (const auto& ev : noteoff_ptrs)
-				ev->is_enabled() = modifiers->apply((noteoff*)ev);
-			for (const auto& ev : note_aftertouch_ptrs)
-				ev->is_enabled() = modifiers->apply((note_aftertouch*)ev);
-			for (const auto& ev : note_aftertouch_ptrs)
-				ev->is_enabled() = modifiers->apply((controller*)ev);
-			for (const auto& ev : note_aftertouch_ptrs)
-				ev->is_enabled() = modifiers->apply((channel_aftertouch*)ev);
-			for (const auto& ev : note_aftertouch_ptrs)
-				ev->is_enabled() = modifiers->apply((program_change*)ev);
-			for (const auto& ev : note_aftertouch_ptrs)
-				ev->is_enabled() = modifiers->apply((pitch_change*)ev);
-			
-			
-			locker.unlock();
-		}
 	public:
-		midi_track(event_modifiers* modifiers, bbb_ffr* file_input) : modifiers(modifiers), file_input(file_input) {
+		midi_track(modifiers_wrapper modifiers, bbb_ffr* file_input) : modifiers(modifiers), file_input(file_input) {
 
 		}
 		void clear() {
@@ -911,6 +535,7 @@ namespace mrwf {
 			uint64_t current_tick = 0;
 			uint32_t header = 0;
 			uint8_t running_status_byte = 0;
+			bool active_track = true;
 
 			/*header*/
 			while (header != mrwf::expected_file_header && file_input->good() && !file_input->eof())
@@ -923,23 +548,25 @@ namespace mrwf {
 			if (file_input->eof())
 				return;
 
-			while (file_input->good() && !file_input->eof()) {
+			while (active_track && file_input->good() && !file_input->eof()) {
 				uint8_t event_type = 0;
 				auto [new_delta_time, delta_time_length] = get_vlv(*file_input);
 				current_tick += new_delta_time;
 				event_type = file_input->get();
 				switch (event_type) {
-					MULTICHANNEL_CASE(0x8)
+					MULTICHANNEL_CASE(0x8) {
+						running_status_byte = event_type;
 						uint8_t key = file_input->get();
 						uint8_t velocity = file_input->get();
 						uint8_t channel = event_type & 0xF;
-						uint16_t index = ((uint16_t)key << 4) | (channel); 
+						uint16_t index = ((uint16_t)key << 4) | (channel);
 						if (polyphonies[index]) {
 							polyphonies[index]--;
-							events_list.push_back(new noteoff(current_tick, event_type & 0xF, key, velocity));
+							insert_here(noteoff, new noteoff(current_tick, channel, key, velocity));
 						}
+					}
 					break;
-					MULTICHANNEL_CASE(0x9)
+					MULTICHANNEL_CASE(0x9) {
 						running_status_byte = event_type;
 						uint8_t key = file_input->get();
 						uint8_t velocity = file_input->get();
@@ -947,12 +574,135 @@ namespace mrwf {
 						uint16_t index = ((uint16_t)key << 4) | (channel);
 						if (velocity) {
 							polyphonies[index]++;
-							events_list.push_back(new noteon(current_tick, event_type & 0xF, key, velocity));
+							insert_here(noteon, new noteon(current_tick, channel, key, velocity));
 						}
 						else if (polyphonies[index]) {
 							polyphonies[index]--;
-							events_list.push_back(new noteoff(current_tick, event_type & 0xF, key, velocity));
+							insert_here(noteoff, new noteoff(current_tick, channel, key, velocity));
 						}
+					}
+					break;
+					MULTICHANNEL_CASE(0xA) {
+						running_status_byte = event_type;
+						uint8_t key = file_input->get();
+						uint8_t value = file_input->get();
+						uint8_t channel = event_type & 0xF;
+						insert_here(note_aftertouch, new note_aftertouch(current_tick, channel, key, value));
+					}
+					break;
+					MULTICHANNEL_CASE(0xB) {
+						running_status_byte = event_type;
+						uint8_t contr_no = file_input->get();
+						uint8_t value = file_input->get();
+						uint8_t channel = event_type & 0xF;
+						insert_here(controller, new controller(current_tick, channel, contr_no, value));
+					}
+					break;
+					MULTICHANNEL_CASE(0xC) {
+						running_status_byte = event_type;
+						uint8_t prog_no = file_input->get();
+						uint8_t channel = event_type & 0xF;
+						insert_here(program_change, new program_change(current_tick, channel, prog_no));
+					}
+					break;
+					MULTICHANNEL_CASE(0xD) {
+						running_status_byte = event_type;
+						uint8_t value = file_input->get();
+						uint8_t channel = event_type & 0xF;
+						insert_here(channel_aftertouch, new channel_aftertouch(current_tick, channel, value));
+					}
+					break;
+					MULTICHANNEL_CASE(0xE) {
+						running_status_byte = event_type;
+						uint8_t pitch_lsb = file_input->get();
+						uint8_t pitch_msb = file_input->get();
+						uint8_t channel = event_type & 0xF;
+						insert_here(pitch_change, new pitch_change(current_tick, channel, pitch_lsb, pitch_msb));
+					}
+					break;
+					case(0xFF): {
+						running_status_byte = 0;
+						uint8_t meta_type = file_input->get();
+						auto [meta_length, meta_length_length] = get_vlv(*file_input);
+						insert_here(meta, new meta(current_tick, meta_type, meta_length));
+						for (size_t i = 0; i < meta_length; i++) 
+							meta_ptrs.back()->data[i] = file_input->get();
+						if (meta_ptrs.back()->deduct_type() == mrwf::type::endoftrack) {
+							meta_ptrs.back()->is_enabled() = false;
+							active_track = false;
+						}
+					}
+					break;
+					case(0xF7):case(0xF0): {
+						running_status_byte = 0;
+						auto [sysex_length, sysex_length_length] = get_vlv(*file_input);
+						for (size_t i = 0; i < sysex_length; i++)
+							file_input->get();
+					}
+					break;
+					default: {
+						switch (running_status_byte) {
+							MULTICHANNEL_CASE(0x8) {
+								uint8_t key = running_status_byte;
+								uint8_t velocity = file_input->get();
+								uint8_t channel = event_type & 0xF;
+								uint16_t index = ((uint16_t)key << 4) | (channel);
+								if (polyphonies[index]) {
+									polyphonies[index]--;
+									insert_here(noteoff, new noteoff(current_tick, channel, key, velocity));
+								}
+							}
+							break;
+							MULTICHANNEL_CASE(0x9) {
+								uint8_t key = running_status_byte;
+								uint8_t velocity = file_input->get();
+								uint8_t channel = event_type & 0xF;
+								uint16_t index = ((uint16_t)key << 4) | (channel);
+								if (velocity) {
+									polyphonies[index]++;
+									insert_here(noteon, new noteon(current_tick, channel, key, velocity));
+								}
+								else if (polyphonies[index]) {
+									polyphonies[index]--;
+									insert_here(noteoff, new noteoff(current_tick, channel, key, velocity));
+								}
+							}
+							break;
+							MULTICHANNEL_CASE(0xA) {
+								uint8_t key = running_status_byte;
+								uint8_t value = file_input->get();
+								uint8_t channel = event_type & 0xF;
+								insert_here(note_aftertouch, new note_aftertouch(current_tick, channel, key, value));
+							}
+							break;
+							MULTICHANNEL_CASE(0xB) {
+								uint8_t contr_no = running_status_byte;
+								uint8_t value = file_input->get();
+								uint8_t channel = event_type & 0xF;
+								insert_here(controller, new controller(current_tick, channel, contr_no, value));
+							}
+							break;
+							MULTICHANNEL_CASE(0xC) {
+								uint8_t prog_no = running_status_byte;
+								uint8_t channel = event_type & 0xF;
+								insert_here(program_change, new program_change(current_tick, channel, prog_no));
+							}
+							break;
+							MULTICHANNEL_CASE(0xD) {
+								uint8_t value = running_status_byte;
+								uint8_t channel = event_type & 0xF;
+								insert_here(channel_aftertouch, new channel_aftertouch(current_tick, channel, value));
+							}
+							break;
+							MULTICHANNEL_CASE(0xE) {
+								uint8_t pitch_lsb = running_status_byte;
+								uint8_t pitch_msb = file_input->get();
+								uint8_t channel = event_type & 0xF;
+								insert_here(pitch_change, new pitch_change(current_tick, channel, pitch_lsb, pitch_msb));
+							}
+							break;
+						}
+					}
 					break;
 				}
 
