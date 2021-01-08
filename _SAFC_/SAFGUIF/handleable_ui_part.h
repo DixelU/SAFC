@@ -26,6 +26,13 @@ struct HandleableUIPart {
 	void Invert_Enable() {
 		Enabled ^= true;
 	}
+	bool virtual IsResizeable() {
+		return false;
+	}
+	/* relative to right-bottom corner */
+	void virtual SafeResize(float NewHeight, float NewWidth) {
+		return;
+	}
 	inline DWORD virtual TellType() {
 		return TT_UNSPECIFIED;
 	}

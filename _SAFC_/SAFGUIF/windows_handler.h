@@ -3,7 +3,7 @@
 #define SAFGUIF_WH
 
 #include "handleable_ui_part.h"
-#include "moveable_window.h"
+#include "movable_resizeable_window.h"
 #include "textbox.h"
 #include "special_signs.h"
 #include "input_field.h"

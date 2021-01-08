@@ -246,6 +246,7 @@
     <ClInclude Include="bbb_ffio.h" />
     <ClInclude Include="BWMR.h" />
     <ClInclude Include="consts.h" />
+    <ClInclude Include="movable_resizeable_window.h" />
     <ClInclude Include="resource.h" />
     <ClInclude Include="SAFCGUIF_Local\BAWC.h" />
     <ClInclude Include="SAFCGUIF_Local\CATh.h" />
@@ -271,6 +272,7 @@
     <ClInclude Include="SAFGUIF\handleable_ui_part.h" />
     <ClInclude Include="SAFGUIF\header_utils.h" />
     <ClInclude Include="SAFGUIF\input_field.h" />
+    <ClInclude Include="SAFGUIF\movable_resizeable_window.h" />
     <ClInclude Include="SAFGUIF\moveable_window.h" />
     <ClInclude Include="SAFGUIF\SAFGUIF.h" />
     <ClInclude Include="SAFGUIF\single_text_line.h" />
@@ -282,7 +284,6 @@
     <ClInclude Include="SAFGUIF\textbox.h" />
     <ClInclude Include="SAFGUIF\wheel_variable_changer.h" />
     <ClInclude Include="SAFGUIF\windows_handler.h" />
-    <ClInclude Include="shader_smpclass.h" />
     <ClInclude Include="WinReg.h" />
   </ItemGroup>
   <ItemGroup>

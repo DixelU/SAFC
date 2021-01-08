@@ -1562,8 +1562,21 @@ void Init() {///SetIsFontedVar
 	hDc = GetDC(hWnd);
 	_Data.DetectedThreads = std::min((int)std::thread::hardware_concurrency() - 1,(int)(ceil(GetAvailableMemory() / 2048)));
 
-	MoveableWindow *T = new MoveableWindow("Main window", System_White, -200, 200, 400, 400, 0x3F3F3FAF, 0x7F7F7F7F);
-	SelectablePropertedList *SPL = new SelectablePropertedList(BS_List_Black_Small, NULL, PropsAndSets::OGPInMIDIList, -50, 172, 300, 12, 65, 30);
+	SelectablePropertedList* SPL = new SelectablePropertedList(BS_List_Black_Small, NULL, PropsAndSets::OGPInMIDIList, -50, 172, 300, 12, 65, 30);
+	MoveableWindow* T = new MoveableResizeableWindow("Main window", System_White, -200, 200, 400, 400, 0x3F3F3FAF, 0x7F7F7F7F, 0, [SPL](float dH, float dW, float NewHeight, float NewWidth) {
+		constexpr float TopMargin = 200 - 172;
+		constexpr float BottomMargin = 12;
+		float SPLNewHight = (NewHeight - TopMargin - BottomMargin);
+		float SPLNewWidth = SPL->Width + dW;
+		SPL->SafeResize(SPLNewHight, SPLNewWidth);
+	});
+	((MoveableResizeableWindow*)T)->AssignMinDimentions(300, 300);
+	((MoveableResizeableWindow*)T)->AssignPinnedActivities({
+		"ADD_Butt", "REM_Butt", "REM_ALL_Butt", "GLOBAL_PPQN_Butt", "GLOBAL_OFFSET_Butt", "GLOBAL_TEMPO_Butt", "DELETE_ALL_VM", "DELETE_ALL_CAT", "DELETE_ALL_PITCHES",
+		"DELETE_ALL_MODULES", "SETTINGS", "SAVE_AS", "START"
+		}, MoveableResizeableWindow::PinSide::right);
+	((MoveableResizeableWindow*)T)->AssignPinnedActivities({ "SETTINGS", "SAVE_AS", "START" }, MoveableResizeableWindow::PinSide::bottom);
+
 	Button *Butt;
 	(*T)["List"] = SPL;
 

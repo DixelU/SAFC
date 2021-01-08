@@ -137,20 +137,72 @@ struct SelectablePropertedList : HandleableUIPart {
 	}
 	void SafeUpdateLines() {
 		Lock.lock();
-		while (SelectorsText.size() < Selectors.size())Selectors.pop_back();
+		while (SelectorsText.size() < Selectors.size()) {
+			delete Selectors.back();
+			Selectors.pop_back();
+		}
 		if (CurrentTopLineID + MaxVisibleLines > SelectorsText.size()) {
-			if (SelectorsText.size() >= MaxVisibleLines)CurrentTopLineID = SelectorsText.size() - MaxVisibleLines;
+			if (SelectorsText.size() >= MaxVisibleLines) CurrentTopLineID = SelectorsText.size() - MaxVisibleLines;
 			else CurrentTopLineID = 0;
 		}
-		for (int i = 0; i < Selectors.size(); i++)
+		for (int i = 0; i < Selectors.size(); i++) {
 			if (i + CurrentTopLineID < SelectorsText.size())
 				Selectors[i]->SafeStringReplace(
-				(MaxCharsInLine) ?
-				(SelectorsText[i + CurrentTopLineID].substr(0, MaxCharsInLine))
+					(MaxCharsInLine) ?
+					(SelectorsText[i + CurrentTopLineID].substr(0, MaxCharsInLine))
 					:
-				(SelectorsText[i + CurrentTopLineID])
-					);
+					(SelectorsText[i + CurrentTopLineID])
+			);
+		}
 		ReSetAlign_All(TextInButtonsAlign);
+		Lock.unlock();
+	}
+	bool IsResizeable() override {
+		return true;
+	}
+	void SafeResize(float NewHeight, float NewWidth) override {
+		Lock.lock();
+		float dCX = (NewWidth - Width) * 0.5;
+		HeaderCXPos += dCX;
+		float OldWidth = Width;
+		Width = NewWidth;
+		float Lines = std::floor(NewHeight / SpaceBetween);
+		int difference = (int)Lines - (int)MaxVisibleLines;
+
+		float YSpace = ButtSettings->STLS->SpaceWidth + 2 * ButtSettings->STLS->XUnitSize;
+		int NewMaxCharsInLine = Width / YSpace;
+		int ImportantDifference = OldWidth / YSpace - MaxCharsInLine;
+		MaxCharsInLine = NewMaxCharsInLine - ImportantDifference;
+
+		if (Selectors.size()) {
+			if (difference < 0) {
+				while (difference && Selectors.size()) {
+					delete Selectors.back();
+					Selectors.pop_back();
+					if (CurrentTopLineID && Selectors.size() + CurrentTopLineID == SelectorsText.size())
+						CurrentTopLineID--;
+					difference++;
+				}
+			}
+			else if (difference > 0) {
+				ButtSettings->Height = SpaceBetween;
+				ButtSettings->Width = NewWidth;
+				ButtSettings->OnClick = NULL;
+				while (difference && Selectors.size() + CurrentTopLineID < SelectorsText.size() + 1) {
+					ButtSettings->ChangePosition(HeaderCXPos, HeaderYPos - (Selectors.size() + 0.5f) * SpaceBetween);
+					Selectors.push_back(ButtSettings->CreateOne(SelectorsText[Selectors.size() + CurrentTopLineID - 1]));
+					difference--;
+				}
+			}
+		}
+
+		for (auto& button : Selectors) {
+			button->Width = Width;
+			button->SafeChangePosition(HeaderCXPos, button->Ypos);
+		}
+		MaxVisibleLines = Lines;
+		SafeUpdateLines();
+		RecalculateCurrentHeight();
 		Lock.unlock();
 	}
 	void SafeRotateList(INT32 Delta) {
@@ -229,9 +281,9 @@ struct SelectablePropertedList : HandleableUIPart {
 		if (MaxCharsInLine)ButtonText = ButtonText.substr(0, MaxCharsInLine);
 		SelectorsText.push_back(ButtonText);
 		if (MaxVisibleLines && SelectorsText.size() > MaxVisibleLines) {
-			SafeUpdateLines(); {
-				Lock.unlock(); return;
-			}
+			SafeUpdateLines(); 
+			Lock.unlock(); 
+			return;
 		}
 		ButtSettings->ChangePosition(HeaderCXPos, HeaderYPos - (SelectorsText.size() - 0.5f) * SpaceBetween);
 		ButtSettings->Height = SpaceBetween;

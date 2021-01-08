@@ -4,61 +4,110 @@
 #pragma comment(lib, "WebCore.lib")
 
 #include <Ultralight/Ultralight.h>
-#include <AppCore/App.h>
-#include <AppCore/Window.h>
-#include <AppCore/Overlay.h>
+#include <JavaScriptCore/JavaScript.h>
+#include <AppCore/AppCore.h>
 
 #include "MRWF.h"
+
+#include  <io.h>
+#include  <stdio.h>
+#include  <stdlib.h>
 
 #include <iostream>
 #include <fstream>
 #include <sstream>
 #include <string>
 
+#include <Windows.h>
+
 using namespace ultralight;
 
-constexpr const wchar_t* index_file = L"index.htm";
+const std::string index_file = "index.htm";
 std::string index_file_content;
 
-JSValueRef MyCallback(JSContextRef ctx, JSObjectRef function,
-    JSObjectRef thisObject, size_t argumentCount,
-    const JSValueRef arguments[], JSValueRef* exception) {
 
-    // Handle JavaScript arguments in our C callback here...
+class MyApp : 
+    public AppListener,
+    public WindowListener,
+    public LoadListener,
+    public ViewListener {
+public:
+    MyApp() {
+        app_ = App::Create();
+        window_ = Window::Create(app_->main_monitor(), 900, 600, false, kWindowFlags_Titled | kWindowFlags_Resizable | kWindowFlags_Maximizable);
+        app_->set_window(*window_.get());
+        overlay_ = Overlay::Create(*window_.get(), 1, 1, 0, 0);
+        OnResize(window_->width(), window_->height());
+        overlay_->view()->LoadURL(("file:///" + index_file).c_str());
+        app_->set_listener(this);
+        window_->set_listener(this);
+        overlay_->view()->set_load_listener(this);
+        overlay_->view()->set_view_listener(this);
+    }
+    virtual ~MyApp() {
 
-    // Optionally return a value back to JavaScript
+    }
 
-    return JSValueMakeNull(ctx);
-}
+    virtual void Run() {
+        app_->Run();
+    }
+
+    virtual void OnUpdate() {
+
+    }
+    
+    virtual void OnClose() {
+
+    }
+
+    virtual void OnResize(uint32_t width, uint32_t height) {
+
+        overlay_->Resize(width, height);
+    }
+
+    virtual void OnFinishLoading(ultralight::View* caller,
+        uint64_t frame_id,
+        bool is_main_frame,
+        const String& url) {
+
+    }
+
+
+    virtual void OnDOMReady(ultralight::View* caller,
+        uint64_t frame_id,
+        bool is_main_frame,
+        const String& url) {
+
+    }
+
+
+    virtual void OnChangeCursor(ultralight::View* caller,
+        Cursor cursor) {
+
+        window_->SetCursor(cursor);
+    }
+
+    virtual void OnChangeTitle(ultralight::View* caller,
+        const String& title) {
+
+        window_->SetTitle(title.utf8().data());
+    }
+
+protected:
+    RefPtr<App> app_;
+    RefPtr<Window> window_;
+    RefPtr<Overlay> overlay_;
+};
+
 
 int main() {
-    if (_waccess(index_file, 0)) {
+    if (_access(index_file.c_str(), 0)) {
         std::cout << "Unable to locate index file";
         exit(0);
     }
 
-    std::ifstream inp(index_file);
-    std::stringstream strstr;
-    strstr << inp.rdbuf();
-    index_file_content = strstr.str();
-
-    //std::cout << index_file_content << std::endl;
-
-    Ref<App> app = App::Create();
-
-    Ref<Window> window = Window::Create(app->main_monitor(), 900, 600, false,
-        kWindowFlags_Titled | kWindowFlags_Resizable | kWindowFlags_Maximizable);
-
-    window->SetTitle("SAFC2");
-
-    app->set_window(window);
-
-    Ref<Overlay> overlay = Overlay::Create(window, window->width(),
-        window->height(), 0, 0);
-
-    overlay->view()->LoadHTML(index_file_content.c_str());
-
-    app->Run();
+    MyApp app;
+    app.Run();
 
     return 0;
 }

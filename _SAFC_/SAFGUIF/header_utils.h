@@ -47,7 +47,7 @@ BIT ANIMATION_IS_ACTIVE = 0, FIRSTBOOT = 1, DRAG_OVER = 0, APRIL_FOOL = 0, SHIFT
 DWORD TimerV = 0;
 HWND hWnd;
 HDC hDc;
-auto HandCursor = ::LoadCursor(NULL, IDC_HAND), AllDirectCursor = ::LoadCursor(NULL, IDC_CROSS);///AAAAAAAAAAA
+auto HandCursor = ::LoadCursor(NULL, IDC_HAND), AllDirectCursor = ::LoadCursor(NULL, IDC_CROSS), NWSECursor = ::LoadCursor(NULL, IDC_SIZENWSE);///AAAAAAAAAAA
 //const float singlepixwidth = (float)RANGE / WINDXSIZE;
 
 BIT AutoUpdatesCheck = true;
