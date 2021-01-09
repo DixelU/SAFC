@@ -1709,8 +1709,8 @@ void Init() {///SetIsFontedVar
 
 	(*WH)["SMRP_CONTAINER"] = T;
 
-	T = new MoveableWindow("MIDI Info Collector", System_Black, -150, 200, 300, 400, 0xFFFFFFCF, 0x7F7F7F7F);
-	(*T)["FLL"] = new TextBox("--File log line--", System_Black, 0, -WindowHeapSize + 185, 15, 285, 10, 0, 0, 0, _Align::left);
+	T = new MoveableWindow("MIDI Info Collector", System_White, -150, 200, 300, 400, 0x3F3F3FCF, 0x7F7F7F7F);
+	(*T)["FLL"] = new TextBox("--File log line--", System_White, 0, -WindowHeapSize + 185, 15, 285, 10, 0, 0, 0, _Align::left);
 	(*T)["FEL"] = new TextBox("--File error line--", System_Red, 0, -WindowHeapSize + 175, 15, 285, 10, 0, 0, 0, _Align::left);
 	(*T)["TEMPO_GRAPH"] = new Graphing<SingleMIDIInfoCollector::tempo_graph>(
 		0, -WindowHeapSize + 145, 285, 50, (1. / 20000.), true, 0x007FFFFF, 0x000000FF, 0xFF7F00FF, 0xFF00FFFF, 0x7F7F7F7F, nullptr, System_Black, false
@@ -1718,23 +1718,23 @@ void Init() {///SetIsFontedVar
 	(*T)["POLY_GRAPH"] = new Graphing<SingleMIDIInfoCollector::polyphony_graph>(
 		0, -WindowHeapSize + 95, 285, 50, (1. / 20000.), true, 0x007FFFFF, 0x000000FF, 0xFF7F00FF, 0xFF00FFFF, 0x7F7F7F7F, nullptr, System_Black, false
 	);
-	(*T)["PG_SWITCH"] = new Button("Enable graph B", System_Black, PropsAndSets::SMIC::EnablePG, 37.5, 60 - WindowHeapSize, 70, 10, 1, 0xAFAFAFAF, 0x000000FF, 0xFFFFFFFF, 0x000000FF, 0x007FFFFF, System_Black, "Polyphony differences graph");
-	(*T)["TG_SWITCH"] = new Button("Enable graph A", System_Black, PropsAndSets::SMIC::EnableTG, -37.5, 60 - WindowHeapSize, 70, 10, 1, 0xAFAFAFAF, 0x000000FF, 0xFFFFFFFF, 0x000000FF, 0x007FFFFF, System_Black, "Tempo graph");
-	(*T)["ALL_EXP"] = new Button("Export all", System_Black, PropsAndSets::SMIC::ExportAll, 110, 60 - WindowHeapSize, 65, 10, 1, 0xAFAFAFAF, 0x000000FF, 0xFFFFFFFF, 0x000000FF, 0x007FFFFF, nullptr);
-	(*T)["TG_EXP"] = new Button("Export Tempo", System_Black, PropsAndSets::SMIC::ExportTG, -110, 60 - WindowHeapSize, 65, 10, 1, 0xAFAFAFAF, 0x000000FF, 0xFFFFFFFF, 0x000000FF, 0x007FFFFF, nullptr);
-	(*T)["TG_RESET"] = new Button("Reset graph A", System_Black, PropsAndSets::SMIC::ResetTG, 45, 40 - WindowHeapSize, 65, 10, 1, 0xAFAFAFAF, 0x000000FF, 0xFFFFFFFF, 0x000000FF, 0x007FFFFF, nullptr);
-	(*T)["PG_RESET"] = new Button("Reset graph B", System_Black, PropsAndSets::SMIC::ResetPG, 45, 20 - WindowHeapSize, 65, 10, 1, 0xAFAFAFAF, 0x000000FF, 0xFFFFFFFF, 0x000000FF, 0x007FFFFF, nullptr);
-	(*T)["PERSONALUSE"] = Butt = new Button(".csv", System_Black, PropsAndSets::SMIC::SwitchPersonalUse, 105, 40 - WindowHeapSize, 45, 10, 1, 0xAFAFAFAF, 0x000000FF, 0xFFFFFFFF, 0x000000FF, 0x007FFFFF, System_Black, "Switches output format for `export all`");
+	(*T)["PG_SWITCH"] = new Button("Enable graph B", System_White, PropsAndSets::SMIC::EnablePG, 37.5, 60 - WindowHeapSize, 70, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, System_White, "Polyphony differences graph");
+	(*T)["TG_SWITCH"] = new Button("Enable graph A", System_White, PropsAndSets::SMIC::EnableTG, -37.5, 60 - WindowHeapSize, 70, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, System_White, "Tempo graph");
+	(*T)["ALL_EXP"] = new Button("Export all", System_White, PropsAndSets::SMIC::ExportAll, 110, 60 - WindowHeapSize, 65, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr);
+	(*T)["TG_EXP"] = new Button("Export Tempo", System_White, PropsAndSets::SMIC::ExportTG, -110, 60 - WindowHeapSize, 65, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr);
+	(*T)["TG_RESET"] = new Button("Reset graph A", System_White, PropsAndSets::SMIC::ResetTG, 45, 40 - WindowHeapSize, 65, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr);
+	(*T)["PG_RESET"] = new Button("Reset graph B", System_White, PropsAndSets::SMIC::ResetPG, 45, 20 - WindowHeapSize, 65, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr);
+	(*T)["PERSONALUSE"] = Butt = new Button(".csv", System_White, PropsAndSets::SMIC::SwitchPersonalUse, 105, 40 - WindowHeapSize, 45, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, System_White, "Switches output format for `export all`");
 	Butt->Tip->SafeChangePosition_Argumented(_Align::right, Butt->Xpos + Butt->Width*0.5, Butt->Tip->CYpos);
-	(*T)["TOTAL_INFO"] = new TextBox("----", System_Black, 0, -150, 35, 285, 10, 0, 0, 0, _Align::left);
-	(*T)["INT_MIN"] = new InputField("0", -132.5, 40 - WindowHeapSize, 10, 20, System_Black, NULL, 0x000000FF, System_Black, "Minutes", 3, _Align::center, _Align::left, InputField::Type::NaturalNumbers);
-	(*T)["INT_SEC"] = new InputField("0", -107.5, 40 - WindowHeapSize, 10, 20, System_Black, NULL, 0x000000FF, System_Black, "Seconds", 2, _Align::center, _Align::left, InputField::Type::NaturalNumbers);
-	(*T)["INT_MSC"] = new InputField("000", -80, 40 - WindowHeapSize, 10, 25, System_Black, NULL, 0x000000FF, System_Black, "Milliseconds", 3, _Align::center, _Align::left, InputField::Type::NaturalNumbers);
-	(*T)["INTEGRATE_TICKS"] = new Button("Integrate ticks", System_Black, PropsAndSets::SMIC::IntegrateTime, -27.5, 40 - WindowHeapSize, 70, 10, 1, 0xAFAFAFAF, 0x000000FF, 0xFFFFFFFF, 0x000000FF, 0x007FFFFF, System_Black, "Result is the closest tick to that time.");
-	(*T)["INT_TIC"] = new InputField("0", -105, 20 - WindowHeapSize, 10, 75, System_Black, NULL, 0x000000FF, System_Black, "Ticks", 17, _Align::center, _Align::left, InputField::Type::NaturalNumbers);
-	(*T)["INTEGRATE_TIME"] = new Button("Integrate time", System_Black, PropsAndSets::SMIC::DiffirentiateTicks, -27.5, 20 - WindowHeapSize, 70, 10, 1, 0xAFAFAFAF, 0x000000FF, 0xFFFFFFFF, 0x000000FF, 0x007FFFFF, System_Black, "Result is the time of that tick.");
-	(*T)["DELIM"] = new InputField(";", 137.5, 40 - WindowHeapSize, 10, 7.5, System_Black, &(PropsAndSets::CSV_DELIM), 0x000000FF, System_Black, "Delimiter", 1, _Align::center, _Align::right, InputField::Type::Text);
-	(*T)["ANSWER"] = new TextBox("----", System_Black, -66.25, -30, 25, 152.5, 10, 0, 0, 0, _Align::center, TextBox::VerticalOverflow::recalibrate);
+	(*T)["TOTAL_INFO"] = new TextBox("----", System_White, 0, -150, 35, 285, 10, 0, 0, 0, _Align::left);
+	(*T)["INT_MIN"] = new InputField("0", -132.5, 40 - WindowHeapSize, 10, 20, System_White, NULL, 0x007FFFFF, System_White, "Minutes", 3, _Align::center, _Align::left, InputField::Type::NaturalNumbers);
+	(*T)["INT_SEC"] = new InputField("0", -107.5, 40 - WindowHeapSize, 10, 20, System_White, NULL, 0x007FFFFF, System_White, "Seconds", 2, _Align::center, _Align::left, InputField::Type::NaturalNumbers);
+	(*T)["INT_MSC"] = new InputField("000", -80, 40 - WindowHeapSize, 10, 25, System_White, NULL, 0x007FFFFF, System_White, "Milliseconds", 3, _Align::center, _Align::left, InputField::Type::NaturalNumbers);
+	(*T)["INTEGRATE_TICKS"] = new Button("Integrate ticks", System_White, PropsAndSets::SMIC::IntegrateTime, -27.5, 40 - WindowHeapSize, 70, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, System_White, "Result is the closest tick to that time.");
+	(*T)["INT_TIC"] = new InputField("0", -105, 20 - WindowHeapSize, 10, 75, System_White, NULL, 0x007FFFFF, System_White, "Ticks", 17, _Align::center, _Align::left, InputField::Type::NaturalNumbers);
+	(*T)["INTEGRATE_TIME"] = new Button("Integrate time", System_White, PropsAndSets::SMIC::DiffirentiateTicks, -27.5, 20 - WindowHeapSize, 70, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, System_White, "Result is the time of that tick.");
+	(*T)["DELIM"] = new InputField(";", 137.5, 40 - WindowHeapSize, 10, 7.5, System_Black, &(PropsAndSets::CSV_DELIM), 0x000000FF, System_White, "Delimiter", 1, _Align::center, _Align::right, InputField::Type::Text);
+	(*T)["ANSWER"] = new TextBox("----", System_White, -66.25, -30, 25, 152.5, 10, 0, 0, 0, _Align::center, TextBox::VerticalOverflow::recalibrate);
 
 	(*WH)["SMIC"] = T;
 
@@ -1958,9 +1958,9 @@ int main(int argc, char ** argv) {
 	glShadeModel(GL_SMOOTH); 
 	//glEnable(GLUT_MULTISAMPLE);
 
-	glHint(GL_LINE_SMOOTH_HINT, GL_NICEST);//GL_FASTEST//GL_NICEST
-	glHint(GL_POINT_SMOOTH_HINT, GL_NICEST);
-	glHint(GL_POLYGON_SMOOTH_HINT, GL_NICEST);
+	glHint(GL_LINE_SMOOTH_HINT, GL_FASTEST);//GL_FASTEST//GL_NICEST
+	glHint(GL_POINT_SMOOTH_HINT, GL_FASTEST);
+	glHint(GL_POLYGON_SMOOTH_HINT, GL_FASTEST);
 
 	glutMouseFunc(mClick);
 	glutReshapeFunc(OnResize);

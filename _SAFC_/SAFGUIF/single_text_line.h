@@ -138,7 +138,10 @@ struct SingleTextLine {
 			else
 				Chars.push_back(new DottedSymbol(*(Chars.front())));
 		}
-		while (NewString.size() < Chars.size()) Chars.pop_back();
+		while (NewString.size() < Chars.size()) {
+			delete Chars.back();
+			Chars.pop_back();
+		}
 		for (int i = 0; i < Chars.size(); i++)
 			SafeReplaceChar(i, NewString[i]);
 		RecalculateWidth();
