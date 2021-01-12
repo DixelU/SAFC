@@ -38,7 +38,7 @@ struct Graphing : HandleableUIPart {
 		STLS->SetNewPos(CXpos, CYpos - 0.5f * TargetHeight + 5.f);
 		STL_Info = STLS->CreateOne("_");
 	}
-	~Graphing() {
+	~Graphing() override {
 		delete STL_Info;
 	}
 	void Reset() {

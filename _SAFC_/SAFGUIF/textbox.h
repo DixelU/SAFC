@@ -18,7 +18,7 @@ struct TextBox : HandleableUIPart {
 	SingleTextLineSettings* STLS;
 	BYTE BorderWidth;
 	DWORD RGBABorder, RGBABackground, SymbolsPerLine;
-	~TextBox() {
+	~TextBox() override {
 		Lock.lock();
 		for (auto i = Lines.begin(); i != Lines.end(); i++)
 			if (*i)delete* i;

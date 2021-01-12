@@ -14,7 +14,7 @@ struct PLC_VolumeWorker :HandleableUIPart {
 	BIT Hovered, ActiveSetting, RePutMode/*JustPut=0*/;
 	BYTE XCP, YCP;
 	BYTE FPX, FPY;
-	~PLC_VolumeWorker() {
+	~PLC_VolumeWorker() override {
 		delete STL_MSG;
 	}
 	PLC_VolumeWorker(float CXPos, float CYPos, float Width, float Height, PLC<BYTE, BYTE>* PLC_bb = NULL) {

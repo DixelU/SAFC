@@ -20,7 +20,7 @@ struct SelectablePropertedList : HandleableUIPart {
 	std::deque<DWORD> SelectedID;
 	DWORD MaxVisibleLines, CurrentTopLineID, MaxCharsInLine;
 	BYTE TopArrowHovered, BottomArrowHovered;
-	~SelectablePropertedList() {
+	~SelectablePropertedList() override {
 		Lock.lock();
 		for (auto Y = Selectors.begin(); Y != Selectors.end(); Y++)
 			delete (*Y);

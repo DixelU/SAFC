@@ -197,6 +197,7 @@ struct MIDICollectionThreadedMerger {
 		IITrackCount = 0;
 		std::thread IMC_Processor([](std::vector<SingleMIDIReProcessor*>* IMC, BIT* FinishedFlag, WORD PPQN, std::wstring _SaveTo, WORD* TrackCount) {
 			if (IMC->empty()) {
+				delete IMC;
 				(*FinishedFlag) = 1; /// Will this work?
 				return;
 			}

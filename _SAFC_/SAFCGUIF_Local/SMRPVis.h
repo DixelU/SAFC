@@ -33,6 +33,12 @@ struct SMRP_Vis : HandleableUIPart {
 		STLS->RGBAColor = BASERGBA;
 		Lock.unlock();
 	}
+	~SMRP_Vis() override {
+		delete STL_Log;
+		delete STL_War;
+		delete STL_Err;
+		delete STL_Info;
+	}
 	void SafeMove(float dx, float dy) override {
 		Lock.lock();
 		XPos += dx;

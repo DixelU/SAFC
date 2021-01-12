@@ -192,7 +192,7 @@ public:
 			WriteSymbolAtCursorPos(ch);
 		Lock.unlock();
 	}
-	~EditBox() {
+	~EditBox() override {
 		Lock.lock();
 		for (auto& line : Words)
 			if(line)delete line;

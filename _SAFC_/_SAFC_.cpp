@@ -288,13 +288,13 @@ size_t GetAvailableMemory(){
 ButtonSettings 
 					*BS_List_Black_Small = new ButtonSettings(System_White, 0, 0, 100, 10, 1, 0, 0, 0xFFEFDFFF, 0x00003F7F, 0x7F7F7FFF);
 
-DWORD DefaultBoolSettings = _BoolSettings::remove_remnants | /*_BoolSettings::remove_empty_tracks*/ 0 | _BoolSettings::all_instruments_to_piano;
+DWORD DefaultBoolSettings = _BoolSettings::remove_remnants | _BoolSettings::remove_empty_tracks | _BoolSettings::all_instruments_to_piano;
 
 struct FileSettings {////per file settings
 	std::wstring Filename;
-	std::wstring PostprocessedFile_Name, WFileNamePostfix;;
-	std::string AppearanceFilename,AppearancePath,FileNamePostfix;
-	WORD NewPPQN,OldPPQN,OldTrackNumber,MergeMultiplier;
+	std::wstring PostprocessedFile_Name, WFileNamePostfix;
+	std::string AppearanceFilename, AppearancePath, FileNamePostfix;
+	WORD NewPPQN, OldPPQN, OldTrackNumber, MergeMultiplier;
 	INT16 GroupID;
 	FLOAT NewTempo;
 	UINT64 FileSize;
@@ -303,7 +303,7 @@ struct FileSettings {////per file settings
 	CutAndTransposeKeys *KeyMap;
 	PLC<BYTE, BYTE> *VolumeMap;
 	PLC<WORD, WORD> *PitchBendMap;
-	DWORD OffsetTicks,BoolSettings;///use ump to see how far you wanna offset all that.
+	DWORD OffsetTicks, BoolSettings;///use ump to see how far you wanna offset all that.
 	~FileSettings() {
 		if (KeyMap)delete KeyMap;
 		if (VolumeMap)delete VolumeMap;
@@ -1456,7 +1456,7 @@ void OnStart() {
 				Sleep(100);
 			}
 			std::cout << "SMRP: Out from sleep\n";
-			for (int i = 0; i <= SD->DetectedThreads; i++) {
+			for (int i = 0; i <= pMCTM->Cur_Processing.size(); i++) {
 				MW->DeleteUIElementByName("SMRP_C" + std::to_string(i));
 			}
 			MW->SafeChangePosition_Argumented(0, 0, 0);
@@ -1492,7 +1492,7 @@ void OnStart() {
 			//WH->DisableAllWindows();
 			WH->EnableWindow("MAIN");
 			//pMCTM->ResetEverything();
-		},GlobalMCTM,MW, START);
+		},GlobalMCTM, MW, START);
 		FLO.detach();
 
 	}
@@ -1560,7 +1560,7 @@ void RestoreRegSettings() {
 void Init() {///SetIsFontedVar
 	RestoreRegSettings();
 	hDc = GetDC(hWnd);
-	_Data.DetectedThreads = std::min((int)std::thread::hardware_concurrency() - 1,(int)(ceil(GetAvailableMemory() / 2048)));
+	_Data.DetectedThreads = std::min((int)std::thread::hardware_concurrency() - 1, (int)(ceil(GetAvailableMemory() / 2048)));
 
 	SelectablePropertedList* SPL = new SelectablePropertedList(BS_List_Black_Small, NULL, PropsAndSets::OGPInMIDIList, -50, 172, 300, 12, 65, 30);
 	MoveableWindow* T = new MoveableResizeableWindow("Main window", System_White, -200, 200, 400, 400, 0x3F3F3FAF, 0x7F7F7F7F, 0, [SPL](float dH, float dW, float NewHeight, float NewWidth) {
@@ -1569,7 +1569,7 @@ void Init() {///SetIsFontedVar
 		float SPLNewHight = (NewHeight - TopMargin - BottomMargin);
 		float SPLNewWidth = SPL->Width + dW;
 		SPL->SafeResize(SPLNewHight, SPLNewWidth);
-	});
+		});
 	((MoveableResizeableWindow*)T)->AssignMinDimentions(300, 300);
 	((MoveableResizeableWindow*)T)->AssignPinnedActivities({
 		"ADD_Butt", "REM_Butt", "REM_ALL_Butt", "GLOBAL_PPQN_Butt", "GLOBAL_OFFSET_Butt", "GLOBAL_TEMPO_Butt", "DELETE_ALL_VM", "DELETE_ALL_CAT", "DELETE_ALL_PITCHES",
@@ -1577,10 +1577,10 @@ void Init() {///SetIsFontedVar
 		}, MoveableResizeableWindow::PinSide::right);
 	((MoveableResizeableWindow*)T)->AssignPinnedActivities({ "SETTINGS", "SAVE_AS", "START" }, MoveableResizeableWindow::PinSide::bottom);
 
-	Button *Butt;
+	Button* Butt;
 	(*T)["List"] = SPL;
 
-	(*T)["ADD_Butt"] = new Button("Add MIDIs", System_White, OnAdd, 150, 172.5, 75, 12, 1, 0x00003FAF, 0xFFFFFFFF, 0x00003FFF, 0xFFFFFFFF, 0x7F7F7F7FF,NULL," ");
+	(*T)["ADD_Butt"] = new Button("Add MIDIs", System_White, OnAdd, 150, 172.5, 75, 12, 1, 0x00003FAF, 0xFFFFFFFF, 0x00003FFF, 0xFFFFFFFF, 0x7F7F7F7FF, NULL, " ");
 	(*T)["REM_Butt"] = new Button("Remove selected", System_White, OnRem, 150, 160, 75, 12, 1, 0x3F0000AF, 0xFFFFFFFF, 0x3F0000FF, 0xFFFFFFFF, 0x7F7F7F7FF, NULL, " ");
 	(*T)["REM_ALL_Butt"] = new Button("Remove all", System_White, OnRemAll, 150, 147.5, 75, 12, 1, 0xAF0000AF, 0xFFFFFFFF, 0xAF0000AF, 0xFFFFFFFF, 0x7F7F7F7FF, System_White, "May cause lag");
 	(*T)["GLOBAL_PPQN_Butt"] = new Button("Global PPQN", System_White, OnGlobalPPQN, 150, 122.5, 75, 12, 1, 0xFF3F00AF, 0xFFFFFFFF, 0xFF3F00AF, 0xFFFFFFFF, 0x7F7F7F7FF, NULL, " ");
@@ -1589,11 +1589,11 @@ void Init() {///SetIsFontedVar
 	//(*T)["_FRESOLVE"] = new Button("_ForceResolve", System_White, _OnResolve, 150, 0, 75, 12, 1, 0x7F007F3F, 0xFFFFFF3F, 0x000000FF, 0xFFFFFF3F, 0x7F7F7F73F, NULL, " ");
 	(*T)["DELETE_ALL_VM"] = new Button("Remove vol. maps", System_White, OnRemVolMaps, 150, 72.5, 75, 12, 1,
 		0x7F7F7FAF, 0xFFFFFFFF, 0x7F7F7FAF, 0xFFFFFFFF, 0x7F7F7F7FF, NULL, " ");//0xFF007FAF
-	(*T)["DELETE_ALL_CAT"] = new Button("Remove C&Ts", System_White, OnRemCATs, 150, 60, 75, 12, 1, 
+	(*T)["DELETE_ALL_CAT"] = new Button("Remove C&Ts", System_White, OnRemCATs, 150, 60, 75, 12, 1,
 		0x7F7F7FAF, 0xFFFFFFFF, 0x7F7F7FAF, 0xFFFFFFFF, 0x7F7F7F7FF, NULL, " ");
-	(*T)["DELETE_ALL_PITCHES"] = new Button("Remove p. maps", System_White, OnRemPitchMaps, 150, 47.5, 75, 12, 1, 
+	(*T)["DELETE_ALL_PITCHES"] = new Button("Remove p. maps", System_White, OnRemPitchMaps, 150, 47.5, 75, 12, 1,
 		0x7F7F7FAF, 0xFFFFFFFF, 0x7F7F7FAF, 0xFFFFFFFF, 0x7F7F7F7FF, NULL, " ");
-	(*T)["DELETE_ALL_MODULES"] = new Button("Remove modules", System_White, OnRemAllModules, 150, 35, 75, 12, 1, 
+	(*T)["DELETE_ALL_MODULES"] = new Button("Remove modules", System_White, OnRemAllModules, 150, 35, 75, 12, 1,
 		0x7F7F7FAF, 0xFFFFFFFF, 0x7F7F7FAF, 0xFFFFFFFF, 0x7F7F7F7FF, NULL, " ");
 
 	(*T)["SETTINGS"] = new Button("Settings...", System_White, Settings::OnSettings, 150, -140, 75, 12, 1,
@@ -1606,7 +1606,7 @@ void Init() {///SetIsFontedVar
 	(*WH)["MAIN"] = T;
 
 	T = new MoveableWindow("Props. and sets.", System_White, -100, 100, 200, 200, 0x3F3F3FCF, 0x7F7F7F7F);
-	(*T)["FileName"] = new TextBox("_", System_White, 0, 88.5 - WindowHeapSize, 6, 200 - 1.5*WindowHeapSize, 7.5, 0, 0, 0, _Align::left, TextBox::VerticalOverflow::cut); 
+	(*T)["FileName"] = new TextBox("_", System_White, 0, 88.5 - WindowHeapSize, 6, 200 - 1.5 * WindowHeapSize, 7.5, 0, 0, 0, _Align::left, TextBox::VerticalOverflow::cut);
 	(*T)["PPQN"] = new InputField(" ", -90 + WindowHeapSize, 75 - WindowHeapSize, 10, 25, System_White, PropsAndSets::PPQN, 0x007FFFFF, System_White, "PPQN is lesser than 65536.", 5, _Align::center, _Align::left, InputField::Type::NaturalNumbers);
 	(*T)["TEMPO"] = new InputField(" ", -45 + WindowHeapSize, 75 - WindowHeapSize, 10, 55, System_White, PropsAndSets::TEMPO, 0x007FFFFF, System_White, "Specific tempo override field", 8, _Align::center, _Align::left, InputField::Type::FP_PositiveNumbers);
 	(*T)["OFFSET"] = new InputField(" ", 17.5 + WindowHeapSize, 75 - WindowHeapSize, 10, 60, System_White, PropsAndSets::OFFSET, 0x007FFFFF, System_White, "Offset from begining in ticks", 10, _Align::center, _Align::right, InputField::Type::NaturalNumbers);
@@ -1643,12 +1643,12 @@ void Init() {///SetIsFontedVar
 	(*T)["SELECT_START"] = new InputField(" ", -37.5 - WindowHeapSize, -5 - WindowHeapSize, 10, 70, System_White, NULL, 0x007FFFFF, System_White, "Selection start", 13, _Align::center, _Align::right, InputField::Type::NaturalNumbers);
 	(*T)["SELECT_LENGTH"] = new InputField(" ", 37.5 - WindowHeapSize, -5 - WindowHeapSize, 10, 70, System_White, NULL, 0x007FFFFF, System_White, "Selection length", 14, _Align::center, _Align::right, InputField::Type::WholeNumbers);
 
-	(*T)["CONSTANT_PROPS"] = new TextBox("_Props text example_", System_White, 0, -57.5 - WindowHeapSize, 80 - WindowHeapSize, 200 - 1.5*WindowHeapSize, 7.5, 0, 0, 1);
+	(*T)["CONSTANT_PROPS"] = new TextBox("_Props text example_", System_White, 0, -57.5 - WindowHeapSize, 80 - WindowHeapSize, 200 - 1.5 * WindowHeapSize, 7.5, 0, 0, 1);
 
 	(*WH)["SMPAS"] = T;//Selected midi properties and settings
 
 	T = new MoveableWindow("Cut and Transpose.", System_White, -200, 50, 400, 100, 0x3F3F3FCF, 0x7F7F7F7F);
-	(*T)["CAT_ITSELF"] = new CAT_Piano(0, 25-WindowHeapSize, 1, 10, NULL);
+	(*T)["CAT_ITSELF"] = new CAT_Piano(0, 25 - WindowHeapSize, 1, 10, NULL);
 	(*T)["CAT_SET_DEFAULT"] = new Button("Reset", System_White, PropsAndSets::CutAndTranspose::OnReset, -150, -10 - WindowHeapSize, 40, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, NULL, " ");
 	(*T)["CAT_+128"] = new Button("0-127 -> 128-255", System_White, PropsAndSets::CutAndTranspose::On0_127to128_255, -85, -10 - WindowHeapSize, 80, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, NULL, " ");
 	(*T)["CAT_CDT128"] = new Button("Cut down to 128", System_White, PropsAndSets::CutAndTranspose::OnCDT128, 0, -10 - WindowHeapSize, 80, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, NULL, " ");
@@ -1658,7 +1658,7 @@ void Init() {///SetIsFontedVar
 
 	(*WH)["CAT"] = T;
 
-	T = new MoveableWindow("Volume map.", System_White, -150, 150, 300, 350, 0x3F3F3FCF, 0x7F7F7F7F,0x7F6F8FCF);
+	T = new MoveableWindow("Volume map.", System_White, -150, 150, 300, 350, 0x3F3F3FCF, 0x7F7F7F7F, 0x7F6F8FCF);
 	(*T)["VM_PLC"] = new PLC_VolumeWorker(0, 0 - WindowHeapSize, 300 - WindowHeapSize * 2, 300 - WindowHeapSize * 2, new PLC<BYTE, BYTE>());///todo: interface
 	(*T)["VM_SSBDIIF"] = Butt = new Button("Shape alike x^y", System_White, PropsAndSets::VolumeMap::OnDegreeShape, -110 + WindowHeapSize, -150 - WindowHeapSize, 80, 10, 1, 0xFFFFFF3F, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFAFFF3F, 0xFFAFFFFF, System_White, "Where y is from frame bellow");///Set shape by degree in input field;
 	Butt->Tip->SafeChangePosition_Argumented(_Align::left, -150 + WindowHeapSize, -160 - WindowHeapSize);
@@ -1679,7 +1679,7 @@ void Init() {///SetIsFontedVar
 
 	(*T)["AS_GLOBALSETTINGS"] = new TextBox("Global settings for new MIDIs", System_White, 0, 85 - WindowHeapSize, 30, 200, 12, 0x007FFF1F, 0x007FFF7F, 1, _Align::center);
 	(*T)["AS_APPLY"] = Butt = new Button("Apply", System_White, Settings::OnSetApply, 85 - WindowHeapSize, -87.5 - WindowHeapSize, 40, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, NULL, "_");
-	(*T)["AS_EN_FONT"] = Butt = new Button((is_fonted)?"Disable fonts":"Enable fonts", System_White, Settings::ChangeIsFontedVar, 72.5 - WindowHeapSize, -67.5 - WindowHeapSize, 65, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, System_White, " ");
+	(*T)["AS_EN_FONT"] = Butt = new Button((is_fonted) ? "Disable fonts" : "Enable fonts", System_White, Settings::ChangeIsFontedVar, 72.5 - WindowHeapSize, -67.5 - WindowHeapSize, 65, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, System_White, " ");
 	(*T)["AS_ROT_ANGLE"] = new InputField(std::to_string(ROT_ANGLE), -87.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 30, System_White, NULL, 0x007FFFFF, System_White, "Rotation angle", 6, _Align::center, _Align::left, InputField::Type::FP_Any);
 	(*T)["AS_FONT_SIZE"] = new WheelVariableChanger(Settings::ApplyFSWheel, -37.5, -82.5, lFontSymbolsInfo::Size, 1, System_White, "Font size", "Delta", WheelVariableChanger::Type::addictable);
 	(*T)["AS_FONT_P"] = new WheelVariableChanger(Settings::ApplyRelWheel, -37.5, -22.5, lFONT_HEIGHT_TO_WIDTH, 0.01, System_White, "Font rel.", "Delta", WheelVariableChanger::Type::addictable);
@@ -1704,7 +1704,7 @@ void Init() {///SetIsFontedVar
 	(*WH)["APP_SETTINGS"] = T;
 
 	T = new MoveableWindow("SMRP Container", System_White, -300, 300, 600, 600, 0x000000CF, 0xFFFFFF7F);
-	
+
 	(*T)["TIMER"] = new InputField("0 s", 0, 195, 10, 50, System_White, NULL, 0, System_White, "Timer", 12, _Align::center, _Align::center, InputField::Type::Text);
 
 	(*WH)["SMRP_CONTAINER"] = T;
@@ -1714,10 +1714,10 @@ void Init() {///SetIsFontedVar
 	(*T)["FEL"] = new TextBox("--File error line--", System_Red, 0, -WindowHeapSize + 175, 15, 285, 10, 0, 0, 0, _Align::left);
 	(*T)["TEMPO_GRAPH"] = new Graphing<SingleMIDIInfoCollector::tempo_graph>(
 		0, -WindowHeapSize + 145, 285, 50, (1. / 20000.), true, 0x007FFFFF, 0x000000FF, 0xFF7F00FF, 0xFF00FFFF, 0x7F7F7F7F, nullptr, System_Black, false
-	);
+		);
 	(*T)["POLY_GRAPH"] = new Graphing<SingleMIDIInfoCollector::polyphony_graph>(
 		0, -WindowHeapSize + 95, 285, 50, (1. / 20000.), true, 0x007FFFFF, 0x000000FF, 0xFF7F00FF, 0xFF00FFFF, 0x7F7F7F7F, nullptr, System_Black, false
-	);
+		);
 	(*T)["PG_SWITCH"] = new Button("Enable graph B", System_White, PropsAndSets::SMIC::EnablePG, 37.5, 60 - WindowHeapSize, 70, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, System_White, "Polyphony differences graph");
 	(*T)["TG_SWITCH"] = new Button("Enable graph A", System_White, PropsAndSets::SMIC::EnableTG, -37.5, 60 - WindowHeapSize, 70, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, System_White, "Tempo graph");
 	(*T)["ALL_EXP"] = new Button("Export all", System_White, PropsAndSets::SMIC::ExportAll, 110, 60 - WindowHeapSize, 65, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr);
@@ -1725,7 +1725,7 @@ void Init() {///SetIsFontedVar
 	(*T)["TG_RESET"] = new Button("Reset graph A", System_White, PropsAndSets::SMIC::ResetTG, 45, 40 - WindowHeapSize, 65, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr);
 	(*T)["PG_RESET"] = new Button("Reset graph B", System_White, PropsAndSets::SMIC::ResetPG, 45, 20 - WindowHeapSize, 65, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr);
 	(*T)["PERSONALUSE"] = Butt = new Button(".csv", System_White, PropsAndSets::SMIC::SwitchPersonalUse, 105, 40 - WindowHeapSize, 45, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, System_White, "Switches output format for `export all`");
-	Butt->Tip->SafeChangePosition_Argumented(_Align::right, Butt->Xpos + Butt->Width*0.5, Butt->Tip->CYpos);
+	Butt->Tip->SafeChangePosition_Argumented(_Align::right, Butt->Xpos + Butt->Width * 0.5, Butt->Tip->CYpos);
 	(*T)["TOTAL_INFO"] = new TextBox("----", System_White, 0, -150, 35, 285, 10, 0, 0, 0, _Align::left);
 	(*T)["INT_MIN"] = new InputField("0", -132.5, 40 - WindowHeapSize, 10, 20, System_White, NULL, 0x007FFFFF, System_White, "Minutes", 3, _Align::center, _Align::left, InputField::Type::NaturalNumbers);
 	(*T)["INT_SEC"] = new InputField("0", -107.5, 40 - WindowHeapSize, 10, 20, System_White, NULL, 0x007FFFFF, System_White, "Seconds", 2, _Align::center, _Align::left, InputField::Type::NaturalNumbers);
@@ -1738,11 +1738,17 @@ void Init() {///SetIsFontedVar
 
 	(*WH)["SMIC"] = T;
 
-	T = new MoveableWindow("Test", System_White, -150, 150, 300, 300, 0x0000000F, 0x7F7F7F7F, 0x000000FF);
+	auto InnerWindow = new MoveableResizeableWindow("Inner Test", System_White, -100, 100, 200, 200, 0x0000000F, 0x7F7F7F7F, 0x000000FF);
+	T = new MoveableResizeableWindow("Test", System_White, -150, 150, 300, 300, 0x0000000F, 0x7F7F7F7F, 0x000000FF, [InnerWindow](float dH, float dW, float NewHeight, float NewWidth) {
+		InnerWindow->SafeResize(InnerWindow->Height + dH, InnerWindow->Width + dW);
+		});
 
-	(*T)["TEXTAREA"] = new EditBox("", System_White, 0, 0, 200, 200, 10, 0, 0xFFFFFFFF, 2);
-	(*T)["BUTT"] = new Button("Compile", System_White, nullptr, -100, -135, 75, 12, 1,
+	(*T)["WINDOW"] = InnerWindow;
+	//(*T)["TEXTAREA"] = new EditBox("", System_White, 0, 0, 200, 200, 10, 0, 0xFFFFFFFF, 2);
+	(*InnerWindow)["BUTT"] = new Button("Compile", System_White, nullptr, -50, -55, 75, 12, 1,
 		0x000000AF, 0xFFFFFFFF, 0x000000AF, 0xFFFFFFFF, 0x7F7F7F7FF, NULL, " ");
+	InnerWindow->AssignPinnedActivities({ "BUTT" }, MoveableResizeableWindow::PinSide::bottom);
+	InnerWindow->AssignPinnedActivities({ "BUTT" }, MoveableResizeableWindow::PinSide::left);
 
 	(*WH)["COMPILEW"] = T;
 

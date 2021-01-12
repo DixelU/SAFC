@@ -15,7 +15,7 @@ struct Button : HandleableUIPart {
 	BYTE BorderWidth;
 	BIT Hovered;
 	void(*OnClick)();
-	~Button() {
+	~Button() override {
 		delete STL;
 		if (Tip)delete Tip;
 	}

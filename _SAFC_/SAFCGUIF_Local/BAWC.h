@@ -19,6 +19,9 @@ struct BoolAndWORDChecker : HandleableUIPart {
 		STLS->SetNewPos(XPos, YPos + 40);
 		this->STL_Info = STLS->CreateOne("_");
 	}
+	~BoolAndWORDChecker() override {
+		delete this->STL_Info;
+	}
 	void SafeMove(float dx, float dy) override {
 		Lock.lock();
 		XPos += dx;

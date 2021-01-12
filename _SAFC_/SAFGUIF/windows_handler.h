@@ -33,6 +33,12 @@ struct WindowsHandler {
 		(*ptr)["TXT"] = new TextBox("_abc_", System_White, 0, 7.5 - WindowHeapSize, 10, 80, 7.5, 0, 0, 2, _Align::center, TextBox::VerticalOverflow::recalibrate);
 		(*ptr)["BUTT"] = new Button("Submit", System_White, NULL, -0, -20 - WindowHeapSize, 80, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFF7F00FF, 0xFFFFFFFF, 0xFF7F00FF, NULL, " ");
 	}
+	~WindowsHandler() {
+		for (auto& [_, ptr] : Map) {
+			delete ptr;
+			ptr = nullptr;
+		}
+	}
 	void MouseHandler(float mx, float my, CHAR Button, CHAR State) {
 		locker.lock();
 		//printf("%X\n", Button);

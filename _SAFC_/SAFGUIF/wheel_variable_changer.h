@@ -18,7 +18,7 @@ struct WheelVariableChanger :HandleableUIPart {
 	double factor;
 	bool IsHovered, WheelFieldHovered;
 	void(*OnApply)(double);
-	~WheelVariableChanger() {
+	~WheelVariableChanger() override {
 		if (var_if)
 			delete var_if;
 		if (var_if)

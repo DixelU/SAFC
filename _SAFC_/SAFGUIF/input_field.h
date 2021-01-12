@@ -52,6 +52,10 @@ struct InputField : HandleableUIPart {
 		this->FirstInput = this->Focused = false;
 		this->OutputSource = OutputSource;
 	}
+	~InputField() override {
+		delete STL;
+		delete Tip;
+	}
 	BIT MouseHandler(float mx, float my, CHAR Button/*-1 left, 1 right, 0 move*/, CHAR State /*-1 down, 1 up*/) override {
 		if (abs(mx - Xpos) < 0.5 * Width && abs(my - Ypos) < 0.5 * Height) {
 			if (!Focused)

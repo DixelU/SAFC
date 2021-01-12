@@ -16,7 +16,7 @@ struct CAT_Piano :HandleableUIPart {
 	float CalculatedHeight, CalculatedWidth;
 	float BaseXPos, BaseYPos, PianoHeight, KeyWidth;
 	BIT Focused;
-	~CAT_Piano() {
+	~CAT_Piano() override {
 		delete MinCont;
 		delete MaxCont;
 		delete Transp;

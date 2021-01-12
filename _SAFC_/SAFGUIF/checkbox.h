@@ -12,7 +12,7 @@ struct CheckBox : HandleableUIPart {///NeedsTest
 	SingleTextLine* Tip;
 	BIT State, Focused;
 	BYTE BorderWidth;
-	~CheckBox() {
+	~CheckBox() override {
 		Lock.lock();
 		if (Tip)delete Tip;
 		Lock.unlock();

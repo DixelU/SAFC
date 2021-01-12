@@ -19,7 +19,7 @@ struct MoveableWindow :HandleableUIPart {
 	BIT CursorFollowMode;
 	BIT HUIP_MapWasChanged;
 	float PCurX, PCurY;
-	~MoveableWindow() {
+	~MoveableWindow() override {
 		Lock.lock();
 		delete WindowName;
 		for (auto i = WindowActivities.begin(); i != WindowActivities.end(); i++)
