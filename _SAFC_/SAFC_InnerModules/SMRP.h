@@ -295,7 +295,7 @@ struct SingleMIDIReProcessor {
 						LastDeltaTime = L_VLV - tStartTick;
 						L_VLV = LastDeltaTime;
 						//printf("Entered#%hu VLV:%i \t TStart:%li\n", TrackCount, LastDeltaTime, tStartTick);
-						if (ResetDeltatimesOutsideOfTheRange)
+						//if (ResetDeltatimesOutsideOfTheRange)
 							tStartTick = 0;
 
 						if (EscapeFlag) {
@@ -441,7 +441,7 @@ struct SingleMIDIReProcessor {
 					IO = file_input.get();//MetaEventType.
 					Track.push_back(IO);
 					if (IO == 0x2F) {//end of track event+
-						if ((ResetDeltatimesOutsideOfTheRange) && ((!Entered) || (Exited))) {//it doesn't matter? right?
+						if (/* (ResetDeltatimesOutsideOfTheRange) && */ ((!Entered) || (Exited))) {//it doesn't matter? right?
 							for (int i = -2; i < (int)DeltaTimeSize; i++)
 								Track.pop_back();
 							Track.push_back(0);
@@ -457,9 +457,8 @@ struct SingleMIDIReProcessor {
 
 						if (ActiveSelection && !Entered) {//in case if these wasn't unloaded
 							INT64 LocalEndingDeltaTime = SelectionStart - CurTick;
-							if (ResetDeltatimesOutsideOfTheRange) {
+							//if (ResetDeltatimesOutsideOfTheRange) 
 								LocalEndingDeltaTime = 0;
-							}
 							int LEDT_size = 0;
 
 							INT64 UnloadSize = UnLoad.size();
