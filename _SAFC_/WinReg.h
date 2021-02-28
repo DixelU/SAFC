@@ -55,6 +55,7 @@
 
 
 #include <Windows.h>        // Windows Platform SDK
+#include <winreg.h>
 #include <crtdbg.h>         // _ASSERTE
 
 #include <memory>           // std::unique_ptr
@@ -443,7 +444,7 @@ namespace WinReg {
 			|| (m_hKey == HKEY_LOCAL_MACHINE)
 			|| (m_hKey == HKEY_CLASSES_ROOT)
 			|| (m_hKey == HKEY_CURRENT_CONFIG)
-			|| (m_hKey == HKEY_CURRENT_USER_LOCAL_SETTINGS)
+		//	|| (m_hKey == HKEY_CURRENT_USER_LOCAL_SETTINGS)
 			|| (m_hKey == HKEY_PERFORMANCE_DATA)
 			|| (m_hKey == HKEY_PERFORMANCE_NLSTEXT)
 			|| (m_hKey == HKEY_PERFORMANCE_TEXT)

@@ -151,7 +151,7 @@ struct SingleMIDIReProcessor {
 #define PCLOG true
 	void ReProcess() {
 		bbb_ffr file_input(FileName.c_str());
-		std::ofstream file_output(this->FileName + Postfix, std::ios::binary | std::ios::out);
+		auto [file_output, fo_ptr] = open_wide_stream<std::ostream>(this->FileName + Postfix, L"wb");
 		std::vector<BYTE> Track;///quite memory expensive...
 		std::vector<BYTE> UnLoad;
 		std::vector<BYTE> CorruptData;
@@ -185,12 +185,12 @@ struct SingleMIDIReProcessor {
 		}
 		///processing starts here///
 		for (int i = 0; i < 12 && file_input.good(); i++)
-			file_output.put(file_input.get());
+			file_output->put(file_input.get());
 		///PPQN swich
 		OldPPQN = ((WORD)file_input.get()) << 8;
 		OldPPQN |= file_input.get();
-		file_output.put(NewPPQN >> 8);
-		file_output.put(NewPPQN & 0xFF);
+		file_output->put(NewPPQN >> 8);
+		file_output->put(NewPPQN & 0xFF);
 		PPQNIncreaseAmount = (double)NewPPQN / OldPPQN;
 		///if statement says everything
 		///just in case of having no tempoevents :)
@@ -551,16 +551,16 @@ struct SingleMIDIReProcessor {
 						}
 						else {
 							Track.insert(Track.end() - DeltaTimeSize - 3, UnLoad.begin(), UnLoad.end());
-							file_output.put('M');
-							file_output.put('T');
-							file_output.put('r');
-							file_output.put('k');
-							file_output.put(Track.size() >> 24);///size of track
-							file_output.put(Track.size() >> 16);
-							file_output.put(Track.size() >> 8);
-							file_output.put(Track.size());
+							file_output->put('M');
+							file_output->put('T');
+							file_output->put('r');
+							file_output->put('k');
+							file_output->put(Track.size() >> 24);///size of track
+							file_output->put(Track.size() >> 16);
+							file_output->put(Track.size() >> 8);
+							file_output->put(Track.size());
 							//copy(Track.begin(), Track.end(), ostream_iterator<BYTE>(fo));
-							SingleMIDIReProcessor::ostream_write(Track, file_output);
+							SingleMIDIReProcessor::ostream_write(Track, *file_output);
 							LogLine = "Track " + std::to_string(TrackCount++) + " is processed";
 						}
 						UnLoad.clear();
@@ -1086,13 +1086,13 @@ struct SingleMIDIReProcessor {
 						else {
 							Track.insert(Track.end() - DeltaTimeSize - 3, UnLoad.begin(), UnLoad.end());
 							UnLoad.clear();
-							file_output.put('M'); file_output.put('T'); file_output.put('r'); file_output.put('k');
-							file_output.put(Track.size() >> 24);///size of track
-							file_output.put(Track.size() >> 16);
-							file_output.put(Track.size() >> 8);
-							file_output.put(Track.size());
+							file_output->put('M'); file_output->put('T'); file_output->put('r'); file_output->put('k');
+							file_output->put(Track.size() >> 24);///size of track
+							file_output->put(Track.size() >> 16);
+							file_output->put(Track.size() >> 8);
+							file_output->put(Track.size());
 							//copy(Track.begin(), Track.end(), ostream_iterator<BYTE>(file_output));
-							SingleMIDIReProcessor::ostream_write(Track, file_output);
+							SingleMIDIReProcessor::ostream_write(Track, *file_output);
 							WarningLine = "Partially recovered track. (" + std::to_string(TrackCount++) + ")";
 							TrackCount++;
 							TrackEnded = true;
@@ -1116,10 +1116,11 @@ struct SingleMIDIReProcessor {
 		}
 		file_input.close();
 		Track.clear();
-		file_output.seekp(10, std::ios::beg);///changing amount of tracks :)
-		file_output.put(TrackCount >> 8);
-		file_output.put(TrackCount & 0xFF);
-		file_output.close();
+		file_output->seekp(10, std::ios::beg);///changing amount of tracks :)
+		file_output->put(TrackCount >> 8);
+		file_output->put(TrackCount & 0xFF);
+		fclose(fo_ptr);
+		delete file_output;
 		Processing = 0;
 		Finished = 1;
 	}

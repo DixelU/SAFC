@@ -5,6 +5,19 @@
 #include <stdio.h>
 #include <fileapi.h>
 
+#include <istream>
+#include <ostream>
+
+#include <ext/stdio_filebuf.h>
+
+template<typename __inner_stream_type, decltype(std::ios_base::out) stream_io_type = std::ios_base::out>
+std::pair<__inner_stream_type*, FILE*> open_wide_stream(std::wstring file, const wchar_t* parameter){
+	FILE* c_file = _wfopen(file.c_str(), parameter);
+	auto buffer = new __gnu_cxx::stdio_filebuf<char>(c_file, stream_io_type, 1);
+	
+	return {new __inner_stream_type(buffer), c_file};
+}
+
 typedef struct byte_by_byte_fast_file_reader {
 private:
 	FILE* file;
@@ -18,7 +31,7 @@ private:
 	const size_t true_buffer_size;
 	inline void __read_next_chunk() {
 		if (!next_chunk_is_unavailable) {
-			size_t new_buffer_len = _fread_nolock_s(buffer, buffer_size, 1, buffer_size, file);
+			size_t new_buffer_len = fread(buffer, 1, buffer_size, file);
 			//printf("%lli\n", new_buffer_len);
 			if (new_buffer_len != buffer_size) {
 				buffer_size = new_buffer_len;

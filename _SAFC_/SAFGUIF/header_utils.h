@@ -44,7 +44,7 @@ float ROT_ANGLE = 0.f;
 float WindX = WINDXSIZE, WindY = WINDYSIZE;
 
 BIT ANIMATION_IS_ACTIVE = 0, FIRSTBOOT = 1, DRAG_OVER = 0, APRIL_FOOL = 0, SHIFT_HELD = 0;
-DWORD TimerV = 0;
+uint64_t TimerV = 0;
 HWND hWnd;
 HDC hDc;
 SHORT YearsOld = -1;

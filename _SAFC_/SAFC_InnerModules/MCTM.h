@@ -208,9 +208,9 @@ struct MIDICollectionThreadedMerger {
 			std::vector<INT64> DecayingDeltaTimes;
 #define ddt (DecayingDeltaTimes[i])
 			std::vector<BYTE> Track, FrontEdge, BackEdge;
-			bbb_ffr* fi;
-			std::ofstream file_output(_SaveTo + L".I.mid", std::ios::binary | std::ios::out);
-			file_output << "MThd" << '\0' << '\0' << '\0' << (char)6 << '\0' << (char)1;
+			bbb_ffr* fi; ;
+			auto [file_output, fo_ptr] = open_wide_stream<std::ostream>(_SaveTo + L".I.mid", L"wb");
+			(*file_output) << "MThd" << '\0' << '\0' << '\0' << (char)6 << '\0' << (char)1;
 			for (auto Y = IMC->begin(); Y != IMC->end(); Y++) {
 				fi = new bbb_ffr(((*Y)->FileName + (*Y)->Postfix).c_str());///
 				//if ((*Y)->TrackCount > *TrackCount)*TrackCount = (*Y)->TrackCount;
@@ -219,10 +219,10 @@ struct MIDICollectionThreadedMerger {
 				DecayingDeltaTimes.push_back(0);
 				fiv.push_back(fi);
 			}
-			file_output.put(*TrackCount >> 8);
-			file_output.put(*TrackCount);
-			file_output.put(PPQN >> 8);
-			file_output.put(PPQN);
+			file_output->put(*TrackCount >> 8);
+			file_output->put(*TrackCount);
+			file_output->put(PPQN >> 8);
+			file_output->put(PPQN);
 			while (ActiveStreamFlag) {
 				///reading tracks
 				DWORD Header = 0, DIO, DeltaLen = 0;
@@ -361,32 +361,32 @@ struct MIDICollectionThreadedMerger {
 						BackEdge.clear();
 						DTI.PutCurrentHoldedNotes(BackEdge, false);
 						UINT64 TotalSize = FrontEdge.size() + (DTI.CurPosition - PrevEdgePos) + BackEdge.size() + 4;
-						file_output << "MTrk";
-						file_output.put(TotalSize >> 24);
-						file_output.put(TotalSize >> 16);
-						file_output.put(TotalSize >> 8);
-						file_output.put(TotalSize);
+						(*file_output) << "MTrk";
+						file_output->put(TotalSize >> 24);
+						file_output->put(TotalSize >> 16);
+						file_output->put(TotalSize >> 8);
+						file_output->put(TotalSize);
 
 						SingleMIDIReProcessor::ostream_write(FrontEdge, file_output);
 						SingleMIDIReProcessor::ostream_write(Track, Track.begin() + PrevEdgePos, Track.begin() + DTI.CurPosition, file_output);
 						SingleMIDIReProcessor::ostream_write(BackEdge, BackEdge.begin(), BackEdge.end(), file_output);
 
-						file_output.put(0);//that's why +4
-						file_output.put(0xFF);
-						file_output.put(0x2F);
-						file_output.put(0);
+						file_output->put(0);//that's why +4
+						file_output->put(0xFF);
+						file_output->put(0x2F);
+						file_output->put(0);
 						(*TrackCount)++;
 						PrevEdgePos = DTI.CurPosition;
 						FrontEdge.clear();
 						DTI.PutCurrentHoldedNotes(FrontEdge, true);
 					}
-					file_output << "MTrk";
+					(*file_output) << "MTrk";
 					UINT64 TotalSize = FrontEdge.size() + (DTI.CurPosition - PrevEdgePos);
 					//cout << "Outside:" << TotalSize << endl;
-					file_output.put(TotalSize >> 24);
-					file_output.put(TotalSize >> 16);
-					file_output.put(TotalSize >> 8);
-					file_output.put(TotalSize);
+					file_output->put(TotalSize >> 24);
+					file_output->put(TotalSize >> 16);
+					file_output->put(TotalSize >> 8);
+					file_output->put(TotalSize);
 
 					SingleMIDIReProcessor::ostream_write(FrontEdge, file_output);
 					SingleMIDIReProcessor::ostream_write(Track, Track.begin() + PrevEdgePos, Track.end(), file_output);
@@ -396,13 +396,13 @@ struct MIDICollectionThreadedMerger {
 					(*TrackCount)++;
 				}
 				else {
-					file_output << "MTrk";
-					file_output.put(Track.size() >> 24);
-					file_output.put(Track.size() >> 16);
-					file_output.put(Track.size() >> 8);
-					file_output.put(Track.size());
+					(*file_output) << "MTrk";
+					file_output->put(Track.size() >> 24);
+					file_output->put(Track.size() >> 16);
+					file_output->put(Track.size() >> 8);
+					file_output->put(Track.size());
 
-					SingleMIDIReProcessor::ostream_write(Track, file_output);
+					SingleMIDIReProcessor::ostream_write(Track, (*file_output));
 					//copy(Track.begin(), Track.end(), ostream_iterator<BYTE>(file_output));
 					(*TrackCount)++;
 				}
@@ -413,13 +413,14 @@ struct MIDICollectionThreadedMerger {
 				if ((*IMC)[i]->BoolSettings & _BoolSettings::remove_remnants)
 					_wremove(((((*IMC)[i]->FileName) + ((*IMC)[i]->Postfix)).c_str()));
 			}
-			file_output.seekp(10, std::ios::beg);
-			file_output.put((*TrackCount) >> 8);
-			file_output.put((*TrackCount) & 0xff);
-			file_output.close();
+			file_output->seekp(10, std::ios::beg);
+			file_output->put((*TrackCount) >> 8);
+			file_output->put((*TrackCount) & 0xff);
+			fclose(fo_ptr);
 			for (auto& t : fiv) {
 				delete t;
 			}
+			delete file_output;
 			printf("Inplace: finished\n");
 			(*FinishedFlag) = 1; /// Will this work?
 			delete IMC;
@@ -438,16 +439,16 @@ struct MIDICollectionThreadedMerger {
 			}
 			//BIT FirstFlag = 1;
 			const size_t buffer_size = 20000000;
-			BYTE* buffer = new BYTE[buffer_size];
-			std::ofstream file_output(_SaveTo + L".R.mid", std::ios::binary | std::ios::out);
+			BYTE* buffer = new BYTE[buffer_size]; 
+			auto [file_output, fo_ptr] = open_wide_stream<std::ostream>(_SaveTo + L".R.mid", L"wb");
 			bbb_ffr file_input(((*(RMC->begin()))->FileName + (*(RMC->begin()))->Postfix).c_str());
 			std::wstring filename = ((*(RMC->begin()))->FileName + (*(RMC->begin()))->Postfix);
-			file_output.rdbuf()->pubsetbuf((char*)buffer, buffer_size);
-			file_output << "MThd" << '\0' << '\0' << '\0' << (char)6 << '\0' << (char)1;
-			file_output.put(0);
-			file_output.put(0);
-			file_output.put(PPQN >> 8);
-			file_output.put(PPQN);
+			file_output->rdbuf()->pubsetbuf((char*)buffer, buffer_size);
+			(*file_output) << "MThd" << '\0' << '\0' << '\0' << (char)6 << '\0' << (char)1;
+			file_output->put(0);
+			file_output->put(0);
+			file_output->put(PPQN >> 8);
+			file_output->put(PPQN);
 			for (auto Y = RMC->begin(); Y != RMC->end(); Y++) {
 				filename = (*Y)->FileName + (*Y)->Postfix;
 				if (Y != RMC->begin())
@@ -455,16 +456,17 @@ struct MIDICollectionThreadedMerger {
 				*TrackCount += (*Y)->TrackCount;
 				for (int i = 0; i < 14; i++)
 					file_input.get();
-				file_input.put_into_ostream(file_output);
+				file_input.put_into_ostream(*file_output);
 				int t;
 				if ((*Y)->BoolSettings & _BoolSettings::remove_remnants)
 					t = _wremove(filename.c_str());
 			}
-			file_output.seekp(10, std::ios::beg);
-			file_output.put(*TrackCount >> 8);
-			file_output.put(*TrackCount);
+			file_output->seekp(10, std::ios::beg);
+			file_output->put(*TrackCount >> 8);
+			file_output->put(*TrackCount);
 			(*FinishedFlag) = true; /// Will this work?
-			file_output.close();
+			fclose(fo_ptr);
+			delete file_output;
 			delete RMC;
 			delete[] buffer;
 			}, RegularMergeCandidats, &IntermediateRegularFlag, FinalPPQN, SaveTo, &IRTrackCount);
@@ -478,7 +480,7 @@ struct MIDICollectionThreadedMerger {
 		std::thread RMC_Processor([this](BIT* FinishedFlag, std::wstring _SaveTo) {
 			bbb_ffr* IM = new bbb_ffr((_SaveTo + L".I.mid").c_str()),
 				* RM = new bbb_ffr((_SaveTo + L".R.mid").c_str());
-			std::ofstream F(_SaveTo, std::ios::binary | std::ios::out);
+			auto [F, fo_ptr] = open_wide_stream<std::ostream>(_SaveTo, L"wb");
 			BIT IMgood = !IM->eof(), RMgood = !RM->eof();
 			if (!IMgood || !RMgood) {
 				IM->close();
@@ -497,7 +499,7 @@ struct MIDICollectionThreadedMerger {
 			printf("Active merging at last stage (untested)\n");
 			WORD T = 0;
 			BYTE A = 0, B = 0;
-			F << "MThd" << '\0' << '\0' << '\0' << (char)6 << '\0' << (char)1;
+			(*F) << "MThd" << '\0' << '\0' << '\0' << (char)6 << '\0' << (char)1;
 			for (int i = 0; i < 10; i++)
 				IM->get();
 			for (int i = 0; i < 10; i++)
@@ -508,16 +510,18 @@ struct MIDICollectionThreadedMerger {
 			T += (B + RM->get());
 			A = T >> 8;
 			B = T;
-			F.put(A);
-			F.put(B);
-			F.put(IM->get());
-			F.put(IM->get());
+			F->put(A);
+			F->put(B);
+			F->put(IM->get());
+			F->put(IM->get());
 			for (int i = 0; i < 4; i++)
 				RM->get();
-			IM->put_into_ostream(F);
-			RM->put_into_ostream(F);
+			IM->put_into_ostream(*F);
+			RM->put_into_ostream(*F);
 			IM->close();
 			RM->close();
+			fclose(fo_ptr);
+			delete F;
 			delete IM;
 			delete RM;
 			*FinishedFlag = true;

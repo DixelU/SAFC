@@ -1,4 +1,5 @@
-﻿#define NOMINMAX
+#define NOMINMAX
+#define _WIN32_WINNT 0x0A00
 #include <algorithm>
 #include <cstdlib>
 #include <wchar.h>
@@ -30,11 +31,6 @@
 #include <WinSock2.h>
 #include <WinInet.h>
 
-#pragma comment (lib, "Version.lib")//Urlmon.lib
-#pragma comment (lib, "Urlmon.lib")//Urlmon.lib
-#pragma comment (lib, "wininet.lib")//Urlmon.lib
-#pragma comment (lib, "dwmapi.lib")
-
 #include "allocator.h"
 #include "WinReg.h"
 #include "resource.h"
@@ -52,26 +48,26 @@
 #include "SAFGUIF/SAFGUIF.h"
 #include "SAFC_InnerModules/SAFC_IM.h"
 #include "SAFCGUIF_Local/SAFGUIF_L.h"
-
+/*
 std::tuple<WORD, WORD, WORD, WORD> ___GetVersion() {
 	// get the filename of the executable containing the version resource
 	TCHAR szFilename[MAX_PATH + 1] = { 0 };
-	if (GetModuleFileName(NULL, szFilename, MAX_PATH) == 0) 
+	if (GetModuleFileName(NULL, szFilename, MAX_PATH) == 0)
 		return {0,0,0,0};
 	// allocate a block of memory for the version info
 	DWORD dummy;
 	DWORD dwSize = GetFileVersionInfoSize(szFilename, &dummy);
-	if (dwSize == 0) 
+	if (dwSize == 0)
 		return { 0,0,0,0 };
 	std::vector<BYTE> data(dwSize);
 	// load the version info
-	if (!GetFileVersionInfo(szFilename, 0, dwSize, &data[0])) 
+	if (!GetFileVersionInfo(szFilename, 0, dwSize, &data[0]))
 		return { 0,0,0,0 };
 	////////////////////////////////////
 	UINT                uiVerLen = 0;
 	VS_FIXEDFILEINFO* pFixedInfo = 0;     // pointer to fixed file info structure
-	// get the fixed file info (language-independent) 
-	if (VerQueryValue(&data[0], TEXT("\\"), (void**)&pFixedInfo, (UINT*)&uiVerLen) == 0) 
+	// get the fixed file info (language-independent)
+	if (VerQueryValue(&data[0], TEXT("\\"), (void**)&pFixedInfo, (UINT*)&uiVerLen) == 0)
 		return { 0,0,0,0 };
 	return {
 		HIWORD(pFixedInfo->dwProductVersionMS),
@@ -113,8 +109,8 @@ bool SAFC_Update(const std::wstring& latest_release) {
 		std::cout << strerror(errno) << std::endl;
 		//_wrename((pathway + L"freeglut.dll").c_str(), (pathway + L"_f").c_str());
 		//std::cout << strerror(errno) << std::endl;
-		//_wrename((pathway + L"glew32.dll").c_str(), (pathway + L"_g").c_str()); 
-		//cout << strerror(errno) << endl; 
+		//_wrename((pathway + L"glew32.dll").c_str(), (pathway + L"_g").c_str());
+		//cout << strerror(errno) << endl;
 		//wcout << pathway << endl;
 		if (!errno) {
 			std::wstring dir = pathway.substr(0, pathway.length() - 1);
@@ -153,8 +149,7 @@ bool SAFC_Update(const std::wstring& latest_release) {
 				_wrename((pathway + L"_f").c_str(), (pathway + L"freeglut.dll").c_str());
 				_wrename((pathway + L"_g").c_str(), (pathway + L"glew32.dll").c_str());
 			}
-		}
-		else {
+		} else {
 			auto error_msg = std::string("Autoudate error:\n") + strerror(errno);
 			if (AutoUpdatesCheck)
 				ThrowAlert_Error(error_msg);
@@ -165,8 +160,7 @@ bool SAFC_Update(const std::wstring& latest_release) {
 			_wrename((pathway + L"_g").c_str(), (pathway + L"glew32.dll").c_str());
 		}
 		_wremove(filename.c_str());
-	}
-	else if (AutoUpdatesCheck)
+	} else if (AutoUpdatesCheck)
 		ThrowAlert_Error("Autoupdate error: #" + std::to_string(co_res));
 	else
 		std::cout << "Autoupdate error: #" + std::to_string(co_res) << std::endl;
@@ -190,17 +184,19 @@ void SAFC_VersionCheck() {
 		try {
 			if (res == S_OK) {
 				auto [maj, min, ver, build] = ___GetVersion();
-				std::ifstream input(filename);
+				auto [input, fi_ptr] = open_wide_stream<std::istream, std::ios_base::in>(filename, L"wb");;
 				std::string temp_buffer;
-				std::getline(input, temp_buffer);
-				input.close();
+				std::getline(*input, temp_buffer);
+				fclose(fi_ptr);
+				delete input;
+				input = nullptr;
 				auto JSON_Value = JSON::Parse(temp_buffer.c_str());
 				if (JSON_Value->IsArray()) {
 					auto FirstElement = JSON_Value->AsArray()[0];
 					if (FirstElement->IsObject()) {
 						auto Name = FirstElement->AsObject().find(L"name");
 						if (FirstElement->AsObject().end() != Name &&
-							Name->second->IsString()) {
+						        Name->second->IsString()) {
 							auto git_latest_version = Name->second->AsString();
 							//std::wcout << L"Git latest version: " << git_latest_version << std::endl;
 							WORD version_partied[4] = { 0,0,0,0 };
@@ -213,8 +209,7 @@ void SAFC_VersionCheck() {
 								for (auto& num_val : ans) {
 									try {
 										version_partied[index] = std::stoi(num_val);
-									}
-									catch (...) {
+									} catch (...) {
 										break;
 									}
 									if (index == 3)
@@ -223,12 +218,12 @@ void SAFC_VersionCheck() {
 								}
 								std::wcout << L"Git latest version: v" << version_partied[0] << L"." << version_partied[1] << L"." << version_partied[2] << L"." << version_partied[3] << L"\n";
 								std::wcout << L"Current vesion: v" << maj << L"." << min << L"." << ver << L"." << build << L"\n";
-								if (AutoUpdatesCheck && 
-									(maj < version_partied[0] ||
-										maj == version_partied[0] && min < version_partied[1] ||
-										maj == version_partied[0] && min == version_partied[1] && ver < version_partied[2] ||
-										maj == version_partied[0] && min == version_partied[1] && ver == version_partied[2] && build < version_partied[3]
-									)) {
+								if (AutoUpdatesCheck &&
+								        (maj < version_partied[0] ||
+								         maj == version_partied[0] && min < version_partied[1] ||
+								         maj == version_partied[0] && min == version_partied[1] && ver < version_partied[2] ||
+								         maj == version_partied[0] && min == version_partied[1] && ver == version_partied[2] && build < version_partied[3]
+								        )) {
 									ThrowAlert_Warning("Update found! The app might restart soon...\nUpdate: " + std::string(git_latest_version.begin(), git_latest_version.end()));
 									flag = SAFC_Update(git_latest_version);
 									if (flag)
@@ -238,12 +233,10 @@ void SAFC_VersionCheck() {
 						}
 					}
 				}
-			}
-			else if(AutoUpdatesCheck)
+			} else if(AutoUpdatesCheck)
 				ThrowAlert_Warning("Most likely your internet connection is unstable\nSAFC cannot check for updates"),
-				std::cout<< "Most likely your internet connection is unstable\nSAFC cannot check for updates";
-		}
-		catch (...) {
+				                   std::cout<< "Most likely your internet connection is unstable\nSAFC cannot check for updates";
+		} catch (...) {
 			ThrowAlert_Warning("SAFC just almost crashed while checking the update...\nTell developer about that");
 		}
 		_wremove(filename.c_str());
@@ -256,7 +249,9 @@ void SAFC_VersionCheck() {
 	});
 	version_checker.detach();
 }
-size_t GetAvailableMemory(){
+*/
+
+size_t GetAvailableMemory() {
 	size_t ret = 0;
 
 	// because compiler static links the function...
@@ -267,12 +262,10 @@ size_t GetAvailableMemory(){
 	if (GMSEx) {
 		MEMORYSTATUSEX m;
 		m.dwLength = sizeof(m);
-		if (GMSEx(&m))
-		{
+		if (GMSEx(&m)) {
 			ret = (int)(m.ullAvailPhys >> 20);
 		}
-	}
-	else {
+	} else {
 		MEMORYSTATUS m;
 		m.dwLength = sizeof(m);
 		GlobalMemoryStatus(&m);
@@ -285,8 +278,8 @@ size_t GetAvailableMemory(){
 ////TRUE USAGE STARTS HERE////
 //////////////////////////////
 
-ButtonSettings 
-					*BS_List_Black_Small = new ButtonSettings(System_White, 0, 0, 100, 10, 1, 0, 0, 0xFFEFDFFF, 0x00003F7F, 0x7F7F7FFF);
+ButtonSettings
+*BS_List_Black_Small = new ButtonSettings(System_White, 0, 0, 100, 10, 1, 0, 0, 0xFFEFDFFF, 0x00003F7F, 0x7F7F7FFF);
 
 DWORD DefaultBoolSettings = _BoolSettings::remove_remnants | _BoolSettings::remove_empty_tracks | _BoolSettings::all_instruments_to_piano;
 
@@ -310,7 +303,7 @@ struct FileSettings {////per file settings
 		auto pos = Filename.rfind('\\');
 		for (; pos < Filename.size(); pos++)
 			AppearanceFilename.push_back(Filename[pos] & 0xFF);
-		for (int i = 0; i < Filename.size(); i++) 
+		for (int i = 0; i < Filename.size(); i++)
 			AppearancePath.push_back((char)(Filename[i] & 0xFF));
 		//cout << AppearancePath << " ::\n";
 		FastMIDIChecker FMIC(Filename);
@@ -376,8 +369,7 @@ struct SAFCData {////overall settings and storing perfile settings....
 		if (Files.empty()) {
 			SaveDirectory = L"";
 			return;
-		}
-		else if(Files.size())
+		} else if(Files.size())
 			SaveDirectory = Files[0].Filename + L".AfterSAFC.mid";
 
 		if (Files.size() == 1) {
@@ -488,32 +480,60 @@ std::vector<std::wstring> MOFD(const wchar_t* Title) {
 				if (counter == 1) InpLinks.push_back(Link);
 				else InpLinks.push_back(Link + L"\\" + Gen);
 				break;
-			}
-			else {
+			} else {
 				if (Gen != L"")InpLinks.push_back(Link + L"\\" + Gen);
 			}
 		}
 		return InpLinks;
-	}
-	else {
+	} else {
 		switch (CommDlgExtendedError()) {
-		case CDERR_DIALOGFAILURE:		 ThrowAlert_Error("CDERR_DIALOGFAILURE\n");   break;
-		case CDERR_FINDRESFAILURE:		 ThrowAlert_Error("CDERR_FINDRESFAILURE\n");  break;
-		case CDERR_INITIALIZATION:	 ThrowAlert_Error("CDERR_INITIALIZATION\n"); break;
-		case CDERR_LOADRESFAILURE:	 ThrowAlert_Error("CDERR_LOADRESFAILURE\n"); break;
-		case CDERR_LOADSTRFAILURE:	 ThrowAlert_Error("CDERR_LOADSTRFAILURE\n"); break;
-		case CDERR_LOCKRESFAILURE:	 ThrowAlert_Error("CDERR_LOCKRESFAILURE\n"); break;
-		case CDERR_MEMALLOCFAILURE:	 ThrowAlert_Error("CDERR_MEMALLOCFAILURE\n"); break;
-		case CDERR_MEMLOCKFAILURE:	 ThrowAlert_Error("CDERR_MEMLOCKFAILURE\n"); break;
-		case CDERR_NOHINSTANCE:		 ThrowAlert_Error("CDERR_NOHINSTANCE\n"); break;
-		case CDERR_NOHOOK:			 ThrowAlert_Error("CDERR_NOHOOK\n"); break;
-		case CDERR_NOTEMPLATE:		 ThrowAlert_Error("CDERR_NOTEMPLATE\n"); break;
-		case CDERR_STRUCTSIZE:		 ThrowAlert_Error("CDERR_STRUCTSIZE\n"); break;
-		case FNERR_BUFFERTOOSMALL:	 ThrowAlert_Error("FNERR_BUFFERTOOSMALL\n"); break;
-		case FNERR_INVALIDFILENAME:	 ThrowAlert_Error("FNERR_INVALIDFILENAME\n"); break;
-		case FNERR_SUBCLASSFAILURE:	 ThrowAlert_Error("FNERR_SUBCLASSFAILURE\n"); break;
+			case CDERR_DIALOGFAILURE:
+				ThrowAlert_Error("CDERR_DIALOGFAILURE\n");
+				break;
+			case CDERR_FINDRESFAILURE:
+				ThrowAlert_Error("CDERR_FINDRESFAILURE\n");
+				break;
+			case CDERR_INITIALIZATION:
+				ThrowAlert_Error("CDERR_INITIALIZATION\n");
+				break;
+			case CDERR_LOADRESFAILURE:
+				ThrowAlert_Error("CDERR_LOADRESFAILURE\n");
+				break;
+			case CDERR_LOADSTRFAILURE:
+				ThrowAlert_Error("CDERR_LOADSTRFAILURE\n");
+				break;
+			case CDERR_LOCKRESFAILURE:
+				ThrowAlert_Error("CDERR_LOCKRESFAILURE\n");
+				break;
+			case CDERR_MEMALLOCFAILURE:
+				ThrowAlert_Error("CDERR_MEMALLOCFAILURE\n");
+				break;
+			case CDERR_MEMLOCKFAILURE:
+				ThrowAlert_Error("CDERR_MEMLOCKFAILURE\n");
+				break;
+			case CDERR_NOHINSTANCE:
+				ThrowAlert_Error("CDERR_NOHINSTANCE\n");
+				break;
+			case CDERR_NOHOOK:
+				ThrowAlert_Error("CDERR_NOHOOK\n");
+				break;
+			case CDERR_NOTEMPLATE:
+				ThrowAlert_Error("CDERR_NOTEMPLATE\n");
+				break;
+			case CDERR_STRUCTSIZE:
+				ThrowAlert_Error("CDERR_STRUCTSIZE\n");
+				break;
+			case FNERR_BUFFERTOOSMALL:
+				ThrowAlert_Error("FNERR_BUFFERTOOSMALL\n");
+				break;
+			case FNERR_INVALIDFILENAME:
+				ThrowAlert_Error("FNERR_INVALIDFILENAME\n");
+				break;
+			case FNERR_SUBCLASSFAILURE:
+				ThrowAlert_Error("FNERR_SUBCLASSFAILURE\n");
+				break;
 		}
-		return std::vector<std::wstring>{L""};
+		return std::vector<std::wstring> {L""};
 	}
 }
 std::wstring SOFD(const wchar_t* Title) {
@@ -535,21 +555,51 @@ std::wstring SOFD(const wchar_t* Title) {
 	if (GetSaveFileName(&ofn)) return std::wstring(filename);
 	else {
 		switch (CommDlgExtendedError()) {
-		case CDERR_DIALOGFAILURE:		 ThrowAlert_Error("CDERR_DIALOGFAILURE\n");   break;
-		case CDERR_FINDRESFAILURE:		 ThrowAlert_Error("CDERR_FINDRESFAILURE\n");  break;
-		case CDERR_INITIALIZATION:	 ThrowAlert_Error("CDERR_INITIALIZATION\n"); break;
-		case CDERR_LOADRESFAILURE:	 ThrowAlert_Error("CDERR_LOADRESFAILURE\n"); break;
-		case CDERR_LOADSTRFAILURE:	 ThrowAlert_Error("CDERR_LOADSTRFAILURE\n"); break;
-		case CDERR_LOCKRESFAILURE:	 ThrowAlert_Error("CDERR_LOCKRESFAILURE\n"); break;
-		case CDERR_MEMALLOCFAILURE:	 ThrowAlert_Error("CDERR_MEMALLOCFAILURE\n"); break;
-		case CDERR_MEMLOCKFAILURE:	 ThrowAlert_Error("CDERR_MEMLOCKFAILURE\n"); break;
-		case CDERR_NOHINSTANCE:		 ThrowAlert_Error("CDERR_NOHINSTANCE\n"); break;
-		case CDERR_NOHOOK:			 ThrowAlert_Error("CDERR_NOHOOK\n"); break;
-		case CDERR_NOTEMPLATE:		 ThrowAlert_Error("CDERR_NOTEMPLATE\n"); break;
-		case CDERR_STRUCTSIZE:		 ThrowAlert_Error("CDERR_STRUCTSIZE\n"); break;
-		case FNERR_BUFFERTOOSMALL:	 ThrowAlert_Error("FNERR_BUFFERTOOSMALL\n"); break;
-		case FNERR_INVALIDFILENAME:	 ThrowAlert_Error("FNERR_INVALIDFILENAME\n"); break;
-		case FNERR_SUBCLASSFAILURE:	 ThrowAlert_Error("FNERR_SUBCLASSFAILURE\n"); break;
+			case CDERR_DIALOGFAILURE:
+				ThrowAlert_Error("CDERR_DIALOGFAILURE\n");
+				break;
+			case CDERR_FINDRESFAILURE:
+				ThrowAlert_Error("CDERR_FINDRESFAILURE\n");
+				break;
+			case CDERR_INITIALIZATION:
+				ThrowAlert_Error("CDERR_INITIALIZATION\n");
+				break;
+			case CDERR_LOADRESFAILURE:
+				ThrowAlert_Error("CDERR_LOADRESFAILURE\n");
+				break;
+			case CDERR_LOADSTRFAILURE:
+				ThrowAlert_Error("CDERR_LOADSTRFAILURE\n");
+				break;
+			case CDERR_LOCKRESFAILURE:
+				ThrowAlert_Error("CDERR_LOCKRESFAILURE\n");
+				break;
+			case CDERR_MEMALLOCFAILURE:
+				ThrowAlert_Error("CDERR_MEMALLOCFAILURE\n");
+				break;
+			case CDERR_MEMLOCKFAILURE:
+				ThrowAlert_Error("CDERR_MEMLOCKFAILURE\n");
+				break;
+			case CDERR_NOHINSTANCE:
+				ThrowAlert_Error("CDERR_NOHINSTANCE\n");
+				break;
+			case CDERR_NOHOOK:
+				ThrowAlert_Error("CDERR_NOHOOK\n");
+				break;
+			case CDERR_NOTEMPLATE:
+				ThrowAlert_Error("CDERR_NOTEMPLATE\n");
+				break;
+			case CDERR_STRUCTSIZE:
+				ThrowAlert_Error("CDERR_STRUCTSIZE\n");
+				break;
+			case FNERR_BUFFERTOOSMALL:
+				ThrowAlert_Error("FNERR_BUFFERTOOSMALL\n");
+				break;
+			case FNERR_INVALIDFILENAME:
+				ThrowAlert_Error("FNERR_INVALIDFILENAME\n");
+				break;
+			case FNERR_SUBCLASSFAILURE:
+				ThrowAlert_Error("FNERR_SUBCLASSFAILURE\n");
+				break;
 		}
 		return L"";
 	}
@@ -578,8 +628,7 @@ void AddFiles(std::vector<std::wstring> Filenames) {
 					Counter++;
 				}
 			}
-		}
-		else {
+		} else {
 			_Data.Files.pop_back();
 		}
 	}
@@ -623,15 +672,14 @@ namespace PropsAndSets {
 			((CheckBox*)((*PASWptr)["LEGACY_META_RSB_BEHAVIOR"]))->State = _Data[ID].AllowLegacyRunningStatusMetaIgnorance;
 
 			((TextBox*)((*PASWptr)["CONSTANT_PROPS"]))->SafeStringReplace(
-				"File size: " + std::to_string(_Data[ID].FileSize) + "b\n" +
-				"Old PPQN: " + std::to_string(_Data[ID].OldPPQN) + "\n" +
-				"Track number (header info): " + std::to_string(_Data[ID].OldTrackNumber) + "\n" +
-				"\"Remnant\" file postfix: " + _Data[ID].FileNamePostfix
+			    "File size: " + std::to_string(_Data[ID].FileSize) + "b\n" +
+			    "Old PPQN: " + std::to_string(_Data[ID].OldPPQN) + "\n" +
+			    "Track number (header info): " + std::to_string(_Data[ID].OldTrackNumber) + "\n" +
+			    "\"Remnant\" file postfix: " + _Data[ID].FileNamePostfix
 			);
 
 			WH->EnableWindow("SMPAS");
-		}
-		else {
+		} else {
 			currentID = -1;
 		}
 	}
@@ -683,7 +731,7 @@ namespace PropsAndSets {
 				TG_Exp->Disable();
 				ITicks->Disable();
 				ITime->Disable();
-				while (!SMICptr->Finished){
+				while (!SMICptr->Finished) {
 					if (ErrorLine->Text != SMICptr->ErrorLine)
 						ErrorLine->SafeStringReplace(SMICptr->ErrorLine);
 					if (InfoLine->Text != SMICptr->LogLine)
@@ -705,8 +753,8 @@ namespace PropsAndSets {
 
 			auto UIElement_TB = (TextBox*)(*(*WH)["SMIC"])["TOTAL_INFO"];
 			UIElement_TB->SafeStringReplace(
-				"Total (real) tracks: " + std::to_string(SMICptr->Tracks.size()) + "; ... "
-				);
+			    "Total (real) tracks: " + std::to_string(SMICptr->Tracks.size()) + "; ... "
+			);
 
 			WH->MainWindow_ID = "MAIN";
 			WH->EnableWindow("MAIN");
@@ -745,9 +793,9 @@ namespace PropsAndSets {
 		void SwitchPersonalUse() {//PERSONALUSE
 			auto UIElement_Butt = (Button*)(*(*WH)["SMIC"])["PERSONALUSE"];
 			ForPersonalUse ^= true;
-			if (ForPersonalUse) 
+			if (ForPersonalUse)
 				UIElement_Butt->SafeStringReplace(".csv");
-			else 
+			else
 				UIElement_Butt->SafeStringReplace(".atraw");
 		}
 		void ExportTG() {
@@ -756,11 +804,13 @@ namespace PropsAndSets {
 				WH->DisableAllWindows();
 				auto InfoLine = (TextBox*)(*(*WH)["SMIC"])["FLL"];
 				InfoLine->SafeStringReplace("Graph A is exporting...");
-				std::ofstream out(SMICptr->FileName+L".tg.csv");
-				out << "tick" << CSV_DELIM << "tempo" << '\n';
+				auto [out, fo_ptr] = open_wide_stream<std::ostream>(SMICptr->FileName+L".tg.csv", L"wb");
+				(*out) << "tick" << CSV_DELIM << "tempo" << '\n';
 				for (auto cur_pair : SMICptr->TempoMap)
-					out << cur_pair.first << CSV_DELIM << cur_pair.second << '\n';
-				out.close();
+					(*out) << cur_pair.first << CSV_DELIM << cur_pair.second << '\n';
+				fclose(fo_ptr);
+				delete out;
+				out = nullptr;
 				WH->MainWindow_ID = "MAIN";
 				WH->EnableWindow("MAIN");
 				WH->EnableWindow("SMIC");
@@ -782,7 +832,7 @@ namespace PropsAndSets {
 				};
 
 				INT64 Polyphony = 0;
-				WORD PPQ = SMICptr->PPQ; 
+				WORD PPQ = SMICptr->PPQ;
 				INT64 last_tick = 0;
 				std::string header = "";
 				double tempo = 0;
@@ -810,7 +860,7 @@ namespace PropsAndSets {
 						t.Tempo = tempo;
 						it_ptree++;
 					}
-					if (it_ptree->first == cur_pair.first) 
+					if (it_ptree->first == cur_pair.first)
 						info[it_ptree->first].Tempo = cur_pair.second;
 					else {
 						seconds += seconds_per_tick * (cur_pair.first - last_tick);
@@ -831,19 +881,19 @@ namespace PropsAndSets {
 					t.Tempo = tempo;
 					it_ptree++;
 				}
-				std::ofstream out(SMICptr->FileName +  ((ForPersonalUse) ? L".a.csv" : L".atraw"),
-					((ForPersonalUse)? (std::ios::out ):(std::ios::out | std::ios::binary))
-					);
+				auto [out, fo_ptr] = open_wide_stream<std::ostream>(SMICptr->FileName +
+				                     ((ForPersonalUse)?L".a.csv":L".a.atraw"),
+				                     ((ForPersonalUse)?L"w":L"wb")
+				                                                   );
 				if (ForPersonalUse) {
-					out << header;
+					(*out) << header;
 					for (auto cur_pair : info) {
 						out << cur_pair.first << CSV_DELIM
 							<< cur_pair.second.Polyphony << CSV_DELIM
 							<< cur_pair.second.Seconds << CSV_DELIM
 							<< cur_pair.second.Tempo << std::endl;
 					}
-				}
-				else {
+				} else {
 					for (auto cur_pair : info) {
 						out.write((const char*)(&cur_pair.first), 8);
 						out.write((const char*)(&cur_pair.second.Polyphony), 8);
@@ -851,7 +901,9 @@ namespace PropsAndSets {
 						out.write((const char*)(&cur_pair.second.Tempo), 8);
 					}
 				}
-				out.close();
+				fclose(fo_ptr);
+				delete out;
+				out = nullptr;
 				WH->MainWindow_ID = "MAIN";
 				WH->EnableWindow("MAIN");
 				WH->EnableWindow("SMIC");
@@ -896,16 +948,16 @@ namespace PropsAndSets {
 				double minutes_ans = std::floor(msec_rounded / 60000);
 
 				UIOutput->SafeStringReplace(
-					"Min: " + std::to_string((int)(minutes_ans)) +
-					"\nSec: " + std::to_string((int)(seconds_ans)) +
-					"\nMsec: "+ std::to_string((int)(milliseconds_ans))
-					);
+				    "Min: " + std::to_string((int)(minutes_ans)) +
+				    "\nSec: " + std::to_string((int)(seconds_ans)) +
+				    "\nMsec: "+ std::to_string((int)(milliseconds_ans))
+				);
 
 				WH->MainWindow_ID = "MAIN";
 				WH->EnableWindow("MAIN");
 				WH->EnableWindow("SMIC");
 				InfoLine->SafeStringReplace("Integration was succsessfully finished");
-				});
+			});
 			th.detach();
 		}
 		void IntegrateTime() {
@@ -1114,8 +1166,7 @@ namespace PropsAndSets {
 				for (int i = 0; i < 128; i++) {
 					VM->PLC_bb->InsertNewPoint(i, std::ceil(std::pow(i / 127., Degree)*127.));
 				}
-			}
-			else 
+			} else
 				ThrowAlert_Error("If you see this message, some error might have happen, since PLC_bb is null");
 		}
 		void OnSimplify() {
@@ -1123,8 +1174,7 @@ namespace PropsAndSets {
 			auto VM = ((PLC_VolumeWorker*)(*Wptr)["VM_PLC"]);
 			if (VM->PLC_bb) {
 				VM->_MakeMapMoreSimple();
-			}
-			else
+			} else
 				ThrowAlert_Error("If you see this message, some error might have happen, since PLC_bb is null");
 		}
 		void OnTrace() {
@@ -1139,8 +1189,7 @@ namespace PropsAndSets {
 				for (int i = 0; i < 255; i++) {
 					VM->PLC_bb->ConversionMap[i] = C[i];
 				}
-			}
-			else
+			} else
 				ThrowAlert_Error("If you see this message, some error might have happen, since PLC_bb is null");
 		}
 		void OnSetModeChange() {
@@ -1149,8 +1198,7 @@ namespace PropsAndSets {
 			if (VM->PLC_bb) {
 				VM->RePutMode = !VM->RePutMode;
 				((Button*)(*Wptr)["VM_SETMODE"])->SafeStringReplace(((VM->RePutMode)?"Double":"Single"));
-			}
-			else
+			} else
 				ThrowAlert_Error("If you see this message, some error might have happen, since PLC_bb is null");
 		}
 		void OnErase() {
@@ -1189,7 +1237,7 @@ void OnRem() {
 void OnRemAll() {
 	auto ptr = _WH_t("MAIN", "List", SelectablePropertedList*);
 	WH->DisableAllWindows();
-	while(_Data.Files.size()){
+	while(_Data.Files.size()) {
 		_Data.RemoveByID(0);
 		ptr->SafeRemoveStringByID(0);
 	}
@@ -1259,7 +1307,7 @@ void OnRemPitchMaps() {
 	}
 }
 void OnRemAllModules() {
-	OnRemVolMaps(); 
+	OnRemVolMaps();
 	OnRemCATs();
 	//OnRemPitchMaps();
 }
@@ -1291,8 +1339,7 @@ namespace Settings {
 		try {
 			Settings::RegestryAccess.Open(HKEY_CURRENT_USER, RegPath);
 			isRegestryOpened = true;
-		}
-		catch (...) {
+		} catch (...) {
 			std::cout << "RK opening failed\n";
 		}
 		auto pptr = (*WH)["APP_SETTINGS"];
@@ -1303,7 +1350,7 @@ namespace Settings {
 		if (T.size()) {
 			ShaderMode = std::stoi(T);
 			if (isRegestryOpened)TRY_CATCH(RegestryAccess.SetDwordValue(L"AS_BCKGID",ShaderMode);,"Failed on setting AS_BCKGID")
-		}
+			}
 		std::cout << ShaderMode << std::endl;
 
 		T = ((InputField*)(*pptr)["AS_ROT_ANGLE"])->GetCurrentInput("0");
@@ -1319,7 +1366,7 @@ namespace Settings {
 			_Data.DetectedThreads = stoi(T);
 			_Data.ResolveSubdivisionProblem_GroupIDAssign();
 			if (isRegestryOpened)TRY_CATCH(RegestryAccess.SetDwordValue(L"AS_THREADS_COUNT", _Data.DetectedThreads);, "Failed on setting AS_THREADS_COUNT")
-		}
+			}
 		std::cout << _Data.DetectedThreads << std::endl;
 
 		DefaultBoolSettings = (DefaultBoolSettings & (~_BoolSettings::remove_empty_tracks)) | (_BoolSettings::remove_empty_tracks * (!!((CheckBox*)(*pptr)["BOOL_REM_TRCKS"])->State));
@@ -1332,23 +1379,23 @@ namespace Settings {
 
 		AutoUpdatesCheck = ((CheckBox*)(*pptr)["AUTOUPDATECHECK"])->State;
 
-		if (isRegestryOpened) 
-			TRY_CATCH(RegestryAccess.SetDwordValue(L"AUTOUPDATECHECK", AutoUpdatesCheck); , "Failed on setting AUTOUPDATECHECK")
+		if (isRegestryOpened)
+			TRY_CATCH(RegestryAccess.SetDwordValue(L"AUTOUPDATECHECK", AutoUpdatesCheck);, "Failed on setting AUTOUPDATECHECK")
 
-		if (isRegestryOpened) { 
-			TRY_CATCH(RegestryAccess.SetDwordValue(L"DEFAULT_BOOL_SETTINGS", DefaultBoolSettings); , "Failed on setting DEFAULT_BOOL_SETTINGS") 
-			TRY_CATCH(RegestryAccess.SetDwordValue(L"FONTSIZE", lFontSymbolsInfo::Size);, "Failed on setting FONTSIZE") 
-			TRY_CATCH(RegestryAccess.SetDwordValue(L"FLOAT_FONTHTW", *(DWORD*)(&lFONT_HEIGHT_TO_WIDTH));, "Failed on setting FLOAT_FONTHTW")
-		}
+			if (isRegestryOpened) {
+				TRY_CATCH(RegestryAccess.SetDwordValue(L"DEFAULT_BOOL_SETTINGS", DefaultBoolSettings);, "Failed on setting DEFAULT_BOOL_SETTINGS")
+				TRY_CATCH(RegestryAccess.SetDwordValue(L"FONTSIZE", lFontSymbolsInfo::Size);, "Failed on setting FONTSIZE")
+				TRY_CATCH(RegestryAccess.SetDwordValue(L"FLOAT_FONTHTW", *(DWORD*)(&lFONT_HEIGHT_TO_WIDTH));, "Failed on setting FLOAT_FONTHTW")
+			}
 
 		_Data.InplaceMergeFlag = (((CheckBox*)(*pptr)["INPLACE_MERGE"])->State);
-		if (isRegestryOpened)TRY_CATCH(RegestryAccess.SetDwordValue(L"AS_INPLACE_FLAG", _Data.InplaceMergeFlag); , "Failed on setting AS_INPLACE_FLAG")
+		if (isRegestryOpened)TRY_CATCH(RegestryAccess.SetDwordValue(L"AS_INPLACE_FLAG", _Data.InplaceMergeFlag);, "Failed on setting AS_INPLACE_FLAG")
 
-		((InputField*)(*pptr)["AS_FONT_NAME"])->PutIntoSource();
+			((InputField*)(*pptr)["AS_FONT_NAME"])->PutIntoSource();
 		std::wstring ws(FONTNAME.begin(), FONTNAME.end());
 		if (isRegestryOpened)TRY_CATCH(RegestryAccess.SetStringValue(L"COLLAPSEDFONTNAME", ws.c_str());, "Failed on setting AS_BCKGID")
-		if(isRegestryOpened)
-			Settings::RegestryAccess.Close();
+			if(isRegestryOpened)
+				Settings::RegestryAccess.Close();
 	}
 	void ChangeIsFontedVar() {
 		is_fonted = !is_fonted;
@@ -1397,7 +1444,8 @@ void OnStart() {
 	}
 	GlobalMCTM = _Data.MCTM_Constructor();
 	printf("MCTM constructed\n");
-	std::chrono::steady_clock::time_point START = std::chrono::high_resolution_clock::now();
+	auto START = std::chrono::high_resolution_clock::now();
+	using start_type = decltype(START);
 	GlobalMCTM->ProcessMIDIs();
 	printf("MCTM Processing has begun\n");
 	MoveableWindow *MW;
@@ -1412,8 +1460,8 @@ void OnStart() {
 
 		auto ptr = (InputField*)(*MW)["TIMER"];
 		auto now = std::chrono::high_resolution_clock::now();
-		auto difference = std::chrono::duration_cast<std::chrono::duration<double>>(now - START);
-		ptr->SafeStringReplace(std::to_string(difference.count()) + " s");
+		auto difference = (now - START).count();
+		ptr->SafeStringReplace(std::to_string(difference) + " s");
 
 		for (ID = 0; ID < GlobalMCTM->Cur_Processing.size(); ID++) {
 			std::cout << ID << std::endl;
@@ -1461,18 +1509,18 @@ void OnStart() {
 		}, GlobalMCTM, &_Data, MW);
 		LO.detach();
 
-		std::thread FLO([](MIDICollectionThreadedMerger *pMCTM, MoveableWindow *MW, std::chrono::steady_clock::time_point START) {
+		std::thread FLO([](MIDICollectionThreadedMerger *pMCTM, MoveableWindow *MW, start_type START) {
 			auto ptr = (InputField*)(*MW)["TIMER"];
 			while (!pMCTM->CompleteFlag) {
 				auto now = std::chrono::high_resolution_clock::now();
-				auto difference = std::chrono::duration_cast<std::chrono::duration<double>>(now - START);
-				ptr->SafeStringReplace(std::to_string(difference.count())+" s");
+				auto difference = (now - START).count();
+				ptr->SafeStringReplace(std::to_string(difference)+" s");
 				std::this_thread::sleep_for(std::chrono::milliseconds(50));
 			}
 			std::cout << "F: Out from sleep!!!\n";
 			MW->DeleteUIElementByName("FM");
 
-			WH->DisableWindow(WH->MainWindow_ID); 
+			WH->DisableWindow(WH->MainWindow_ID);
 			WH->MainWindow_ID = "MAIN";
 			//WH->DisableAllWindows();
 			WH->EnableWindow("MAIN");
@@ -1494,50 +1542,60 @@ void OnSaveTo() {
 
 void RestoreRegSettings() {
 	bool Opened = false;
-	try{
+	try {
 		Settings::RegestryAccess.Create(HKEY_CURRENT_USER, RegPath);
+	} catch(...) {
+		std::cout << "Exception thrown while creating registry key\n";
 	}
-	catch(...){ std::cout << "Exception thrown while creating registry key\n"; }
 	try {
 		Settings::RegestryAccess.Open(HKEY_CURRENT_USER, RegPath);
 		Opened = true;
+	} catch (...) {
+		std::cout << "Exception thrown while opening RK\n";
 	}
-	catch (...) { std::cout << "Exception thrown while opening RK\n"; }
 	if (Opened) {
 		try {
 			Settings::ShaderMode = Settings::RegestryAccess.GetDwordValue(L"AS_BCKGID");
+		} catch (...) {
+			std::cout << "Exception thrown while restoring AS_BCKGID from registry\n";
 		}
-		catch (...) { std::cout << "Exception thrown while restoring AS_BCKGID from registry\n"; }
 		try {
 			AutoUpdatesCheck = Settings::RegestryAccess.GetDwordValue(L"AUTOUPDATECHECK");
+		} catch (...) {
+			std::cout << "Exception thrown while restoring AUTOUPDATECHECK from registry\n";
 		}
-		catch (...) { std::cout << "Exception thrown while restoring AUTOUPDATECHECK from registry\n"; }
 		try {
 			_Data.DetectedThreads = Settings::RegestryAccess.GetDwordValue(L"AS_THREADS_COUNT");
+		} catch (...) {
+			std::cout << "Exception thrown while restoring AS_THREADS_COUNT from registry\n";
 		}
-		catch (...) { std::cout << "Exception thrown while restoring AS_THREADS_COUNT from registry\n"; }
 		try {
 			DefaultBoolSettings = Settings::RegestryAccess.GetDwordValue(L"DEFAULT_BOOL_SETTINGS");
+		} catch (...) {
+			std::cout << "Exception thrown while restoring AS_INPLACE_FLAG from registry\n";
 		}
-		catch (...) { std::cout << "Exception thrown while restoring AS_INPLACE_FLAG from registry\n"; }
 		try {
 			_Data.InplaceMergeFlag = Settings::RegestryAccess.GetDwordValue(L"AS_INPLACE_FLAG");
+		} catch (...) {
+			std::cout << "Exception thrown while restoring INPLACE_MERGE from registry\n";
 		}
-		catch (...) { std::cout << "Exception thrown while restoring INPLACE_MERGE from registry\n"; }
 		try {
 			std::wstring ws = Settings::RegestryAccess.GetStringValue(L"COLLAPSEDFONTNAME");//COLLAPSEDFONTNAME
 			FONTNAME = std::string(ws.begin(), ws.end());
+		} catch (...) {
+			std::cout << "Exception thrown while restoring COLLAPSEDFONTNAME from registry\n";
 		}
-		catch (...) { std::cout << "Exception thrown while restoring COLLAPSEDFONTNAME from registry\n"; }
 		try {
 			lFontSymbolsInfo::Size = Settings::RegestryAccess.GetDwordValue(L"FONTSIZE");//COLLAPSEDFONTNAME
+		} catch (...) {
+			std::cout << "Exception thrown while restoring FONTSIZE from registry\n";
 		}
-		catch (...) { std::cout << "Exception thrown while restoring FONTSIZE from registry\n"; }
 		try {
 			DWORD B = Settings::RegestryAccess.GetDwordValue(L"FLOAT_FONTHTW");//COLLAPSEDFONTNAME
 			lFONT_HEIGHT_TO_WIDTH = *(float*)&B;
+		} catch (...) {
+			std::cout << "Exception thrown while restoring FLOAT_FONTHTW from registry\n";
 		}
-		catch (...) { std::cout << "Exception thrown while restoring FLOAT_FONTHTW from registry\n"; }
 		Settings::RegestryAccess.Close();
 	}
 }
@@ -1565,12 +1623,12 @@ void Init() {///SetIsFontedVar
 		float SPLNewHight = (NewHeight - TopMargin - BottomMargin);
 		float SPLNewWidth = SPL->Width + dW;
 		SPL->SafeResize(SPLNewHight, SPLNewWidth);
-		});
+	});
 	((MoveableResizeableWindow*)T)->AssignMinDimentions(300, 300);
 	((MoveableResizeableWindow*)T)->AssignPinnedActivities({
 		"ADD_Butt", "REM_Butt", "REM_ALL_Butt", "GLOBAL_PPQN_Butt", "GLOBAL_OFFSET_Butt", "GLOBAL_TEMPO_Butt", "DELETE_ALL_VM", "DELETE_ALL_CAT", "DELETE_ALL_PITCHES",
 		"DELETE_ALL_MODULES", "SETTINGS", "SAVE_AS", "START"
-		}, MoveableResizeableWindow::PinSide::right);
+	}, MoveableResizeableWindow::PinSide::right);
 	((MoveableResizeableWindow*)T)->AssignPinnedActivities({ "SETTINGS", "SAVE_AS", "START" }, MoveableResizeableWindow::PinSide::bottom);
 
 	Button* Butt;
@@ -1584,20 +1642,20 @@ void Init() {///SetIsFontedVar
 	(*T)["GLOBAL_TEMPO_Butt"] = new Button("Global tempo", System_White, OnGlobalTempo, 150, 97.5, 75, 12, 1, 0xFFAF00AF, 0xFFFFFFFF, 0xFFAF00AF, 0xFFFFFFFF, 0x7F7F7F7FF, NULL, " ");
 	//(*T)["_FRESOLVE"] = new Button("_ForceResolve", System_White, _OnResolve, 150, 0, 75, 12, 1, 0x7F007F3F, 0xFFFFFF3F, 0x000000FF, 0xFFFFFF3F, 0x7F7F7F73F, NULL, " ");
 	(*T)["DELETE_ALL_VM"] = new Button("Remove vol. maps", System_White, OnRemVolMaps, 150, 72.5, 75, 12, 1,
-		0x7F7F7FAF, 0xFFFFFFFF, 0x7F7F7FAF, 0xFFFFFFFF, 0x7F7F7F7FF, NULL, " ");//0xFF007FAF
+	                                   0x7F7F7FAF, 0xFFFFFFFF, 0x7F7F7FAF, 0xFFFFFFFF, 0x7F7F7F7FF, NULL, " ");//0xFF007FAF
 	(*T)["DELETE_ALL_CAT"] = new Button("Remove C&Ts", System_White, OnRemCATs, 150, 60, 75, 12, 1,
-		0x7F7F7FAF, 0xFFFFFFFF, 0x7F7F7FAF, 0xFFFFFFFF, 0x7F7F7F7FF, NULL, " ");
+	                                    0x7F7F7FAF, 0xFFFFFFFF, 0x7F7F7FAF, 0xFFFFFFFF, 0x7F7F7F7FF, NULL, " ");
 	(*T)["DELETE_ALL_PITCHES"] = new Button("Remove p. maps", System_White, OnRemPitchMaps, 150, 47.5, 75, 12, 1,
-		0x7F7F7FAF, 0xFFFFFFFF, 0x7F7F7FAF, 0xFFFFFFFF, 0x7F7F7F7FF, NULL, " ");
+	                                        0x7F7F7FAF, 0xFFFFFFFF, 0x7F7F7FAF, 0xFFFFFFFF, 0x7F7F7F7FF, NULL, " ");
 	(*T)["DELETE_ALL_MODULES"] = new Button("Remove modules", System_White, OnRemAllModules, 150, 35, 75, 12, 1,
-		0x7F7F7FAF, 0xFFFFFFFF, 0x7F7F7FAF, 0xFFFFFFFF, 0x7F7F7F7FF, NULL, " ");
+	                                        0x7F7F7FAF, 0xFFFFFFFF, 0x7F7F7FAF, 0xFFFFFFFF, 0x7F7F7F7FF, NULL, " ");
 
 	(*T)["SETTINGS"] = new Button("Settings...", System_White, Settings::OnSettings, 150, -140, 75, 12, 1,
-		0x5F5F5FAF, 0xFFFFFFFF, 0x5F5F5FAF, 0xFFFFFFFF, 0x7F7F7F7FF, NULL, " ");
+	                              0x5F5F5FAF, 0xFFFFFFFF, 0x5F5F5FAF, 0xFFFFFFFF, 0x7F7F7F7FF, NULL, " ");
 	(*T)["SAVE_AS"] = new Button("Save as...", System_White, OnSaveTo, 150, -152.5, 75, 12, 1,
-		0x3FAF00AF, 0xFFFFFFFF, 0x3FAF00AF, 0xFFFFFFFF, 0x7F7F7F7FF, NULL, " ");
+	                             0x3FAF00AF, 0xFFFFFFFF, 0x3FAF00AF, 0xFFFFFFFF, 0x7F7F7F7FF, NULL, " ");
 	(*T)["START"] = Butt = new Button("Start merging", System_White, OnStart, 150, -177.5, 75, 12, 1,
-		0x000000AF, 0xFFFFFFFF, 0x000000AF, 0xFFFFFFFF, 0x7F7F7F7FF, NULL, " ");//177.5
+	                                  0x000000AF, 0xFFFFFFFF, 0x000000AF, 0xFFFFFFFF, 0x7F7F7F7FF, NULL, " ");//177.5
 
 	(*WH)["MAIN"] = T;
 
@@ -1711,8 +1769,8 @@ void Init() {///SetIsFontedVar
 	(*T)["FLL"] = new TextBox("--File log line--", System_White, 0, -WindowHeapSize + 185, 15, 285, 10, 0, 0, 0, _Align::left);
 	(*T)["FEL"] = new TextBox("--File error line--", System_Red, 0, -WindowHeapSize + 175, 15, 285, 10, 0, 0, 0, _Align::left);
 	(*T)["TEMPO_GRAPH"] = new Graphing<SingleMIDIInfoCollector::tempo_graph>(
-		0, -WindowHeapSize + 145, 285, 50, (1. / 20000.), true, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F00FF, 0xFF00FFFF, 0x7F7F7F7F, nullptr, System_White, false
-		);
+	    0, -WindowHeapSize + 145, 285, 50, (1. / 20000.), true, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F00FF, 0xFF00FFFF, 0x7F7F7F7F, nullptr, System_White, false
+	);
 	(*T)["POLY_GRAPH"] = new Graphing<SingleMIDIInfoCollector::polyphony_graph>(
 		0, -WindowHeapSize + 95, 285, 50, (1. / 20000.), true, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F00FF, 0xFF00FFFF, 0x7F7F7F7F, nullptr, System_White, false
 		);
@@ -1739,7 +1797,7 @@ void Init() {///SetIsFontedVar
 	auto InnerWindow = new MoveableResizeableWindow("Inner Test", System_White, -100, 100, 200, 200, 0x0000007F, 0x7F7F7FFF, 0x0000007F);
 	T = new MoveableResizeableWindow("Test", System_White, -150, 150, 300, 300, 0x0000007F, 0x7F7F7FFF, 0x0000007F, [InnerWindow](float dH, float dW, float NewHeight, float NewWidth) {
 		InnerWindow->SafeResize(InnerWindow->Height + dH, InnerWindow->Width + dW);
-		});
+	});
 
 	(*T)["WINDOW"] = InnerWindow;
 	(*T)["TEXTAREA"] = new EditBox("", System_White, 0, 0, 200, 200, 10, 0, 0xFFFFFFFF, 2);
@@ -1764,8 +1822,13 @@ void Init() {///SetIsFontedVar
 	DragAcceptFiles(hWnd, TRUE);
 	OleInitialize(NULL);
 	std::cout << "Registering Drag&Drop: " << (RegisterDragDrop(hWnd, &DNDH_Global)) << std::endl;
-	
-	SAFC_VersionCheck();
+
+	GLfloat lineWidthRange[2] = { 0.0f, 0.0f };
+	glGetFloatv(GL_SMOOTH_LINE_WIDTH_RANGE, lineWidthRange);
+
+	printf("Supported MWL:%lf/%lf\n", lineWidthRange[0], lineWidthRange[1]);
+
+	//SAFC_VersionCheck();
 }
 
 ///////////////////////////////////////
@@ -1819,8 +1882,7 @@ void mDisplay() {
 		glColor4f(0, 0.5f, 1, (DRAG_OVER) ? 0.25f : 1);
 		glVertex2f(RANGE * (WindX / WINDXSIZE), 0 - RANGE * (WindY / WINDYSIZE));
 		glEnd();
-	}
-	else if (Settings::ShaderMode < 4) {
+	} else if (Settings::ShaderMode < 4) {
 		glBegin(GL_QUADS);
 		glColor4f(1, 0.5f, 0, (DRAG_OVER) ? 0.25f : 1);
 		glVertex2f(0 - RANGE * (WindX / WINDXSIZE), 0 - RANGE * (WindY / WINDYSIZE));
@@ -1829,8 +1891,7 @@ void mDisplay() {
 		glVertex2f(RANGE * (WindX / WINDXSIZE), RANGE * (WindY / WINDYSIZE));
 		glVertex2f(RANGE * (WindX / WINDXSIZE), 0 - RANGE * (WindY / WINDYSIZE));
 		glEnd();
-	}
-	else {
+	} else {
 		glBegin(GL_QUADS);
 		glColor4f(0.25f, 0.25f, 0.25f, (DRAG_OVER) ? 0.25f : 1);
 		glVertex2f(0 - RANGE * (WindX / WINDXSIZE), 0 - RANGE * (WindY / WINDYSIZE));
@@ -1922,14 +1983,18 @@ void mSpecialKey(int Key,int x, int y) {
 	auto modif = glutGetModifiers();
 	if (!(modif & GLUT_ACTIVE_ALT)) {
 		switch (Key) {
-		case GLUT_KEY_DOWN:		if (WH)WH->KeyboardHandler(1);
-			break;
-		case GLUT_KEY_UP:		if (WH)WH->KeyboardHandler(2);
-			break;
-		case GLUT_KEY_LEFT:		if (WH)WH->KeyboardHandler(3);
-			break;
-		case GLUT_KEY_RIGHT:	if (WH)WH->KeyboardHandler(4);
-			break;
+			case GLUT_KEY_DOWN:
+				if (WH)WH->KeyboardHandler(1);
+				break;
+			case GLUT_KEY_UP:
+				if (WH)WH->KeyboardHandler(2);
+				break;
+			case GLUT_KEY_LEFT:
+				if (WH)WH->KeyboardHandler(3);
+				break;
+			case GLUT_KEY_RIGHT:
+				if (WH)WH->KeyboardHandler(4);
+				break;
 		}
 	}
 	if (modif == GLUT_ACTIVE_ALT && Key == GLUT_KEY_DOWN) {
@@ -1965,7 +2030,7 @@ int main(int argc, char ** argv) {
 	//cout << to_string((WORD)0) << endl;
 
 	srand(TIMESEED());
-	__glutInitWithExit(&argc, argv, mExit);
+	__glutInitWithExit(&argc, (char**)argv, mExit);
 	//cout << argv[0] << endl;
 	glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGBA | GLUT_ALPHA | GLUT_MULTISAMPLE);
 	glutInitWindowSize(WINDXSIZE, WINDYSIZE);
@@ -1991,8 +2056,8 @@ int main(int argc, char ** argv) {
 	//glEnable(GLUT_MULTISAMPLE); 
 	//glutSetOption(GLUT_MULTISAMPLE, 8);
 
-	glHint(GL_LINE_SMOOTH_HINT, GL_FASTEST);//GL_FASTEST//GL_NICEST
-	glHint(GL_POINT_SMOOTH_HINT, GL_FASTEST);
+	glHint(GL_LINE_SMOOTH_HINT, GL_NICEST);//GL_FASTEST//GL_NICEST
+	glHint(GL_POINT_SMOOTH_HINT, GL_NICEST);
 	glHint(GL_POLYGON_SMOOTH_HINT, GL_FASTEST);
 
 	glutMouseFunc(mClick);

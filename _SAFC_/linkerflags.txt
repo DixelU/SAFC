@@ -1,0 +1,1 @@
+-static -lcomdlg32 -lws2_32 -lwinmm -lgdi32 -ldwmapi -lole32 -lglew32 -lglew32mx -lfreeglut -lopengl32 -lglu32 -loleaut32 -loleaut32 -luuid -lmincore -lurlmon
