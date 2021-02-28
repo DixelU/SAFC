@@ -1,14 +1,14 @@
 Simple AF Converter (SAFC)
 ==========================
 
-**Merging completely different midis by completely different ways!**
+## MinGW branch
 
-There's discord server, where SAF apps were publishing all that time since July/August of 2018: https://discord.gg/CsgEW4P
+No description 
 
-**Noting that Support of Windows XP was dropped since v1.0**
-Also thanks to all beta testers on SAF server!  
+How to build:
+Compiler and linker flags are listed in subsequent files in `./_SAFC_` + do not forget to set `-std=c++17`  
+You'd need to find and put freeglut (glut32 is unnecessary, but it's listed in includes) for MinGW somewhere.  
 
-You can compile it using MSVC 2017 (and later) by installing freeglut (and glew?) using vcpkg/nuget :)
+Bugs:
+I think that there are tons of memory leaks in that, yet it works. Might be helpful in case if somebody has problems with original SAFC's GUI.
 
-## Important notice: 
-**Currently is being supported as legacy project.** Update including a complete overhaul is coming soon
