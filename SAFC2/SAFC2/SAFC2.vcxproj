@@ -173,6 +173,7 @@
     <ClInclude Include="allocator.h" />
     <ClInclude Include="bbb_ffio.h" />
     <ClInclude Include="MRWF.h" />
+    <ClInclude Include="mrwf_raw.h" />
     <ClInclude Include="resource.h" />
   </ItemGroup>
   <ItemGroup>

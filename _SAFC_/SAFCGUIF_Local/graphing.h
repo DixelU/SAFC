@@ -11,7 +11,7 @@ constexpr float __epsilon = FLT_EPSILON;
 #else
 */
 using local_fp_type = double;
-constexpr double __epsilon = DBL_EPSILON;
+constexpr double __epsilon = 1e-30;
 //#endif
 
 template<typename ordered_map_type = std::map<int, int>>

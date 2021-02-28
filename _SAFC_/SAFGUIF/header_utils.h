@@ -2,8 +2,8 @@
 #ifndef SAFGUIF_HEADER
 #define SAFGUIF_HEADER
 
-#include <GL/glew.h>
-#include <GL/freeglut.h>
+#include "../glew.h"
+#include "../freeglut.h"
 
 #include "consts.h"
 
@@ -44,7 +44,7 @@ float ROT_ANGLE = 0.f;
 float WindX = WINDXSIZE, WindY = WINDYSIZE;
 
 BIT ANIMATION_IS_ACTIVE = 0, FIRSTBOOT = 1, DRAG_OVER = 0, APRIL_FOOL = 0, SHIFT_HELD = 0;
-DWORD TimerV = 0;
+uint64_t TimerV = 0;
 HWND hWnd;
 HDC hDc;
 auto HandCursor = ::LoadCursor(NULL, IDC_HAND), AllDirectCursor = ::LoadCursor(NULL, IDC_CROSS), NWSECursor = ::LoadCursor(NULL, IDC_SIZENWSE);///AAAAAAAAAAA
