@@ -70,7 +70,7 @@ struct SingleMIDIReProcessor {
 	BYTE_PLC_Core* VolumeMapCore;
 	_14BIT_PLC_Core* PitchMapCore;
 	CutAndTransposeKeys* KeyConverter;
-	BIT ResetDeltatimesOutsideOfTheRange;
+	BIT ResetDeltatimesOutsideOfTheRange, AllowLegacyRunningStatusMetaIgnorance;
 	UINT64 FilePosition, FileSize;
 	inline static void ostream_write(std::vector<BYTE>& vec, const std::vector<BYTE>::iterator& beg, const std::vector<BYTE>::iterator& end, std::ostream& out) {
 		out.write(((char*)vec.data()) + (beg - vec.begin()), end - beg);
@@ -117,6 +117,7 @@ struct SingleMIDIReProcessor {
 		this->SelectionStart = SelectionStart;
 		this->SelectionLength = SelectionLength;
 		this->ResetDeltatimesOutsideOfTheRange = ResetDeltatimesOutsideOfTheRange;
+		this->AllowLegacyRunningStatusMetaIgnorance = false;
 	}
 	SingleMIDIReProcessor(std::wstring filename, DWORD Settings, FLOAT Tempo, DWORD GlobalOffset, WORD PPQN, DWORD ThreadID, PLC<BYTE, BYTE>* VolumeMapCore, PLC<WORD, WORD>* PitchMapCore, CutAndTransposeKeys* KeyConverter, std::wstring RPostfix = L"_.mid", BIT InplaceMerge = 0, UINT64 FileSize = 0, INT64 SelectionStart = 0, INT64 SelectionLength = -1, BIT ResetDeltatimesOutsideOfTheRange = true) {
 		this->ThreadID = ThreadID;
@@ -145,6 +146,7 @@ struct SingleMIDIReProcessor {
 		this->SelectionStart = SelectionStart;
 		this->SelectionLength = SelectionLength;
 		this->ResetDeltatimesOutsideOfTheRange = ResetDeltatimesOutsideOfTheRange;
+		this->AllowLegacyRunningStatusMetaIgnorance = false;
 	}
 #define PCLOG true
 	void ReProcess() {
@@ -169,7 +171,7 @@ struct SingleMIDIReProcessor {
 		WORD OldPPQN;
 		double DeltaTimeTranq = 0, PPQNIncreaseAmount = 1;
 		BYTE Tempo1 = 0, Tempo2 = 0, Tempo3 = 0;
-		BYTE IO = 0, MetaEventType = 0;//register?
+		BYTE CurByte = 0, MetaEventType = 0;//register?
 		BYTE RunningStatusByte = 0;
 		BIT TrackEnded = false;
 		TrackCount = 0x0;
@@ -232,6 +234,7 @@ struct SingleMIDIReProcessor {
 				CurHolded[i] = 0;
 			}
 
+			RunningStatusByte = 0;
 			INT64 CurTick = 0;//understandable
 			bool Entered = false, Exited = false;
 			INT64 TickTranq = 0;
@@ -251,11 +254,11 @@ struct SingleMIDIReProcessor {
 				DWORD LastDeltaTime = 0, L_VLV;
 				DWORD DeltaTimeSize = 0;
 
-				IO = 0;
+				CurByte = 0;
 				do {//reading LastDeltaTime
-					IO = file_input.get();
-					LastDeltaTime = LastDeltaTime << 7 | IO & 0x7F;
-				} while (IO & 0x80 && !file_input.eof());
+					CurByte = file_input.get();
+					LastDeltaTime = LastDeltaTime << 7 | CurByte & 0x7F;
+				} while (CurByte & 0x80 && !file_input.eof());
 
 				DeltaTimeTranq += ((double)(LastDeltaTime)*PPQNIncreaseAmount) + TickTranq;
 				DeltaTimeTranq -= (L_VLV = (LastDeltaTime = (INT64)DeltaTimeTranq));
@@ -432,15 +435,16 @@ struct SingleMIDIReProcessor {
 			ActiveSelectionBorderEscapePoint:
 				DeltaTimeSize = push_vlv(L_VLV, Track);
 
-				IO = file_input.get();
+				CurByte = file_input.get();
 
-				switch (IO) {
+				switch (CurByte) {
 				case 0xFF: {
-					RunningStatusByte = 0;
-					Track.push_back(IO);
-					IO = file_input.get();//MetaEventType.
-					Track.push_back(IO);
-					if (IO == 0x2F) {//end of track event+
+					if(!AllowLegacyRunningStatusMetaIgnorance)
+						RunningStatusByte = 0;
+					Track.push_back(CurByte);
+					CurByte = file_input.get();//MetaEventType.
+					Track.push_back(CurByte);
+					if (CurByte == 0x2F) {//end of track event+
 						if ((ResetDeltatimesOutsideOfTheRange) && ((!Entered) || (Exited))) {//it doesn't matter? right?
 							for (int i = -2; i < (int)DeltaTimeSize; i++)
 								Track.pop_back();
@@ -569,13 +573,13 @@ struct SingleMIDIReProcessor {
 						if (!(BoolSettings & SMP_BOOL_SETTINGS_IGNORE_ALL_BUT_TEMPOS_NOTES_AND_PITCH)) {
 							L_VLV = 0;
 							DWORD MetaVLVSize = 0;
-							MetaEventType = IO;
+							MetaEventType = CurByte;
 							do {
-								IO = file_input.get();
-								Track.push_back(IO);
+								CurByte = file_input.get();
+								Track.push_back(CurByte);
 								MetaVLVSize++;
-								L_VLV = (L_VLV << 7) | (IO & 0x7F);
-							} while (IO & 0x80);
+								L_VLV = (L_VLV << 7) | (CurByte & 0x7F);
+							} while (CurByte & 0x80);
 							if (MetaEventType != 0x51) {
 								for (int i = 0; i < L_VLV; i++)
 									Track.push_back(file_input.get());
@@ -619,13 +623,13 @@ struct SingleMIDIReProcessor {
 						else {
 							L_VLV = 0;
 							DWORD MetaVLVSize = 0;
-							MetaEventType = IO;
+							MetaEventType = CurByte;
 							do {
-								IO = file_input.get();
-								Track.push_back(IO);
+								CurByte = file_input.get();
+								Track.push_back(CurByte);
 								MetaVLVSize++;
-								L_VLV = (L_VLV << 7) | (IO & 0x7F);
-							} while (IO & 0x80);
+								L_VLV = (L_VLV << 7) | (CurByte & 0x7F);
+							} while (CurByte & 0x80);
 							if (MetaEventType != 0x51) {//deleting
 								TickTranq = LastDeltaTime;
 								for (int i = -2 - MetaVLVSize; i < (int)DeltaTimeSize; i++)
@@ -668,10 +672,10 @@ struct SingleMIDIReProcessor {
 					}
 				} break;
 				MH_CASE(0x80) : MH_CASE(0x90) : {
-					RunningStatusByte = IO;
+					RunningStatusByte = CurByte;
 					bool DeleteEvent = BoolSettings & SMP_BOOL_SETTINGS_IGNORE_NOTES, isnoteon = (RunningStatusByte >= 0x90);
 					BYTE Key = file_input.get();
-					Track.push_back(IO);///Event|Channel data
+					Track.push_back(CurByte);///Event|Channel data
 					if (this->KeyConverter && !DeleteEvent) {////key data processing
 						auto T = (this->KeyConverter->Process(Key));
 						if (T.has_value())
@@ -683,15 +687,15 @@ struct SingleMIDIReProcessor {
 					}
 					else Track.push_back(Key);///key data processing
 					BYTE Vol = file_input.get();
-					if (this->VolumeMapCore && (IO & 0x10))
+					if (this->VolumeMapCore && (CurByte & 0x10))
 						Vol = (*this->VolumeMapCore)[Vol];
 					if (!Vol && isnoteon) {
-						IO = (IO & 0xF) | 0x80;
-						*((&Track.back()) - 1) = IO;
+						CurByte = (CurByte & 0xF) | 0x80;
+						*((&Track.back()) - 1) = CurByte;
 					}
-					isnoteon = (IO >= 0x90);
+					isnoteon = (CurByte >= 0x90);
 
-					SHORT HoldIndex = (Key << 4) | (IO & 0xF);
+					SHORT HoldIndex = (Key << 4) | (CurByte & 0xF);
 					////////added
 					if (!DeleteEvent) {
 						if (isnoteon) {//if noteon
@@ -733,13 +737,13 @@ struct SingleMIDIReProcessor {
 					EventCounter++;
 				} break;
 				MH_CASE(0xA0) : {
-					RunningStatusByte = IO;
+					RunningStatusByte = CurByte;
 					if (!(BoolSettings & SMP_BOOL_SETTINGS_IGNORE_ALL_BUT_TEMPOS_NOTES_AND_PITCH)) {
-						Track.push_back(IO);///event type
+						Track.push_back(CurByte);///event type
 						Track.push_back(byte1 = file_input.get());///1st parameter//key
 						Track.push_back(byte2 = file_input.get());///2nd parameter//value
 						EventCounter++;
-						CurrentNoteAftertouch[((WORD)byte1 << 4) | (IO & 0xF)] = byte2;
+						CurrentNoteAftertouch[((WORD)byte1 << 4) | (CurByte & 0xF)] = byte2;
 					}
 					else {
 						TickTranq = LastDeltaTime;
@@ -747,18 +751,18 @@ struct SingleMIDIReProcessor {
 							Track.pop_back();
 						byte1 = file_input.get();
 						byte2 = file_input.get();
-						CurrentNoteAftertouch[((WORD)byte1 << 4) | (IO & 0xF)] = byte2;
+						CurrentNoteAftertouch[((WORD)byte1 << 4) | (CurByte & 0xF)] = byte2;
 						continue;
 					}
 				} break;
 				MH_CASE(0xB0) : {
-					RunningStatusByte = IO;
+					RunningStatusByte = CurByte;
 					if (!(BoolSettings & SMP_BOOL_SETTINGS_IGNORE_ALL_BUT_TEMPOS_NOTES_AND_PITCH)) {
-						Track.push_back(IO);///event type
+						Track.push_back(CurByte);///event type
 						Track.push_back(byte1 = file_input.get());///1st parameter
 						Track.push_back(byte2 = file_input.get());///2nd parameter
 						EventCounter++;
-						CurrentController[((WORD)byte1 << 4) | (IO & 0xF)] = byte2;
+						CurrentController[((WORD)byte1 << 4) | (CurByte & 0xF)] = byte2;
 					}
 					else {
 						TickTranq = LastDeltaTime;
@@ -766,52 +770,52 @@ struct SingleMIDIReProcessor {
 							Track.pop_back();
 						byte1 = file_input.get();
 						byte2 = file_input.get();
-						CurrentController[((WORD)byte1 << 4) | (IO & 0xF)] = byte2;
+						CurrentController[((WORD)byte1 << 4) | (CurByte & 0xF)] = byte2;
 						continue;
 					}
 				} break;
 				MH_CASE(0xC0) : {
-					RunningStatusByte = IO;
+					RunningStatusByte = CurByte;
 					if (!(BoolSettings & SMP_BOOL_SETTINGS_IGNORE_ALL_BUT_TEMPOS_NOTES_AND_PITCH)) {
-						Track.push_back(IO);///event type
+						Track.push_back(CurByte);///event type
 						if (BoolSettings & SMP_BOOL_SETTINGS_ALL_INSTRUMENTS_TO_PIANO)
 							Track.push_back(byte1 = (file_input.get() & 0));///1st parameter
 						else
 							Track.push_back(byte1 = (file_input.get() & 0x7F));
 						EventCounter++;
-						CurrentProgram[IO & 0xF] = byte1;
+						CurrentProgram[CurByte & 0xF] = byte1;
 					}
 					else {
 						TickTranq = LastDeltaTime;
 						for (int i = 0; i < (INT32)DeltaTimeSize; i++)
 							Track.pop_back();
 						byte1 = file_input.get();///for its single parameter
-						CurrentProgram[IO & 0xF] = byte1;
+						CurrentProgram[CurByte & 0xF] = byte1;
 						continue;
 					}
 				} break;
 				MH_CASE(0xD0) :{
-					RunningStatusByte = IO;
+					RunningStatusByte = CurByte;
 					if (!(BoolSettings & SMP_BOOL_SETTINGS_IGNORE_ALL_BUT_TEMPOS_NOTES_AND_PITCH)) {
-						Track.push_back(IO);///event type
+						Track.push_back(CurByte);///event type
 						Track.push_back(byte1 = (file_input.get() & 0x7F));
 						//fi.get();
 						EventCounter++;
-						CurrentChannelAftertouch[IO & 0xF] = byte1;
+						CurrentChannelAftertouch[CurByte & 0xF] = byte1;
 					}
 					else {
 						TickTranq = LastDeltaTime;
 						for (int i = 0; i < (INT32)DeltaTimeSize; i++)
 							Track.pop_back();
 						byte1 = file_input.get();
-						CurrentChannelAftertouch[IO & 0xF] = byte1;
+						CurrentChannelAftertouch[CurByte & 0xF] = byte1;
 						continue;
 					}
 				} break;
 				MH_CASE(0xE0) : {
-					RunningStatusByte = IO;
+					RunningStatusByte = CurByte;
 					if (!(BoolSettings & SMP_BOOL_SETTINGS_IGNORE_PITCHES)) {
-						Track.push_back(IO);
+						Track.push_back(CurByte);
 						if (this->PitchMapCore) {
 							WORD PitchBend = file_input.get() << 7;
 							PitchBend |= file_input.get() & 0x7F;
@@ -823,7 +827,7 @@ struct SingleMIDIReProcessor {
 							Track.push_back(byte1 = (file_input.get() & 0x7F));
 							Track.push_back(byte2 = (file_input.get() & 0x7F));
 						}
-						CurrentPitch[IO & 0xF] = ((((WORD)byte1) << 8) | (WORD)byte2);
+						CurrentPitch[CurByte & 0xF] = ((((WORD)byte1) << 8) | (WORD)byte2);
 						EventCounter++;
 					}
 					else {
@@ -832,21 +836,22 @@ struct SingleMIDIReProcessor {
 							Track.pop_back();
 						byte1 = file_input.get() & 0x7F;
 						byte2 = file_input.get() & 0x7F;///for 1st and 2nd parameter
-						CurrentPitch[IO & 0xF] = ((((WORD)byte1) << 8) | (WORD)byte2);
+						CurrentPitch[CurByte & 0xF] = ((((WORD)byte1) << 8) | (WORD)byte2);
 						continue;
 					}
 				} break;
 				case 0xF0: case 0xF7: {
 					DWORD sysexVLVsize = 0;
-					RunningStatusByte = 0;
+					if (!AllowLegacyRunningStatusMetaIgnorance)
+						RunningStatusByte = 0;
 					L_VLV = 0;
-					Track.push_back(IO);//sysex type 
+					Track.push_back(CurByte);//sysex type 
 					do {
-						IO = file_input.get();
-						Track.push_back(IO);
+						CurByte = file_input.get();
+						Track.push_back(CurByte);
 						sysexVLVsize++;
-						L_VLV = (L_VLV << 7) | (IO & 0x7F);
-					} while (IO & 0x80);
+						L_VLV = (L_VLV << 7) | (CurByte & 0x7F);
+					} while (CurByte & 0x80);
 					if (!(BoolSettings & SMP_BOOL_SETTINGS_IGNORE_ALL_BUT_TEMPOS_NOTES_AND_PITCH)) {
 						for (int i = 0; i < L_VLV; i++)
 							Track.push_back(file_input.get());
@@ -866,7 +871,7 @@ struct SingleMIDIReProcessor {
 					switch (RunningStatusByte) {
 						MH_CASE(0x80) :MH_CASE(0x90) :  {
 							bool DeleteEvent = (BoolSettings & SMP_BOOL_SETTINGS_IGNORE_NOTES), isnoteon = (RunningStatusByte >= 0x90);
-							BYTE Key = IO;
+							BYTE Key = CurByte;
 							Track.push_back(RunningStatusByte);///Event|Channel data
 							if (this->KeyConverter) {////key data processing
 								auto T = (this->KeyConverter->Process(Key));
@@ -883,13 +888,13 @@ struct SingleMIDIReProcessor {
 							if (this->VolumeMapCore && isnoteon)
 								Vol = (*this->VolumeMapCore)[Vol];
 							if (!Vol && isnoteon) {
-								IO = (RunningStatusByte & 0xF) | 0x80;
-								*((&Track.back()) - 1) = IO;
+								CurByte = (RunningStatusByte & 0xF) | 0x80;
+								*((&Track.back()) - 1) = CurByte;
 							}
 							else
-								IO = RunningStatusByte;
+								CurByte = RunningStatusByte;
 
-							isnoteon = (IO >= 0x90);
+							isnoteon = (CurByte >= 0x90);
 							SHORT HoldIndex = (Key << 4) | (RunningStatusByte & 0xF);
 							//printf("%X %X\n", Key, file_input.tellg());
 
@@ -934,10 +939,10 @@ struct SingleMIDIReProcessor {
 							EventCounter++;
 						}break; 
 						MH_CASE(0xA0) : {
-							//RSB = IO;
+							//RSB = CurByte;
 							if (!(BoolSettings & SMP_BOOL_SETTINGS_IGNORE_ALL_BUT_TEMPOS_NOTES_AND_PITCH)) {
 								Track.push_back(RunningStatusByte);///event type
-								Track.push_back(byte1 = IO);///1st parameter
+								Track.push_back(byte1 = CurByte);///1st parameter
 								Track.push_back(byte2 = file_input.get());///2nd parameter
 								EventCounter++;
 								CurrentNoteAftertouch[(RunningStatusByte & 0xF) | (byte1 << 4)] = byte2;
@@ -946,7 +951,7 @@ struct SingleMIDIReProcessor {
 								TickTranq = LastDeltaTime;
 								for (int i = 0; i < (INT32)DeltaTimeSize; i++)
 									Track.pop_back();
-								byte1 = IO;
+								byte1 = CurByte;
 								byte2 = file_input.get();
 								CurrentNoteAftertouch[(RunningStatusByte & 0xF) | (byte1 << 4)] = byte2;
 								continue;
@@ -955,7 +960,7 @@ struct SingleMIDIReProcessor {
 						MH_CASE(0xB0) : {
 							if (!(BoolSettings & SMP_BOOL_SETTINGS_IGNORE_ALL_BUT_TEMPOS_NOTES_AND_PITCH)) {
 								Track.push_back(RunningStatusByte);///event type
-								Track.push_back(byte1 = IO);///1st parameter
+								Track.push_back(byte1 = CurByte);///1st parameter
 								Track.push_back(byte2 = file_input.get());///2nd parameter
 								EventCounter++;
 								CurrentController[(RunningStatusByte & 0xF) | (byte1 << 4)] = byte2;
@@ -964,7 +969,7 @@ struct SingleMIDIReProcessor {
 								TickTranq = LastDeltaTime;
 								for (int i = 0; i < (INT32)DeltaTimeSize; i++)
 									Track.pop_back();
-								byte1 = IO;
+								byte1 = CurByte;
 								byte2 = file_input.get();
 								CurrentController[(RunningStatusByte & 0xF) | (byte1 << 4)] = byte2;
 								continue;
@@ -976,7 +981,7 @@ struct SingleMIDIReProcessor {
 								if (BoolSettings & SMP_BOOL_SETTINGS_ALL_INSTRUMENTS_TO_PIANO)
 									Track.push_back(byte1 = 0);///1st parameter
 								else
-									Track.push_back(byte1 = IO);//
+									Track.push_back(byte1 = CurByte);//
 								EventCounter++;
 								CurrentProgram[RunningStatusByte & 0xF] = byte1;
 							}
@@ -984,7 +989,7 @@ struct SingleMIDIReProcessor {
 								TickTranq = LastDeltaTime;
 								for (int i = 0; i < (INT32)DeltaTimeSize; i++)
 									Track.pop_back();
-								byte1 = IO;
+								byte1 = CurByte;
 								CurrentProgram[RunningStatusByte & 0xF] = byte1;
 								continue;
 								//fi.get();///for its single parameter
@@ -993,15 +998,15 @@ struct SingleMIDIReProcessor {
 						MH_CASE(0xD0) : {
 							if (!(BoolSettings & SMP_BOOL_SETTINGS_IGNORE_ALL_BUT_TEMPOS_NOTES_AND_PITCH)) {
 								Track.push_back(RunningStatusByte);///event type
-								Track.push_back(IO);
+								Track.push_back(CurByte);
 								EventCounter++;
-								CurrentChannelAftertouch[RunningStatusByte & 0xF] = IO;
+								CurrentChannelAftertouch[RunningStatusByte & 0xF] = CurByte;
 							}
 							else {
 								TickTranq = LastDeltaTime;
 								for (int i = 0; i < (INT32)DeltaTimeSize; i++)
 									Track.pop_back();
-								CurrentChannelAftertouch[RunningStatusByte & 0xF] = IO;
+								CurrentChannelAftertouch[RunningStatusByte & 0xF] = CurByte;
 								continue;
 							}
 						}break;
@@ -1009,14 +1014,14 @@ struct SingleMIDIReProcessor {
 							if (!(BoolSettings & SMP_BOOL_SETTINGS_IGNORE_PITCHES)) {
 								Track.push_back(RunningStatusByte);
 								if (this->PitchMapCore) {
-									WORD PitchBend = IO << 7;
+									WORD PitchBend = CurByte << 7;
 									PitchBend |= file_input.get() & 0x7F;
 									PitchBend = (*PitchMapCore)[PitchBend];
 									Track.push_back(byte1 = ((PitchBend >> 7) & 0x7F));
 									Track.push_back(byte2 = (PitchBend & 0x7F));
 								}
 								else {
-									Track.push_back(byte1 = IO);
+									Track.push_back(byte1 = CurByte);
 									Track.push_back(byte2 = (file_input.get() & 0x7F));
 								}
 								EventCounter++;
@@ -1026,7 +1031,7 @@ struct SingleMIDIReProcessor {
 								TickTranq = LastDeltaTime;
 								for (int i = 0; i < (INT32)DeltaTimeSize; i++)
 									Track.pop_back();
-								byte1 = IO;
+								byte1 = CurByte;
 								byte2 = file_input.get();///for 2nd parameter
 								CurrentPitch[RunningStatusByte & 0xF] = (((DWORD)byte1 << 8) | (DWORD)byte2);
 								continue;
@@ -1041,7 +1046,7 @@ struct SingleMIDIReProcessor {
 						BYTE TempIOByte;
 
 						CorruptData.clear();//Corrupted data handler when?//
-						CorruptData.push_back(IO);
+						CorruptData.push_back(CurByte);
 						while (T != 0x2FFF00 && file_input.good() && !file_input.eof()) {
 							TempIOByte = file_input.get();
 							CorruptData.push_back(TempIOByte);

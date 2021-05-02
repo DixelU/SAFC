@@ -85,12 +85,15 @@ struct SingleMIDIInfoCollector {
 	polyphony_graph PolyphonyFiniteDifference;
 	std::vector<TrackData> Tracks;
 	WORD PPQ;
+	BIT AllowLegacyRunningStatusMetaIgnorance;
 	//Locker<btree::btree_map<UINT64, UINT64>> Polyphony;
 	//Locker<btree::btree_map<>>
-	SingleMIDIInfoCollector(std::wstring filename, WORD PPQ) : FileName(filename), LogLine(" "), Processing(0), Finished(0), PPQ(PPQ) { }
+	SingleMIDIInfoCollector(std::wstring filename, WORD PPQ, BIT AllowLegacyRunningStatusMetaIgnorance = false) : FileName(filename), LogLine(" "), Processing(0), Finished(0), PPQ(PPQ), AllowLegacyRunningStatusMetaIgnorance(AllowLegacyRunningStatusMetaIgnorance) { }
 	void Lookup() {
 		Processing = true;
 		bbb_ffr file_input(FileName.c_str());
+		ErrorLine = " ";
+		LogLine = " ";
 		//std::array<DWORD, 4096> CurHolded;
 		DWORD MTRK = 0, vlv = 0;
 		UINT64 LastTick = 0;

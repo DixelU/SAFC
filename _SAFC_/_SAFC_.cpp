@@ -299,7 +299,7 @@ struct FileSettings {////per file settings
 	FLOAT NewTempo;
 	UINT64 FileSize;
 	INT64 SelectionStart, SelectionLength;
-	BIT IsMIDI, InplaceMergeEnabled, OffsetResetOnSelection;
+	BIT IsMIDI, InplaceMergeEnabled, OffsetResetOnSelection, AllowLegacyRunningStatusMetaIgnorance;
 	CutAndTransposeKeys *KeyMap;
 	PLC<BYTE, BYTE> *VolumeMap;
 	PLC<WORD, WORD> *PitchBendMap;
@@ -334,6 +334,7 @@ struct FileSettings {////per file settings
 		BoolSettings = DefaultBoolSettings;
 		FileNamePostfix = "_.mid";//_FILENAMEWITHEXTENSIONSTRING_.mid
 		WFileNamePostfix = L"_.mid";
+		AllowLegacyRunningStatusMetaIgnorance = false;
 	}
 	inline void SwitchBoolSetting(DWORD SMP_BoolSetting) {
 		BoolSettings ^= SMP_BoolSetting;
@@ -346,6 +347,7 @@ struct FileSettings {////per file settings
 	SingleMIDIReProcessor* BuildSMRP() {
 		SingleMIDIReProcessor *SMRP = new SingleMIDIReProcessor(this->Filename, this->BoolSettings, this->NewTempo, this->OffsetTicks, this->NewPPQN, this->GroupID, this->VolumeMap, this->PitchBendMap, this->KeyMap, this->WFileNamePostfix, this->InplaceMergeEnabled, this->FileSize, this->SelectionStart, this->SelectionLength);
 		SMRP->AppearanceFilename = this->AppearanceFilename;
+		SMRP->AllowLegacyRunningStatusMetaIgnorance = this->AllowLegacyRunningStatusMetaIgnorance;
 		return SMRP;
 	}
 };
@@ -625,7 +627,7 @@ namespace PropsAndSets {
 			((CheckBox*)((*PASWptr)["BOOL_IGN_ALL_EX_TPS"]))->State = _Data[ID].BoolSettings&_BoolSettings::ignore_all_but_tempos_notes_and_pitch;
 
 			((CheckBox*)((*PASWptr)["INPLACE_MERGE"]))->State = _Data[ID].InplaceMergeEnabled;
-
+			((CheckBox*)((*PASWptr)["LEGACY_META_RSB_BEHAVIOR"]))->State = _Data[ID].AllowLegacyRunningStatusMetaIgnorance;
 
 			((TextBox*)((*PASWptr)["CONSTANT_PROPS"]))->SafeStringReplace(
 				"File size: " + std::to_string(_Data[ID].FileSize) + "b\n" +
@@ -653,7 +655,7 @@ namespace PropsAndSets {
 			UIElement->Graph = nullptr;
 			//delete SMICptr;
 		}
-		SMICptr = new SingleMIDIInfoCollector(_Data.Files[currentID].Filename, _Data.Files[currentID].OldPPQN);
+		SMICptr = new SingleMIDIInfoCollector(_Data.Files[currentID].Filename, _Data.Files[currentID].OldPPQN, _Data.Files[currentID].AllowLegacyRunningStatusMetaIgnorance);
 		std::thread th([]() {
 			WH->MainWindow_ID = "SMIC";
 			WH->DisableAllWindows();
@@ -695,7 +697,7 @@ namespace PropsAndSets {
 						ErrorLine->SafeStringReplace(SMICptr->ErrorLine);
 					if (InfoLine->Text != SMICptr->LogLine)
 						InfoLine->SafeStringReplace(SMICptr->LogLine);
-					Sleep(100);
+					Sleep(10);
 				}
 				InfoLine->SafeStringReplace("Finished");
 				All_Exp->Enable();
@@ -1014,6 +1016,11 @@ namespace PropsAndSets {
 			_Data[currentID].SelectionLength = T;
 		}
 
+		_Data[currentID].AllowLegacyRunningStatusMetaIgnorance = (((CheckBox*)(*SMPASptr)["LEGACY_META_RSB_BEHAVIOR"])->State);
+
+		if (_Data[currentID].AllowLegacyRunningStatusMetaIgnorance)
+			std::cout << "WARNING: Legacy way of treating running status events can also allow major corruptions of midi structure!" << std::endl;
+
 		_Data[currentID].SetBoolSetting(_BoolSettings::remove_empty_tracks, (((CheckBox*)(*SMPASptr)["BOOL_REM_TRCKS"])->State));
 		_Data[currentID].SetBoolSetting(_BoolSettings::remove_remnants, (((CheckBox*)(*SMPASptr)["BOOL_REM_REM"])->State));
 		_Data[currentID].SetBoolSetting(_BoolSettings::all_instruments_to_piano, (((CheckBox*)(*SMPASptr)["BOOL_PIANO_ONLY"])->State));
@@ -1033,6 +1040,7 @@ namespace PropsAndSets {
 		for (auto Y = _Data.Files.begin(); Y != _Data.Files.end(); Y++) {
 			DefaultBoolSettings = Y->BoolSettings = _Data[currentID].BoolSettings;
 			_Data.InplaceMergeFlag = Y->InplaceMergeEnabled = _Data[currentID].InplaceMergeEnabled;
+			Y->AllowLegacyRunningStatusMetaIgnorance = _Data[currentID].AllowLegacyRunningStatusMetaIgnorance;
 		}
 	}
 
@@ -1639,6 +1647,8 @@ void Init() {///SetIsFontedVar
 
 	(*T)["SELECT_START"] = new InputField(" ", -37.5 - WindowHeapSize, -5 - WindowHeapSize, 10, 70, System_White, NULL, 0x007FFFFF, System_White, "Selection start", 13, _Align::center, _Align::right, InputField::Type::NaturalNumbers);
 	(*T)["SELECT_LENGTH"] = new InputField(" ", 37.5 - WindowHeapSize, -5 - WindowHeapSize, 10, 70, System_White, NULL, 0x007FFFFF, System_White, "Selection length", 14, _Align::center, _Align::right, InputField::Type::WholeNumbers);
+
+	(*T)["LEGACY_META_RSB_BEHAVIOR"] = new CheckBox(97.5 - WindowHeapSize, -5 - WindowHeapSize, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, false, System_White, _Align::right, "Enables legacy RSB/Meta behavior");
 
 	(*T)["CONSTANT_PROPS"] = new TextBox("_Props text example_", System_White, 0, -57.5 - WindowHeapSize, 80 - WindowHeapSize, 200 - 1.5 * WindowHeapSize, 7.5, 0, 0, 1);
 
