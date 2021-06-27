@@ -80,9 +80,11 @@ struct SingleMIDIInfoCollector {
 	std::string LogLine;
 	std::string ErrorLine;
 	using tempo_graph = btree::btree_map<INT64, TempoEvent>;
-	using polyphony_graph = btree::btree_map<INT64, NoteOnOffCounter>;
+	using der_polyphony_graph = btree::btree_map<INT64, NoteOnOffCounter>;
+	using polyphony_graph = btree::btree_map<INT64, INT64>;
 	tempo_graph TempoMap;
-	polyphony_graph PolyphonyFiniteDifference;
+	//der_polyphony_graph PolyphonyFiniteDifference;
+	polyphony_graph Polyphony;
 	std::vector<TrackData> Tracks;
 	WORD PPQ;
 	BIT AllowLegacyRunningStatusMetaIgnorance;
@@ -90,6 +92,7 @@ struct SingleMIDIInfoCollector {
 	//Locker<btree::btree_map<>>
 	SingleMIDIInfoCollector(std::wstring filename, WORD PPQ, BIT AllowLegacyRunningStatusMetaIgnorance = false) : FileName(filename), LogLine(" "), Processing(0), Finished(0), PPQ(PPQ), AllowLegacyRunningStatusMetaIgnorance(AllowLegacyRunningStatusMetaIgnorance) { }
 	void Lookup() {
+		der_polyphony_graph PolyphonyFiniteDifference;
 		Processing = true;
 		bbb_ffr file_input(FileName.c_str());
 		ErrorLine = " ";
@@ -205,6 +208,9 @@ struct SingleMIDIInfoCollector {
 		}
 		TempoMap[LastTick] = TempoMap.rbegin()->second;
 		PolyphonyFiniteDifference[LastTick + 1] = 0;
+		INT64 CurPolyphony = 0;
+		for (auto cur_pair : PolyphonyFiniteDifference)
+			Polyphony[cur_pair.first] = (CurPolyphony += cur_pair.second);
 		Finished = true;
 		Processing = false;
 		file_input.close();

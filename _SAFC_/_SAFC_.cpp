@@ -710,7 +710,8 @@ namespace PropsAndSets {
 			auto UIElement_TG = (Graphing<SingleMIDIInfoCollector::tempo_graph>*)(*(*WH)["SMIC"])["TEMPO_GRAPH"];
 			UIElement_TG->Graph = &(SMICptr->TempoMap);
 			auto UIElement_PG = (Graphing<SingleMIDIInfoCollector::polyphony_graph>*)(*(*WH)["SMIC"])["POLY_GRAPH"];
-			UIElement_PG->Graph = &(SMICptr->PolyphonyFiniteDifference);
+			UIElement_PG->Graph = &(SMICptr->Polyphony);
+
 			auto UIElement_TB = (TextBox*)(*(*WH)["SMIC"])["TOTAL_INFO"];
 			UIElement_TB->SafeStringReplace(
 				"Total (real) tracks: " + std::to_string(SMICptr->Tracks.size()) + "; ... "
@@ -784,8 +785,6 @@ namespace PropsAndSets {
 				InfoLine->SafeStringReplace("Collecting data for exporting...");
 
 				using line_data = struct {
-					INT64 NoteOns;
-					INT64 NoteOffs;
 					INT64 Polyphony;
 					double Seconds;
 					double Tempo;
@@ -800,20 +799,18 @@ namespace PropsAndSets {
 				double seconds_per_tick = 0;
 				header = (
 					  "Tick" + CSV_DELIM
-					+ "NoteOffs" + CSV_DELIM 
-					+ "NoteOns" + CSV_DELIM
 					+ "Polyphony" + CSV_DELIM
 					+ "Time(seconds)" + CSV_DELIM
 					+ "Tempo"
 					+ "\n");
 				btree::btree_map<INT64, line_data> info;
-				for (auto cur_pair : SMICptr->PolyphonyFiniteDifference)
+				for (auto cur_pair : SMICptr->Polyphony)
 					info[cur_pair.first] = line_data({
-						cur_pair.second.NoteOn,cur_pair.second.NoteOff,(Polyphony += cur_pair.second), 0., 0.
+						cur_pair.second, 0., 0.
 					}); 
-				auto it_ptree = SMICptr->PolyphonyFiniteDifference.begin();
+				auto it_ptree = SMICptr->Polyphony.begin();
 				for (auto cur_pair : SMICptr->TempoMap) {
-					while (it_ptree != SMICptr->PolyphonyFiniteDifference.end() && it_ptree->first < cur_pair.first ) {
+					while (it_ptree != SMICptr->Polyphony.end() && it_ptree->first < cur_pair.first ) {
 						seconds += seconds_per_tick * (it_ptree->first - last_tick);
 						last_tick = it_ptree->first;
 						auto& t = info[it_ptree->first];
@@ -827,14 +824,14 @@ namespace PropsAndSets {
 					else {
 						seconds += seconds_per_tick * (cur_pair.first - last_tick);
 						info[cur_pair.first] = line_data({
-						 0,0,Polyphony, seconds, cur_pair.second
-							});
+							Polyphony, seconds, cur_pair.second
+						});
 					}
 					last_tick = cur_pair.first;
 					tempo = cur_pair.second;
 					seconds_per_tick = (60 / (tempo * PPQ));
 				}
-				while (it_ptree != SMICptr->PolyphonyFiniteDifference.end()) {
+				while (it_ptree != SMICptr->Polyphony.end()) {
 					seconds += seconds_per_tick * (it_ptree->first - last_tick);
 					last_tick = it_ptree->first;
 					auto& t = info[it_ptree->first];
@@ -850,8 +847,6 @@ namespace PropsAndSets {
 					out << header;
 					for (auto cur_pair : info) {
 						out << cur_pair.first << CSV_DELIM
-							<< cur_pair.second.NoteOffs << CSV_DELIM
-							<< cur_pair.second.NoteOns << CSV_DELIM
 							<< cur_pair.second.Polyphony << CSV_DELIM
 							<< cur_pair.second.Seconds << CSV_DELIM
 							<< cur_pair.second.Tempo << std::endl;
@@ -860,8 +855,6 @@ namespace PropsAndSets {
 				else {
 					for (auto cur_pair : info) {
 						out.write((const char*)(&cur_pair.first), 8);
-						out.write((const char*)(&cur_pair.second.NoteOffs), 8);
-						out.write((const char*)(&cur_pair.second.NoteOns), 8);
 						out.write((const char*)(&cur_pair.second.Polyphony), 8);
 						out.write((const char*)(&cur_pair.second.Seconds), 8);
 						out.write((const char*)(&cur_pair.second.Tempo), 8);
@@ -1725,7 +1718,7 @@ void Init() {///SetIsFontedVar
 	(*T)["POLY_GRAPH"] = new Graphing<SingleMIDIInfoCollector::polyphony_graph>(
 		0, -WindowHeapSize + 95, 285, 50, (1. / 20000.), true, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F00FF, 0xFF00FFFF, 0x7F7F7F7F, nullptr, System_White, false
 		);
-	(*T)["PG_SWITCH"] = new Button("Enable graph B", System_White, PropsAndSets::SMIC::EnablePG, 37.5, 60 - WindowHeapSize, 70, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, System_White, "Polyphony differences graph");
+	(*T)["PG_SWITCH"] = new Button("Enable graph B", System_White, PropsAndSets::SMIC::EnablePG, 37.5, 60 - WindowHeapSize, 70, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, System_White, "Polyphony graph");
 	(*T)["TG_SWITCH"] = new Button("Enable graph A", System_White, PropsAndSets::SMIC::EnableTG, -37.5, 60 - WindowHeapSize, 70, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, System_White, "Tempo graph");
 	(*T)["ALL_EXP"] = new Button("Export all", System_White, PropsAndSets::SMIC::ExportAll, 110, 60 - WindowHeapSize, 65, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr);
 	(*T)["TG_EXP"] = new Button("Export Tempo", System_White, PropsAndSets::SMIC::ExportTG, -110, 60 - WindowHeapSize, 65, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr);
