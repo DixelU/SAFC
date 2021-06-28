@@ -153,6 +153,9 @@
     <ClInclude Include="SAFGUIF\movable_resizeable_window.h">
       <Filter>Файлы заголовков\SAFGUIF</Filter>
     </ClInclude>
+    <ClInclude Include="MRWF.h">
+      <Filter>Файлы заголовков\MIDI Processing</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="_SAFC_.cpp">

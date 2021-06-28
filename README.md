@@ -13,4 +13,4 @@ There's also discord server, where SAF apps were publishing all that time since 
 **Noting that Support of Windows XP was dropped since v1.0**
 Also thanks to all beta testers on SAF server!  
 
-You can compile it using MSVC 2017 (and later) by installing freeglut and glew using vcpkg/nuget :)
+You can compile it using MSVC 2017 (and later) by installing freeglut (and glew?) using vcpkg/nuget :)

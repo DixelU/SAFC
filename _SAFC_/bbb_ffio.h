@@ -15,7 +15,7 @@ private:
 	bool is_open;
 	bool is_eof;
 	bool next_chunk_is_unavailable;
-	const int true_buffer_size;
+	const size_t true_buffer_size;
 	inline void __read_next_chunk() {
 		if (!next_chunk_is_unavailable) {
 			size_t new_buffer_len = _fread_nolock_s(buffer, buffer_size, 1, buffer_size, file);
@@ -96,9 +96,17 @@ public:
 		}
 		close();
 	}
-	inline void seekg(signed long long int abs_pos) {
-		_fseeki64_nolock(file, file_pos = abs_pos, 0); 
-		__read_next_chunk();
+	inline void seekg(unsigned long long int abs_pos) {
+		auto chunk_begining = file_pos - inner_buffer_pos;
+		auto chunk_ending = chunk_begining + buffer_size;
+		if (abs_pos >= chunk_begining && abs_pos < chunk_ending) {
+			inner_buffer_pos = abs_pos - chunk_begining;
+			file_pos = abs_pos;
+		}
+		else {
+			_fseeki64_nolock(file, file_pos = abs_pos, SEEK_SET);
+			__read_next_chunk();
+		}
 	}
 	inline unsigned char get() {
 		if (is_open && !is_eof) {

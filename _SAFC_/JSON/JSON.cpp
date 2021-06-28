@@ -217,7 +217,7 @@ bool JSON::ExtractString(const wchar_t **data, std::wstring &str)
 		else if (next_char == L'"')
 		{
 			(*data)++;
-			str.reserve(); // Remove unused capacity
+			//str.reserve(); // Remove unused capacity
 			return true;
 		}
 		
