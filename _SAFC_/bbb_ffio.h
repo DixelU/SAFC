@@ -123,7 +123,7 @@ public:
 		is_eof = true;
 		is_open = false;
 	}
-	inline signed long long int  tellg() const {
+	inline signed long long int tellg() const {
 		return file_pos;
 	}
 	inline bool good() {

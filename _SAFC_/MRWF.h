@@ -1,6 +1,7 @@
 #ifndef SAF_MRWF_H
 #define SAF_MRWF_H
 
+#include <sstream>
 #include <iostream>
 #include <memory>
 #include <fstream>
@@ -8,6 +9,8 @@
 #include <string>
 #include <stack>
 #include <array>
+
+#include <coroutine>
 
 #include "bbb_ffio.h"
 
@@ -313,7 +316,7 @@ struct meta : midi_event {
 		out.insert(out.end(), data, data + meta_size);
 		return true;
 	}
-	std::int64_t event_size() const override { return 3 + (log(meta_size) / log(128)) + meta_size; }
+	std::int64_t event_size() const override { return 3 + (log((double)meta_size) / log(128.)) + meta_size; }
 	type event_type() const override { return deduct_type(); }
 
 	inline type deduct_type() const {
@@ -336,11 +339,10 @@ struct meta : midi_event {
 struct sysex : midi_event {
 	uint8_t* data;
 	uint32_t sysex_size;
-	uint8_t sysex_head;
 	uint8_t first_byte;
 
-	sysex(uint64_t absolute_tick, uint8_t sysex_head, uint8_t first_byte, uint32_t sysex_size /*size of meta data*/) :
-		midi_event(absolute_tick), sysex_head(sysex_head), first_byte(first_byte),
+	sysex(uint64_t absolute_tick, uint8_t first_byte, uint32_t sysex_size /*size of meta data*/) :
+		midi_event(absolute_tick), first_byte(first_byte),
 		data(new uint8_t[sysex_size]), sysex_size(sysex_size) { }
 	~sysex() override {
 		delete[] data;
@@ -354,12 +356,11 @@ struct sysex : midi_event {
 		details::push_vlv(delta_time, out);
 		auto first_param_position = out.size();
 		out.push_back(first_byte);
-		out.push_back(sysex_head);
 		details::push_vlv(sysex_size, out);
 		out.insert(out.end(), data, data + sysex_size);
 		return true;
 	}
-	std::int64_t event_size() const override { return 3 + (log(sysex_size) / log(128)) + sysex_size; } 
+	std::int64_t event_size() const override { return 3 + (log((double)sysex_size) / log(128.)) + sysex_size; } 
 	type event_type() const override { return type::sysex; }
 };
 
@@ -398,10 +399,13 @@ struct gradient_color_event : meta {
 	uint8_t& a2() { return data[11]; }
 };
 
+/* constructs a view of midi track */
 struct midi_track {
-	std::vector<midi_event*> events;
-	std::vector<full_note_view> note_views;
-	full_note_view::note_events_ordering events_ordering;
+
+	struct parse_error_reporter {
+		virtual void report_warning(std::string str) { std::clog << str << std::endl; };
+		virtual void report_error(std::string str) { std::cerr << str << std::endl; };
+	};
 
 	struct track_reading_settings {
 		bool legacy_rsb_handling;
@@ -411,273 +415,325 @@ struct midi_track {
 		bool report_on_corruption_detection;
 	};
 
-	void read_track(bbb_ffr* file_input, track_reading_settings* reading_settings) {
-		std::array<std::stack<full_note_view>, 4096> polyphony;
-
+	struct lazy_direct_track_reader_data {
+		uint64_t file_MTrk_position = 0;
+		uint64_t expected_track_size = 0;
 		uint64_t current_tick = 0;
-		uint32_t header = 0;
 		uint8_t running_status_byte = 0;
+		midi_track::parse_error_reporter* error_reporter;
 		bool active_track = true;
+		bool first_run = true;
+	};
 
-		/*header*/
-		while (header != details::expected_track_header && file_input->good() && !file_input->eof())
-			header = (header << 8) | file_input->get();
+	std::vector<midi_event*> events;
+	std::vector<full_note_view> note_views;
+	full_note_view::note_events_ordering events_ordering;
 
-		/*passing through tracksize*/
-		for (int i = 0; i < 4; i++)
-			file_input->get();
+	parse_error_reporter* error_reporter;
+	bool is_view_of_track_data;
 
-		if (file_input->eof())
-			return;
+	midi_track():error_reporter(new parse_error_reporter){
 
-		while ((active_track || reading_settings->continue_parsing_after_end_of_track) && file_input->good() && !file_input->eof()) {
-			uint8_t event_type = 0;
-			auto [new_delta_time, delta_time_length] = details::get_vlv(*file_input);
-			current_tick += new_delta_time;
-			event_type = file_input->get();
+	}
+	midi_track(parse_error_reporter* error_reporter) 
+		:error_reporter(error_reporter) {
 
-			if (reading_settings->continue_parsing_after_end_of_track &&
-				!active_track && new_delta_time == 0x4D && event_type == 0x54) {
-				auto supposed_r = file_input->get();
-				auto supposed_k = file_input->get();
-				bool MTrk_found = false;
-				if (supposed_k == 0x72 && supposed_r == 0x6B)
-					MTrk_found = true;
-				file_input->seekg(file_input->tellg() - 4);
-				if (MTrk_found)
-					goto loop_break;
+	}
+
+	~midi_track() {
+		delete error_reporter;
+		if (!is_view_of_track_data) {
+			release_track_data();
+		}
+	}
+
+	void release_track_data() {
+		note_views.clear();
+		for (auto ptr : events) {
+			delete ptr;
+		}
+	}
+
+	/* nullptr signs the end of track */
+	inline static midi_event* lazy_direct_track_reading(
+		bbb_ffr* file_input, 
+		track_reading_settings* reading_settings,
+		lazy_direct_track_reader_data* lazy_data
+	) {
+		auto first_run_initialiser = [&]() -> bool {
+			uint32_t header = 0;
+
+			while (header != details::expected_track_header && file_input->good() && !file_input->eof())
+				header = (header << 8) | file_input->get();
+
+			lazy_data->file_MTrk_position = file_input->tellg() - 4;
+
+			/*passing through tracksize*/
+			for (int i = 0; i < 4; i++) {
+				auto track_size_byte = file_input->get();
+				lazy_data->expected_track_size = (lazy_data->expected_track_size << 8) | track_size_byte;
 			}
 
-			switch (event_type) {
-				SAF_MRWF_MULTICHANNEL_CASE(0x8) {
-					running_status_byte = event_type;
-					uint8_t key = file_input->get();
-					uint8_t velocity = file_input->get();
-					uint8_t channel = event_type & 0xF;
-					uint16_t index = ((uint16_t)key << 4) | (channel);
-					if (polyphony[index].size()) {
-						auto event_ptr = new noteoff(current_tick, channel, key, velocity);
-						event_ptr->enabled = active_track;
-						events.push_back(event_ptr);
-						note_views.push_back(polyphony[index].top());
-						polyphony[index].pop();
-						note_views.back().end = event_ptr;
-					}
-					else if(reading_settings->report_on_negative_polyhony) {
-						auto message = "Negative polyphony at " + std::to_string(current_tick);
-						std::cerr << message << std::endl;
-						if (reading_settings->throw_on_negative_polyphony)
-							throw std::runtime_error(message);
-					}
+			if (file_input->eof())
+				return false;
+
+			lazy_data->first_run = false;
+			return true;
+		};
+
+		if (lazy_data->first_run) {
+			auto init_state = first_run_initialiser();
+			if (!init_state)
+				return nullptr;
+		}
+
+		bool track_state = 
+			(lazy_data->active_track || reading_settings->continue_parsing_after_end_of_track) 
+			&& file_input->good() && !file_input->eof();
+
+		if (track_state)
+			return nullptr;
+
+		uint8_t event_type = 0;
+		auto [new_delta_time, delta_time_length] = details::get_vlv(*file_input);
+		lazy_data->current_tick += new_delta_time;
+		event_type = file_input->get();
+
+		if (reading_settings->continue_parsing_after_end_of_track &&
+			!lazy_data->active_track && new_delta_time == 0x4D && event_type == 0x54) {
+			auto supposed_r = file_input->get();
+			auto supposed_k = file_input->get();
+			bool MTrk_found = false;
+			if (supposed_k == 0x72 && supposed_r == 0x6B)
+				MTrk_found = true;
+			file_input->seekg(file_input->tellg() - 4);
+			if (MTrk_found)
+				return nullptr;
+		}
+
+		switch (event_type) {
+			SAF_MRWF_MULTICHANNEL_CASE(0x8) {
+				lazy_data->running_status_byte = event_type;
+				uint8_t key = file_input->get();
+				uint8_t velocity = file_input->get();
+				uint8_t channel = event_type & 0xF;
+				uint16_t index = ((uint16_t)key << 4) | (channel);
+
+				auto event_ptr = new noteoff(lazy_data->current_tick, channel, key, velocity);
+				event_ptr->enabled = lazy_data->active_track;
+
+				return event_ptr;
+			}
+			break;
+			SAF_MRWF_MULTICHANNEL_CASE(0x9) {
+				lazy_data->running_status_byte = event_type;
+				uint8_t key = file_input->get();
+				uint8_t velocity = file_input->get();
+				uint8_t channel = event_type & 0xF;
+				uint16_t index = ((uint16_t)key << 4) | (channel);
+				if (velocity) {
+					auto event_ptr = new noteon(lazy_data->current_tick, channel, key, velocity);
+					event_ptr->enabled = lazy_data->active_track;
+					return event_ptr;
 				}
-				break;
-				SAF_MRWF_MULTICHANNEL_CASE(0x9) {
-					running_status_byte = event_type;
-					uint8_t key = file_input->get();
-					uint8_t velocity = file_input->get();
-					uint8_t channel = event_type & 0xF;
-					uint16_t index = ((uint16_t)key << 4) | (channel);
-					if (velocity) {
-						auto event_ptr = new noteon(current_tick, channel, key, velocity);
-						event_ptr->enabled = active_track;
-						events.push_back(event_ptr);
-						polyphony[index].push({&events_ordering , event_ptr, nullptr});
-					}
-					else if (polyphony[index].size()) {
-						auto event_ptr = new noteoff(current_tick, channel, key, velocity);
-						event_ptr->enabled = active_track;
-						events.push_back(event_ptr);
-						note_views.push_back(polyphony[index].top());
-						polyphony[index].pop();
-						note_views.back().end = event_ptr;
-					}
-					else if (reading_settings->report_on_negative_polyhony) {
-						auto message = "Negative polyphony at " + std::to_string(current_tick);
-						std::cerr << message << std::endl;
-						if (reading_settings->throw_on_negative_polyphony)
-							throw std::runtime_error(message);
-					}
+			}
+			break;
+			SAF_MRWF_MULTICHANNEL_CASE(0xA) {
+				lazy_data->running_status_byte = event_type;
+				uint8_t key = file_input->get();
+				uint8_t value = file_input->get();
+				uint8_t channel = event_type & 0xF;
+				auto event_ptr = new note_aftertouch(lazy_data->current_tick, channel, key, value);
+				event_ptr->enabled = lazy_data->active_track;
+				return event_ptr;
+			}
+			break;
+			SAF_MRWF_MULTICHANNEL_CASE(0xB) {
+				lazy_data->running_status_byte = event_type;
+				uint8_t contr_no = file_input->get();
+				uint8_t value = file_input->get();
+				uint8_t channel = event_type & 0xF;
+				auto event_ptr = (new controller(lazy_data->current_tick, channel, contr_no, value));
+				event_ptr->enabled = lazy_data->active_track;
+				return event_ptr;
+			}
+			break;
+			SAF_MRWF_MULTICHANNEL_CASE(0xC) {
+				lazy_data->running_status_byte = event_type;
+				uint8_t prog_no = file_input->get();
+				uint8_t channel = event_type & 0xF;
+				auto event_ptr = (new program_change(lazy_data->current_tick, channel, prog_no));
+				event_ptr->enabled = lazy_data->active_track;
+				return event_ptr;
+			}
+			break;
+			SAF_MRWF_MULTICHANNEL_CASE(0xD) {
+				lazy_data->running_status_byte = event_type;
+				uint8_t value = file_input->get();
+				uint8_t channel = event_type & 0xF;
+				auto event_ptr = (new channel_aftertouch(lazy_data->current_tick, channel, value));
+				event_ptr->enabled = lazy_data->active_track;
+				return event_ptr;
+			}
+			break;
+			SAF_MRWF_MULTICHANNEL_CASE(0xE) {
+				lazy_data->running_status_byte = event_type;
+				uint8_t pitch_lsb = file_input->get();
+				uint8_t pitch_msb = file_input->get();
+				uint8_t channel = event_type & 0xF;
+				auto event_ptr = (new pitch_change(lazy_data->current_tick, channel, pitch_lsb, pitch_msb));
+				event_ptr->enabled = lazy_data->active_track;
+				return event_ptr;
+			}
+			break;
+			case(0xFF): {
+				if (!reading_settings->legacy_rsb_handling)
+					lazy_data->running_status_byte = 0;
+				uint8_t meta_type = file_input->get();
+				auto [meta_length, meta_length_length] = details::get_vlv(*file_input);
+				auto event_ptr = new meta(lazy_data->current_tick, meta_type, meta_length);
+				event_ptr->enabled = lazy_data->active_track;
+				for (size_t i = 0; i < meta_length; i++)
+					event_ptr->data[i] = file_input->get();
+				if (event_ptr->deduct_type() == midi_event::type::endoftrack) {
+					event_ptr->enabled = false;
+					lazy_data->active_track = false;
+					if (!reading_settings->continue_parsing_after_end_of_track)
+						return nullptr;
 				}
-				break;
-				SAF_MRWF_MULTICHANNEL_CASE(0xA) {
-					running_status_byte = event_type;
-					uint8_t key = file_input->get();
-					uint8_t value = file_input->get();
-					uint8_t channel = event_type & 0xF;
-					auto event_ptr = new note_aftertouch(current_tick, channel, key, value);
-					event_ptr->enabled = active_track;
-					events.push_back(event_ptr);
-				}
-				break;
-				SAF_MRWF_MULTICHANNEL_CASE(0xB) {
-					running_status_byte = event_type;
-					uint8_t contr_no = file_input->get();
-					uint8_t value = file_input->get();
-					uint8_t channel = event_type & 0xF;
-					auto event_ptr = (new controller(current_tick, channel, contr_no, value));
-					event_ptr->enabled = active_track;
-					events.push_back(event_ptr);
-				}
-				break;
-				SAF_MRWF_MULTICHANNEL_CASE(0xC) {
-					running_status_byte = event_type;
-					uint8_t prog_no = file_input->get();
-					uint8_t channel = event_type & 0xF;
-					auto event_ptr = (new program_change(current_tick, channel, prog_no));
-					event_ptr->enabled = active_track;
-					events.push_back(event_ptr);
-				}
-				break;
-				SAF_MRWF_MULTICHANNEL_CASE(0xD) {
-					running_status_byte = event_type;
-					uint8_t value = file_input->get();
-					uint8_t channel = event_type & 0xF;
-					auto event_ptr = (new channel_aftertouch(current_tick, channel, value));
-					event_ptr->enabled = active_track;
-					events.push_back(event_ptr);
-				}
-				break;
-				SAF_MRWF_MULTICHANNEL_CASE(0xE) {
-					running_status_byte = event_type;
-					uint8_t pitch_lsb = file_input->get();
-					uint8_t pitch_msb = file_input->get();
-					uint8_t channel = event_type & 0xF;
-					auto event_ptr = (new pitch_change(current_tick, channel, pitch_lsb, pitch_msb));
-					event_ptr->enabled = active_track;
-					events.push_back(event_ptr);
-				}
-				break;
-				case(0xFF): {
-					if(!reading_settings->legacy_rsb_handling)
-						running_status_byte = 0;
-					uint8_t meta_type = file_input->get();
-					auto [meta_length, meta_length_length] = details::get_vlv(*file_input);
-					auto event_ptr = new meta(current_tick, meta_type, meta_length);
-					event_ptr->enabled = active_track;
-					events.push_back(event_ptr);
-					for (size_t i = 0; i < meta_length; i++)
-						event_ptr->data[i] = file_input->get();
-					if (event_ptr->deduct_type() == midi_event::type::endoftrack) {
-						event_ptr->enabled = false;
-						active_track = false;
-						if (!reading_settings->continue_parsing_after_end_of_track)
-							goto loop_break;
-					}
-				}
-				break;
-				case(0xF7):case(0xF0): {
-					running_status_byte = 0;
-					auto [sysex_length, sysex_length_length] = details::get_vlv(*file_input);
-					for (size_t i = 0; i < sysex_length; i++)
-						file_input->get();
-				}
-				break;
-				default: {
-				switch (running_status_byte) {
+				return event_ptr;
+			}
+			break;
+			case(0xF7):case(0xF0): {
+				if (!reading_settings->legacy_rsb_handling)
+					lazy_data->running_status_byte = 0;
+				auto [sysex_length, sysex_length_length] = details::get_vlv(*file_input);
+				auto event_ptr = new sysex(lazy_data->current_tick, event_type, sysex_length);
+				for (size_t i = 0; i < sysex_length; i++)
+					event_ptr->data[i] = file_input->get();
+				event_ptr->enabled = false;
+			}
+			break;
+			default: {
+				switch (lazy_data->running_status_byte) {
 					SAF_MRWF_MULTICHANNEL_CASE(0x8) {
-						uint8_t key = running_status_byte;
+						uint8_t key = lazy_data->running_status_byte;
 						uint8_t velocity = file_input->get();
 						uint8_t channel = event_type & 0xF;
 						uint16_t index = ((uint16_t)key << 4) | (channel);
-						if (polyphony[index].size()) {
-							auto event_ptr = new noteoff(current_tick, channel, key, velocity);
-							event_ptr->enabled = active_track;
-							events.push_back(event_ptr);
-							note_views.push_back(polyphony[index].top());
-							polyphony[index].pop();
-							note_views.back().end = event_ptr;
-						}
-						else if (reading_settings->report_on_negative_polyhony) {
-							auto message = "Negative polyphony at " + std::to_string(current_tick);
-							std::cerr << message << std::endl;
-							if (reading_settings->throw_on_negative_polyphony)
-								throw std::runtime_error(message);
-						}
+						auto event_ptr = new noteoff(lazy_data->current_tick, channel, key, velocity);
+						event_ptr->enabled = lazy_data->active_track;
+						return event_ptr;
 					}
 					break;
 					SAF_MRWF_MULTICHANNEL_CASE(0x9) {
-						uint8_t key = running_status_byte;
+						uint8_t key = lazy_data->running_status_byte;
 						uint8_t velocity = file_input->get();
 						uint8_t channel = event_type & 0xF;
 						uint16_t index = ((uint16_t)key << 4) | (channel);
 						if (velocity) {
-							auto event_ptr = new noteon(current_tick, channel, key, velocity);
-							event_ptr->enabled = active_track;
-							events.push_back(event_ptr);
-							polyphony[index].push({ &events_ordering , event_ptr, nullptr });
-						}
-						else if (polyphony[index].size()) {
-							auto event_ptr = new noteoff(current_tick, channel, key, velocity);
-							event_ptr->enabled = active_track;
-							events.push_back(event_ptr);
-							note_views.push_back(polyphony[index].top());
-							polyphony[index].pop();
-							note_views.back().end = event_ptr;
-						}
-						else if (reading_settings->report_on_negative_polyhony) {
-							auto message = "Negative polyphony at " + std::to_string(current_tick);
-							std::cerr << message << std::endl;
-							if (reading_settings->throw_on_negative_polyphony)
-								throw std::runtime_error(message);
+							auto event_ptr = new noteon(lazy_data->current_tick, channel, key, velocity);
+							event_ptr->enabled = lazy_data->active_track;
+							return event_ptr;
 						}
 					}
 					break;
 					SAF_MRWF_MULTICHANNEL_CASE(0xA) {
-						uint8_t key = running_status_byte;
+						uint8_t key = lazy_data->running_status_byte;
 						uint8_t value = file_input->get();
 						uint8_t channel = event_type & 0xF;
-						auto event_ptr = (new note_aftertouch(current_tick, channel, key, value));
-						event_ptr->enabled = active_track;
-						events.push_back(event_ptr);
+						auto event_ptr = (new note_aftertouch(lazy_data->current_tick, channel, key, value));
+						event_ptr->enabled = lazy_data->active_track;
+						return event_ptr;
 					}
 					break;
 					SAF_MRWF_MULTICHANNEL_CASE(0xB) {
-						uint8_t contr_no = running_status_byte;
+						uint8_t contr_no = lazy_data->running_status_byte;
 						uint8_t value = file_input->get();
 						uint8_t channel = event_type & 0xF;
-						auto event_ptr = (new controller(current_tick, channel, contr_no, value));
-						event_ptr->enabled = active_track;
-						events.push_back(event_ptr);
+						auto event_ptr = (new controller(lazy_data->current_tick, channel, contr_no, value));
+						event_ptr->enabled = lazy_data->active_track;
+						return event_ptr;
 					}
 					break;
 					SAF_MRWF_MULTICHANNEL_CASE(0xC) {
-						uint8_t prog_no = running_status_byte;
+						uint8_t prog_no = lazy_data->running_status_byte;
 						uint8_t channel = event_type & 0xF;
-						auto event_ptr = (new program_change(current_tick, channel, prog_no));
-						event_ptr->enabled = active_track;
-						events.push_back(event_ptr);
+						auto event_ptr = (new program_change(lazy_data->current_tick, channel, prog_no));
+						event_ptr->enabled = lazy_data->active_track;
+						return event_ptr;
 					}
 					break;
 					SAF_MRWF_MULTICHANNEL_CASE(0xD) {
-						uint8_t value = running_status_byte;
+						uint8_t value = lazy_data->running_status_byte;
 						uint8_t channel = event_type & 0xF;
-						auto event_ptr = (new channel_aftertouch(current_tick, channel, value));
-						event_ptr->enabled = active_track;
-						events.push_back(event_ptr);
+						auto event_ptr = (new channel_aftertouch(lazy_data->current_tick, channel, value));
+						event_ptr->enabled = lazy_data->active_track;
+						return event_ptr;
 					}
 					break;
 					SAF_MRWF_MULTICHANNEL_CASE(0xE) {
-						uint8_t pitch_lsb = running_status_byte;
+						uint8_t pitch_lsb = lazy_data->running_status_byte;
 						uint8_t pitch_msb = file_input->get();
 						uint8_t channel = event_type & 0xF;
-						auto event_ptr = (new pitch_change(current_tick, channel, pitch_lsb, pitch_msb));
-						event_ptr->enabled = active_track;
-						events.push_back(event_ptr);
+						auto event_ptr = (new pitch_change(lazy_data->current_tick, channel, pitch_lsb, pitch_msb));
+						event_ptr->enabled = lazy_data->active_track;
+						return event_ptr;
 					}
 					break;
 					default: {
 						if (reading_settings->report_on_corruption_detection) {
-							std::cerr << std::hex << "Detected chunk of corrupted data. Event " << event_type << " with RSB " << running_status_byte << " at " << file_input->tellg() << std::dec << ", tick " << current_tick << "." << std::endl;
+							std::stringstream message_ss;
+							message_ss << std::hex << "Detected chunk of corrupted data. Event " << event_type << " with RSB " << lazy_data->running_status_byte << " at " << file_input->tellg() << std::dec << ", tick " << lazy_data->current_tick << "." << std::endl;
+							lazy_data->error_reporter->report_error(message_ss.str());
 						}
-						goto loop_break;
-					}
-				}
-			}
-				   break;
-			}
+						return nullptr;
+					}	
+				}//switch(rsb)
+			}//default
+			break;
+		}//switch(event_type)
+	}
 
-		}
-	loop_break:
+	void read_track(bbb_ffr* file_input, track_reading_settings* reading_settings) {
+		std::array<std::stack<full_note_view>, 4096> polyphony;
+
+		lazy_direct_track_reader_data lazy_data;
+		lazy_data.error_reporter = error_reporter;
+		midi_event* event_ptr = nullptr;
+
+		do {
+			event_ptr = lazy_direct_track_reading(file_input, reading_settings, &lazy_data);
+			events.push_back(event_ptr);
+			switch (event_ptr->event_type()) {
+			case midi_event::type::noteon: {
+				auto noteon_ptr = (noteon*)event_ptr;
+
+				uint16_t index = ((uint16_t)noteon_ptr->key << 4) | (noteon_ptr->channel);
+
+				polyphony[index].push({ &events_ordering , noteon_ptr, nullptr });
+			}break;
+			case midi_event::type::noteoff: {
+				auto noteoff_ptr = (noteoff*)event_ptr;
+
+				uint16_t index = ((uint16_t)noteoff_ptr->key << 4) | (noteoff_ptr->channel);
+
+				if (polyphony[index].size()) {
+					note_views.push_back(polyphony[index].top());
+					polyphony[index].pop();
+					note_views.back().end = noteoff_ptr;
+				}
+				else if (reading_settings->report_on_negative_polyhony) {
+					auto message = "Negative polyphony at " + std::to_string(lazy_data.current_tick);
+					std::cerr << message << std::endl;
+					if (reading_settings->throw_on_negative_polyphony)
+						throw std::runtime_error(message);
+				}
+			}break;
+
+			}
+		} while (event_ptr);
+
 
 		for (auto unmet_note_view_stack : polyphony) {
 			while (unmet_note_view_stack.size()) {

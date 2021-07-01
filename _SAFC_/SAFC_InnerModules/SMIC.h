@@ -106,6 +106,7 @@ struct SingleMIDIInfoCollector {
 		TempoMap[0] = TempoEvent(0x7, 0xA1, 0x20);
 		PolyphonyFiniteDifference[-1] = NoteOnOffCounter();
 		while (file_input.good()) {
+			std::array<UINT64, 4096> polyphony;
 			CurTick = 0;
 			MTRK = 0;
 			while (MTRK != MTrk && file_input.good())
@@ -125,7 +126,8 @@ struct SingleMIDIInfoCollector {
 					LastTick = CurTick;
 				BYTE EventType = file_input.get();
 				if (EventType == 0xFF) {
-					RSB = 0;
+					if(AllowLegacyRunningStatusMetaIgnorance)
+						RSB = 0;
 					BYTE type = file_input.get();
 					DWORD meta_data_size = 0;
 					do {
@@ -153,12 +155,25 @@ struct SingleMIDIInfoCollector {
 					RSB = EventType;
 					int change = (EventType & 0x10) ? 1 : -1;
 					auto it = PolyphonyFiniteDifference.find(CurTick);
+					auto key = file_input.get();
+					auto volume = file_input.get();
+
+					if (!volume && change == 1)
+						change = -1;
+
+					int index = EventType & 0xF | (key << 4);
+					if (change == -1) {
+						if (polyphony[index] == 0)
+							continue;
+						polyphony[index] -= 1;
+					}
+					else 
+						polyphony[index] += 1;
+
 					if (it == PolyphonyFiniteDifference.end())
 						PolyphonyFiniteDifference[CurTick] = change;
 					else
 						it->second += change;
-					file_input.get();
-					file_input.get();
 				}
 				else if ((EventType >= 0xA0 && EventType <= 0xBF) ||
 					(EventType >= 0xE0 && EventType <= 0xEF)) {
@@ -171,7 +186,8 @@ struct SingleMIDIInfoCollector {
 					file_input.get();
 				}
 				else if (EventType == 0xF0 || EventType == 0xF7) {
-					RSB = 0;
+					if(AllowLegacyRunningStatusMetaIgnorance)
+						RSB = 0;
 					DWORD meta_data_size = 0;
 					do {
 						IO = file_input.get();
@@ -181,16 +197,29 @@ struct SingleMIDIInfoCollector {
 						file_input.get();
 				}
 				else {
-					//BYTE FirstParam = EventType;
+					BYTE FirstParam = EventType;
 					EventType = RSB;
 					if (EventType >= 0x80 && EventType <= 0x9F) {
 						int change = (EventType & 0x10) ? 1 : -1;
 						auto it = PolyphonyFiniteDifference.find(CurTick);
+						auto volume = file_input.get();
+
+						if (!volume && change == 1)
+							change = -1;
+
+						int index = EventType & 0xF | (FirstParam << 4);
+						if (change == -1) {
+							if (polyphony[index] == 0)
+								continue;
+							polyphony[index] -= 1;
+						}
+						else
+							polyphony[index] += 1;
+
 						if (it == PolyphonyFiniteDifference.end())
 							PolyphonyFiniteDifference[CurTick] = change;
 						else
 							it->second += change;
-						file_input.get();
 					}
 					else if ((EventType >= 0xA0 && EventType <= 0xBF) ||
 						(EventType >= 0xE0 && EventType <= 0xEF)) {

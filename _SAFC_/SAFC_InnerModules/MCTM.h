@@ -489,16 +489,17 @@ struct MIDICollectionThreadedMerger {
 				IM->close();
 				RM->close();
 				F.close();
-				_wremove(_SaveTo.c_str());
-				_wrename((_SaveTo + L".I.mid").c_str(), _SaveTo.c_str());
-				_wrename((_SaveTo + L".R.mid").c_str(), _SaveTo.c_str());//one of these will not work
+				auto remove = _wremove(_SaveTo.c_str());
+				auto remove_i = _wrename((_SaveTo + L".I.mid").c_str(), _SaveTo.c_str());
+				auto remove_r = _wrename((_SaveTo + L".R.mid").c_str(), _SaveTo.c_str());//one of these will not work
+				printf("S2 status: %i\nI status: %i\nR status: %i\n", remove, remove_i, remove_r);
 				delete IM;
 				delete RM;
 				printf("Escaped last stage\n");
 				*FinishedFlag = true;
 				return;
 			}
-			printf("Active merging at last stage\n");
+			printf("Active merging at last stage (untested)\n");
 			WORD T = 0;
 			BYTE A = 0, B = 0;
 			F << "MThd" << '\0' << '\0' << '\0' << (char)6 << '\0' << (char)1;
