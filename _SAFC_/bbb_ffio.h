@@ -13,7 +13,7 @@
 template<typename __inner_stream_type, decltype(std::ios_base::out) stream_io_type = std::ios_base::out>
 std::pair<__inner_stream_type*, FILE*> open_wide_stream(std::wstring file, const wchar_t* parameter){
 	FILE* c_file = _wfopen(file.c_str(), parameter);
-	auto buffer = new __gnu_cxx::stdio_filebuf<char>(c_file, stream_io_type, 1);
+	auto buffer = new __gnu_cxx::stdio_filebuf<char>(c_file, stream_io_type, 100000);
 	
 	return {new __inner_stream_type(buffer), c_file};
 }
