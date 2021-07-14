@@ -399,6 +399,10 @@ struct gradient_color_event : meta {
 	uint8_t& a2() { return data[11]; }
 };
 
+struct events_reprocessor {
+	virtual midi_event* operator()(midi_event* event);
+};
+
 /* constructs a view of midi track */
 struct midi_track {
 
@@ -416,13 +420,23 @@ struct midi_track {
 	};
 
 	struct lazy_direct_track_reader_data {
-		uint64_t file_MTrk_position = 0;
-		uint64_t expected_track_size = 0;
-		uint64_t current_tick = 0;
-		uint8_t running_status_byte = 0;
+		uint64_t file_MTrk_position;
+		uint64_t expected_track_size;
+		uint64_t current_tick;
+		uint8_t running_status_byte;
 		midi_track::parse_error_reporter* error_reporter;
-		bool active_track = true;
-		bool first_run = true;
+		bool active_track;
+		bool first_run;
+		lazy_direct_track_reader_data(midi_track::parse_error_reporter* error_reporter) :
+			error_reporter(error_reporter) {
+			file_MTrk_position = 0;
+			expected_track_size = 0;
+			current_tick = 0;
+			running_status_byte = 0;
+			active_track = true;
+			first_run = true;
+		}
+
 	};
 
 	std::vector<midi_event*> events;
@@ -698,39 +712,37 @@ struct midi_track {
 	void read_track(bbb_ffr* file_input, track_reading_settings* reading_settings) {
 		std::array<std::stack<full_note_view>, 4096> polyphony;
 
-		lazy_direct_track_reader_data lazy_data;
-		lazy_data.error_reporter = error_reporter;
+		lazy_direct_track_reader_data lazy_data(error_reporter);
 		midi_event* event_ptr = nullptr;
 
 		do {
 			event_ptr = lazy_direct_track_reading(file_input, reading_settings, &lazy_data);
 			events.push_back(event_ptr);
 			switch (event_ptr->event_type()) {
-			case midi_event::type::noteon: {
-				auto noteon_ptr = (noteon*)event_ptr;
+				case midi_event::type::noteon: {
+					auto noteon_ptr = (noteon*)event_ptr;
 
-				uint16_t index = ((uint16_t)noteon_ptr->key << 4) | (noteon_ptr->channel);
+					uint16_t index = ((uint16_t)noteon_ptr->key << 4) | (noteon_ptr->channel);
 
-				polyphony[index].push({ &events_ordering , noteon_ptr, nullptr });
-			}break;
-			case midi_event::type::noteoff: {
-				auto noteoff_ptr = (noteoff*)event_ptr;
+					polyphony[index].push({ &events_ordering , noteon_ptr, nullptr });
+				}break;
+				case midi_event::type::noteoff: {
+					auto noteoff_ptr = (noteoff*)event_ptr;
 
-				uint16_t index = ((uint16_t)noteoff_ptr->key << 4) | (noteoff_ptr->channel);
+					uint16_t index = ((uint16_t)noteoff_ptr->key << 4) | (noteoff_ptr->channel);
 
-				if (polyphony[index].size()) {
-					note_views.push_back(polyphony[index].top());
-					polyphony[index].pop();
-					note_views.back().end = noteoff_ptr;
-				}
-				else if (reading_settings->report_on_negative_polyhony) {
-					auto message = "Negative polyphony at " + std::to_string(lazy_data.current_tick);
-					std::cerr << message << std::endl;
-					if (reading_settings->throw_on_negative_polyphony)
-						throw std::runtime_error(message);
-				}
-			}break;
-
+					if (polyphony[index].size()) {
+						note_views.push_back(polyphony[index].top());
+						polyphony[index].pop();
+						note_views.back().end = noteoff_ptr;
+					}
+					else if (reading_settings->report_on_negative_polyhony) {
+						auto message = "Negative polyphony at " + std::to_string(lazy_data.current_tick);
+						error_reporter->report_warning(message);
+						if (reading_settings->throw_on_negative_polyphony)
+							throw std::runtime_error(message);
+					}
+				}break;
 			}
 		} while (event_ptr);
 
@@ -750,5 +762,8 @@ struct midi_track {
 	}
 };
 
+struct track_to_track_lazy_merger {
+
+};
 
 #endif

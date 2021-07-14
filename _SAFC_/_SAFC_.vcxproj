@@ -250,6 +250,7 @@
     <ClInclude Include="consts.h" />
     <ClInclude Include="MRWF.h" />
     <ClInclude Include="movable_resizeable_window.h" />
+    <ClInclude Include="PIPE.h" />
     <ClInclude Include="resource.h" />
     <ClInclude Include="SAFCGUIF_Local\BAWC.h" />
     <ClInclude Include="SAFCGUIF_Local\CATh.h" />

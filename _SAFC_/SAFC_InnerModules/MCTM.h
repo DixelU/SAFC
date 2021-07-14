@@ -368,11 +368,8 @@ struct MIDICollectionThreadedMerger {
 						file_output.put(TotalSize);
 
 						SingleMIDIReProcessor::ostream_write(FrontEdge, file_output);
-						//copy(FrontEdge.begin(), FrontEdge.end(), ostream_iterator<BYTE>(file_output));
 						SingleMIDIReProcessor::ostream_write(Track, Track.begin() + PrevEdgePos, Track.begin() + DTI.CurPosition, file_output);
-						//copy(Track.begin() + PrevEdgePos, Track.begin() + DTI.CurPosition, ostream_iterator<BYTE>(file_output));
 						SingleMIDIReProcessor::ostream_write(BackEdge, BackEdge.begin(), BackEdge.end(), file_output);
-						//copy(BackEdge.begin(), BackEdge.end(), ostream_iterator<BYTE>(file_output));
 
 						file_output.put(0);//that's why +4
 						file_output.put(0xFF);
@@ -392,9 +389,7 @@ struct MIDICollectionThreadedMerger {
 					file_output.put(TotalSize);
 
 					SingleMIDIReProcessor::ostream_write(FrontEdge, file_output);
-					//copy(FrontEdge.begin(), FrontEdge.end(), ostream_iterator<BYTE>(file_output));
 					SingleMIDIReProcessor::ostream_write(Track, Track.begin() + PrevEdgePos, Track.end(), file_output);
-					//copy(Track.begin() + PrevEdgePos, Track.end(), ostream_iterator<BYTE>(file_output));
 
 					FrontEdge.clear();
 					BackEdge.clear();
