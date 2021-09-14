@@ -218,7 +218,7 @@
       <OmitFramePointers>true</OmitFramePointers>
       <EnableFiberSafeOptimizations>true</EnableFiberSafeOptimizations>
       <FloatingPointModel>Fast</FloatingPointModel>
-      <LanguageStandard>stdcpplatest</LanguageStandard>
+      <LanguageStandard>stdcpp17</LanguageStandard>
       <AdditionalUsingDirectories>
       </AdditionalUsingDirectories>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>

@@ -1547,9 +1547,9 @@ void Init() {///SetIsFontedVar
 	_Data.DetectedThreads = 
 		std::max(
 			std::min((WORD)(
-				std::max(
+				(WORD)std::max(
 					std::thread::hardware_concurrency(), 
-					(size_t)1
+					1u
 				)
 				- 1
 				), 
