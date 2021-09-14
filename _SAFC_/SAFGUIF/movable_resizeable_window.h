@@ -21,11 +21,9 @@ struct MoveableResizeableWindow : MoveableWindow {
 		return true;
 	}
 	void SafeResize(float NewHeight, float NewWidth) override {
-		Lock.lock();
-		if (NewHeight < MinHeight && NewWidth < MinWidth) {
-			Lock.unlock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
+		if (NewHeight < MinHeight && NewWidth < MinWidth) 
 			return;
-		}
 		else if (NewHeight < MinHeight) {
 			NewHeight = MinHeight;
 		}
@@ -56,26 +54,21 @@ struct MoveableResizeableWindow : MoveableWindow {
 			}break;
 			}
 		}
-		Lock.unlock();
 	}
 	void AssignMinDimentions(float MinHeight, float MinWidth) {
-		Lock.lock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		this->MinHeight = MinHeight;
 		this->MinWidth = MinWidth;
-		Lock.unlock();
 	}
 	void AssignPinnedActivities(const std::initializer_list<std::string>& list, PinSide side) {
-		Lock.lock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		for (auto& val : list) 
 			PinnedWindowActivities.insert({ val, side });
-		Lock.unlock();
 	}
 	BIT MouseHandler(float mx, float my, CHAR Button/*-1 left, 1 right, 0 move*/, CHAR State /*-1 down, 1 up*/) override {
-		Lock.lock();
-		if (!Drawable) {
-			Lock.unlock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
+		if (!Drawable) 
 			return 0;
-		}
 		float CenterDraggableX = XWindowPos + Width, CenterDraggableY = YWindowPos - Height;
 		float dW = mx - CenterDraggableX, dH = CenterDraggableY - my;
 
@@ -92,19 +85,15 @@ struct MoveableResizeableWindow : MoveableWindow {
 			if(Button == -1 && State == 1)
 				ResizeCornerIsActive = !ResizeCornerIsActive;
 			SafeResize(Height + dH, Width + dW);
-			Lock.unlock();
 			return 1;
 		}
 		auto HandlerResult = MoveableWindow::MouseHandler(mx, my, Button, State);
-		Lock.unlock();
 		return HandlerResult;
 	}
 	void Draw() override {
-		Lock.lock();
-		if (!Drawable) {
-			Lock.unlock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
+		if (!Drawable) 
 			return;
-		}
 		float CenterDraggableX = XWindowPos + Width, CenterDraggableY = YWindowPos - Height;
 
 		GLCOLOR(RGBAThemeColor | 0xFFFFFFFF*ResizeCornerIsActive);
@@ -116,7 +105,6 @@ struct MoveableResizeableWindow : MoveableWindow {
 		glEnd();
 		
 		MoveableWindow::Draw();
-		Lock.unlock();
 	}
 };
 

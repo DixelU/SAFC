@@ -125,26 +125,23 @@ struct SpecialSignHandler : HandleableUIPart {
 		this->SRGBA = SRGBA;
 	}
 	void Draw() override {
-		Lock.lock();
-		if (this->DrawFunc)this->DrawFunc(x, y, SZParam, FRGBA, SRGBA);
-		Lock.unlock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
+		if (this->DrawFunc)
+			this->DrawFunc(x, y, SZParam, FRGBA, SRGBA);
 	}
 	void SafeMove(float dx, float dy) override {
-		Lock.lock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		x += dx;
 		y += dy;
-		Lock.unlock();
 	}
 	void SafeChangePosition(float NewX, float NewY) override {
-		Lock.lock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		x = NewX;
 		y = NewY;
-		Lock.unlock();
 	}
 	void _ReplaceVoidFunc(void(*NewDrawFunc)(float, float, float, DWORD, DWORD)) {
-		Lock.lock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		this->DrawFunc = NewDrawFunc;
-		Lock.unlock();
 	}
 	void SafeChangePosition_Argumented(BYTE Arg, float NewX, float NewY) override {
 

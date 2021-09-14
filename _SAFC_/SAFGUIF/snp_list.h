@@ -21,10 +21,9 @@ struct SelectablePropertedList : HandleableUIPart {
 	DWORD MaxVisibleLines, CurrentTopLineID, MaxCharsInLine;
 	BYTE TopArrowHovered, BottomArrowHovered;
 	~SelectablePropertedList() override {
-		Lock.lock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		for (auto Y = Selectors.begin(); Y != Selectors.end(); Y++)
 			delete (*Y);
-		Lock.unlock();
 	}
 	SelectablePropertedList(ButtonSettings* ButtSettings, void(*OnSelect)(int SelectedID), void(*OnGetProperties)(int ID), float HeaderCXPos, float HeaderYPos, float Width, float SpaceBetween, DWORD MaxCharsInLine = 0, DWORD MaxVisibleLines = 0, _Align TextInButtonsAlign = _Align::left) {
 		this->MaxCharsInLine = MaxCharsInLine;
@@ -42,12 +41,11 @@ struct SelectablePropertedList : HandleableUIPart {
 		//SelectedID = 0xFFFFFFFF;
 	}
 	void RecalculateCurrentHeight() {
-		Lock.lock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		CalculatedHeight = SpaceBetween * Selectors.size();
-		Lock.unlock();
 	}
 	BIT MouseHandler(float mx, float my, CHAR Button/*-1 left, 1 right, 0 move*/, CHAR State /*-1 down, 1 up*/)  override {
-		Lock.lock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		TopArrowHovered = BottomArrowHovered = 0;
 		if (fabsf(mx - HeaderCXPos) < 0.5 * Width && my < HeaderYPos && my > HeaderYPos - CalculatedHeight) {
 			if (Button == 2 /*UP*/) {
@@ -67,7 +65,6 @@ struct SelectablePropertedList : HandleableUIPart {
 					TopArrowHovered = 1;
 					if (Button == -1 && State == -1) {
 						SafeRotateList(-1);
-						Lock.unlock();
 						return 1;
 					}
 				}
@@ -75,7 +72,6 @@ struct SelectablePropertedList : HandleableUIPart {
 					BottomArrowHovered = 1;
 					if (Button == -1 && State == -1) {
 						SafeRotateList(1);
-						Lock.unlock();
 						return 1;
 					}
 				}
@@ -102,7 +98,6 @@ struct SelectablePropertedList : HandleableUIPart {
 							OnGetProperties(i + CurrentTopLineID);
 					}
 					flag = 0;
-					Lock.unlock();
 					return 1;
 				}
 			}
@@ -115,16 +110,14 @@ struct SelectablePropertedList : HandleableUIPart {
 			if (ID < SelectorsText.size())
 				if (ID >= CurrentTopLineID && ID < CurrentTopLineID + MaxVisibleLines)
 					Selectors[ID - CurrentTopLineID]->MouseHandler(Selectors[ID - CurrentTopLineID]->Xpos, Selectors[ID - CurrentTopLineID]->Ypos, 0, 0);
-		Lock.unlock();
 		return 0;
 	}
 	void SafeStringReplace(std::string NewString) override {
-		Lock.lock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		this->SafeStringReplace(NewString, 0xFFFFFFFF);
-		Lock.unlock();
 	}
 	void SafeStringReplace(std::string NewString, DWORD LineID) {
-		Lock.lock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		if (LineID == 0xFFFFFFFF) {
 			SafeStringReplace(NewString, SelectedID.front());
 		}
@@ -133,10 +126,9 @@ struct SelectablePropertedList : HandleableUIPart {
 			if (LineID > CurrentTopLineID && LineID - CurrentTopLineID < MaxVisibleLines)
 				Selectors[LineID - CurrentTopLineID]->SafeStringReplace(NewString);
 		}
-		Lock.unlock();
 	}
 	void SafeUpdateLines() {
-		Lock.lock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		while (SelectorsText.size() < Selectors.size()) {
 			delete Selectors.back();
 			Selectors.pop_back();
@@ -154,14 +146,13 @@ struct SelectablePropertedList : HandleableUIPart {
 					(SelectorsText[i + CurrentTopLineID])
 			);
 		}
-		ReSetAlign_All(TextInButtonsAlign);
-		Lock.unlock();
+		ResetAlign_All(TextInButtonsAlign);
 	}
 	bool IsResizeable() override {
 		return true;
 	}
 	void SafeResize(float NewHeight, float NewWidth) override {
-		Lock.lock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		float dCX = (NewWidth - Width) * 0.5;
 		HeaderCXPos += dCX;
 		float OldWidth = Width;
@@ -203,43 +194,39 @@ struct SelectablePropertedList : HandleableUIPart {
 		MaxVisibleLines = Lines;
 		SafeUpdateLines();
 		RecalculateCurrentHeight();
-		Lock.unlock();
 	}
 	void SafeRotateList(INT32 Delta) {
-		Lock.lock();
-		if (!MaxVisibleLines) {
-			Lock.unlock(); return;
-		}
-		if (Delta < 0 && CurrentTopLineID < 0 - Delta)CurrentTopLineID = 0;
+		std::lock_guard<std::recursive_mutex> locker(Lock);
+		if (!MaxVisibleLines)
+			return;
+		if (Delta < 0 && CurrentTopLineID < 0 - Delta)
+			CurrentTopLineID = 0;
 		else if (Delta > 0 && CurrentTopLineID + Delta + MaxVisibleLines > SelectorsText.size())
 			CurrentTopLineID = SelectorsText.size() - MaxVisibleLines;
 		else CurrentTopLineID += Delta;
 		SafeUpdateLines();
-		Lock.unlock();
 	}
 	void SafeRemoveStringByID(DWORD ID) {
-		Lock.lock();
-		if (ID >= SelectorsText.size()) {
-			Lock.unlock(); return;
-		}
-		if (SelectorsText.empty()) {
-			Lock.unlock(); return;
-		}
+		std::lock_guard<std::recursive_mutex> locker(Lock);
+		if (ID >= SelectorsText.size()) 
+			return;
+		if (SelectorsText.empty()) 
+			return;
 		if (MaxVisibleLines) {
 			if (ID < CurrentTopLineID) {
 				CurrentTopLineID--;
 			}
 			else if (ID == CurrentTopLineID) {
-				if (CurrentTopLineID == SelectorsText.size() - 1)CurrentTopLineID--;
+				if (CurrentTopLineID == SelectorsText.size() - 1)
+					CurrentTopLineID--;
 			}
 		}
 		SelectorsText.erase(SelectorsText.begin() + ID);
 		SafeUpdateLines();
 		SelectedID.clear();
-		Lock.unlock();
 	}
 	void RemoveSelected() {
-		Lock.lock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		std::sort(SelectedID.begin(), SelectedID.end());
 		while (SelectedID.size()) {
 			if (MaxVisibleLines) {
@@ -247,7 +234,8 @@ struct SelectablePropertedList : HandleableUIPart {
 					CurrentTopLineID--;
 				}
 				else if (SelectedID.back() == CurrentTopLineID) {
-					if (CurrentTopLineID == SelectorsText.size() - 1)CurrentTopLineID--;
+					if (CurrentTopLineID == SelectorsText.size() - 1)
+						CurrentTopLineID--;
 				}
 			}
 			SelectorsText.erase(SelectorsText.begin() + SelectedID.back());
@@ -255,34 +243,28 @@ struct SelectablePropertedList : HandleableUIPart {
 		}
 		SafeUpdateLines();
 		SelectedID.clear();
-		Lock.unlock();
 	}
-	void ReSetAlignFor(DWORD ID, _Align Align) {
-		Lock.lock();
-		if (ID >= Selectors.size()) {
-			Lock.unlock(); return;
-		}
+	void ResetAlignFor(DWORD ID, _Align Align) {
+		std::lock_guard<std::recursive_mutex> locker(Lock);
+		if (ID >= Selectors.size()) 
+			return;
 		float nx = HeaderCXPos - ((Align == _Align::left) ? 0.5f : ((Align == _Align::right) ? 0 - 0.5f : 0)) * (Width - SpaceBetween);
 		Selectors[ID]->STL->SafeChangePosition_Argumented(Align, nx, Selectors[ID]->Ypos);
-		Lock.unlock();
 	}
-	void ReSetAlign_All(_Align Align) {
-		Lock.lock();
-		if (!Align) {
-			Lock.unlock(); return;
-		}
+	void ResetAlign_All(_Align Align) {
+		std::lock_guard<std::recursive_mutex> locker(Lock);
+		if (!Align) 
+			return;
 		float nx = HeaderCXPos - ((Align == _Align::left) ? 0.5f : ((Align == _Align::right) ? 0 - 0.5f : 0)) * (Width - SpaceBetween);
 		for (int i = 0; i < Selectors.size(); i++)
 			Selectors[i]->STL->SafeChangePosition_Argumented(Align, nx, Selectors[i]->Ypos);
-		Lock.unlock();
 	}
 	void SafePushBackNewString(std::string ButtonText) {
-		Lock.lock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		if (MaxCharsInLine)ButtonText = ButtonText.substr(0, MaxCharsInLine);
 		SelectorsText.push_back(ButtonText);
 		if (MaxVisibleLines && SelectorsText.size() > MaxVisibleLines) {
 			SafeUpdateLines(); 
-			Lock.unlock(); 
 			return;
 		}
 		ButtSettings->ChangePosition(HeaderCXPos, HeaderYPos - (SelectorsText.size() - 0.5f) * SpaceBetween);
@@ -291,31 +273,26 @@ struct SelectablePropertedList : HandleableUIPart {
 		ButtSettings->OnClick = NULL;
 		Button* ptr;
 		Selectors.push_back(ptr = ButtSettings->CreateOne(ButtonText));
-		//free(ptr);
 		RecalculateCurrentHeight();
-		ReSetAlignFor(SelectorsText.size() - 1, this->TextInButtonsAlign);
-		Lock.unlock();
+		ResetAlignFor(SelectorsText.size() - 1, this->TextInButtonsAlign);
 	}
 	void PushStrings(std::list<std::string> LStrings) {
-		Lock.lock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		for (auto Y = LStrings.begin(); Y != LStrings.end(); Y++)
 			SafePushBackNewString(*Y);
-		Lock.unlock();
 	}
 	void PushStrings(std::vector<std::string> LStrings) {
-		Lock.lock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		for (auto Y = LStrings.begin(); Y != LStrings.end(); Y++)
 			SafePushBackNewString(*Y);
-		Lock.unlock();
 	}
 	void PushStrings(std::initializer_list<std::string> LStrings) {
-		Lock.lock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		for (auto Y = LStrings.begin(); Y != LStrings.end(); Y++)
 			SafePushBackNewString(*Y);
-		Lock.unlock();
 	}
 	void SafeChangePosition_Argumented(BYTE Arg, float NewX, float NewY) {
-		Lock.lock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		float CW = 0.5f * (
 			(INT32)((BIT)(GLOBAL_LEFT & Arg))
 			- (INT32)((BIT)(GLOBAL_RIGHT & Arg))
@@ -325,28 +302,25 @@ struct SelectablePropertedList : HandleableUIPart {
 				- (INT32)((BIT)(GLOBAL_TOP & Arg))
 				) * CalculatedHeight;
 		SafeChangePosition(NewX + CW, NewY - 0.5f * CalculatedHeight + CH);
-		Lock.unlock();
 	}
 	void KeyboardHandler(CHAR CH) override {
 		return;
 	}
 	void SafeChangePosition(float NewCXPos, float NewHeaderYPos) override {
-		Lock.lock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		NewCXPos -= HeaderCXPos;
 		NewHeaderYPos -= HeaderYPos;
 		SafeMove(NewCXPos, NewHeaderYPos);
-		Lock.unlock();
 	}
 	void SafeMove(float dx, float dy) override {
-		Lock.lock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		HeaderCXPos += dx;
 		HeaderYPos += dy;
 		for (auto Y = Selectors.begin(); Y != Selectors.end(); Y++)
 			(*Y)->SafeMove(dx, dy);
-		Lock.unlock();
 	}
 	void Draw() override {
-		Lock.lock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		if (Selectors.size() < SelectorsText.size()) {
 			///TOP BAR
 			if (TopArrowHovered)GLCOLOR(ButtSettings->HoveredRGBABorder);
@@ -385,7 +359,6 @@ struct SelectablePropertedList : HandleableUIPart {
 		}
 		for (auto Y = Selectors.begin(); Y != Selectors.end(); Y++)
 			(*Y)->Draw();
-		Lock.unlock();
 	}
 	inline DWORD TellType() override {
 		return TT_SELPROPLIST;

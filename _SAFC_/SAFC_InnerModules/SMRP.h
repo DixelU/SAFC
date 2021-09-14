@@ -67,9 +67,9 @@ struct SingleMIDIReProcessor {
 	BIT InQueueToInplaceMerge;
 	BYTE ProgramToOverride;
 	INT64 SelectionStart, SelectionLength;
-	BYTE_PLC_Core* VolumeMapCore;
-	_14BIT_PLC_Core* PitchMapCore;
-	CutAndTransposeKeys* KeyConverter;
+	std::shared_ptr<BYTE_PLC_Core> VolumeMapCore;
+	std::shared_ptr<_14BIT_PLC_Core> PitchMapCore;
+	std::shared_ptr<CutAndTransposeKeys> KeyConverter;
 	BIT ResetDeltatimesOutsideOfTheRange, AllowLegacyRunningStatusMetaIgnorance;
 	UINT64 FilePosition, FileSize;
 	inline static void ostream_write(std::vector<BYTE>& vec, const std::vector<BYTE>::iterator& beg, const std::vector<BYTE>::iterator& end, std::ostream& out) {
@@ -96,16 +96,16 @@ struct SingleMIDIReProcessor {
 			vec.push_back(stack[--size]);
 		return r_size;
 	};
-	SingleMIDIReProcessor(std::wstring filename, DWORD Settings, FLOAT Tempo, DWORD GlobalOffset, WORD PPQN, DWORD ThreadID, BYTE_PLC_Core* VolumeMapCore, _14BIT_PLC_Core* PitchMapCore, CutAndTransposeKeys* KeyConverter, std::wstring RPostfix = L"_.mid", BIT InplaceMerge = 0, UINT64 FileSize = 0, INT64 SelectionStart = 0, INT64 SelectionLength = -1, BIT ResetDeltatimesOutsideOfTheRange = true) {
+	SingleMIDIReProcessor(std::wstring filename, DWORD Settings, FLOAT Tempo, DWORD GlobalOffset, WORD PPQN, DWORD ThreadID, std::shared_ptr<BYTE_PLC_Core> VolumeMapCore, std::shared_ptr<_14BIT_PLC_Core> PitchMapCore, std::shared_ptr<CutAndTransposeKeys> KeyConverter, std::wstring RPostfix = L"_.mid", BIT InplaceMerge = 0, UINT64 FileSize = 0, INT64 SelectionStart = 0, INT64 SelectionLength = -1, BIT ResetDeltatimesOutsideOfTheRange = true) {
 		this->ThreadID = ThreadID;
 		this->FileName = filename;
 		this->BoolSettings = Settings;
 		this->NewTempo = Tempo;
 		this->NewPPQN = PPQN;
 		this->GlobalOffset = GlobalOffset;
-		this->VolumeMapCore = (BYTE_PLC_Core*)VolumeMapCore;
-		this->PitchMapCore = (_14BIT_PLC_Core*)PitchMapCore;
-		this->KeyConverter = (CutAndTransposeKeys*)KeyConverter;
+		this->VolumeMapCore = VolumeMapCore;
+		this->PitchMapCore = PitchMapCore;
+		this->KeyConverter = KeyConverter;
 		this->InQueueToInplaceMerge = InplaceMerge;
 		this->Postfix = RPostfix;
 		this->FileSize = FileSize;
@@ -119,7 +119,7 @@ struct SingleMIDIReProcessor {
 		this->ResetDeltatimesOutsideOfTheRange = ResetDeltatimesOutsideOfTheRange;
 		this->AllowLegacyRunningStatusMetaIgnorance = false;
 	}
-	SingleMIDIReProcessor(std::wstring filename, DWORD Settings, FLOAT Tempo, DWORD GlobalOffset, WORD PPQN, DWORD ThreadID, PLC<BYTE, BYTE>* VolumeMapCore, PLC<WORD, WORD>* PitchMapCore, CutAndTransposeKeys* KeyConverter, std::wstring RPostfix = L"_.mid", BIT InplaceMerge = 0, UINT64 FileSize = 0, INT64 SelectionStart = 0, INT64 SelectionLength = -1, BIT ResetDeltatimesOutsideOfTheRange = true) {
+	SingleMIDIReProcessor(std::wstring filename, DWORD Settings, FLOAT Tempo, DWORD GlobalOffset, WORD PPQN, DWORD ThreadID, std::shared_ptr<PLC<BYTE, BYTE>> VolumeMapCore, std::shared_ptr<PLC<WORD, WORD>> PitchMapCore, std::shared_ptr<CutAndTransposeKeys> KeyConverter, std::wstring RPostfix = L"_.mid", BIT InplaceMerge = 0, UINT64 FileSize = 0, INT64 SelectionStart = 0, INT64 SelectionLength = -1, BIT ResetDeltatimesOutsideOfTheRange = true) {
 		this->ThreadID = ThreadID;
 		this->FileName = filename;
 		this->BoolSettings = Settings;
@@ -127,11 +127,11 @@ struct SingleMIDIReProcessor {
 		this->NewPPQN = PPQN;
 		this->GlobalOffset = GlobalOffset;
 		if (VolumeMapCore)
-			this->VolumeMapCore = new BYTE_PLC_Core(VolumeMapCore);
+			this->VolumeMapCore = std::make_shared<BYTE_PLC_Core>(VolumeMapCore);
 		else
 			this->VolumeMapCore = NULL;
 		if (PitchMapCore)
-			this->PitchMapCore = new _14BIT_PLC_Core(PitchMapCore);
+			this->PitchMapCore = std::make_shared<_14BIT_PLC_Core>(PitchMapCore);
 		else
 			this->PitchMapCore = NULL;
 		this->KeyConverter = KeyConverter;

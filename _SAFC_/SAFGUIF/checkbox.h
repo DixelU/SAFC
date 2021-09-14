@@ -13,9 +13,9 @@ struct CheckBox : HandleableUIPart {///NeedsTest
 	BIT State, Focused;
 	BYTE BorderWidth;
 	~CheckBox() override {
-		Lock.lock();
-		if (Tip)delete Tip;
-		Lock.unlock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
+		if (Tip)
+			delete Tip;
 	}
 	CheckBox(float Xpos, float Ypos, float SideSize, DWORD BorderRGBAColor, DWORD UncheckedRGBABackground, DWORD CheckedRGBABackground, BYTE BorderWidth, BIT StartState = false, SingleTextLineSettings* TipSettings = NULL, _Align TipAlign = _Align::left, std::string TipText = " ") {
 		this->Xpos = Xpos;
@@ -33,7 +33,7 @@ struct CheckBox : HandleableUIPart {///NeedsTest
 		}
 	}
 	void Draw() override {
-		Lock.lock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		float hSideSize = 0.5f * SideSize;
 		if (State)
 			GLCOLOR(CheckedRGBABackground);
@@ -62,25 +62,23 @@ struct CheckBox : HandleableUIPart {///NeedsTest
 			glVertex2f(Xpos + hSideSize, Ypos - hSideSize);
 			glEnd();
 		}
-		if (Focused && Tip)Tip->Draw();
-		Lock.unlock();
+		if (Focused && Tip)
+			Tip->Draw();
 	}
 	void SafeMove(float dx, float dy) override {
-		Lock.lock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		Xpos += dx;
 		Ypos += dy;
 		if (Tip)Tip->SafeMove(dx, dy);
-		Lock.unlock();
 	}
 	void SafeChangePosition(float NewX, float NewY) override {
-		Lock.lock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		NewX -= Xpos;
 		NewY -= Ypos;
 		SafeMove(NewX, NewY);
-		Lock.unlock();
 	}
 	void SafeChangePosition_Argumented(BYTE Arg, float NewX, float NewY) override {
-		Lock.lock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		float CW = 0.5f * (
 			(INT32)((BIT)(GLOBAL_LEFT & Arg))
 			- (INT32)((BIT)(GLOBAL_RIGHT & Arg))
@@ -90,24 +88,22 @@ struct CheckBox : HandleableUIPart {///NeedsTest
 				- (INT32)((BIT)(GLOBAL_TOP & Arg))
 				) * SideSize;
 		SafeChangePosition(NewX + CW, NewY + CH);
-		Lock.unlock();
 	}
 	void KeyboardHandler(CHAR CH) override {
 		return;
 	}
 	void SafeStringReplace(std::string TipString) override {
-		Lock.lock();
-		if (Tip)Tip->SafeStringReplace(TipString);
-		Lock.unlock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
+		if (Tip)
+			Tip->SafeStringReplace(TipString);
 	}
 	void FocusChange() {
-		Lock.lock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		this->Focused = !this->Focused;
 		BorderRGBAColor = (((~(BorderRGBAColor >> 8)) << 8) | (BorderRGBAColor & 0xFF));
-		Lock.unlock();
 	}
 	BIT MouseHandler(float mx, float my, CHAR Button, CHAR State) override {
-		Lock.lock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		if (fabsf(mx - Xpos) < 0.5 * SideSize && fabsf(my - Ypos) < 0.5 * SideSize) {
 			if (!Focused)
 				FocusChange();
@@ -115,18 +111,14 @@ struct CheckBox : HandleableUIPart {///NeedsTest
 				//cout << "State switch from " << State << endl;
 				if (State == 1)
 					this->State = !this->State;
-				Lock.unlock();
 				return 1;
 			}
-			else {
-				Lock.unlock();
+			else 
 				return 0;
-			}
 		}
 		else {
 			if (Focused)
 				FocusChange();
-			Lock.unlock();
 			return 0;
 		}
 	}

@@ -300,15 +300,10 @@ struct FileSettings {////per file settings
 	UINT64 FileSize;
 	INT64 SelectionStart, SelectionLength;
 	BIT IsMIDI, InplaceMergeEnabled, OffsetResetOnSelection, AllowLegacyRunningStatusMetaIgnorance;
-	CutAndTransposeKeys *KeyMap;
-	PLC<BYTE, BYTE> *VolumeMap;
-	PLC<WORD, WORD> *PitchBendMap;
-	DWORD OffsetTicks, BoolSettings;///use ump to see how far you wanna offset all that.
-	~FileSettings() {
-		if (KeyMap)delete KeyMap;
-		if (VolumeMap)delete VolumeMap;
-		if (PitchBendMap)delete PitchBendMap;
-	}
+	std::shared_ptr<CutAndTransposeKeys> KeyMap;
+	std::shared_ptr<PLC<BYTE, BYTE>> VolumeMap;
+	std::shared_ptr<PLC<WORD, WORD>> PitchBendMap;
+	DWORD OffsetTicks, BoolSettings;
 	FileSettings(const std::wstring& Filename) {
 		this->Filename = Filename;
 		AppearanceFilename = AppearancePath = "";
@@ -323,9 +318,6 @@ struct FileSettings {////per file settings
 		OldPPQN = FMIC.PPQN;
 		OldTrackNumber = FMIC.ExpectedTrackNumber;
 		OffsetTicks = InplaceMergeEnabled = 0;
-		VolumeMap = NULL;
-		PitchBendMap = NULL;
-		KeyMap = NULL;
 		FileSize = FMIC.FileSize;
 		GroupID = NewTempo = 0;
 		OffsetResetOnSelection = false;
@@ -378,7 +370,7 @@ struct SAFCData {////overall settings and storing perfile settings....
 		InplaceMergeFlag = 0;
 		SaveDirectory = L"";
 	}
-	void ResolveSubdivisionProblem_GroupIDAssign(INT32 ThreadsCount=0) {
+	void ResolveSubdivisionProblem_GroupIDAssign(WORD ThreadsCount=0) {
 		if (!ThreadsCount)ThreadsCount = DetectedThreads;
 		if (Files.empty()) {
 			SaveDirectory = L"";
@@ -650,10 +642,8 @@ namespace PropsAndSets {
 		}
 		auto UIElement = (Graphing<SingleMIDIInfoCollector::tempo_graph>*)(*(*WH)["SMIC"])["TEMPO_GRAPH"];
 		if (SMICptr) {
-			UIElement->Lock.lock();
-			UIElement->Lock.unlock();
+			{ std::lock_guard<std::recursive_mutex> locker(UIElement->Lock); }
 			UIElement->Graph = nullptr;
-			//delete SMICptr;
 		}
 		SMICptr = new SingleMIDIInfoCollector(_Data.Files[currentID].Filename, _Data.Files[currentID].OldPPQN, _Data.Files[currentID].AllowLegacyRunningStatusMetaIgnorance);
 		std::thread th([]() {
@@ -1043,7 +1033,8 @@ namespace PropsAndSets {
 		void OnCaT() {
 			auto Wptr = (*WH)["CAT"];
 			auto CATptr = (CAT_Piano*)((*Wptr)["CAT_ITSELF"]);
-			if (!_Data[currentID].KeyMap) _Data[currentID].KeyMap = new CutAndTransposeKeys(0,127,0);
+			if (!_Data[currentID].KeyMap)
+				_Data[currentID].KeyMap = std::make_shared<CutAndTransposeKeys>(0,127,0);
 			CATptr->PianoTransform = _Data[currentID].KeyMap;
 			CATptr->UpdateInfo();
 			WH->EnableWindow("CAT");
@@ -1089,10 +1080,9 @@ namespace PropsAndSets {
 		}
 		void OnDelete() {
 			auto Wptr = (*WH)["CAT"];
-			((CAT_Piano*)((*Wptr)["CAT_ITSELF"]))->PianoTransform = NULL;
+			((CAT_Piano*)((*Wptr)["CAT_ITSELF"]))->PianoTransform = nullptr;
 			WH->DisableWindow("CAT");
-			delete _Data[currentID].KeyMap;
-			_Data[currentID].KeyMap = NULL;
+			_Data[currentID].KeyMap = nullptr;
 		}
 	}
 	namespace VolumeMap {
@@ -1106,7 +1096,8 @@ namespace PropsAndSets {
 			VM->ActiveSetting = 0;
 			VM->Hovered = 0;
 			VM->RePutMode = 0;
-			if (!_Data[currentID].VolumeMap)_Data[currentID].VolumeMap = new PLC<BYTE, BYTE>();
+			if (!_Data[currentID].VolumeMap)
+				_Data[currentID].VolumeMap = std::make_shared<PLC<BYTE, BYTE>>();
 			VM->PLC_bb = _Data[currentID].VolumeMap;
 			WH->EnableWindow("VM");
 		}
@@ -1170,13 +1161,11 @@ namespace PropsAndSets {
 				ThrowAlert_Error("If you see this message, some error might have happen, since PLC_bb is null");
 		}
 		void OnDelete() {
-			if (_Data[currentID].VolumeMap) {
-				delete _Data[currentID].VolumeMap;
-				_Data[currentID].VolumeMap = NULL;
-			}
+			if (_Data[currentID].VolumeMap) 
+				_Data[currentID].VolumeMap = nullptr;
 			auto Wptr = (*WH)["VM"];
 			auto VM = ((PLC_VolumeWorker*)(*Wptr)["VM_PLC"]);
-			VM->PLC_bb = NULL;
+			VM->PLC_bb = nullptr;
 			WH->DisableWindow("VM");
 		}
 	}
@@ -1252,23 +1241,20 @@ void OnRemVolMaps() {
 	((PLC_VolumeWorker*)(*((*WH)["VM"]))["VM_PLC"])->PLC_bb = NULL;
 	WH->DisableWindow("VM");
 	for (int i = 0; i < _Data.Files.size(); i++) {
-		if(_Data[i].VolumeMap)delete _Data[i].VolumeMap;
-		_Data[i].VolumeMap = NULL;
+		_Data[i].VolumeMap = nullptr;
 	}
 }
 void OnRemCATs() {
 	WH->DisableWindow("CAT");
 	for (int i = 0; i < _Data.Files.size(); i++) {
-		if(_Data[i].KeyMap)delete _Data[i].KeyMap;
-		_Data[i].KeyMap = NULL;
+		_Data[i].KeyMap = nullptr;
 	}
 }
 void OnRemPitchMaps() {
 	//WH->DisableWindow("CAT");
 	ThrowAlert_Error("Currently pitch maps can not be created and/or deleted :D");
 	for (int i = 0; i < _Data.Files.size(); i++) {
-		if(_Data[i].PitchBendMap)delete _Data[i].PitchBendMap;
-		_Data[i].PitchBendMap = NULL;
+		_Data[i].PitchBendMap = nullptr;
 	}
 }
 void OnRemAllModules() {
@@ -1558,7 +1544,18 @@ void RestoreRegSettings() {
 void Init() {///SetIsFontedVar
 	RestoreRegSettings();
 	hDc = GetDC(hWnd);
-	_Data.DetectedThreads = std::min((int)std::thread::hardware_concurrency() - 1, (int)(ceil(GetAvailableMemory() / 2048)));
+	_Data.DetectedThreads = 
+		std::max(
+			std::min((WORD)(
+				std::max(
+					std::thread::hardware_concurrency(), 
+					(size_t)1
+				)
+				- 1
+				), 
+				(WORD)(ceil(GetAvailableMemory() / 2048))
+			), (WORD)1
+		);
 
 	SelectablePropertedList* SPL = new SelectablePropertedList(BS_List_Black_Small, NULL, PropsAndSets::OGPInMIDIList, -50, 172, 300, 12, 65, 30);
 	MoveableWindow* T = new MoveableResizeableWindow("Main window", System_White, -200, 200, 400, 400, 0x3F3F3FAF, 0x7F7F7F7F, 0, [SPL](float dH, float dW, float NewHeight, float NewWidth) {
@@ -1659,7 +1656,7 @@ void Init() {///SetIsFontedVar
 	(*WH)["CAT"] = T;
 
 	T = new MoveableWindow("Volume map.", System_White, -150, 150, 300, 350, 0x3F3F3FCF, 0x7F7F7F7F, 0x7F6F8FCF);
-	(*T)["VM_PLC"] = new PLC_VolumeWorker(0, 0 - WindowHeapSize, 300 - WindowHeapSize * 2, 300 - WindowHeapSize * 2, new PLC<BYTE, BYTE>());///todo: interface
+	(*T)["VM_PLC"] = new PLC_VolumeWorker(0, 0 - WindowHeapSize, 300 - WindowHeapSize * 2, 300 - WindowHeapSize * 2, std::make_shared<PLC<BYTE, BYTE>>());///todo: interface
 	(*T)["VM_SSBDIIF"] = Butt = new Button("Shape alike x^y", System_White, PropsAndSets::VolumeMap::OnDegreeShape, -110 + WindowHeapSize, -150 - WindowHeapSize, 80, 10, 1, 0xFFFFFF3F, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFAFFF3F, 0xFFAFFFFF, System_White, "Where y is from frame bellow");///Set shape by degree in input field;
 	Butt->Tip->SafeChangePosition_Argumented(_Align::left, -150 + WindowHeapSize, -160 - WindowHeapSize);
 	(*T)["VM_DEGREE"] = new InputField("1", -140 + WindowHeapSize, -170 - WindowHeapSize, 10, 20, System_White, NULL, 0x007FFFFF, NULL, " ", 4, _Align::center, _Align::center, InputField::Type::FP_PositiveNumbers);

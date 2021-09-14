@@ -6,7 +6,7 @@
 #include "../SAFC_InnerModules/SAFC_IM.h"
 
 struct PLC_VolumeWorker :HandleableUIPart {
-	PLC<BYTE, BYTE>* PLC_bb;
+	std::shared_ptr<PLC<BYTE, BYTE>> PLC_bb;
 	std::pair<BYTE, BYTE> _HoveredPoint;
 	SingleTextLine* STL_MSG;
 	float CXPos, CYPos, HorizontalSidesSize, VerticalSidesSize;
@@ -17,7 +17,7 @@ struct PLC_VolumeWorker :HandleableUIPart {
 	~PLC_VolumeWorker() override {
 		delete STL_MSG;
 	}
-	PLC_VolumeWorker(float CXPos, float CYPos, float Width, float Height, PLC<BYTE, BYTE>* PLC_bb = NULL) {
+	PLC_VolumeWorker(float CXPos, float CYPos, float Width, float Height, std::shared_ptr<PLC<BYTE, BYTE>> PLC_bb = nullptr) {
 		this->PLC_bb = PLC_bb;
 		this->CXPos = CXPos;
 		this->CYPos = CYPos;
@@ -32,7 +32,7 @@ struct PLC_VolumeWorker :HandleableUIPart {
 		ActiveSetting = Hovered = FPX = FPY = XCP = YCP = 0;
 	}
 	void Draw() override {
-		Lock.lock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		float begx = CXPos - 0.5f * HorizontalSidesSize, begy = CYPos - 0.5f * VerticalSidesSize;
 		glColor4f(1, 1, 1, (Hovered) ? 0.85f : 0.5f);
 		glLineWidth(1);
@@ -115,10 +115,9 @@ struct PLC_VolumeWorker :HandleableUIPart {
 			glEnd();
 		}
 		STL_MSG->Draw();
-		Lock.unlock();
 	}
 	void UpdateInfo() {
-		Lock.lock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		SHORT tx = (128. + floor(255 * (MouseX - CXPos) / HorizontalSidesSize)),
 			ty = (128. + floor(255 * (MouseY - CYPos) / VerticalSidesSize));
 		if (tx < 0 || tx>255 || ty < 0 || ty>255) {
@@ -131,10 +130,9 @@ struct PLC_VolumeWorker :HandleableUIPart {
 			Hovered = 1;
 			STL_MSG->SafeStringReplace(std::to_string(XCP = tx) + ":" + std::to_string(YCP = ty));
 		}
-		Lock.unlock();
 	}
 	void _MakeMapMoreSimple() {
-		Lock.lock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		if (PLC_bb) {
 			BYTE TF, TS;
 			for (auto Y = PLC_bb->ConversionMap.begin(); Y != PLC_bb->ConversionMap.end();) {
@@ -146,24 +144,21 @@ struct PLC_VolumeWorker :HandleableUIPart {
 				}
 			}
 		}
-		Lock.unlock();
 	}
 	void SafeMove(float dx, float dy) override {
-		Lock.lock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		CXPos += dx;
 		CYPos += dy;
 		this->STL_MSG->SafeMove(dx, dy);
-		Lock.unlock();
 	}
 	void SafeChangePosition(float NewX, float NewY) override {
-		Lock.lock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		NewX -= CXPos;
 		NewY -= CYPos;
 		SafeMove(NewX, NewY);
-		Lock.unlock();
 	}
 	void SafeChangePosition_Argumented(BYTE Arg, float NewX, float NewY) override {
-		Lock.lock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		float CW = 0.5f * (
 			(INT32)((BIT)(GLOBAL_LEFT & Arg))
 			- (INT32)((BIT)(GLOBAL_RIGHT & Arg))
@@ -173,7 +168,6 @@ struct PLC_VolumeWorker :HandleableUIPart {
 				- (INT32)((BIT)(GLOBAL_TOP & Arg))
 				) * VerticalSidesSize;
 		SafeChangePosition(NewX + CW, NewY + CH);
-		Lock.unlock();
 	}
 	void KeyboardHandler(CHAR CH) override {
 		///hmmmm ... should i... meh...
@@ -182,7 +176,7 @@ struct PLC_VolumeWorker :HandleableUIPart {
 		/// ... ///
 	}
 	void RePutFromAtoB(BYTE A, BYTE B, BYTE ValA, BYTE ValB) {
-		Lock.lock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		if (PLC_bb) {
 			if (B < A) {
 				std::swap(A, B);
@@ -195,16 +189,14 @@ struct PLC_VolumeWorker :HandleableUIPart {
 			PLC_bb->InsertNewPoint(A, ValA);
 			PLC_bb->InsertNewPoint(B, ValB);
 		}
-		Lock.unlock();
 	}
 	void JustPutNewValue(BYTE A, BYTE ValA) {
-		Lock.lock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		if (PLC_bb)
 			PLC_bb->InsertNewPoint(A, ValA);
-		Lock.unlock();
 	}
 	BIT MouseHandler(float mx, float my, CHAR Button, CHAR State) override {
-		Lock.lock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		this->MouseX = mx;
 		this->MouseY = my;
 		UpdateInfo();
@@ -242,7 +234,6 @@ struct PLC_VolumeWorker :HandleableUIPart {
 				}
 			}
 		}
-		Lock.unlock();
 		return 0;
 	}
 };

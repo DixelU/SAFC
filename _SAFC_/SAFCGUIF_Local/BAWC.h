@@ -23,18 +23,16 @@ struct BoolAndWORDChecker : HandleableUIPart {
 		delete this->STL_Info;
 	}
 	void SafeMove(float dx, float dy) override {
-		Lock.lock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		XPos += dx;
 		YPos += dy;
 		STL_Info->SafeMove(dx, dy);
-		Lock.unlock();
 	}
 	void SafeChangePosition(float NewX, float NewY) override {
-		Lock.lock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		NewX -= XPos;
 		NewY -= YPos;
 		SafeMove(NewX, NewY);
-		Lock.unlock();
 	}
 	void SafeChangePosition_Argumented(BYTE Arg, float NewX, float NewY) override {
 		return;
@@ -49,15 +47,14 @@ struct BoolAndWORDChecker : HandleableUIPart {
 		return;
 	}
 	void UpdateInfo() {
-		Lock.lock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		if (Number) {
 			std::string T = std::to_string(*Number);
 			if (T != STL_Info->_CurrentText)STL_Info->SafeStringReplace(T);
 		}
-		Lock.unlock();
 	}
 	void Draw() override {
-		Lock.lock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		UpdateInfo();
 		if (Flag) {
 			if (*Flag)SpecialSigns::DrawOK(XPos, YPos, 15, 0x00FFFFFF);
@@ -65,7 +62,6 @@ struct BoolAndWORDChecker : HandleableUIPart {
 		}
 		else SpecialSigns::DrawNo(XPos, YPos, 15, 0xFF0000FF);
 		STL_Info->Draw();
-		Lock.unlock();
 	}
 	BIT MouseHandler(float mx, float my, CHAR Button, CHAR State) override {
 		return 0;

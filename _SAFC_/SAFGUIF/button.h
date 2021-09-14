@@ -66,11 +66,9 @@ struct Button : HandleableUIPart {
 		this->Enabled = true;
 	}
 	BIT MouseHandler(float mx, float my, CHAR Button/*-1 left, 1 right, 0 move*/, CHAR State /*-1 down, 1 up*/)  override {
-		Lock.lock();
-		if (!Enabled) {
-			Lock.unlock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
+		if (!Enabled) 
 			return 0;
-		}
 		mx = Xpos - mx;
 		my = Ypos - my;
 		if (Hovered) {
@@ -83,8 +81,8 @@ struct Button : HandleableUIPart {
 				SetCursor(HandCursor);
 				if (Button && State == 1) {
 
-					if (Button == -1 && OnClick)OnClick();
-					Lock.unlock();
+					if (Button == -1 && OnClick)
+						OnClick();
 					return 1;
 				}
 
@@ -96,34 +94,31 @@ struct Button : HandleableUIPart {
 				STL->SafeColorChange(HoveredRGBAColor);
 			}
 		}
-		Lock.unlock();
 		return 0;
 	}
 	void SafeMove(float dx, float dy) {
-		Lock.lock();
-		if (Tip)Tip->SafeMove(dx, dy);
+		std::lock_guard<std::recursive_mutex> locker(Lock);
+		if (Tip)
+			Tip->SafeMove(dx, dy);
 		STL->SafeMove(dx, dy);
 		Xpos += dx;
 		Ypos += dy;
-		Lock.unlock();
 	}
 	void KeyboardHandler(char CH) override {
 		return;
 	}
 	void SafeStringReplace(std::string NewString) override {
-		Lock.lock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		this->STL->SafeStringReplace(NewString);
-		Lock.unlock();
 	}
 	void SafeChangePosition(float NewX, float NewY) {
-		Lock.lock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		NewX -= Xpos;
 		NewY -= Ypos;
 		SafeMove(NewX, NewY);
-		Lock.unlock();
 	}
 	void SafeChangePosition_Argumented(BYTE Arg, float NewX, float NewY) {
-		Lock.lock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		float CW = 0.5f * (
 			(INT32)((BIT)(GLOBAL_LEFT & Arg))
 			- (INT32)((BIT)(GLOBAL_RIGHT & Arg))
@@ -133,14 +128,11 @@ struct Button : HandleableUIPart {
 				- (INT32)((BIT)(GLOBAL_TOP & Arg))
 				) * Height;
 		SafeChangePosition(NewX + CW, NewY + CH);
-		Lock.unlock();
 	}
 	void Draw() {
-		Lock.lock();
-		if (!Enabled) {
-			Lock.unlock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
+		if (!Enabled) 
 			return;
-		}
 		if (Hovered) {
 			if ((BYTE)HoveredRGBABackground) {
 				GLCOLOR(HoveredRGBABackground);
@@ -183,9 +175,9 @@ struct Button : HandleableUIPart {
 				glEnd();
 			}
 		}
-		if (Tip && Hovered)Tip->Draw();
+		if (Tip && Hovered)
+			Tip->Draw();
 		STL->Draw();
-		Lock.unlock();
 	}
 	inline DWORD TellType() override {
 		return TT_BUTTON;

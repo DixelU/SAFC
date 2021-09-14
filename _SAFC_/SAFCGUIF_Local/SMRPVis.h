@@ -11,7 +11,7 @@ struct SMRP_Vis : HandleableUIPart {
 	BIT Processing, Finished, Hovered;
 	SingleTextLine* STL_Log, * STL_War, * STL_Err, * STL_Info;
 	SMRP_Vis(float XPos, float YPos, SingleTextLineSettings* STLS) {
-		Lock.lock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		SMRP = nullptr;
 		DWORD BASERGBA;
 		this->Processing = this->Hovered = this->Finished = 0;
@@ -31,7 +31,6 @@ struct SMRP_Vis : HandleableUIPart {
 		STLS->SetNewPos(XPos, YPos + 40);
 		this->STL_Info = STLS->CreateOne("_");
 		STLS->RGBAColor = BASERGBA;
-		Lock.unlock();
 	}
 	~SMRP_Vis() override {
 		delete STL_Log;
@@ -40,21 +39,18 @@ struct SMRP_Vis : HandleableUIPart {
 		delete STL_Info;
 	}
 	void SafeMove(float dx, float dy) override {
-		Lock.lock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		XPos += dx;
 		YPos += dy;
 		STL_Err->SafeMove(dx, dy);
 		STL_War->SafeMove(dx, dy);
 		STL_Log->SafeMove(dx, dy);
 		STL_Info->SafeMove(dx, dy);
-		Lock.unlock();
 	}
 	void SafeChangePosition(float NewX, float NewY) override {
-		Lock.lock();
 		NewX -= XPos;
 		NewY -= YPos;
 		SafeMove(NewX, NewY);
-		Lock.unlock();
 	}
 	void SafeChangePosition_Argumented(BYTE Arg, float NewX, float NewY) override {
 		return;
@@ -66,13 +62,13 @@ struct SMRP_Vis : HandleableUIPart {
 		return;
 	}
 	void SetInfoString(std::string NewInfoString) {
-		Lock.lock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		this->STL_Info->SafeStringReplace(NewInfoString);
-		Lock.unlock();
 	}
 	void UpdateInfo() {
-		if (!SMRP)return;
-		Lock.lock();
+		if (!SMRP)
+			return;
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		std::string T;
 		if (SMRP->LogLine.size() && SMRP->LogLine != STL_Log->_CurrentText)
 			STL_Log->SafeStringReplace(SMRP->LogLine);
@@ -94,10 +90,9 @@ struct SMRP_Vis : HandleableUIPart {
 		}
 		if (STL_Info->_CurrentText != T)
 			STL_Info->SafeStringReplace(T);
-		Lock.unlock();
 	}
 	void Draw() override {
-		Lock.lock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		if (!SMRP) {
 			if (STL_Err->_CurrentText != "SMRP is NULL!")
 				STL_Err->SafeStringReplace("SMRP is NULL!");
@@ -112,23 +107,23 @@ struct SMRP_Vis : HandleableUIPart {
 		this->STL_Log->Draw();
 		this->STL_Info->Draw();
 		if (SMRP) {
-			if (Processing && !Finished)SpecialSigns::DrawWait(XPos, YPos, 15, 0x007FFF7F, 20);
+			if (Processing && !Finished)
+				SpecialSigns::DrawWait(XPos, YPos, 15, 0x007FFF7F, 20);
 			else {
-				if (Finished)SpecialSigns::DrawOK(XPos, YPos, 20, 0x00FFFFFF);
+				if (Finished)
+					SpecialSigns::DrawOK(XPos, YPos, 20, 0x00FFFFFF);
 				else SpecialSigns::DrawNo(XPos, YPos, 20, 0xFF3F00FF);
 			}
 		}
-		Lock.unlock();
 	}
 	BIT MouseHandler(float mx, float my, CHAR Button, CHAR State) override {
-		Lock.lock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		mx -= XPos;
 		my -= YPos;
 		if (mx * mx + my * my < 900)
 			Hovered = 1;
 		else
 			Hovered = 0;
-		Lock.unlock();
 		return 0;
 	}
 };

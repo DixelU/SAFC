@@ -36,7 +36,7 @@ public:
 			WriteSymbolAtCursorPos(ch);
 	}
 	void WriteSymbolAtCursorPos(char ch, bool rearrange=true) {
-		Lock.lock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		std::string cur_word = (CursorPosition.first != Words.end()) ? CursorWordIter->_CurrentText : "";
 		float char_width = STLS->XUnitSize*2;
 		float fixed_width = (Width - 2*char_width);
@@ -51,7 +51,6 @@ public:
 				CursorPosition.second = 0;
 			}
 			else if (ch < 32 || ch == 127) {
-				Lock.unlock();
 				return;
 			}
 			else if (cur_word.size() >= maximal_whole_word_size) {
@@ -79,7 +78,6 @@ public:
 				CursorPosition.second = 0;
 			}
 			else if (ch < 32 || ch == 127) {
-				Lock.unlock();
 				return;
 			}
 			else if (cur_word.size() >= maximal_whole_word_size) {
@@ -100,10 +98,9 @@ public:
 		VisibilityCountDown = eb_cursor_flash_subcycle;
 		if(rearrange)
 			RearrangePositions();
-		Lock.unlock();
 	}
 	void RemoveSymbolBeforeCursorPos() {
-		Lock.lock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		auto cur_pos = CursorPosition;
 		if (CursorPosition.second) {
 			std::string cur_word = CursorWordIter->_CurrentText;
@@ -126,28 +123,22 @@ public:
 			}
 			RearrangePositions();
 		}
-		Lock.unlock();
 	}
 	void RemoveSymbolAfterCursorPos() {
-		Lock.lock();
-		if (CursorPosition.first == Words.end() - 1 && CursorPosition.second == Words.back()->_CurrentText.size() - 1) {
-			Lock.unlock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
+		if (CursorPosition.first == Words.end() - 1 && CursorPosition.second == Words.back()->_CurrentText.size() - 1) 
 			return;
-		}
 		MoveCursorBy1(_Align::right);
 		RemoveSymbolBeforeCursorPos();
-		Lock.unlock();
 	}
 	void UpdateBufferedCurText() {
-		Lock.lock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		BufferedCurText = "";
 		for (auto& word : Words) 
 			if (word->_CurrentText != "\t")
 				BufferedCurText += word->_CurrentText;
-		Lock.unlock();
 	}
 	void RearrangePositions() {
-		Lock.lock();
 		float char_width = STLS->XUnitSize*2;
 		float char_height = VerticalOffset;
 		float fixed_height = Height - VerticalOffset;
@@ -173,49 +164,42 @@ public:
 			}
 			word->SafeChangePosition_Argumented(_Align::right | _Align::center, left_line + col_no * char_width + (col_no - 1) * space_width, top_line - char_height * line_no);
 		}
-		Lock.unlock();
 	}
 	void Clear() {
-		Lock.lock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		for (auto& word : Words) 
 			delete word;
 		Words.clear();
 		Words.push_back(STLS->CreateOne("\t"));
 		Words.push_back(STLS->CreateOne("\n"));
 		CursorPosition = { Words.begin(), 0 };
-		Lock.unlock();
 	}
 	void ReparseCurrentTextFromScratch() {
-		Lock.lock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		Clear();
 		for (auto& ch : BufferedCurText)
 			WriteSymbolAtCursorPos(ch);
-		Lock.unlock();
 	}
 	~EditBox() override {
-		Lock.lock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		for (auto& line : Words)
 			if(line)delete line;
-		Lock.unlock();
 	}
 	BIT MouseHandler(float mx, float my, CHAR Button/*-1 left, 1 right, 0 move*/, CHAR State /*-1 down, 1 up*/)  override {
 		return 0;
 	}
 	void SafeStringReplace(std::string NewString) override {
-		Lock.lock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		BufferedCurText = NewString;
 		ReparseCurrentTextFromScratch();
-		Lock.unlock();
 	}
 	inline std::string _UnsafeGetCurrentText() const {
 		return BufferedCurText;
 	}
 	void MoveCursorBy1(_Align Move) {
-		Lock.lock();
-		if ((CursorPosition.first == Words.end())) {
-			Lock.unlock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
+		if ((CursorPosition.first == Words.end())) 
 			return;
-		}
 		auto Y = CursorPosition.first;
 		auto cur_y_coord = (*Y)->CYpos;
 		auto cur_x_coord = (*Y)->Chars[CursorPosition.second]->Xpos;
@@ -258,10 +242,9 @@ public:
 				));
 			break;
 		}
-		Lock.unlock();
 	}
 	void KeyboardHandler(char CH) override {
-		Lock.lock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		switch (CH) {
 		case 13:
 			CH = '\n'; 
@@ -293,26 +276,23 @@ public:
 			break;
 		}
 		WriteSymbolAtCursorPos(CH);
-		Lock.unlock();
 	}
 	void SafeMove(float dx, float dy) override {
-		Lock.lock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		Xpos += dx;
 		Ypos += dy;
 		STLS->Move(dx, dy);
 		for (auto& line : Words)
 			line->SafeMove(dx, dy);
-		Lock.unlock();
 	}
 	void SafeChangePosition(float NewX, float NewY) override {
-		Lock.lock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		NewX -= Xpos;
 		NewY -= Ypos;
 		SafeMove(NewX, NewY);
-		Lock.unlock();
 	}
 	void SafeChangePosition_Argumented(BYTE Arg, float NewX, float NewY) override {
-		Lock.lock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		float CW = 0.5f * (
 			(INT32)((BIT)(GLOBAL_LEFT & Arg))
 			- (INT32)((BIT)(GLOBAL_RIGHT & Arg))
@@ -322,10 +302,9 @@ public:
 			- (INT32)((BIT)(GLOBAL_TOP & Arg))
 			) * Height;
 		SafeChangePosition(NewX + CW, NewY + CH);
-		Lock.unlock();
 	}
 	void Draw() override {
-		Lock.lock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		if (VisibilityCountDown)
 			VisibilityCountDown--;
 		if ((BYTE)RGBABackground) {
@@ -364,7 +343,6 @@ public:
 				break;
 			line->Draw();
 		}
-		Lock.unlock();
 	}
 	inline DWORD TellType() override {
 		return TT_EDITBOX;

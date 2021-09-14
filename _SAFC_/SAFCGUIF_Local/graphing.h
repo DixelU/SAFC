@@ -42,12 +42,13 @@ struct Graphing : HandleableUIPart {
 		delete STL_Info;
 	}
 	void Reset() {
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		HorizontalScaling = 1;
 		CentralPoint = 0;
 		IsHovered = false;
 	}
 	void Draw() override {
-		Lock.lock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		if (Enabled && Graph && Graph->size()) {
 			local_fp_type begin = Graph->begin()->first;
 			local_fp_type end = Graph->rbegin()->first;
@@ -158,24 +159,21 @@ struct Graphing : HandleableUIPart {
 				STL_Info->SafeStringReplace("Graph disabled");
 		}
 		STL_Info->Draw();
-		Lock.unlock();
 	}
 	void SafeMove(float dx, float dy) override {
-		Lock.lock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		CXpos += dx;
 		CYpos += dy;
 		STL_Info->SafeMove(dx, dy);
-		Lock.unlock();
 	}
 	void SafeChangePosition(float NewX, float NewY) override {
-		Lock.lock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		NewX -= CXpos;
 		NewY -= CYpos;
 		SafeMove(NewX, NewY);
-		Lock.unlock();
 	}
 	void SafeChangePosition_Argumented(BYTE Arg, float NewX, float NewY) override {
-		Lock.lock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		float CW = 0.5f * (
 			(INT32)((BIT)(GLOBAL_LEFT & Arg))
 			- (INT32)((BIT)(GLOBAL_RIGHT & Arg))
@@ -185,12 +183,11 @@ struct Graphing : HandleableUIPart {
 				- (INT32)((BIT)(GLOBAL_TOP & Arg))
 				) * TargetHeight;
 		SafeChangePosition(NewX + CW, NewY + CH);
-		Lock.unlock();
 	}
 	void KeyboardHandler(CHAR CH) override {
 		if (!IsHovered || !Enabled)
 			return;
-		Lock.lock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		switch (CH) {
 		case 'W':
 		case 'w':
@@ -219,14 +216,13 @@ struct Graphing : HandleableUIPart {
 			ScaleCoef = 0.001f;
 			Shift = 0;
 		}
-		Lock.unlock();
 		return;
 	}
 	void SafeStringReplace(std::string Meaningless) override {
 		return;
 	}
 	BIT MouseHandler(float mx, float my, CHAR Button, CHAR State) override {
-		Lock.lock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		if (abs(mx - CXpos) <= 0.5f * Width && abs(my - CYpos) <= 0.5f * TargetHeight) {
 			IsHovered = true;
 		}
@@ -234,7 +230,6 @@ struct Graphing : HandleableUIPart {
 			IsHovered = false;
 		MXpos = mx;
 		MYpos = my;
-		Lock.unlock();
 		return 0;
 	}
 };

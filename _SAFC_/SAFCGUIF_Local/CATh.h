@@ -11,7 +11,7 @@ BIT IsWhiteKey(BYTE Key) {
 	else return (Key & 1);
 }
 struct CAT_Piano :HandleableUIPart {
-	CutAndTransposeKeys* PianoTransform;
+	std::shared_ptr<CutAndTransposeKeys> PianoTransform;
 	SingleTextLine* MinCont, * MaxCont, * Transp;
 	float CalculatedHeight, CalculatedWidth;
 	float BaseXPos, BaseYPos, PianoHeight, KeyWidth;
@@ -21,7 +21,7 @@ struct CAT_Piano :HandleableUIPart {
 		delete MaxCont;
 		delete Transp;
 	}
-	CAT_Piano(float BaseXPos, float BaseYPos, float KeyWidth, float PianoHeight, CutAndTransposeKeys* PianoTransform) {
+	CAT_Piano(float BaseXPos, float BaseYPos, float KeyWidth, float PianoHeight, std::shared_ptr<CutAndTransposeKeys> PianoTransform) {
 		this->BaseXPos = BaseXPos;
 		this->BaseYPos = BaseYPos;
 		this->KeyWidth = KeyWidth;
@@ -38,30 +38,26 @@ struct CAT_Piano :HandleableUIPart {
 		UpdateInfo();
 	}
 	void UpdateInfo() {
-		Lock.lock();
-		if (!PianoTransform) {
-			Lock.unlock(); return;
-		}
+		std::lock_guard<std::recursive_mutex> locker(Lock);
+		if (!PianoTransform) 
+			return;
 		MinCont->SafeStringReplace("Min: " + std::to_string(PianoTransform->Min));
 		MaxCont->SafeStringReplace("Max: " + std::to_string(PianoTransform->Max));
 		Transp->SafeStringReplace("Transp: " + std::to_string(PianoTransform->TransposeVal));
 		Transp->SafeChangePosition(BaseXPos + ((PianoTransform->TransposeVal >= 0) ? 1 : -1) * KeyWidth * (128 * 1.25f), BaseYPos +
 			0.75 * PianoHeight
 			);
-		Lock.unlock();
 	}
 	void Draw() override {
-		Lock.lock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		float x = BaseXPos - 128 * KeyWidth, pixsz = RANGE / WINDXSIZE;
 		BIT Inside = 0;
 
 		MinCont->Draw();
 		MaxCont->Draw();
 		Transp->Draw();
-		if (!PianoTransform) {
-			Lock.unlock();
+		if (!PianoTransform) 
 			return;
-		}
 
 		glLineWidth(0.5f * KeyWidth / pixsz);
 		glBegin(GL_LINES);
@@ -114,10 +110,8 @@ struct CAT_Piano :HandleableUIPart {
 		glVertex2f(x, BaseYPos + 1.5f * PianoHeight);
 		glVertex2f(x, BaseYPos - 1.5f * PianoHeight);
 		glEnd();
-		if (!Focused) {
-			Lock.unlock();
+		if (!Focused) 
 			return;
-		}
 		glColor4f(1, 0.5, 0, 1);
 		glBegin(GL_LINE_LOOP);
 		glVertex2f(BaseXPos - 0.5f * CalculatedWidth, BaseYPos - 0.5f * CalculatedHeight);
@@ -125,26 +119,23 @@ struct CAT_Piano :HandleableUIPart {
 		glVertex2f(BaseXPos + 0.5f * CalculatedWidth, BaseYPos + 0.5f * CalculatedHeight);
 		glVertex2f(BaseXPos + 0.5f * CalculatedWidth, BaseYPos - 0.5f * CalculatedHeight);
 		glEnd();
-		Lock.unlock();
 	}
 	void SafeMove(float dx, float dy) override {
-		Lock.lock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		BaseXPos += dx;
 		BaseYPos += dy;
 		this->MaxCont->SafeMove(dx, dy);
 		this->MinCont->SafeMove(dx, dy);
 		this->Transp->SafeMove(dx, dy);
-		Lock.unlock();
 	}
 	void SafeChangePosition(float NewX, float NewY) override {
-		Lock.lock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		NewX -= BaseXPos;
 		NewY -= BaseYPos;
 		SafeMove(NewX, NewY);
-		Lock.unlock();
 	}
 	void SafeChangePosition_Argumented(BYTE Arg, float NewX, float NewY) override {
-		Lock.lock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		float CW = 0.5f * (
 			(INT32)((BIT)(GLOBAL_LEFT & Arg))
 			- (INT32)((BIT)(GLOBAL_RIGHT & Arg))
@@ -154,15 +145,12 @@ struct CAT_Piano :HandleableUIPart {
 				- (INT32)((BIT)(GLOBAL_TOP & Arg))
 				) * CalculatedHeight;
 		SafeChangePosition(NewX + CW, NewY + CH);
-		Lock.unlock();
 	}
 	void KeyboardHandler(CHAR CH) override {
-		Lock.lock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		if (Focused) {
-			if (!PianoTransform) {
-				Lock.unlock();
+			if (!PianoTransform)
 				return;
-			}
 			switch (CH) {
 			case 'W':
 			case 'w':
@@ -208,19 +196,17 @@ struct CAT_Piano :HandleableUIPart {
 				break;
 			}
 		}
-		Lock.unlock();
 	}
 	void SafeStringReplace(std::string Meaningless) override {
 		return;
 	}
 	BIT MouseHandler(float mx, float my, CHAR Button, CHAR State) override {
-		Lock.lock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		mx -= BaseXPos;
 		my -= BaseYPos;
 		if (fabsf(mx) <= CalculatedWidth * 0.5f && fabsf(my) <= CalculatedHeight * 0.5)
 			Focused = 1;
 		else Focused = 0;
-		Lock.unlock();
 		return 0;
 	}
 };
