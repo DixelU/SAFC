@@ -1039,7 +1039,8 @@ struct SingleMIDIReProcessor {
 						}break;
 					default: {
 						ErrorLine = "Track corruption. Pos:" + std::to_string(file_input.tellg());
-						printf("%s\n", ErrorLine.c_str());
+						auto ErrorHolder = (ErrorLine + " " + std::string(FileName.begin(), FileName.end()));
+						printf("%s\n", ErrorHolder.c_str());
 						//ThrowAlert_Error(ErrorLine);
 						RunningStatusByte = 0;
 						DWORD T = 0;
@@ -1047,18 +1048,18 @@ struct SingleMIDIReProcessor {
 
 						CorruptData.clear();//Corrupted data handler when?//
 						CorruptData.push_back(CurByte);
-						while (T != 0x2FFF00 && file_input.good() && !file_input.eof()) {
+						while (T != 0xFF2F00 && file_input.good() && !file_input.eof()) {
 							TempIOByte = file_input.get();
 							CorruptData.push_back(TempIOByte);
 							T = ((T << 8) | TempIOByte) & 0xFFFFFF;
 						}
 
 						for (int corruptedDeltaTimeInd = 0; corruptedDeltaTimeInd < DeltaTimeSize; corruptedDeltaTimeInd++)
-							Track.pop_back();
+							Track.pop_back(); 
 
 						Track.push_back(0x00);
-						Track.push_back(0x2F);
 						Track.push_back(0xFF);
+						Track.push_back(0x2F);
 						Track.push_back(0x00);
 
 						BoolSettings = BoolSettingsBuffer;//just in case
