@@ -131,8 +131,13 @@ FLOAT lFONT_HEIGHT_TO_WIDTH = 2.5;
 namespace lFontSymbolsInfo {
 	bool IsInitialised = false;
 	GLuint CurrentFont = 0;
-	HFONT SelectedFont;
+	HFONT SelectedFont = nullptr;
 	INT32 Size = 16;
+
+	INT32 PrevSize = Size;
+	FLOAT Prev_lFONT_HEIGHT_TO_WIDTH = lFONT_HEIGHT_TO_WIDTH;
+	std::string PrevFontName;
+
 	struct lFontSymbInfosListDestructor {
 		bool abc;
 		~lFontSymbInfosListDestructor() {
@@ -140,15 +145,28 @@ namespace lFontSymbolsInfo {
 		}
 	};
 	lFontSymbInfosListDestructor __wFSILD = { 0 };
-	void InitialiseFont(std::string FontName) {
+	void InitialiseFont(std::string FontName, bool force = false) {
+		if (!force && FontName == PrevFontName && PrevSize == Size &&
+			(std::abs)(Prev_lFONT_HEIGHT_TO_WIDTH - lFONT_HEIGHT_TO_WIDTH) < FLT_EPSILON)
+			return;
+		else
+		{
+			PrevFontName = FontName;
+			PrevSize = Size;
+			Prev_lFONT_HEIGHT_TO_WIDTH = lFONT_HEIGHT_TO_WIDTH;
+		}
+
 		if (!IsInitialised) {
 			CurrentFont = glGenLists(256);
 			IsInitialised = true;
 		}
-		wglUseFontBitmaps(hDc, 0, 255, CurrentFont);
+
+		auto height = Size * (BEG_RANGE / RANGE);
+		auto width = (Size > 0) ? Size * (BEG_RANGE / RANGE) / lFONT_HEIGHT_TO_WIDTH : 0;
+
 		SelectedFont = CreateFontA(
-			Size * (BEG_RANGE / RANGE),
-			(Size > 0) ? Size * (BEG_RANGE / RANGE) / lFONT_HEIGHT_TO_WIDTH : 0,
+			height,
+			width,
 			0, 0,
 			FW_NORMAL,
 			FALSE,
@@ -157,16 +175,22 @@ namespace lFontSymbolsInfo {
 			DEFAULT_CHARSET,
 			OUT_TT_PRECIS,
 			CLIP_DEFAULT_PRECIS,
-			ANTIALIASED_QUALITY,
-			FF_DONTCARE | DEFAULT_PITCH,
+			NONANTIALIASED_QUALITY,
+			FF_MODERN | DEFAULT_PITCH,
 			FontName.c_str()
-			);
+		);
+
+		wglUseFontBitmaps(hDc, 0, 255, CurrentFont);
+
 		if (SelectedFont)
 			SelectObject(hDc, SelectedFont);
+
+		if (!force)
+			InitialiseFont(FontName, true);
 	}
 	inline void CallListOnChar(char C) {
 		if (IsInitialised) {
-			const char PsChStr[2] = { C,0 };
+			const char PsChStr[2] = { C, 0 };
 			glPushAttrib(GL_LIST_BIT);
 			glListBase(CurrentFont);
 			glCallLists(1, GL_UNSIGNED_BYTE, (const char*)(PsChStr));
@@ -177,12 +201,13 @@ namespace lFontSymbolsInfo {
 		if (IsInitialised) {
 			glPushAttrib(GL_LIST_BIT);
 			glListBase(CurrentFont);
-			glCallLists(1, GL_UNSIGNED_BYTE, S.c_str());
+			glCallLists(S.size(), GL_UNSIGNED_BYTE, S.c_str());
 			glPopAttrib();
 		}
 	}
 	const _MAT2 MT = { {0, 1}, {0, 0}, {0, 0}, {0, 1} };;
 }
+
 struct lFontSymbol : DottedSymbol {
 	char Symb;
 	GLYPHMETRICS GM = { 0 };
@@ -191,10 +216,13 @@ struct lFontSymbol : DottedSymbol {
 		this->Symb = Symb;
 	}
 	void Draw() override {
+		if (!lFontSymbolsInfo::SelectedFont)
+			return;
 		float PixelSize = (RANGE * 2) / WINDXSIZE;
 		float rotX = Xpos, rotY = Ypos;
 		//rotate(rotX, rotY);
-		if (fabsf(rotX) + 2.5 > PixelSize * WindX / 2 || fabsf(rotY) + 2.5 > PixelSize * WindY / 2)
+		if (fabsf(rotX) + lFONT_HEIGHT_TO_WIDTH > PixelSize * WindX / 2 || 
+			fabsf(rotY) + lFONT_HEIGHT_TO_WIDTH > PixelSize * WindY / 2)
 			return;
 		SelectObject(hDc, lFontSymbolsInfo::SelectedFont);
 		GetGlyphOutline(hDc, Symb, GGO_METRICS, &GM, 0, NULL, &lFontSymbolsInfo::MT);

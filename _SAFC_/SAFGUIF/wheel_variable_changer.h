@@ -37,6 +37,7 @@ struct WheelVariableChanger :HandleableUIPart {
 		fac_if = new InputField(std::to_string(default_fact).substr(0, 8), Xpos - 25., Ypos - 5, 10, 40, STLS, nullptr, 0x007FFFFF, STLS, fac_string, 8, _Align::center, _Align::center, InputField::Type::FP_PositiveNumbers);
 	}
 	void Draw() override {
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		GLCOLOR(0xFFFFFF3F + WheelFieldHovered * 0x3F);
 		glBegin(GL_QUADS);
 		glVertex2f(Xpos, Ypos + 25);
@@ -61,17 +62,20 @@ struct WheelVariableChanger :HandleableUIPart {
 		fac_if->Draw();
 	}
 	void SafeMove(float dx, float dy) override {
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		Xpos += dx;
 		Ypos += dy;
 		var_if->SafeMove(dx, dy);
 		fac_if->SafeMove(dx, dy);
 	}
 	void SafeChangePosition(float NewX, float NewY) override {
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		NewX -= Xpos;
 		NewY -= Ypos;
 		SafeMove(NewX, NewY);
 	}
 	void SafeChangePosition_Argumented(BYTE Arg, float NewX, float NewY) override {
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		float CW = 0.5f * (
 			(INT32)((BIT)(GLOBAL_LEFT & Arg))
 			- (INT32)((BIT)(GLOBAL_RIGHT & Arg))
@@ -83,10 +87,12 @@ struct WheelVariableChanger :HandleableUIPart {
 		SafeChangePosition(NewX + CW, NewY + CH);
 	}
 	void CheckupInputs() {
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		variable = stod(var_if->GetCurrentInput("0"));
 		factor = stod(fac_if->GetCurrentInput("0"));
 	}
 	void KeyboardHandler(CHAR CH) override {
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		fac_if->KeyboardHandler(CH);
 		var_if->KeyboardHandler(CH);
 		if (IsHovered) {
@@ -101,6 +107,7 @@ struct WheelVariableChanger :HandleableUIPart {
 
 	}
 	BIT MouseHandler(float mx, float my, CHAR Button, CHAR State) override {
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		this->fac_if->MouseHandler(mx, my, Button, State);
 		this->var_if->MouseHandler(mx, my, Button, State);
 		mx -= Xpos;

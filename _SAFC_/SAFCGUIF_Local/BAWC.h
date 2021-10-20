@@ -57,8 +57,10 @@ struct BoolAndWORDChecker : HandleableUIPart {
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		UpdateInfo();
 		if (Flag) {
-			if (*Flag)SpecialSigns::DrawOK(XPos, YPos, 15, 0x00FFFFFF);
-			else SpecialSigns::DrawWait(XPos, YPos, 15, 0x007FFFFF, 20);
+			if (*Flag)
+				SpecialSigns::DrawOK(XPos, YPos, 15, 0x00FFFFFF);
+			else 
+				SpecialSigns::DrawWait(XPos, YPos, 15, 0x007FFFFF, 20);
 		}
 		else SpecialSigns::DrawNo(XPos, YPos, 15, 0xFF0000FF);
 		STL_Info->Draw();

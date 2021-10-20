@@ -17,7 +17,7 @@ struct WindowsHandler {
 	std::list<std::map<std::string, MoveableWindow*>::iterator> ActiveWindows;
 	std::string MainWindow_ID, MW_ID_Holder;
 	BIT WindowWasDisabledDuringMouseHandling;
-	std::recursive_mutex locker;
+	std::recursive_mutex Lock;
 	static constexpr float alerttext_vert_pos = -7.5, alertheight = 65;
 	WindowsHandler() {
 		MW_ID_Holder = "";
@@ -40,7 +40,7 @@ struct WindowsHandler {
 		}
 	}
 	void MouseHandler(float mx, float my, CHAR Button, CHAR State) {
-		locker.lock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		//printf("%X\n", Button);
 		std::list<std::map<std::string, MoveableWindow*>::iterator>::iterator AWIterator = ActiveWindows.begin(), CurrentAW;
 		CurrentAW = AWIterator;
@@ -54,10 +54,9 @@ struct WindowsHandler {
 			if (WindowWasDisabledDuringMouseHandling)
 				WindowWasDisabledDuringMouseHandling = 0;
 		}
-		locker.unlock();
 	}
 	void ThrowPrompt(std::string StaticTipText, std::string WindowTitle, void(*OnSubmit)(), _Align STipAlign, InputField::Type InputType, std::string DefaultString = "", DWORD MaxChars = 0) {
-		locker.lock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		auto wptr = Map["PROMPT"];
 		auto ifptr = ((InputField*)(*wptr)["FLD"]);
 		auto tbptr = ((TextBox*)(*wptr)["TXT"]);
@@ -71,10 +70,9 @@ struct WindowsHandler {
 
 		wptr->SafeChangePosition(-50, 50);
 		EnableWindow("PROMPT");
-		locker.unlock();
 	}
 	void ThrowAlert(std::string AlertText, std::string AlertHeader, void(*SpecialSignsDrawFunc)(float, float, float, DWORD, DWORD), BIT Update = false, DWORD FRGBA = 0, DWORD SRGBA = 0) {
-		locker.lock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		auto AlertWptr = Map["ALERT"];
 		AlertWptr->SafeWindowRename(AlertHeader);
 		AlertWptr->SafeChangePosition_Argumented(0, 0, 0);
@@ -93,56 +91,46 @@ struct WindowsHandler {
 			AlertWSptr->SRGBA = SRGBA;
 		}
 		EnableWindow("ALERT");
-		locker.unlock();
 	}
 	void DisableWindow(std::string ID) {
-		locker.lock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		auto Y = Map.find(ID);
 		if (Y != Map.end()) {
 			WindowWasDisabledDuringMouseHandling = 1;
 			Y->second->Drawable = 1;
 			ActiveWindows.remove(Y);
 		}
-		locker.unlock();
 	}
 	void DisableAllWindows() {
-		locker.lock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		WindowWasDisabledDuringMouseHandling = 1;
 		ActiveWindows.clear();
 		EnableWindow(MainWindow_ID);
-		locker.unlock();
 	}
 	void TurnOnMainWindow() {
-		locker.lock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		if (this->MW_ID_Holder != "")
 			swap(this->MainWindow_ID, this->MW_ID_Holder);
 		this->EnableWindow(MainWindow_ID);
-		locker.unlock();
 	}
 	void TurnOffMainWindow() {
-		locker.lock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		if (this->MW_ID_Holder == "")
 			swap(this->MainWindow_ID, this->MW_ID_Holder);
 		this->DisableWindow(MainWindow_ID);
-		locker.unlock();
 	}
 	void DisableWindow(std::list<std::map<std::string, MoveableWindow*>::iterator>::iterator Window) {
-		locker.lock();
-		if (Window == ActiveWindows.end()) {
-			locker.lock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
+		if (Window == ActiveWindows.end()) 
 			return;
-		}
 		WindowWasDisabledDuringMouseHandling = 1;
 		(*Window)->second->Drawable = 1;
 		ActiveWindows.erase(Window);
-		locker.unlock();
 	}
 	void EnableWindow(std::map<std::string, MoveableWindow*>::iterator Window) {
-		locker.lock();
-		if (Window == Map.end()) {
-			locker.lock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
+		if (Window == Map.end()) 
 			return;
-		}
 		for (auto Y = ActiveWindows.begin(), Q = ActiveWindows.begin(); Y != ActiveWindows.end(); Y++) {
 			if (*Y == Window) {
 				Window->second->Drawable = 1;
@@ -154,30 +142,28 @@ struct WindowsHandler {
 				}
 				else {
 					ActiveWindows.erase(Y);
-					if (ActiveWindows.size())Y = ActiveWindows.begin();
-					else break;
+					if (ActiveWindows.size())
+						Y = ActiveWindows.begin();
+					else 
+						break;
 				}
 			}
 		}
-
 		ActiveWindows.push_front(Window);
-		locker.unlock();
 		//cout << Window->first << " " << ActiveWindows.front()->first << endl;
 	}
 	void EnableWindow(std::string ID) {
-		locker.lock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		this->EnableWindow(Map.find(ID));
-		locker.unlock();
 	}
 	void KeyboardHandler(char CH) {
-		locker.lock();
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		if (ActiveWindows.size())
 			(*(ActiveWindows.begin()))->second->KeyboardHandler(CH);
-		locker.unlock();
 	}
 	void Draw() {
+		std::lock_guard<std::recursive_mutex> locker(Lock);
 		BIT MetMain = 0;
-		locker.lock();
 		if (!ActiveWindows.empty()) {//if only reverse iterators could be easily converted to usual iterators...
 			auto Y = (++ActiveWindows.rbegin()).base();
 
@@ -190,18 +176,21 @@ struct WindowsHandler {
 							break;
 						}
 						else DisableWindow(Y);
-					else (*Y)->second->Drawable = true;
+					else 
+						(*Y)->second->Drawable = true;
 					continue;
 				}
 				(*Y)->second->Draw();
-				if ((*Y)->first == MainWindow_ID)MetMain = 1;
-				if (Y == ActiveWindows.begin())break;
+				if ((*Y)->first == MainWindow_ID)
+					MetMain = 1;
+				if (Y == ActiveWindows.begin())
+					break;
 				Y--;
 			}
 		}
 		//cout << endl;
-		if (!MetMain)this->EnableWindow(MainWindow_ID);
-		locker.unlock();
+		if (!MetMain)
+			this->EnableWindow(MainWindow_ID);
 	}
 	inline MoveableWindow*& operator[](std::string ID) {
 		return (this->Map[ID]);

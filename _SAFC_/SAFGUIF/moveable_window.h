@@ -187,7 +187,8 @@ struct MoveableWindow :HandleableUIPart {
 		glVertex2f(XWindowPos + Width - WindowHeapSize, YWindowPos);
 		glEnd();
 
-		if (WindowName)WindowName->Draw();
+		if (WindowName)
+			WindowName->Draw();
 
 		for (auto Y = WindowActivities.begin(); Y != WindowActivities.end(); Y++)
 			if (Y->second)

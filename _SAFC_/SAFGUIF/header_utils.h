@@ -2,7 +2,7 @@
 #ifndef SAFGUIF_HEADER
 #define SAFGUIF_HEADER
 
-#include <GL/glew.h>
+// #include <GL/glew.h>
 #include <GL/freeglut.h>
 
 #include "consts.h"
@@ -22,7 +22,7 @@ FLOAT RANGE = BEG_RANGE, MXPOS = 0.f, MYPOS = 0.f;
 const char* WINDOWTITLE = "SAFC\0";
 std::wstring RegPath = L"Software\\SAFC\\";
 
-std::string FONTNAME = "Arial";
+std::string FONTNAME = "Consolas";
 BIT is_fonted = 0;
 
 //#define ROT_ANGLE 0.7
@@ -47,6 +47,7 @@ BIT ANIMATION_IS_ACTIVE = 0, FIRSTBOOT = 1, DRAG_OVER = 0, APRIL_FOOL = 0, SHIFT
 DWORD TimerV = 0;
 HWND hWnd;
 HDC hDc;
+SHORT YearsOld = -1;
 auto HandCursor = ::LoadCursor(NULL, IDC_HAND), AllDirectCursor = ::LoadCursor(NULL, IDC_CROSS), NWSECursor = ::LoadCursor(NULL, IDC_SIZENWSE);///AAAAAAAAAAA
 //const float singlepixwidth = (float)RANGE / WINDXSIZE;
 
@@ -57,7 +58,12 @@ void inline rotate(float& x, float& y);
 int TIMESEED() {
 	SYSTEMTIME t;
 	GetLocalTime(&t);
-	if (t.wMonth == 4 && t.wDay == 1)APRIL_FOOL = 1;
+	if (t.wMonth == 4 && t.wDay == 1)
+		APRIL_FOOL = 1;
+	if (t.wMonth == 8 && t.wDay == 31)
+	{
+		YearsOld = t.wYear - 2018;
+	}
 	return t.wMilliseconds + (t.wSecond * 1000) + t.wMinute * 60000;
 }
 void ThrowAlert_Error(std::string AlertText);

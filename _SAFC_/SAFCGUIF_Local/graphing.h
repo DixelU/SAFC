@@ -4,15 +4,9 @@
 
 #include "../SAFGUIF/SAFGUIF.h"
 #include "../SAFC_InnerModules/SAFC_IM.h"
-/*
-#ifndef __X64
+
 using local_fp_type = float;
 constexpr float __epsilon = FLT_EPSILON;
-#else
-*/
-using local_fp_type = double;
-constexpr double __epsilon = DBL_EPSILON;
-//#endif
 
 template<typename ordered_map_type = std::map<int, int>>
 struct Graphing : HandleableUIPart {
@@ -55,10 +49,10 @@ struct Graphing : HandleableUIPart {
 			local_fp_type max_value = -1e31f, min_value = 1e31f;
 			local_fp_type prev_value = CYpos - 0.5 * TargetHeight + (ScaleCoef * Graph->begin()->second + Shift) * TargetHeight;
 			local_fp_type t_prev_value = prev_value;
-			BIT IsFirstLine = true;
 			BIT IsLastLoopComplete = false;
 			GLCOLOR(Color);
 			glBegin(GL_LINE_STRIP);
+			glVertex2f(CXpos - 0.5f * Width, t_prev_value);
 			for (auto T : *Graph) {
 				IsLastLoopComplete = false;
 				local_fp_type cur_pos = T.first;
@@ -75,10 +69,6 @@ struct Graphing : HandleableUIPart {
 					max_value = cur_y;
 				if (min_value > cur_y)
 					min_value = cur_y;
-				if (IsFirstLine) {
-					IsFirstLine = false;
-					glVertex2f(CXpos - 0.5f * Width, t_prev_value);
-				}
 				glVertex2f(CXpos + cur_x * Width, t_prev_value);
 				glVertex2f(CXpos + cur_x * Width, prev_value);
 				IsLastLoopComplete = true;
@@ -87,13 +77,13 @@ struct Graphing : HandleableUIPart {
 			glEnd();
 			if (AssignedXSelection_ByKey > 0.5f) {
 				GLCOLOR(SelectionColor);
-				local_fp_type last_tempo_pos_x = ((AssignedXSelection_ByKey - begin) / (end - begin) - 0.5f + CentralPoint) * HorizontalScaling;
-				if (last_tempo_pos_x >= -0.5f) {
-					last_tempo_pos_x = ((last_tempo_pos_x < 0.5f) ? last_tempo_pos_x : 0.5f) * Width;
+				local_fp_type last_pos_x = ((AssignedXSelection_ByKey - begin) / (end - begin) - 0.5f + CentralPoint) * HorizontalScaling;
+				if (last_pos_x >= -0.5f) {
+					last_pos_x = ((last_pos_x < 0.5f) ? last_pos_x : 0.5f) * Width;
 					glBegin(GL_POLYGON);
 					glVertex2f(CXpos - 0.5f * Width, CYpos + TargetHeight * 0.5f);
-					glVertex2f(CXpos + last_tempo_pos_x, CYpos + TargetHeight * 0.5f);
-					glVertex2f(CXpos + last_tempo_pos_x, CYpos - TargetHeight * 0.5f);
+					glVertex2f(CXpos + last_pos_x, CYpos + TargetHeight * 0.5f);
+					glVertex2f(CXpos + last_pos_x, CYpos - TargetHeight * 0.5f);
 					glVertex2f(CXpos - 0.5f * Width, CYpos - TargetHeight * 0.5f);
 					glEnd();
 				}
@@ -101,10 +91,9 @@ struct Graphing : HandleableUIPart {
 			if (AutoAdjusting) {
 				if (min_value != max_value) {
 					Shift = (Shift - min_value);
-					ScaleCoef = std::max(ScaleCoef / (max_value - min_value), __epsilon*4);
+					ScaleCoef = std::max(ScaleCoef / (max_value - min_value), __epsilon * 4.f);
 				}
 			}
-			//std::cout << "min: " << min_value << " max: " << max_value << " shift: " << Shift << " ScaleC: " << ScaleCoef << std::endl;
 			if (IsHovered) {
 				local_fp_type cur_x = (((MXpos - CXpos) / Width) / HorizontalScaling - CentralPoint + 0.5f) * (end - begin) + begin;
 				glLineWidth(1);
@@ -115,26 +104,30 @@ struct Graphing : HandleableUIPart {
 				glVertex2f(CXpos + 0.5f * Width, CYpos - TargetHeight * 0.5f);
 				glVertex2f(CXpos - 0.5f * Width, CYpos - TargetHeight * 0.5f);
 				glEnd();
+
 				glBegin(GL_LINES);
 				glVertex2f(MXpos, CYpos - TargetHeight * 0.5f);
 				glVertex2f(MXpos, CYpos + TargetHeight * 0.5f);
+				glEnd();
 				auto equal_u_bound = Graph->upper_bound(cur_x);
 				auto lesser_one = equal_u_bound;
 				if (equal_u_bound != Graph->begin())
 					lesser_one--;
-				local_fp_type last_tempo_pos_x = ((lesser_one->first - begin) / (end - begin) - 0.5f + CentralPoint) * HorizontalScaling;
-				local_fp_type last_tempo_pos_y = CYpos - 0.5f * TargetHeight + (ScaleCoef * lesser_one->second + Shift) * TargetHeight;
-				if (abs(last_tempo_pos_x) <= 0.5f) {
-					last_tempo_pos_x = last_tempo_pos_x * Width + CXpos;
+				local_fp_type last_pos_x = ((lesser_one->first - begin) / (end - begin) - 0.5f + CentralPoint) * HorizontalScaling;
+				local_fp_type last_pos_y = CYpos - 0.5f * TargetHeight + (ScaleCoef * lesser_one->second + Shift) * TargetHeight;
+				if (abs(last_pos_x) <= 0.5f) {
+					last_pos_x = last_pos_x * Width + CXpos;
 					GLCOLOR(NearestLineColor);
 					glLineWidth(3);
-					glVertex2f(last_tempo_pos_x, CYpos - TargetHeight * 0.5f);
-					glVertex2f(last_tempo_pos_x, CYpos + TargetHeight * 0.5f);
+					glBegin(GL_LINES);
+					glVertex2f(last_pos_x, CYpos - TargetHeight * 0.5f);
+					glVertex2f(last_pos_x, CYpos + TargetHeight * 0.5f);
 					glEnd();
+
 					GLCOLOR(PointColor);
 					glPointSize(3);
 					glBegin(GL_POINTS);
-					glVertex2f(last_tempo_pos_x, last_tempo_pos_y);
+					glVertex2f(last_pos_x, last_pos_y);
 					glEnd();
 				}
 				STL_Info->SafeStringReplace(std::to_string(lesser_one->first) + " : " + std::to_string(lesser_one->second));

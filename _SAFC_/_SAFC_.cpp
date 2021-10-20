@@ -371,7 +371,8 @@ struct SAFCData {////overall settings and storing perfile settings....
 		SaveDirectory = L"";
 	}
 	void ResolveSubdivisionProblem_GroupIDAssign(WORD ThreadsCount=0) {
-		if (!ThreadsCount)ThreadsCount = DetectedThreads;
+		if (!ThreadsCount)
+			ThreadsCount = DetectedThreads;
 		if (Files.empty()) {
 			SaveDirectory = L"";
 			return;
@@ -1735,20 +1736,19 @@ void Init() {///SetIsFontedVar
 
 	(*WH)["SMIC"] = T;
 
-	auto InnerWindow = new MoveableResizeableWindow("Inner Test", System_White, -100, 100, 200, 200, 0x0000000F, 0x7F7F7F7F, 0x000000FF);
-	T = new MoveableResizeableWindow("Test", System_White, -150, 150, 300, 300, 0x0000000F, 0x7F7F7F7F, 0x000000FF, [InnerWindow](float dH, float dW, float NewHeight, float NewWidth) {
+	auto InnerWindow = new MoveableResizeableWindow("Inner Test", System_White, -100, 100, 200, 200, 0x0000007F, 0x7F7F7FFF, 0x0000007F);
+	T = new MoveableResizeableWindow("Test", System_White, -150, 150, 300, 300, 0x0000007F, 0x7F7F7FFF, 0x0000007F, [InnerWindow](float dH, float dW, float NewHeight, float NewWidth) {
 		InnerWindow->SafeResize(InnerWindow->Height + dH, InnerWindow->Width + dW);
 		});
 
 	(*T)["WINDOW"] = InnerWindow;
-	//(*T)["TEXTAREA"] = new EditBox("", System_White, 0, 0, 200, 200, 10, 0, 0xFFFFFFFF, 2);
-	(*InnerWindow)["BUTT"] = new Button("Compile", System_White, nullptr, -50, -55, 75, 12, 1,
+	(*T)["TEXTAREA"] = new EditBox("", System_White, 0, 0, 200, 200, 10, 0, 0xFFFFFFFF, 2);
+	(*InnerWindow)["BUTT"] = new Button("o3o", System_White, nullptr, -50, -55, 75, 12, 1,
 		0x000000AF, 0xFFFFFFFF, 0x000000AF, 0xFFFFFFFF, 0x7F7F7F7FF, NULL, " ");
 	InnerWindow->AssignPinnedActivities({ "BUTT" }, MoveableResizeableWindow::PinSide::bottom);
 	InnerWindow->AssignPinnedActivities({ "BUTT" }, MoveableResizeableWindow::PinSide::left);
 
 	(*WH)["COMPILEW"] = T;
-
 
 	WH->EnableWindow("MAIN");
 	//WH->EnableWindow("COMPILEW");
@@ -1774,8 +1774,7 @@ void Init() {///SetIsFontedVar
 
 void onTimer(int v);
 void mDisplay() {
-	if(!(TimerV&0xF))
-		lFontSymbolsInfo::InitialiseFont(FONTNAME);
+	lFontSymbolsInfo::InitialiseFont(FONTNAME);
 	glClear(GL_COLOR_BUFFER_BIT | GL_ACCUM_BUFFER_BIT);
 	glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 	if (FIRSTBOOT) {
@@ -1783,16 +1782,33 @@ void mDisplay() {
 
 		WH = new WindowsHandler();
 		Init();
-		//WH->ThrowAlert("kokoko", "alerttest", SpecialSigns::DrawWait, 1, 0xFF00FF7F, 20);//
 		if (APRIL_FOOL) {
 			WH->ThrowAlert("Today is a special day! ( -w-)\nToday you'll have new background\n(-w- )", "1st of April!", SpecialSigns::DrawWait, 1, 0xFF00FFFF, 20);
-			(*WH)["ALERT"]->RGBABackground = 0; 
+			(*WH)["ALERT"]->RGBABackground = 0xF; 
+			_WH_t("ALERT", "AlertText", TextBox*)->SafeTextColorChange(0xFFFFFFFF);
+		}
+		if (YearsOld >= 0) {
+			WH->ThrowAlert("Interesting fact: today is exactly " + std::to_string(YearsOld) + " years since first SAFC release.\n(o w o  )", "SAFC birthday", SpecialSigns::DrawWait, 1, 0xFF7F3FFF, 50);
+			(*WH)["ALERT"]->RGBABackground = 0xF;
 			_WH_t("ALERT", "AlertText", TextBox*)->SafeTextColorChange(0xFFFFFFFF);
 		}
 		ANIMATION_IS_ACTIVE = !ANIMATION_IS_ACTIVE;
 		onTimer(0);
 	}
-	if (APRIL_FOOL || Settings::ShaderMode==69) {
+
+	if (YearsOld >= 0 || Settings::ShaderMode == 100) {
+		glBegin(GL_QUADS);
+		glColor4f(1, 1, 1, (DRAG_OVER) ? 0.25f : 1);
+		glVertex2f(0 - RANGE * (WindX / WINDXSIZE), 0 - RANGE * (WindY / WINDYSIZE));
+		glColor4f(1, 1, 1, (DRAG_OVER) ? 0.25f : 1);
+		glVertex2f(0 - RANGE * (WindX / WINDXSIZE), RANGE * (WindY / WINDYSIZE));
+		glColor4f(1, 0.9f, 0.8f, (DRAG_OVER) ? 0.25f : 1);
+		glVertex2f(RANGE * (WindX / WINDXSIZE), RANGE * (WindY / WINDYSIZE));
+		glColor4f(0.8f, 0.9f, 1, (DRAG_OVER) ? 0.25f : 1);
+		glVertex2f(RANGE * (WindX / WINDXSIZE), 0 - RANGE * (WindY / WINDYSIZE));
+		glEnd();
+	}
+	else if (APRIL_FOOL || Settings::ShaderMode == 69) {
 		glBegin(GL_QUADS);
 		glColor4f(1, 0, 1, (DRAG_OVER) ? 0.25f : 1);
 		glVertex2f(0 - RANGE * (WindX / WINDXSIZE), 0 - RANGE * (WindY / WINDYSIZE));
@@ -1826,8 +1842,9 @@ void mDisplay() {
 	//ROT_ANGLE += 0.02;
 
 	glRotatef(ROT_ANGLE, 0, 0, 1);
-	if (WH)WH->Draw();
-	if (DRAG_OVER)SpecialSigns::DrawFileSign(0, 0, 50, 0xFFFFFFCF,0);
+	if (WH)
+		WH->Draw();
+	if (DRAG_OVER)SpecialSigns::DrawFileSign(0, 0, 50, 0xFFFFFFFF, 0);
 	glRotatef(-ROT_ANGLE, 0, 0, 1);
 
 	glutSwapBuffers();
@@ -1874,7 +1891,8 @@ void mMotion(int ix, int iy) {
 	absoluteToActualCoords(ix, iy, fx, fy);
 	MXPOS = fx;
 	MYPOS = fy;
-	if (WH)WH->MouseHandler(fx, fy, 0, 0);
+	if (WH)
+		WH->MouseHandler(fx, fy, 0, 0);
 }
 void mKey(BYTE k, int x, int y) {
 	if (WH)WH->KeyboardHandler(k);
@@ -1887,9 +1905,14 @@ void mClick(int butt, int state, int x, int y) {
 	CHAR Button,State=state;
 	absoluteToActualCoords(x, y, fx, fy);
 	Button = butt - 1;
-	if (state == GLUT_DOWN)State = -1;
-	else if (state == GLUT_UP)State = 1;
-	if (WH)WH->MouseHandler(fx, fy, Button, State);
+
+	if (state == GLUT_DOWN)
+		State = -1;
+	else if (state == GLUT_UP)
+		State = 1;
+
+	if (WH)
+		WH->MouseHandler(fx, fy, Button, State);
 }
 void mDrag(int x, int y) {
 	//mClick(88, MOUSE_DRAG_EVENT, x, y);
@@ -1910,11 +1933,11 @@ void mSpecialKey(int Key,int x, int y) {
 		}
 	}
 	if (modif == GLUT_ACTIVE_ALT && Key == GLUT_KEY_DOWN) {
-		RANGE *= 1.1;
+		RANGE *= 1.1f;
 		OnResize(WindX, WindY);
 	}
 	else if(modif == GLUT_ACTIVE_ALT && Key == GLUT_KEY_UP) {
-		RANGE /= 1.1;
+		RANGE /= 1.1f;
 		OnResize(WindX, WindY);
 	}
 }
@@ -1927,7 +1950,7 @@ int main(int argc, char ** argv) {
 	_wremove(L"_f");
 	_wremove(L"_g");
 
-	std::ios_base::sync_with_stdio(false);//why not
+	std::ios_base::sync_with_stdio(false); //why not
 #ifdef _DEBUG 
 	ShowWindow(GetConsoleWindow(), SW_SHOW);
 #else // _DEBUG 
@@ -1953,13 +1976,20 @@ int main(int argc, char ** argv) {
 
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);//_MINUS_SRC_ALPHA
 	glEnable(GL_BLEND); 
-	
-	//glEnable(GL_POLYGON_SMOOTH);//laggy af
-	glEnable(GL_LINE_SMOOTH);//GL_POLYGON_SMOOTH
-	glEnable(GL_POINT_SMOOTH);
+	//glutSetOption(GLUT_MULTISAMPLE, 4);
 
-	glShadeModel(GL_SMOOTH); 
-	//glEnable(GLUT_MULTISAMPLE);
+	//auto vendor = glGetString(GL_VENDOR);
+	//auto renderer = glGetString(GL_RENDERER);
+	//auto version = glGetString(GL_VERSION);
+	//printf("%s - %s.\nVersion %s\n", vendor, renderer, version);
+
+	//glEnable(GL_POLYGON_SMOOTH);//laggy af
+	//glEnable(GL_LINE_SMOOTH);//GL_POLYGON_SMOOTH
+	//glEnable(GL_POINT_SMOOTH);
+
+	//glShadeModel(GL_SMOOTH); 
+	//glEnable(GLUT_MULTISAMPLE); 
+	//glutSetOption(GLUT_MULTISAMPLE, 8);
 
 	glHint(GL_LINE_SMOOTH_HINT, GL_FASTEST);//GL_FASTEST//GL_NICEST
 	glHint(GL_POINT_SMOOTH_HINT, GL_FASTEST);
