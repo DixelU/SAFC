@@ -40,7 +40,16 @@ struct FastMIDIChecker {
 			PPQN = (PPQN << 8) | (f->get());
 			PPQN = (PPQN << 8) | (f->get());
 			fclose(fo_ptr);
-			FileSize = std::filesystem::file_size(File);
+			std::error_code ec;
+			auto size = std::filesystem::file_size(File, ec);
+			if (ec) {
+	            std::cout << ec.message() << std::endl;
+	        }
+	        else {
+	        	std::uintmax_t t;
+	        	std::cout << size << std::endl;
+	        	std::cout << (FileSize = size) << std::endl;
+			}
 			//cout << FileSize;
 		}
 		else {

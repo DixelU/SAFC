@@ -424,7 +424,7 @@ struct SAFCData {////overall settings and storing perfile settings....
 		std::vector<SingleMIDIReProcessor*> SMRPv;
 		for (int i = 0; i < Files.size(); i++)
 			SMRPv.push_back(Files[i].BuildSMRP());
-		MIDICollectionThreadedMerger *MCTM = new MIDICollectionThreadedMerger(SMRPv,GlobalPPQN,SaveDirectory);
+		MIDICollectionThreadedMerger *MCTM = new MIDICollectionThreadedMerger(SMRPv, GlobalPPQN, SaveDirectory);
 		MCTM->RemnantsRemove = DefaultBoolSettings & _BoolSettings::remove_remnants;
 		return MCTM;
 	}
@@ -1461,7 +1461,7 @@ void OnStart() {
 
 		auto ptr = (InputField*)(*MW)["TIMER"];
 		auto now = std::chrono::high_resolution_clock::now();
-		auto difference = (now - START).count();
+		auto difference = std::chrono::duration_cast<std::chrono::seconds>(now - START).count();
 		ptr->SafeStringReplace(std::to_string(difference) + " s");
 
 		for (ID = 0; ID < GlobalMCTM->Cur_Processing.size(); ID++) {

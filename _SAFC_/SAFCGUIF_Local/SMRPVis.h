@@ -80,7 +80,7 @@ struct SMRP_Vis : HandleableUIPart {
 			Processing = SMRP->Processing;
 		if (Finished != SMRP->Finished)
 			Finished = SMRP->Finished;
-		T = std::to_string((SMRP->FilePosition * 100.) / (SMRP->FileSize)).substr(0, 5) + "%";
+		T = std::to_string(double(SMRP->FilePosition * 100) / double(SMRP->FileSize)).substr(0, 5) + "%";
 		if (Hovered && Processing) {
 			T = SMRP->AppearanceFilename.substr(0, 30) + " " + T;
 			STL_Info->SafeColorChange(0x9FCFFFFF);
