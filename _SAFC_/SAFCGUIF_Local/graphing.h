@@ -6,7 +6,7 @@
 #include "../SAFC_InnerModules/SAFC_IM.h"
 
 using local_fp_type = float;
-constexpr float __epsilon = FLT_EPSILON;
+constexpr float __epsilon = 1e-6;
 
 template<typename ordered_map_type = std::map<int, int>>
 struct Graphing : HandleableUIPart {

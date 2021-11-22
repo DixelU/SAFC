@@ -5,6 +5,8 @@
 #include "header_utils.h"
 #include "charmap.h"
 
+#include <cmath>
+
 struct Coords {
 	float x, y;
 	void Set(float newx, float newy) {
@@ -147,7 +149,7 @@ namespace lFontSymbolsInfo {
 	lFontSymbInfosListDestructor __wFSILD = { 0 };
 	void InitialiseFont(std::string FontName, bool force = false) {
 		if (!force && FontName == PrevFontName && PrevSize == Size &&
-			(std::abs)(Prev_lFONT_HEIGHT_TO_WIDTH - lFONT_HEIGHT_TO_WIDTH) < FLT_EPSILON)
+			(std::abs)(Prev_lFONT_HEIGHT_TO_WIDTH - lFONT_HEIGHT_TO_WIDTH) < 1e-5f)
 			return;
 		else
 		{

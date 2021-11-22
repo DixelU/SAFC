@@ -524,7 +524,7 @@ namespace WinReg {
 	)
 	{
 		HKEY hKey{ nullptr };
-		LONG retCode = ::RegCreateKeyEx(
+		LONG retCode = ::RegCreateKeyExW(
 			hKeyParent,
 			subKey.c_str(),
 			0,          // reserved
@@ -555,7 +555,7 @@ namespace WinReg {
 	)
 	{
 		HKEY hKey{ nullptr };
-		LONG retCode = ::RegOpenKeyEx(
+		LONG retCode = ::RegOpenKeyExW(
 			hKeyParent,
 			subKey.c_str(),
 			REG_NONE,           // default options
@@ -579,7 +579,7 @@ namespace WinReg {
 	{
 		_ASSERTE(IsValid());
 
-		LONG retCode = ::RegSetValueEx(
+		LONG retCode = ::RegSetValueExW(
 			m_hKey,
 			valueName.c_str(),
 			0, // reserved
@@ -598,7 +598,7 @@ namespace WinReg {
 	{
 		_ASSERTE(IsValid());
 
-		LONG retCode = ::RegSetValueEx(
+		LONG retCode = ::RegSetValueExW(
 			m_hKey,
 			valueName.c_str(),
 			0, // reserved
@@ -620,7 +620,7 @@ namespace WinReg {
 		// String size including the terminating NUL, in bytes
 		const DWORD dataSize = static_cast<DWORD>((data.length() + 1) * sizeof(wchar_t));
 
-		LONG retCode = ::RegSetValueEx(
+		LONG retCode = ::RegSetValueExW(
 			m_hKey,
 			valueName.c_str(),
 			0, // reserved
@@ -642,7 +642,7 @@ namespace WinReg {
 		// String size including the terminating NUL, in bytes
 		const DWORD dataSize = static_cast<DWORD>((data.length() + 1) * sizeof(wchar_t));
 
-		LONG retCode = ::RegSetValueEx(
+		LONG retCode = ::RegSetValueExW(
 			m_hKey,
 			valueName.c_str(),
 			0, // reserved
@@ -716,7 +716,7 @@ namespace WinReg {
 		// Total size, in bytes, of the whole multi-string structure
 		const DWORD dataSize = static_cast<DWORD>(multiString.size() * sizeof(wchar_t));
 
-		LONG retCode = ::RegSetValueEx(
+		LONG retCode = ::RegSetValueExW(
 			m_hKey,
 			valueName.c_str(),
 			0, // reserved
@@ -738,7 +738,7 @@ namespace WinReg {
 		// Total data size, in bytes
 		const DWORD dataSize = static_cast<DWORD>(data.size());
 
-		LONG retCode = ::RegSetValueEx(
+		LONG retCode = ::RegSetValueExW(
 			m_hKey,
 			valueName.c_str(),
 			0, // reserved
@@ -761,7 +761,7 @@ namespace WinReg {
 	{
 		_ASSERTE(IsValid());
 
-		LONG retCode = ::RegSetValueEx(
+		LONG retCode = ::RegSetValueExW(
 			m_hKey,
 			valueName.c_str(),
 			0, // reserved
@@ -784,7 +784,7 @@ namespace WinReg {
 		DWORD dataSize = sizeof(data);  // size of data, in bytes
 
 		const DWORD flags = RRF_RT_REG_DWORD;
-		LONG retCode = ::RegGetValue(
+		LONG retCode = ::RegGetValueW(
 			m_hKey,
 			nullptr, // no subkey
 			valueName.c_str(),
@@ -810,7 +810,7 @@ namespace WinReg {
 		DWORD dataSize = sizeof(data);  // size of data, in bytes
 
 		const DWORD flags = RRF_RT_REG_QWORD;
-		LONG retCode = ::RegGetValue(
+		LONG retCode = ::RegGetValueW(
 			m_hKey,
 			nullptr, // no subkey
 			valueName.c_str(),
@@ -835,7 +835,7 @@ namespace WinReg {
 		// Get the size of the result string
 		DWORD dataSize = 0; // size of data, in bytes
 		const DWORD flags = RRF_RT_REG_SZ;
-		LONG retCode = ::RegGetValue(
+		LONG retCode = ::RegGetValueW(
 			m_hKey,
 			nullptr, // no subkey
 			valueName.c_str(),
@@ -856,7 +856,7 @@ namespace WinReg {
 		result.resize(dataSize / sizeof(wchar_t));
 
 		// Call RegGetValue for the second time to read the string's content
-		retCode = ::RegGetValue(
+		retCode = ::RegGetValueW(
 			m_hKey,
 			nullptr,    // no subkey
 			valueName.c_str(),
@@ -894,7 +894,7 @@ namespace WinReg {
 
 		// Get the size of the result string
 		DWORD dataSize = 0; // size of data, in bytes
-		LONG retCode = ::RegGetValue(
+		LONG retCode = ::RegGetValueW(
 			m_hKey,
 			nullptr,    // no subkey
 			valueName.c_str(),
@@ -915,7 +915,7 @@ namespace WinReg {
 		result.resize(dataSize / sizeof(wchar_t));
 
 		// Call RegGetValue for the second time to read the string's content
-		retCode = ::RegGetValue(
+		retCode = ::RegGetValueW(
 			m_hKey,
 			nullptr,    // no subkey
 			valueName.c_str(),
@@ -943,7 +943,7 @@ namespace WinReg {
 		// Request the size of the multi-string, in bytes
 		DWORD dataSize = 0;
 		const DWORD flags = RRF_RT_REG_MULTI_SZ;
-		LONG retCode = ::RegGetValue(
+		LONG retCode = ::RegGetValueW(
 			m_hKey,
 			nullptr,    // no subkey
 			valueName.c_str(),
@@ -964,7 +964,7 @@ namespace WinReg {
 		data.resize(dataSize / sizeof(wchar_t));
 
 		// Read the multi-string from the registry into the vector object
-		retCode = ::RegGetValue(
+		retCode = ::RegGetValueW(
 			m_hKey,
 			nullptr,    // no subkey
 			valueName.c_str(),
@@ -1010,7 +1010,7 @@ namespace WinReg {
 		// Get the size of the binary data
 		DWORD dataSize = 0; // size of data, in bytes
 		const DWORD flags = RRF_RT_REG_BINARY;
-		LONG retCode = ::RegGetValue(
+		LONG retCode = ::RegGetValueW(
 			m_hKey,
 			nullptr,    // no subkey
 			valueName.c_str(),
@@ -1028,7 +1028,7 @@ namespace WinReg {
 		std::vector<BYTE> data(dataSize);
 
 		// Call RegGetValue for the second time to read the data content
-		retCode = ::RegGetValue(
+		retCode = ::RegGetValueW(
 			m_hKey,
 			nullptr,    // no subkey
 			valueName.c_str(),
@@ -1052,7 +1052,7 @@ namespace WinReg {
 
 		DWORD typeId{};     // will be returned by RegQueryValueEx
 
-		LONG retCode = ::RegQueryValueEx(
+		LONG retCode = ::RegQueryValueExW(
 			m_hKey,
 			valueName.c_str(),
 			nullptr,    // reserved
@@ -1138,7 +1138,7 @@ namespace WinReg {
 		{
 			// Get the name of the current subkey
 			DWORD subKeyNameLen = maxSubKeyNameLen;
-			retCode = ::RegEnumKeyEx(
+			retCode = ::RegEnumKeyExW(
 				m_hKey,
 				index,
 				nameBuffer.get(),
@@ -1211,7 +1211,7 @@ namespace WinReg {
 			// Get the name and the type of the current value
 			DWORD valueNameLen = maxValueNameLen;
 			DWORD valueType{};
-			retCode = ::RegEnumValue(
+			retCode = ::RegEnumValueW(
 				m_hKey,
 				index,
 				nameBuffer.get(),
@@ -1243,7 +1243,7 @@ namespace WinReg {
 	{
 		_ASSERTE(IsValid());
 
-		LONG retCode = ::RegDeleteValue(m_hKey, valueName.c_str());
+		LONG retCode = ::RegDeleteValueW(m_hKey, valueName.c_str());
 		if (retCode != ERROR_SUCCESS)
 		{
 			throw RegException{ "RegDeleteValue failed.", retCode };
@@ -1255,7 +1255,7 @@ namespace WinReg {
 	{
 		_ASSERTE(IsValid());
 
-		LONG retCode = ::RegDeleteKeyEx(m_hKey, subKey.c_str(), desiredAccess, 0);
+		LONG retCode = ::RegDeleteKeyExW(m_hKey, subKey.c_str(), desiredAccess, 0);
 		if (retCode != ERROR_SUCCESS)
 		{
 			throw RegException{ "RegDeleteKeyEx failed.", retCode };
@@ -1267,7 +1267,7 @@ namespace WinReg {
 	{
 		_ASSERTE(IsValid());
 
-		LONG retCode = ::RegDeleteTree(m_hKey, subKey.c_str());
+		LONG retCode = ::RegDeleteTreeW(m_hKey, subKey.c_str());
 		if (retCode != ERROR_SUCCESS)
 		{
 			throw RegException{ "RegDeleteTree failed.", retCode };
@@ -1279,7 +1279,7 @@ namespace WinReg {
 	{
 		_ASSERTE(IsValid());
 
-		LONG retCode = ::RegCopyTree(m_hKey, sourceSubKey.c_str(), destKey.Get());
+		LONG retCode = ::RegCopyTreeW(m_hKey, sourceSubKey.c_str(), destKey.Get());
 		if (retCode != ERROR_SUCCESS)
 		{
 			throw RegException{ "RegCopyTree failed.", retCode };
@@ -1303,7 +1303,7 @@ namespace WinReg {
 	{
 		Close();
 
-		LONG retCode = ::RegLoadKey(m_hKey, subKey.c_str(), filename.c_str());
+		LONG retCode = ::RegLoadKeyW(m_hKey, subKey.c_str(), filename.c_str());
 		if (retCode != ERROR_SUCCESS)
 		{
 			throw RegException{ "RegLoadKey failed.", retCode };
@@ -1318,7 +1318,7 @@ namespace WinReg {
 	{
 		_ASSERTE(IsValid());
 
-		LONG retCode = ::RegSaveKey(m_hKey, filename.c_str(), securityAttributes);
+		LONG retCode = ::RegSaveKeyW(m_hKey, filename.c_str(), securityAttributes);
 		if (retCode != ERROR_SUCCESS)
 		{
 			throw RegException{ "RegSaveKey failed.", retCode };
@@ -1365,7 +1365,7 @@ namespace WinReg {
 		Close();
 
 		HKEY hKeyResult{ nullptr };
-		LONG retCode = ::RegConnectRegistry(machineName.c_str(), hKeyPredefined, &hKeyResult);
+		LONG retCode = ::RegConnectRegistryW(machineName.c_str(), hKeyPredefined, &hKeyResult);
 		if (retCode != ERROR_SUCCESS)
 		{
 			throw RegException{ "RegConnectRegistry failed.", retCode };

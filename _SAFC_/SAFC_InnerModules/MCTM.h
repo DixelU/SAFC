@@ -367,9 +367,9 @@ struct MIDICollectionThreadedMerger {
 						file_output->put(TotalSize >> 8);
 						file_output->put(TotalSize);
 
-						SingleMIDIReProcessor::ostream_write(FrontEdge, file_output);
-						SingleMIDIReProcessor::ostream_write(Track, Track.begin() + PrevEdgePos, Track.begin() + DTI.CurPosition, file_output);
-						SingleMIDIReProcessor::ostream_write(BackEdge, BackEdge.begin(), BackEdge.end(), file_output);
+						SingleMIDIReProcessor::ostream_write(FrontEdge, *file_output);
+						SingleMIDIReProcessor::ostream_write(Track, Track.begin() + PrevEdgePos, Track.begin() + DTI.CurPosition, *file_output);
+						SingleMIDIReProcessor::ostream_write(BackEdge, BackEdge.begin(), BackEdge.end(), *file_output);
 
 						file_output->put(0);//that's why +4
 						file_output->put(0xFF);
@@ -388,8 +388,8 @@ struct MIDICollectionThreadedMerger {
 					file_output->put(TotalSize >> 8);
 					file_output->put(TotalSize);
 
-					SingleMIDIReProcessor::ostream_write(FrontEdge, file_output);
-					SingleMIDIReProcessor::ostream_write(Track, Track.begin() + PrevEdgePos, Track.end(), file_output);
+					SingleMIDIReProcessor::ostream_write(FrontEdge, *file_output);
+					SingleMIDIReProcessor::ostream_write(Track, Track.begin() + PrevEdgePos, Track.end(), *file_output);
 
 					FrontEdge.clear();
 					BackEdge.clear();
@@ -403,7 +403,6 @@ struct MIDICollectionThreadedMerger {
 					file_output->put(Track.size());
 
 					SingleMIDIReProcessor::ostream_write(Track, (*file_output));
-					//copy(Track.begin(), Track.end(), ostream_iterator<BYTE>(file_output));
 					(*TrackCount)++;
 				}
 				Track.clear();
@@ -485,7 +484,8 @@ struct MIDICollectionThreadedMerger {
 			if (!IMgood || !RMgood) {
 				IM->close();
 				RM->close();
-				F.close();
+				fclose(fo_ptr);
+				//F->close();
 				auto remove = _wremove(_SaveTo.c_str());
 				auto remove_i = _wrename((_SaveTo + L".I.mid").c_str(), _SaveTo.c_str());
 				auto remove_r = _wrename((_SaveTo + L".R.mid").c_str(), _SaveTo.c_str());//one of these will not work
