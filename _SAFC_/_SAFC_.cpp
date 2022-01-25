@@ -150,19 +150,15 @@ bool SAFC_Update(const std::wstring& latest_release) {
 				if (AutoUpdatesCheck)
 					ThrowAlert_Error("Extraction:\nAutoupdate requres latest 7-Zip or WinRAR installed to default directory.\n");
 				_wrename((pathway + L"_s").c_str(), (pathway + L"SAFC.exe").c_str());
-				_wrename((pathway + L"_f").c_str(), (pathway + L"freeglut.dll").c_str());
-				_wrename((pathway + L"_g").c_str(), (pathway + L"glew32.dll").c_str());
 			}
 		}
 		else {
 			auto error_msg = std::string("Autoudate error:\n") + strerror(errno);
 			if (AutoUpdatesCheck)
-				ThrowAlert_Error(error_msg);
+				ThrowAlert_Error(std::move(error_msg));
 			else
-				std::cout << error_msg << std::endl;
+				std::cout << std::move(error_msg) << std::endl;
 			_wrename((pathway + L"_s").c_str(), (pathway + L"SAFC.exe").c_str());
-			_wrename((pathway + L"_f").c_str(), (pathway + L"freeglut.dll").c_str());
-			_wrename((pathway + L"_g").c_str(), (pathway + L"glew32.dll").c_str());
 		}
 		_wremove(filename.c_str());
 	}
@@ -177,8 +173,6 @@ void SAFC_VersionCheck() {
 	std::thread version_checker([]() {
 		bool flag = false;
 		_wremove(L"_s");
-		_wremove(L"_f");
-		_wremove(L"_g");
 		constexpr wchar_t* SAFC_tags_link = (wchar_t* const)L"https://api.github.com/repos/DixelU/SAFC/tags";
 		wchar_t current_file_path[MAX_PATH];
 		GetModuleFileNameW(NULL, current_file_path, MAX_PATH);
@@ -195,56 +189,45 @@ void SAFC_VersionCheck() {
 				std::getline(input, temp_buffer);
 				input.close();
 				auto JSON_Value = JSON::Parse(temp_buffer.c_str());
-				if (JSON_Value->IsArray()) {
-					auto FirstElement = JSON_Value->AsArray()[0];
-					if (FirstElement->IsObject()) {
-						auto Name = FirstElement->AsObject().find(L"name");
-						if (FirstElement->AsObject().end() != Name &&
-							Name->second->IsString()) {
-							auto git_latest_version = Name->second->AsString();
-							//std::wcout << L"Git latest version: " << git_latest_version << std::endl;
-							WORD version_partied[4] = { 0,0,0,0 };
-							//int cur_index = -1;
-							if (git_latest_version.size() <= 100) {
-								std::vector<std::string> ans;
-								std::wstring git_version_numbers_only = git_latest_version.substr(1);//v?.?.?.?
-								boost::algorithm::split(ans, git_version_numbers_only, boost::is_any_of("."));
-								int index = 0;
-								for (auto& num_val : ans) {
-									try {
-										version_partied[index] = std::stoi(num_val);
-									}
-									catch (...) {
-										break;
-									}
-									if (index == 3)
-										break;
-									index++;
-								}
-								std::wcout << L"Git latest version: v" << version_partied[0] << L"." << version_partied[1] << L"." << version_partied[2] << L"." << version_partied[3] << L"\n";
-								std::wcout << L"Current vesion: v" << maj << L"." << min << L"." << ver << L"." << build << L"\n";
-								if (AutoUpdatesCheck && 
-									(maj < version_partied[0] ||
-										maj == version_partied[0] && min < version_partied[1] ||
-										maj == version_partied[0] && min == version_partied[1] && ver < version_partied[2] ||
-										maj == version_partied[0] && min == version_partied[1] && ver == version_partied[2] && build < version_partied[3]
-									)) {
-									ThrowAlert_Warning("Update found! The app might restart soon...\nUpdate: " + std::string(git_latest_version.begin(), git_latest_version.end()));
-									flag = SAFC_Update(git_latest_version);
-									if (flag)
-										ThrowAlert_Warning("SAFC will restart in 3 seconds...");
-								}
-							}
-						}
+				auto git_latest_version = ((JSON_Value)->AsArray()[0])->AsObject().find(L"name")->second->AsString();
+				WORD version_partied[4] = { 0,0,0,0 };
+				std::vector<std::string> ans;
+				std::wstring git_version_numbers_only = git_latest_version.substr(1);//v?.?.?.?
+				boost::algorithm::split(ans, git_version_numbers_only, boost::is_any_of("."));
+				int index = 0;
+				for (auto& num_val : ans) {
+					try {
+						version_partied[index] = std::stoi(num_val);
 					}
+					catch (...) {
+						break;
+					}
+					if (index == 3)
+						break;
+					index++;
+				}
+				std::wcout << L"Git latest version: v" << version_partied[0] << L"." << version_partied[1] << L"." << version_partied[2] << L"." << version_partied[3] << L"\n";
+				std::wcout << L"Current vesion: v" << maj << L"." << min << L"." << ver << L"." << build << L"\n";
+				if (AutoUpdatesCheck && 
+					(maj < version_partied[0] ||
+						maj == version_partied[0] && min < version_partied[1] ||
+						maj == version_partied[0] && min == version_partied[1] && ver < version_partied[2] ||
+						maj == version_partied[0] && min == version_partied[1] && ver == version_partied[2] && build < version_partied[3]
+					)) {
+					ThrowAlert_Warning("Update found! The app might restart soon...\nUpdate: " + std::string(git_latest_version.begin(), git_latest_version.end()));
+					flag = SAFC_Update(git_latest_version);
+					if (flag)
+						ThrowAlert_Warning("SAFC will restart in 3 seconds...");
 				}
 			}
-			else if(AutoUpdatesCheck)
+			else if (AutoUpdatesCheck)
 				ThrowAlert_Warning("Most likely your internet connection is unstable\nSAFC cannot check for updates"),
-				std::cout<< "Most likely your internet connection is unstable\nSAFC cannot check for updates";
+				std::cout << "Most likely your internet connection is unstable\nSAFC cannot check for updates";
 		}
-		catch (...) {
-			ThrowAlert_Warning("SAFC just almost crashed while checking the update...\nTell developer about that");
+		catch (const std::exception& e) 
+		{
+			ThrowAlert_Warning("SAFC just almost crashed while checking the update...\nTell developer about that" +
+				std::string() + e.what());
 		}
 		_wremove(filename.c_str());
 		if (flag) {
@@ -256,6 +239,7 @@ void SAFC_VersionCheck() {
 	});
 	version_checker.detach();
 }
+
 size_t GetAvailableMemory(){
 	size_t ret = 0;
 
@@ -432,7 +416,7 @@ struct SAFCData {////overall settings and storing perfile settings....
 		std::vector<SingleMIDIReProcessor*> SMRPv;
 		for (int i = 0; i < Files.size(); i++)
 			SMRPv.push_back(Files[i].BuildSMRP());
-		MIDICollectionThreadedMerger *MCTM = new MIDICollectionThreadedMerger(SMRPv,GlobalPPQN,SaveDirectory);
+		MIDICollectionThreadedMerger *MCTM = new MIDICollectionThreadedMerger(SMRPv, GlobalPPQN, SaveDirectory);
 		MCTM->RemnantsRemove = DefaultBoolSettings & _BoolSettings::remove_remnants;
 		return MCTM;
 	}
@@ -443,12 +427,12 @@ struct SAFCData {////overall settings and storing perfile settings....
 SAFCData _Data;
 MIDICollectionThreadedMerger *GlobalMCTM = NULL;
 
-void ThrowAlert_Error(std::string AlertText) {
+void ThrowAlert_Error(std::string&& AlertText) {
 	if (WH)
 		WH->ThrowAlert(AlertText, "ERROR!", SpecialSigns::DrawExTriangle, 1, 0xFFAF00FF, 0xFF);
 }
 
-void ThrowAlert_Warning(std::string AlertText) {
+void ThrowAlert_Warning(std::string&& AlertText) {
 	if (WH)
 		WH->ThrowAlert(AlertText, "Warning!", SpecialSigns::DrawExTriangle, 1, 0x7F7F7FFF, 0xFFFFFFAF);
 }
@@ -1412,8 +1396,8 @@ void OnStart() {
 
 		auto ptr = (InputField*)(*MW)["TIMER"];
 		auto now = std::chrono::high_resolution_clock::now();
-		auto difference = std::chrono::duration_cast<std::chrono::duration<double>>(now - START);
-		ptr->SafeStringReplace(std::to_string(difference.count()) + " s");
+		auto difference = std::chrono::duration_cast<std::chrono::milliseconds>(now - START);
+		ptr->SafeStringReplace(std::to_string(difference.count()*0.001) + " s");
 
 		for (ID = 0; ID < GlobalMCTM->Cur_Processing.size(); ID++) {
 			std::cout << ID << std::endl;

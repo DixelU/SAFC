@@ -2,8 +2,8 @@
 #ifndef SAF_MCTM
 #define SAF_MCTM 
 
-void ThrowAlert_Error(std::string AlertText);
-void ThrowAlert_Warning(std::string AlertText);
+void ThrowAlert_Error(std::string&& AlertText);
+void ThrowAlert_Warning(std::string&& AlertText);
 
 #include <set>
 #include <thread>

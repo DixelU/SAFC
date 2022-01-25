@@ -66,8 +66,8 @@ int TIMESEED() {
 	}
 	return t.wMilliseconds + (t.wSecond * 1000) + t.wMinute * 60000;
 }
-void ThrowAlert_Error(std::string AlertText);
-void ThrowAlert_Warning(std::string AlertText);
+void ThrowAlert_Error(std::string&& AlertText);
+void ThrowAlert_Warning(std::string&& AlertText);
 void AddFiles(std::vector<std::wstring> Filenames);
 #pragma warning(disable : 4996)
 
