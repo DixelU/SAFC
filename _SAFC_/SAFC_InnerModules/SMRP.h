@@ -8,26 +8,33 @@
 #include <fstream>
 #include <array>
 #include <iostream>
+#include <stack>
 #include <typeinfo>
+
+#include <ranges>
 
 #include "BS.h"
 #include "SMIC.h"
 #include "PLC.h"
 #include "CAT.h"
 #include "../bbb_ffio.h"
-/*
-#include "../exprtk_wrapper.h"
-*/
+
 template<typename T>
-struct conditional {
-	BIT is;
+struct optional {
+	bool is;
 	T value;
-	conditional() : value(), is(false) {}
-	conditional(const T& value) : value(value), is(true) {}
+	optional() : value(), is(false) {}
+	optional(const T& value) : value(value), is(true) {}
+	optional(const T&& value) : value(value), is(true) {}
 	inline operator bool() const {
 		return is;
 	}
 	inline T operator = (const T& value) {
+		//cout << typeid(value).name() << " : " << value << endl;
+		is = true;
+		return (this->value = value);
+	}
+	inline T operator = (const T&& value) {
 		//cout << typeid(value).name() << " : " << value << endl;
 		is = true;
 		return (this->value = value);
@@ -40,51 +47,45 @@ struct conditional {
 		this->value = 0;
 	}
 };
-/*
-struct modifiers_wrapper {
-	exprtk_wrapper
-		* notes_modifier,
-		* noteaftertouch_modifier,
-		* channelaftertocuh_modifier,
-		* program_modifier,
-		* pitch_modifier,
-		* controller_modifier,
-		* tempo_modifier;
 
-};
-*/
 struct SingleMIDIReProcessor {
-	DWORD ThreadID;
+	std::uint32_t ThreadID;
 	std::wstring FileName, Postfix;
 	std::string LogLine, WarningLine, ErrorLine, AppearanceFilename;
-	DWORD GlobalOffset;
-	DWORD BoolSettings;
-	FLOAT NewTempo;
-	WORD NewPPQN;
-	WORD TrackCount;
-	BIT Finished;
-	BIT Processing;
-	BIT InQueueToInplaceMerge;
-	BYTE ProgramToOverride;
-	INT64 SelectionStart, SelectionLength;
+	std::int64_t GlobalOffset;
+	std::uint32_t BoolSettings;
+	float NewTempo;
+	std::uint16_t NewPPQN;
+	std::uint16_t TrackCount;
+	bool Finished;
+	bool Processing;
+	bool InQueueToInplaceMerge, forced_single_channel_mode;
+	std::uint8_t ProgramToOverride;
+	std::int64_t SelectionStart, SelectionLength;
 	std::shared_ptr<BYTE_PLC_Core> VolumeMapCore;
 	std::shared_ptr<_14BIT_PLC_Core> PitchMapCore;
 	std::shared_ptr<CutAndTransposeKeys> KeyConverter;
-	BIT ResetDeltatimesOutsideOfTheRange, AllowLegacyRunningStatusMetaIgnorance;
-	UINT64 FilePosition, FileSize;
-	inline static void ostream_write(std::vector<BYTE>& vec, const std::vector<BYTE>::iterator& beg, const std::vector<BYTE>::iterator& end, std::ostream& out) {
+	bool ResetDeltatimesOutsideOfTheRange, AllowLegacyRunningStatusMetaIgnorance;
+	std::uint64_t FilePosition, FileSize;
+	inline static void ostream_write(std::vector<std::uint8_t>& vec, const std::vector<std::uint8_t>::iterator& beg, const std::vector<std::uint8_t>::iterator& end, std::ostream& out) {
 		out.write(((char*)vec.data()) + (beg - vec.begin()), end - beg);
 	}
-	inline static void ostream_write(std::vector<BYTE>& vec, std::ostream& out) {
+	inline static void ostream_write(std::vector<std::uint8_t>& vec, std::ostream& out) {
 		out.write(((char*)vec.data()), vec.size());;
 	}
-	inline static uint8_t push_vlv(uint32_t value, std::vector<BYTE>& vec) {
-		constexpr uint8_t $7byte_mask = 0x7F, max_size = 5, $7byte_mask_size = 7;
+	inline static uint8_t push_vlv(uint32_t value, std::vector<std::uint8_t>& vec) {
+		return push_vlv_s(value, vec);
+	};
+	inline static uint8_t push_vlv_s(std::uint64_t s_value, std::vector<std::uint8_t>& vec)
+	{
+		constexpr uint8_t $7byte_mask = 0x7F, max_size = 10, $7byte_mask_size = 7;
 		constexpr uint8_t $adjacent7byte_mask = ~$7byte_mask;
+		uint64_t value = s_value;
 		uint8_t stack[max_size];
 		uint8_t size = 0;
 		uint8_t r_size = 0;
-		do {
+		do 
+		{
 			stack[size] = (value & $7byte_mask);
 			value >>= $7byte_mask_size;
 			if (size)
@@ -95,8 +96,20 @@ struct SingleMIDIReProcessor {
 		while (size)
 			vec.push_back(stack[--size]);
 		return r_size;
-	};
-	SingleMIDIReProcessor(std::wstring filename, DWORD Settings, FLOAT Tempo, DWORD GlobalOffset, WORD PPQN, DWORD ThreadID, std::shared_ptr<BYTE_PLC_Core> VolumeMapCore, std::shared_ptr<_14BIT_PLC_Core> PitchMapCore, std::shared_ptr<CutAndTransposeKeys> KeyConverter, std::wstring RPostfix = L"_.mid", BIT InplaceMerge = 0, UINT64 FileSize = 0, INT64 SelectionStart = 0, INT64 SelectionLength = -1, BIT ResetDeltatimesOutsideOfTheRange = true) {
+	}
+	inline static uint64_t get_vlv(bbb_ffr& file_input)
+	{
+		uint64_t value = 0;
+		std::uint8_t single_byte;
+		do 
+		{
+			single_byte = file_input.get();
+			value = value << 7 | single_byte & 0x7F;
+		} while (single_byte & 0x80 && !file_input.eof());
+		return value;
+	}
+
+	SingleMIDIReProcessor(std::wstring filename, std::uint32_t Settings, float Tempo, std::int64_t GlobalOffset, std::uint16_t PPQN, std::uint32_t ThreadID, std::shared_ptr<BYTE_PLC_Core> VolumeMapCore, std::shared_ptr<_14BIT_PLC_Core> PitchMapCore, std::shared_ptr<CutAndTransposeKeys> KeyConverter, std::wstring RPostfix = L"_.mid", bool InplaceMerge = 0, std::uint64_t FileSize = 0, std::int64_t SelectionStart = 0, std::int64_t SelectionLength = -1, bool ResetDeltatimesOutsideOfTheRange = true) {
 		this->ThreadID = ThreadID;
 		this->FileName = filename;
 		this->BoolSettings = Settings;
@@ -119,7 +132,7 @@ struct SingleMIDIReProcessor {
 		this->ResetDeltatimesOutsideOfTheRange = ResetDeltatimesOutsideOfTheRange;
 		this->AllowLegacyRunningStatusMetaIgnorance = false;
 	}
-	SingleMIDIReProcessor(std::wstring filename, DWORD Settings, FLOAT Tempo, DWORD GlobalOffset, WORD PPQN, DWORD ThreadID, std::shared_ptr<PLC<BYTE, BYTE>> VolumeMapCore, std::shared_ptr<PLC<WORD, WORD>> PitchMapCore, std::shared_ptr<CutAndTransposeKeys> KeyConverter, std::wstring RPostfix = L"_.mid", BIT InplaceMerge = 0, UINT64 FileSize = 0, INT64 SelectionStart = 0, INT64 SelectionLength = -1, BIT ResetDeltatimesOutsideOfTheRange = true) {
+	SingleMIDIReProcessor(std::wstring filename, std::uint32_t Settings, float Tempo, std::int64_t GlobalOffset, std::uint16_t PPQN, std::uint32_t ThreadID, std::shared_ptr<PLC<std::uint8_t, std::uint8_t>> VolumeMapCore, std::shared_ptr<PLC<std::uint16_t, std::uint16_t>> PitchMapCore, std::shared_ptr<CutAndTransposeKeys> KeyConverter, std::wstring RPostfix = L"_.mid", bool InplaceMerge = 0, std::uint64_t FileSize = 0, std::int64_t SelectionStart = 0, std::int64_t SelectionLength = -1, bool ResetDeltatimesOutsideOfTheRange = true) {
 		this->ThreadID = ThreadID;
 		this->FileName = filename;
 		this->BoolSettings = Settings;
@@ -149,45 +162,63 @@ struct SingleMIDIReProcessor {
 		this->AllowLegacyRunningStatusMetaIgnorance = false;
 	}
 #define PCLOG true
+
+	void ReProcess2()
+	{
+		bbb_ffr file_input(FileName.c_str());
+		std::ofstream file_output(this->FileName + Postfix, std::ios::binary | std::ios::out);
+
+		struct EventHeader
+		{
+			std::uint32_t idx;
+		};
+
+		std::vector<std::uint8_t> raw_data;
+		std::vector<EventHeader> headers;
+
+
+	}
+
 	void ReProcess() {
 		bbb_ffr file_input(FileName.c_str());
 		std::ofstream file_output(this->FileName + Postfix, std::ios::binary | std::ios::out);
-		std::vector<BYTE> Track;///quite memory expensive...
-		std::vector<BYTE> UnLoad;
-		std::vector<BYTE> CorruptData;
-		std::array<DWORD, 4096> CurHolded;
-		conditional<DWORD> CurrentTempo;
-		conditional<WORD> CurrentPitch[16];
-		conditional<BYTE> CurrentProgram[16];
-		conditional<BYTE> CurrentChannelAftertouch[16];
-		conditional<BYTE> CurrentController[4096];
-		conditional<BYTE> CurrentNoteAftertouch[4096];
+		std::vector<std::uint8_t> Track;
+		std::vector<std::uint8_t> UnLoad;
+		std::vector<std::uint8_t> CorruptData;
+		std::array<std::uint32_t, 4096> CurHolded;
+		optional<std::uint32_t> CurrentTempo;
+		optional<std::uint16_t> CurrentPitch[16];
+		optional<std::uint8_t> CurrentProgram[16];
+		optional<std::uint8_t> CurrentChannelAftertouch[16];
+		optional<std::uint8_t> CurrentController[4096];
+		optional<std::uint8_t> CurrentNoteAftertouch[4096];
 		for (auto& v : CurHolded)
 			v = 0;
 		const bool ActiveSelection = SelectionLength > 0;
-		DWORD EventCounter = 0, Header/*,MultitaskTVariable*/, UnholdedCount = 0;
-		const DWORD BoolSettingsBuffer = BoolSettings;
-		const DWORD BSB_IgnoreAllSetting = SMP_BOOL_SETTINGS_IGNORE_TEMPOS | SMP_BOOL_SETTINGS_IGNORE_ALL_BUT_TEMPOS_NOTES_AND_PITCH | SMP_BOOL_SETTINGS_IGNORE_PITCHES | SMP_BOOL_SETTINGS_IGNORE_NOTES;
-		WORD OldPPQN;
+		std::uint32_t EventCounter = 0, Header/*,MultitaskTVariable*/, UnholdedCount = 0;
+		const std::uint32_t BoolSettingsBuffer = BoolSettings;
+		const std::uint32_t BSB_IgnoreAllSetting = SMP_BOOL_SETTINGS_IGNORE_TEMPOS | SMP_BOOL_SETTINGS_IGNORE_ALL_BUT_TEMPOS_NOTES_AND_PITCH | SMP_BOOL_SETTINGS_IGNORE_PITCHES | SMP_BOOL_SETTINGS_IGNORE_NOTES;
+		std::uint16_t OldPPQN;
 		double DeltaTimeTranq = 0, PPQNIncreaseAmount = 1;
-		BYTE Tempo1 = 0, Tempo2 = 0, Tempo3 = 0;
-		BYTE CurByte = 0, MetaEventType = 0;//register?
-		BYTE RunningStatusByte = 0;
-		BIT TrackEnded = false;
+		std::uint8_t Tempo1 = 0, Tempo2 = 0, Tempo3 = 0;
+		std::uint8_t CurByte = 0, MetaEventType = 0;//register?
+		std::uint8_t RunningStatusByte = 0;
+		bool TrackEnded = false;
+		std::uint64_t NegativeOffset = (GlobalOffset < 0) ? -GlobalOffset : 0;
 		TrackCount = 0x0;
 		Processing = 0x1;
 		Track.reserve(10000000);//just in case...
 		if (NewTempo > 3.5763f) {
-			FLOAT LNT = 60000000.f / NewTempo;
-			Tempo1 = (((DWORD)LNT) >> 16);
-			Tempo2 = ((((DWORD)LNT) >> 8) & 0xFF);
-			Tempo3 = (((DWORD)LNT) & 0xFF);
+			float LNT = 60000000.f / NewTempo;
+			Tempo1 = (((std::uint32_t)LNT) >> 16);
+			Tempo2 = ((((std::uint32_t)LNT) >> 8) & 0xFF);
+			Tempo3 = (((std::uint32_t)LNT) & 0xFF);
 		}
 		///processing starts here///
 		for (int i = 0; i < 12 && file_input.good(); i++)
 			file_output.put(file_input.get());
 		///PPQN swich
-		OldPPQN = ((WORD)file_input.get()) << 8;
+		OldPPQN = ((std::uint16_t)file_input.get()) << 8;
 		OldPPQN |= file_input.get();
 		file_output.put(NewPPQN >> 8);
 		file_output.put(NewPPQN & 0xFF);
@@ -235,12 +266,12 @@ struct SingleMIDIReProcessor {
 			}
 
 			RunningStatusByte = 0;
-			INT64 CurTick = 0;//understandable
+			std::int64_t CurTick = 0;//understandable
 			bool Entered = false, Exited = false;
-			INT64 TickTranq = 0;
+			std::int64_t TickTranq = 0;
 			TrackEnded = false;
 
-			DeltaTimeTranq = GlobalOffset;
+			DeltaTimeTranq = (GlobalOffset>=0) ? GlobalOffset : 0;
 			///Parsing events
 			while (file_input.good() && !file_input.eof()) {
 				if (KeyConverter) {//?
@@ -248,11 +279,11 @@ struct SingleMIDIReProcessor {
 					NULL;
 				}
 
-				BYTE byte1 = 0, byte2 = 0, byte3 = 0; // arguments of events
+				std::uint8_t byte1 = 0, byte2 = 0, byte3 = 0; // arguments of events
 
 				///Deltatime recalculation
-				DWORD LastDeltaTime = 0, L_VLV;
-				DWORD DeltaTimeSize = 0;
+				std::uint32_t LastDeltaTime = 0, L_VLV;
+				std::uint32_t DeltaTimeSize = 0;
 
 				CurByte = 0;
 				do {//reading LastDeltaTime
@@ -261,7 +292,7 @@ struct SingleMIDIReProcessor {
 				} while (CurByte & 0x80 && !file_input.eof());
 
 				DeltaTimeTranq += ((double)(LastDeltaTime)*PPQNIncreaseAmount) + TickTranq;
-				DeltaTimeTranq -= (L_VLV = (LastDeltaTime = (INT64)DeltaTimeTranq));
+				DeltaTimeTranq -= (L_VLV = (LastDeltaTime = (std::int64_t)DeltaTimeTranq));
 				CurTick += LastDeltaTime - TickTranq;//adding to the "current tick"
 
 				if (ActiveSelection) {
@@ -292,8 +323,8 @@ struct SingleMIDIReProcessor {
 							}
 						}
 
-						INT64 tStartTick = L_VLV - (CurTick - (SelectionStart));
-						DWORD tSZ = 0;
+						std::int64_t tStartTick = L_VLV - (CurTick - (SelectionStart));
+						std::uint32_t tSZ = 0;
 						bool Flag_NotFirstRun = false;
 						LastDeltaTime = L_VLV - tStartTick;
 						L_VLV = LastDeltaTime;
@@ -353,7 +384,7 @@ struct SingleMIDIReProcessor {
 								EventCounter++;
 							}
 						}
-						for (WORD CurrentChannel = 0; CurrentChannel < 4096; CurrentChannel++) {
+						for (std::uint16_t CurrentChannel = 0; CurrentChannel < 4096; CurrentChannel++) {
 							if (CurrentController[CurrentChannel] && !(BoolSettingsBuffer & SMP_BOOL_SETTINGS_IGNORE_ALL_BUT_TEMPOS_NOTES_AND_PITCH)) {//stuff
 								if (Flag_NotFirstRun)
 									Track.push_back(0);
@@ -409,8 +440,8 @@ struct SingleMIDIReProcessor {
 						}
 						if (EscapeFlag)
 							goto ActiveSelectionBorderEscapePoint;
-						INT64 tStartTick = L_VLV - (CurTick - (SelectionStart + SelectionLength));
-						DWORD tSZ = 0;
+						std::int64_t tStartTick = L_VLV - (CurTick - (SelectionStart + SelectionLength));
+						std::uint32_t tSZ = 0;
 						bool Flag_FirstRun = false;
 						LastDeltaTime = L_VLV - tStartTick;
 						L_VLV = LastDeltaTime;
@@ -457,16 +488,16 @@ struct SingleMIDIReProcessor {
 						file_input.get();
 						Track.push_back(0);
 
-						BIT PushFlag = false;
+						bool PushFlag = false;
 
 						if (ActiveSelection && !Entered) {//in case if these wasn't unloaded
-							INT64 LocalEndingDeltaTime = SelectionStart - CurTick;
+							std::int64_t LocalEndingDeltaTime = SelectionStart - CurTick;
 							if (ResetDeltatimesOutsideOfTheRange) {
 								LocalEndingDeltaTime = 0;
 							}
 							int LEDT_size = 0;
 
-							INT64 UnloadSize = UnLoad.size();
+							std::int64_t UnloadSize = UnLoad.size();
 
 							LEDT_size = push_vlv(LocalEndingDeltaTime, UnLoad);
 
@@ -510,7 +541,7 @@ struct SingleMIDIReProcessor {
 									CurrentPitch[CurrentChannel].reset();
 								}
 							}
-							for (WORD CurrentChannel = 0; CurrentChannel < 4096; CurrentChannel++) {
+							for (std::uint16_t CurrentChannel = 0; CurrentChannel < 4096; CurrentChannel++) {
 								if (CurrentController[CurrentChannel] && !(BoolSettingsBuffer & SMP_BOOL_SETTINGS_IGNORE_ALL_BUT_TEMPOS_NOTES_AND_PITCH)) {//stuff
 									if (PushFlag)
 										UnLoad.push_back(0);
@@ -559,7 +590,7 @@ struct SingleMIDIReProcessor {
 							file_output.put(Track.size() >> 16);
 							file_output.put(Track.size() >> 8);
 							file_output.put(Track.size());
-							//copy(Track.begin(), Track.end(), ostream_iterator<BYTE>(fo));
+							//copy(Track.begin(), Track.end(), ostream_iterator<std::uint8_t>(fo));
 							SingleMIDIReProcessor::ostream_write(Track, file_output);
 							LogLine = "Track " + std::to_string(TrackCount++) + " is processed";
 						}
@@ -572,7 +603,7 @@ struct SingleMIDIReProcessor {
 					else {//other meta events
 						if (!(BoolSettings & SMP_BOOL_SETTINGS_IGNORE_ALL_BUT_TEMPOS_NOTES_AND_PITCH)) {
 							L_VLV = 0;
-							DWORD MetaVLVSize = 0;
+							std::uint32_t MetaVLVSize = 0;
 							MetaEventType = CurByte;
 							do {
 								CurByte = file_input.get();
@@ -593,9 +624,9 @@ struct SingleMIDIReProcessor {
 									byte2 = file_input.get();
 									byte3 = file_input.get();
 									if (NewTempo > 3.5763f) 
-										CurrentTempo = ((((DWORD)Tempo1) << 16) | (((DWORD)Tempo2) << 8) | (DWORD)Tempo3);
+										CurrentTempo = ((((std::uint32_t)Tempo1) << 16) | (((std::uint32_t)Tempo2) << 8) | (std::uint32_t)Tempo3);
 									else
-										CurrentTempo = ((((DWORD)byte1) << 16) | (((DWORD)byte2) << 8) | (DWORD)byte3);
+										CurrentTempo = ((((std::uint32_t)byte1) << 16) | (((std::uint32_t)byte2) << 8) | (std::uint32_t)byte3);
 									continue;
 								}
 								else {
@@ -606,14 +637,14 @@ struct SingleMIDIReProcessor {
 										Track.push_back(byte1 = Tempo1);
 										Track.push_back(byte2 = Tempo2);
 										Track.push_back(byte3 = Tempo3);
-										CurrentTempo = ((((DWORD)byte1) << 16) | (((DWORD)byte2) << 8) | (DWORD)byte3);
+										CurrentTempo = ((((std::uint32_t)byte1) << 16) | (((std::uint32_t)byte2) << 8) | (std::uint32_t)byte3);
 										EventCounter++;
 									}
 									else {
 										Track.push_back(byte1 = file_input.get());
 										Track.push_back(byte2 = file_input.get());
 										Track.push_back(byte3 = file_input.get());
-										CurrentTempo = ((((DWORD)byte1) << 16) | (((DWORD)byte2) << 8) | (DWORD)byte3);
+										CurrentTempo = ((((std::uint32_t)byte1) << 16) | (((std::uint32_t)byte2) << 8) | (std::uint32_t)byte3);
 										EventCounter++;
 									}
 								}
@@ -622,7 +653,7 @@ struct SingleMIDIReProcessor {
 						}
 						else {
 							L_VLV = 0;
-							DWORD MetaVLVSize = 0;
+							std::uint32_t MetaVLVSize = 0;
 							MetaEventType = CurByte;
 							do {
 								CurByte = file_input.get();
@@ -646,7 +677,7 @@ struct SingleMIDIReProcessor {
 									byte1 = file_input.get();
 									byte2 = file_input.get();
 									byte3 = file_input.get();
-									CurrentTempo = ((((DWORD)byte1) << 16) | (((DWORD)byte2) << 8) | (DWORD)byte3);
+									CurrentTempo = ((((std::uint32_t)byte1) << 16) | (((std::uint32_t)byte2) << 8) | (std::uint32_t)byte3);
 									continue;
 								}
 								else if (NewTempo > 3.5763f) {
@@ -656,14 +687,14 @@ struct SingleMIDIReProcessor {
 									Track.push_back(byte1 = Tempo1);
 									Track.push_back(byte2 = Tempo2);
 									Track.push_back(byte3 = Tempo3);
-									CurrentTempo = ((((DWORD)byte1) << 16) | (((DWORD)byte2) << 8) | (DWORD)byte3);
+									CurrentTempo = ((((std::uint32_t)byte1) << 16) | (((std::uint32_t)byte2) << 8) | (std::uint32_t)byte3);
 									EventCounter++;
 								}
 								else {
 									Track.push_back(byte1 = file_input.get());
 									Track.push_back(byte2 = file_input.get());
 									Track.push_back(byte3 = file_input.get());
-									CurrentTempo = ((((DWORD)byte1) << 16) | (((DWORD)byte2) << 8) | (DWORD)byte3);
+									CurrentTempo = ((((std::uint32_t)byte1) << 16) | (((std::uint32_t)byte2) << 8) | (std::uint32_t)byte3);
 									EventCounter++;
 								}
 								//printf("N %i %i\n", CurTick, CurrentTempo());
@@ -674,7 +705,7 @@ struct SingleMIDIReProcessor {
 				MH_CASE(0x80) : MH_CASE(0x90) : {
 					RunningStatusByte = CurByte;
 					bool DeleteEvent = BoolSettings & SMP_BOOL_SETTINGS_IGNORE_NOTES, isnoteon = (RunningStatusByte >= 0x90);
-					BYTE Key = file_input.get();
+					std::uint8_t Key = file_input.get();
 					Track.push_back(CurByte);///Event|Channel data
 					if (this->KeyConverter && !DeleteEvent) {////key data processing
 						auto T = (this->KeyConverter->Process(Key));
@@ -686,7 +717,7 @@ struct SingleMIDIReProcessor {
 						}
 					}
 					else Track.push_back(Key);///key data processing
-					BYTE Vol = file_input.get();
+					std::uint8_t Vol = file_input.get();
 					if (this->VolumeMapCore && (CurByte & 0x10))
 						Vol = (*this->VolumeMapCore)[Vol];
 					if (!Vol && isnoteon) {
@@ -695,7 +726,7 @@ struct SingleMIDIReProcessor {
 					}
 					isnoteon = (CurByte >= 0x90);
 
-					SHORT HoldIndex = (Key << 4) | (CurByte & 0xF);
+					std::int16_t HoldIndex = (Key << 4) | (CurByte & 0xF);
 					////////added
 					if (!DeleteEvent) {
 						if (isnoteon) {//if noteon
@@ -705,7 +736,7 @@ struct SingleMIDIReProcessor {
 						}
 						else {//if noteoff
 							if (CurHolded[HoldIndex]) {///can do something with ticks...
-								//INT64 StartTick = CurHolded[Key].back();
+								//std::int64_t StartTick = CurHolded[Key].back();
 								CurHolded[HoldIndex]--;
 								if (ActiveSelection && (!Entered || (Entered && Exited)))
 									DeleteEvent = true;
@@ -743,7 +774,7 @@ struct SingleMIDIReProcessor {
 						Track.push_back(byte1 = file_input.get());///1st parameter//key
 						Track.push_back(byte2 = file_input.get());///2nd parameter//value
 						EventCounter++;
-						CurrentNoteAftertouch[((WORD)byte1 << 4) | (CurByte & 0xF)] = byte2;
+						CurrentNoteAftertouch[((std::uint16_t)byte1 << 4) | (CurByte & 0xF)] = byte2;
 					}
 					else {
 						TickTranq = LastDeltaTime;
@@ -751,7 +782,7 @@ struct SingleMIDIReProcessor {
 							Track.pop_back();
 						byte1 = file_input.get();
 						byte2 = file_input.get();
-						CurrentNoteAftertouch[((WORD)byte1 << 4) | (CurByte & 0xF)] = byte2;
+						CurrentNoteAftertouch[((std::uint16_t)byte1 << 4) | (CurByte & 0xF)] = byte2;
 						continue;
 					}
 				} break;
@@ -762,7 +793,7 @@ struct SingleMIDIReProcessor {
 						Track.push_back(byte1 = file_input.get());///1st parameter
 						Track.push_back(byte2 = file_input.get());///2nd parameter
 						EventCounter++;
-						CurrentController[((WORD)byte1 << 4) | (CurByte & 0xF)] = byte2;
+						CurrentController[((std::uint16_t)byte1 << 4) | (CurByte & 0xF)] = byte2;
 					}
 					else {
 						TickTranq = LastDeltaTime;
@@ -770,7 +801,7 @@ struct SingleMIDIReProcessor {
 							Track.pop_back();
 						byte1 = file_input.get();
 						byte2 = file_input.get();
-						CurrentController[((WORD)byte1 << 4) | (CurByte & 0xF)] = byte2;
+						CurrentController[((std::uint16_t)byte1 << 4) | (CurByte & 0xF)] = byte2;
 						continue;
 					}
 				} break;
@@ -817,7 +848,7 @@ struct SingleMIDIReProcessor {
 					if (!(BoolSettings & SMP_BOOL_SETTINGS_IGNORE_PITCHES)) {
 						Track.push_back(CurByte);
 						if (this->PitchMapCore) {
-							WORD PitchBend = file_input.get() << 7;
+							std::uint16_t PitchBend = file_input.get() << 7;
 							PitchBend |= file_input.get() & 0x7F;
 							PitchBend = (*PitchMapCore)[PitchBend];
 							Track.push_back(byte1 = ((PitchBend >> 7) & 0x7F));
@@ -827,7 +858,7 @@ struct SingleMIDIReProcessor {
 							Track.push_back(byte1 = (file_input.get() & 0x7F));
 							Track.push_back(byte2 = (file_input.get() & 0x7F));
 						}
-						CurrentPitch[CurByte & 0xF] = ((((WORD)byte1) << 8) | (WORD)byte2);
+						CurrentPitch[CurByte & 0xF] = ((((std::uint16_t)byte1) << 8) | (std::uint16_t)byte2);
 						EventCounter++;
 					}
 					else {
@@ -836,12 +867,12 @@ struct SingleMIDIReProcessor {
 							Track.pop_back();
 						byte1 = file_input.get() & 0x7F;
 						byte2 = file_input.get() & 0x7F;///for 1st and 2nd parameter
-						CurrentPitch[CurByte & 0xF] = ((((WORD)byte1) << 8) | (WORD)byte2);
+						CurrentPitch[CurByte & 0xF] = ((((std::uint16_t)byte1) << 8) | (std::uint16_t)byte2);
 						continue;
 					}
 				} break;
 				case 0xF0: case 0xF7: {
-					DWORD sysexVLVsize = 0;
+					std::uint32_t sysexVLVsize = 0;
 					if (!AllowLegacyRunningStatusMetaIgnorance)
 						RunningStatusByte = 0;
 					L_VLV = 0;
@@ -871,7 +902,7 @@ struct SingleMIDIReProcessor {
 					switch (RunningStatusByte) {
 						MH_CASE(0x80) :MH_CASE(0x90) :  {
 							bool DeleteEvent = (BoolSettings & SMP_BOOL_SETTINGS_IGNORE_NOTES), isnoteon = (RunningStatusByte >= 0x90);
-							BYTE Key = CurByte;
+							std::uint8_t Key = CurByte;
 							Track.push_back(RunningStatusByte);///Event|Channel data
 							if (this->KeyConverter) {////key data processing
 								auto T = (this->KeyConverter->Process(Key));
@@ -884,7 +915,7 @@ struct SingleMIDIReProcessor {
 							}
 							else Track.push_back(Key);///key data processing
 
-							BYTE Vol = file_input.get();
+							std::uint8_t Vol = file_input.get();
 							if (this->VolumeMapCore && isnoteon)
 								Vol = (*this->VolumeMapCore)[Vol];
 							if (!Vol && isnoteon) {
@@ -895,7 +926,7 @@ struct SingleMIDIReProcessor {
 								CurByte = RunningStatusByte;
 
 							isnoteon = (CurByte >= 0x90);
-							SHORT HoldIndex = (Key << 4) | (RunningStatusByte & 0xF);
+							std::int16_t HoldIndex = (Key << 4) | (RunningStatusByte & 0xF);
 							//printf("%X %X\n", Key, file_input.tellg());
 
 							////////added
@@ -907,7 +938,7 @@ struct SingleMIDIReProcessor {
 								}
 								else {//if noteoff
 									if (CurHolded[HoldIndex]) {///can do something with ticks...
-										//INT64 StartTick = CurHolded[Key].back();
+										//std::int64_t StartTick = CurHolded[Key].back();
 										CurHolded[HoldIndex]--;
 										if (ActiveSelection && (!Entered || (Entered && Exited)))
 											DeleteEvent = true;
@@ -1014,7 +1045,7 @@ struct SingleMIDIReProcessor {
 							if (!(BoolSettings & SMP_BOOL_SETTINGS_IGNORE_PITCHES)) {
 								Track.push_back(RunningStatusByte);
 								if (this->PitchMapCore) {
-									WORD PitchBend = CurByte << 7;
+									std::uint16_t PitchBend = CurByte << 7;
 									PitchBend |= file_input.get() & 0x7F;
 									PitchBend = (*PitchMapCore)[PitchBend];
 									Track.push_back(byte1 = ((PitchBend >> 7) & 0x7F));
@@ -1025,7 +1056,7 @@ struct SingleMIDIReProcessor {
 									Track.push_back(byte2 = (file_input.get() & 0x7F));
 								}
 								EventCounter++;
-								CurrentPitch[RunningStatusByte & 0xF] = (((DWORD)byte1 << 8) | (DWORD)byte2);
+								CurrentPitch[RunningStatusByte & 0xF] = (((std::uint32_t)byte1 << 8) | (std::uint32_t)byte2);
 							}
 							else {
 								TickTranq = LastDeltaTime;
@@ -1033,7 +1064,7 @@ struct SingleMIDIReProcessor {
 									Track.pop_back();
 								byte1 = CurByte;
 								byte2 = file_input.get();///for 2nd parameter
-								CurrentPitch[RunningStatusByte & 0xF] = (((DWORD)byte1 << 8) | (DWORD)byte2);
+								CurrentPitch[RunningStatusByte & 0xF] = (((std::uint32_t)byte1 << 8) | (std::uint32_t)byte2);
 								continue;
 							}
 						}break;
@@ -1043,8 +1074,8 @@ struct SingleMIDIReProcessor {
 						printf("%s\n", ErrorHolder.c_str());
 						//ThrowAlert_Error(ErrorLine);
 						RunningStatusByte = 0;
-						DWORD T = 0;
-						BYTE TempIOByte;
+						std::uint32_t T = 0;
+						std::uint8_t TempIOByte;
 
 						CorruptData.clear();//Corrupted data handler when?//
 						CorruptData.push_back(CurByte);
@@ -1091,7 +1122,7 @@ struct SingleMIDIReProcessor {
 							file_output.put(Track.size() >> 16);
 							file_output.put(Track.size() >> 8);
 							file_output.put(Track.size());
-							//copy(Track.begin(), Track.end(), ostream_iterator<BYTE>(file_output));
+							//copy(Track.begin(), Track.end(), ostream_iterator<std::uint8_t>(file_output));
 							SingleMIDIReProcessor::ostream_write(Track, file_output);
 							WarningLine = "Partially recovered track. (" + std::to_string(TrackCount++) + ")";
 							TrackCount++;

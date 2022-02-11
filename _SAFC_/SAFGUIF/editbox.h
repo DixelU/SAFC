@@ -16,19 +16,19 @@ private:
 public:
 private:
 	std::string BufferedCurText;
-	BYTE VisibilityCountDown;
+	std::uint8_t VisibilityCountDown;
 public:
 	std::deque<SingleTextLine*> Words;
 	char_pos CursorPosition;/*points at the symbol after the cursor in current word?*/
 	void (*OnEdit)();
 	SingleTextLineSettings* STLS;
 	float Xpos, Ypos, Height, Width, VerticalOffset;
-	DWORD RGBABackground, RGBABorder;
-	BYTE BorderWidth;
+	std::uint32_t RGBABackground, RGBABorder;
+	std::uint8_t BorderWidth;
 
 #define CursorWordIter (*CursorPosition.first)
 
-	EditBox(std::string Text, SingleTextLineSettings* STLS, float Xpos, float Ypos, float Height, float Width, float VerticalOffset, DWORD RGBABackground, DWORD RGBABorder, BYTE BorderWidth): STLS(STLS),Xpos(Xpos),Ypos(Ypos),Height(Height), Width(Width), VerticalOffset(VerticalOffset), RGBABackground(RGBABackground), RGBABorder(RGBABorder), BorderWidth(BorderWidth), BufferedCurText(Text), VisibilityCountDown(0){
+	EditBox(std::string Text, SingleTextLineSettings* STLS, float Xpos, float Ypos, float Height, float Width, float VerticalOffset, std::uint32_t RGBABackground, std::uint32_t RGBABorder, std::uint8_t BorderWidth): STLS(STLS),Xpos(Xpos),Ypos(Ypos),Height(Height), Width(Width), VerticalOffset(VerticalOffset), RGBABackground(RGBABackground), RGBABorder(RGBABorder), BorderWidth(BorderWidth), BufferedCurText(Text), VisibilityCountDown(0){
 		Words.push_back(STLS->CreateOne("\r"));
 		CursorPosition = { Words.begin(), 0 };
 		RearrangePositions();
@@ -185,7 +185,7 @@ public:
 		for (auto& line : Words)
 			if(line)delete line;
 	}
-	BIT MouseHandler(float mx, float my, CHAR Button/*-1 left, 1 right, 0 move*/, CHAR State /*-1 down, 1 up*/)  override {
+	bool MouseHandler(float mx, float my, CHAR Button/*-1 left, 1 right, 0 move*/, CHAR State /*-1 down, 1 up*/)  override {
 		return 0;
 	}
 	void SafeStringReplace(std::string NewString) override {
@@ -291,15 +291,15 @@ public:
 		NewY -= Ypos;
 		SafeMove(NewX, NewY);
 	}
-	void SafeChangePosition_Argumented(BYTE Arg, float NewX, float NewY) override {
+	void SafeChangePosition_Argumented(std::uint8_t Arg, float NewX, float NewY) override {
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		float CW = 0.5f * (
-			(INT32)((BIT)(GLOBAL_LEFT & Arg))
-			- (INT32)((BIT)(GLOBAL_RIGHT & Arg))
+			(INT32)((bool)(GLOBAL_LEFT & Arg))
+			- (INT32)((bool)(GLOBAL_RIGHT & Arg))
 			) * Width,
 		CH = 0.5f * (
-			(INT32)((BIT)(GLOBAL_BOTTOM & Arg))
-			- (INT32)((BIT)(GLOBAL_TOP & Arg))
+			(INT32)((bool)(GLOBAL_BOTTOM & Arg))
+			- (INT32)((bool)(GLOBAL_TOP & Arg))
 			) * Height;
 		SafeChangePosition(NewX + CW, NewY + CH);
 	}
@@ -307,7 +307,7 @@ public:
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		if (VisibilityCountDown)
 			VisibilityCountDown--;
-		if ((BYTE)RGBABackground) {
+		if ((std::uint8_t)RGBABackground) {
 			GLCOLOR(RGBABackground);
 			glBegin(GL_QUADS);
 			glVertex2f(Xpos - (Width * 0.5f), Ypos + (0.5f * Height));
@@ -327,7 +327,7 @@ public:
 				glEnd();
 			}
 		}
-		if ((BYTE)RGBABorder) {
+		if ((std::uint8_t)RGBABorder) {
 			GLCOLOR(RGBABorder);
 			glLineWidth(BorderWidth);
 			glBegin(GL_LINE_LOOP);
@@ -344,7 +344,7 @@ public:
 			line->Draw();
 		}
 	}
-	inline DWORD TellType() override {
+	inline std::uint32_t TellType() override {
 		return TT_EDITBOX;
 	}
 #undef CursorWordIter

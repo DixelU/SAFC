@@ -11,47 +11,71 @@
 #include <string>
 #include <vector>
 
-//#define NULL nullptr
+constexpr int base_internal_range = 200;
 
-typedef unsigned char BYTE;
-typedef bool BIT;
+float internal_range = base_internal_range, mouse_x_position = 0.f, mouse_y_position = 0.f;
 
-#define BEG_RANGE 200
-FLOAT RANGE = BEG_RANGE, MXPOS = 0.f, MYPOS = 0.f;
+const char* window_title = "SAFC\0";
+std::wstring default_reg_path = L"Software\\SAFC\\";
 
-const char* WINDOWTITLE = "SAFC\0";
-std::wstring RegPath = L"Software\\SAFC\\";
-
-std::string FONTNAME = "Consolas";
-BIT is_fonted = 0;
+std::string default_font_name = "Consolas";
+bool is_fonted = 0;
 
 //#define ROT_ANGLE 0.7
 #define TRY_CATCH(code,msg) try{code}catch(...){std::cout<<msg<<std::endl;}
 
-float ROT_ANGLE = 0.f;
-#define ROT_RAD ANGTORAD(ROT_ANGLE)
+float dumb_rotation_angle = 0.f;
 //#define RANGE 200
-#define WINDXSIZE 720
-#define WINDYSIZE 720
+constexpr int window_base_width = 720;
+constexpr int window_base_height = 720;
 
-#define ANGTORAD(a) (0.0174532925f*(a))
-#define RANDFLOAT(range)  ((0 - range) + ((float)rand()/((float)RAND_MAX/(2*range))))
-#define RANDSGN ((rand()&1)?-1:1)
-#define SLOWDPROG(a,b,progressrate) ((a + (fract - 1)*b)/progressrate)
+constexpr float angle_to_radians(float a)
+{
+	return 0.0174532925f * a;
+}
+constexpr float rotation_angle()
+{
+	return angle_to_radians(dumb_rotation_angle);
+}
 
-#define GLCOLOR(uINT) glColor4ub(((uINT & 0xFF000000) >> 24), ((uINT & 0xFF0000) >> 16), ((uINT & 0xFF00) >> 8), (uINT & 0xFF))
+inline float RANDFLOAT(float range) 
+{
+	return ((0 - range) + ((float)rand() / ((float)RAND_MAX / (2 * range))));
+}
 
-float WindX = WINDXSIZE, WindY = WINDYSIZE;
+inline float RANDSGN()
+{ 
+	return ((rand() & 1) ? -1 : 1); 
+}
 
-BIT ANIMATION_IS_ACTIVE = 0, FIRSTBOOT = 1, DRAG_OVER = 0, APRIL_FOOL = 0, SHIFT_HELD = 0;
-DWORD TimerV = 0;
+constexpr float SLOWDPROG(float a, float b, float progressrate)
+{
+	return ((a + (progressrate - 1) * b) / progressrate);
+}
+
+inline void GLCOLOR(std::uint32_t uINT)
+{
+	glColor4ub(((uINT & 0xFF000000) >> 24), ((uINT & 0xFF0000) >> 16), ((uINT & 0xFF00) >> 8), (uINT & 0xFF));
+}
+
+
+float WindX = window_base_width, WindY = window_base_height;
+
+bool ANIMATION_IS_ACTIVE = 0, 
+	 FIRSTBOOT = 1,
+	 DRAG_OVER = 0, 
+	 APRIL_FOOL = 0,
+	 SHIFT_HELD = 0;
+
+std::uint32_t TimerV = 0;
 HWND hWnd;
 HDC hDc;
-SHORT YearsOld = -1;
+std::int16_t YearsOld = -1;
 auto HandCursor = ::LoadCursor(NULL, IDC_HAND), AllDirectCursor = ::LoadCursor(NULL, IDC_CROSS), NWSECursor = ::LoadCursor(NULL, IDC_SIZENWSE);///AAAAAAAAAAA
+
 //const float singlepixwidth = (float)RANGE / WINDXSIZE;
 
-BIT AutoUpdatesCheck = true;
+bool AutoUpdatesCheck = true;
 
 void absoluteToActualCoords(int ix, int iy, float& x, float& y);
 void inline rotate(float& x, float& y);

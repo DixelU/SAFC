@@ -6,8 +6,6 @@
 #include <string>
 #include <array>
 
-using BIT = bool;
-
 #include "../bbb_ffio.h"
 #include "../btree/btree_map.h"
 
@@ -17,13 +15,13 @@ using BIT = bool;
 
 struct SingleMIDIInfoCollector {
 	struct TempoEvent {
-		BYTE A;
-		BYTE B;
-		BYTE C;
-		TempoEvent(BYTE A, BYTE B, BYTE C) : A(A), B(B), C(C) {	}
+		std::uint8_t A;
+		std::uint8_t B;
+		std::uint8_t C;
+		TempoEvent(std::uint8_t A, std::uint8_t B, std::uint8_t C) : A(A), B(B), C(C) {	}
 		TempoEvent() :TempoEvent(0x7, 0xA1, 0x20) {}
-		inline static double get_bpm(BYTE A, BYTE B, BYTE C) {
-			DWORD L = (A << 16) | (B << 8) | (C);
+		inline static double get_bpm(std::uint8_t A, std::uint8_t B, std::uint8_t C) {
+			std::uint32_t L = (A << 16) | (B << 8) | (C);
 			return 60000000. / L;
 		}
 		inline operator double() const {
@@ -34,33 +32,33 @@ struct SingleMIDIInfoCollector {
 		}
 	};
 	struct NoteOnOffCounter {
-		INT64 NoteOn;
-		INT64 NoteOff;
+		std::int64_t NoteOn;
+		std::int64_t NoteOff;
 		NoteOnOffCounter() : NoteOn(0), NoteOff(0) {}
-		NoteOnOffCounter(INT64 Base) : NoteOnOffCounter() {
+		NoteOnOffCounter(std::int64_t Base) : NoteOnOffCounter() {
 			if (Base > 0)
 				NoteOn += Base;
 			else
 				NoteOff -= Base;
 		}
-		NoteOnOffCounter(INT64 NOn, INT64 NOff) : NoteOn(NOn), NoteOff(NOff) {}
-		inline operator INT64() const {
+		NoteOnOffCounter(std::int64_t NOn, std::int64_t NOff) : NoteOn(NOn), NoteOff(NOff) {}
+		inline operator std::int64_t() const {
 			return NoteOn - NoteOff;
 		}
-		NoteOnOffCounter inline operator +(INT64 offset) {
+		NoteOnOffCounter inline operator +(std::int64_t offset) {
 			if (offset > 0)
 				NoteOn += offset;
 			else
 				NoteOff -= offset;
 			return *this;
 		}
-		NoteOnOffCounter inline operator +=(INT64 offset) {
+		NoteOnOffCounter inline operator +=(std::int64_t offset) {
 			return *this = (*this + (offset));
 		}
-		NoteOnOffCounter inline operator -(INT64 offset) {
+		NoteOnOffCounter inline operator -(std::int64_t offset) {
 			return *this + (-offset);
 		}
-		NoteOnOffCounter inline operator -=(INT64 offset) {
+		NoteOnOffCounter inline operator -=(std::int64_t offset) {
 			return *this = (*this + (-offset));
 		}
 		NoteOnOffCounter inline operator ++() {
@@ -73,35 +71,35 @@ struct SingleMIDIInfoCollector {
 		}
 	};
 	struct TrackData {
-		INT64 MTrk_pos;
+		std::int64_t MTrk_pos;
 	};
-	BIT Processing, Finished;
+	bool Processing, Finished;
 	std::wstring FileName;
 	std::string LogLine;
 	std::string ErrorLine;
-	using tempo_graph = btree::btree_map<INT64, TempoEvent>;
-	using der_polyphony_graph = btree::btree_map<INT64, NoteOnOffCounter>;
-	using polyphony_graph = btree::btree_map<INT64, INT64>;
+	using tempo_graph = btree::btree_map<std::int64_t, TempoEvent>;
+	using der_polyphony_graph = btree::btree_map<std::int64_t, NoteOnOffCounter>;
+	using polyphony_graph = btree::btree_map<std::int64_t, std::int64_t>;
 	tempo_graph TempoMap;
 	//der_polyphony_graph PolyphonyFiniteDifference;
 	polyphony_graph Polyphony;
 	std::vector<TrackData> Tracks;
-	WORD PPQ;
-	BIT AllowLegacyRunningStatusMetaIgnorance;
+	std::uint16_t PPQ;
+	bool AllowLegacyRunningStatusMetaIgnorance;
 	//Locker<btree::btree_map<UINT64, UINT64>> Polyphony;
 	//Locker<btree::btree_map<>>
-	SingleMIDIInfoCollector(std::wstring filename, WORD PPQ, BIT AllowLegacyRunningStatusMetaIgnorance = false) : FileName(filename), LogLine(" "), Processing(0), Finished(0), PPQ(PPQ), AllowLegacyRunningStatusMetaIgnorance(AllowLegacyRunningStatusMetaIgnorance) { }
+	SingleMIDIInfoCollector(std::wstring filename, std::uint16_t PPQ, bool AllowLegacyRunningStatusMetaIgnorance = false) : FileName(filename), LogLine(" "), Processing(0), Finished(0), PPQ(PPQ), AllowLegacyRunningStatusMetaIgnorance(AllowLegacyRunningStatusMetaIgnorance) { }
 	void Lookup() {
 		der_polyphony_graph PolyphonyFiniteDifference;
 		Processing = true;
 		bbb_ffr file_input(FileName.c_str());
 		ErrorLine = " ";
 		LogLine = " ";
-		//std::array<DWORD, 4096> CurHolded;
-		DWORD MTRK = 0, vlv = 0;
+		//std::array<std::uint32_t, 4096> CurHolded;
+		std::uint32_t MTRK = 0, vlv = 0;
 		UINT64 LastTick = 0;
 		UINT64 CurTick = 0;
-		BYTE IO = 0, RSB = 0;
+		std::uint8_t IO = 0, RSB = 0;
 		TrackData TData;
 		TempoMap[0] = TempoEvent(0x7, 0xA1, 0x20);
 		PolyphonyFiniteDifference[-1] = NoteOnOffCounter();
@@ -124,12 +122,12 @@ struct SingleMIDIInfoCollector {
 				CurTick += vlv;
 				if (LastTick < CurTick)
 					LastTick = CurTick;
-				BYTE EventType = file_input.get();
+				std::uint8_t EventType = file_input.get();
 				if (EventType == 0xFF) {
 					if(AllowLegacyRunningStatusMetaIgnorance)
 						RSB = 0;
-					BYTE type = file_input.get();
-					DWORD meta_data_size = 0;
+					std::uint8_t type = file_input.get();
+					std::uint32_t meta_data_size = 0;
 					do {
 						IO = file_input.get();
 						meta_data_size = meta_data_size << 7 | IO & 0x7F;
@@ -188,7 +186,7 @@ struct SingleMIDIInfoCollector {
 				else if (EventType == 0xF0 || EventType == 0xF7) {
 					if(AllowLegacyRunningStatusMetaIgnorance)
 						RSB = 0;
-					DWORD meta_data_size = 0;
+					std::uint32_t meta_data_size = 0;
 					do {
 						IO = file_input.get();
 						meta_data_size = (meta_data_size << 7) | (IO & 0x7F);
@@ -197,7 +195,7 @@ struct SingleMIDIInfoCollector {
 						file_input.get();
 				}
 				else {
-					BYTE FirstParam = EventType;
+					std::uint8_t FirstParam = EventType;
 					EventType = RSB;
 					if (EventType >= 0x80 && EventType <= 0x9F) {
 						int change = (EventType & 0x10) ? 1 : -1;
@@ -237,7 +235,7 @@ struct SingleMIDIInfoCollector {
 		}
 		TempoMap[LastTick] = TempoMap.rbegin()->second;
 		PolyphonyFiniteDifference[LastTick + 1] = 0;
-		INT64 CurPolyphony = 0;
+		std::int64_t CurPolyphony = 0;
 		for (auto cur_pair : PolyphonyFiniteDifference)
 			Polyphony[cur_pair.first] = (CurPolyphony += cur_pair.second);
 		Finished = true;

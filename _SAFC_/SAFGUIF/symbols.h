@@ -14,11 +14,11 @@ struct Coords {
 
 struct DottedSymbol {
 	float Xpos, Ypos;
-	BYTE R, G, B, A, LineWidth;
+	std::uint8_t R, G, B, A, LineWidth;
 	Coords Points[9];
 	std::string RenderWay;
 	std::vector<char> PointPlacement;
-	DottedSymbol(std::string RenderWay, float Xpos, float Ypos, float XUnitSize, float YUnitSize, BYTE LineWidth = 2, BYTE Red = 255, BYTE Green = 255, BYTE Blue = 255, BYTE Alpha = 255) {
+	DottedSymbol(std::string RenderWay, float Xpos, float Ypos, float XUnitSize, float YUnitSize, std::uint8_t LineWidth = 2, std::uint8_t Red = 255, std::uint8_t Green = 255, std::uint8_t Blue = 255, std::uint8_t Alpha = 255) {
 		if (!RenderWay.size())RenderWay = " ";
 		this->RenderWay = RenderWay;
 		this->Xpos = Xpos;
@@ -32,21 +32,21 @@ struct DottedSymbol {
 		}
 		UpdatePointPlacementPositions();
 	}
-	DottedSymbol(char Symbol, float Xpos, float Ypos, float XUnitSize, float YUnitSize, BYTE LineWidth = 2, BYTE Red = 255, BYTE Green = 255, BYTE Blue = 255, BYTE Alpha = 255) :
+	DottedSymbol(char Symbol, float Xpos, float Ypos, float XUnitSize, float YUnitSize, std::uint8_t LineWidth = 2, std::uint8_t Red = 255, std::uint8_t Green = 255, std::uint8_t Blue = 255, std::uint8_t Alpha = 255) :
 		DottedSymbol(ASCII[Symbol], Xpos, Ypos, XUnitSize, YUnitSize, LineWidth, Red, Green, Blue, Alpha) {}
 
-	DottedSymbol(std::string RenderWay, float Xpos, float Ypos, float XUnitSize, float YUnitSize, BYTE LineWidth, DWORD* RGBAColor) :
+	DottedSymbol(std::string RenderWay, float Xpos, float Ypos, float XUnitSize, float YUnitSize, std::uint8_t LineWidth, std::uint32_t* RGBAColor) :
 		DottedSymbol(RenderWay, Xpos, Ypos, XUnitSize, YUnitSize, LineWidth, *RGBAColor >> 24, (*RGBAColor >> 16) & 0xFF, (*RGBAColor >> 8) & 0xFF, (*RGBAColor) & 0xFF) {
 		delete RGBAColor;
 	}
-	DottedSymbol(char Symbol, float Xpos, float Ypos, float XUnitSize, float YUnitSize, BYTE LineWidth, DWORD* RGBAColor) :
+	DottedSymbol(char Symbol, float Xpos, float Ypos, float XUnitSize, float YUnitSize, std::uint8_t LineWidth, std::uint32_t* RGBAColor) :
 		DottedSymbol(ASCII[Symbol], Xpos, Ypos, XUnitSize, YUnitSize, LineWidth, *RGBAColor >> 24, (*RGBAColor >> 16) & 0xFF, (*RGBAColor >> 8) & 0xFF, (*RGBAColor) & 0xFF) {
 		delete RGBAColor;
 	}
-	inline static BIT IsRenderwaySymb(CHAR C) {
+	inline static bool IsRenderwaySymb(CHAR C) {
 		return (C <= '9' && C >= '0' || C == ' ');
 	}
-	inline static BIT IsNumber(CHAR C) {
+	inline static bool IsNumber(CHAR C) {
 		return (C <= '9' && C >= '0');
 	}
 
@@ -87,7 +87,7 @@ struct DottedSymbol {
 		glLineWidth(LineWidth);
 		glPointSize(LineWidth);
 		glBegin(GL_LINE_STRIP);
-		BYTE IO;
+		std::uint8_t IO;
 		for (int i = 0; i < RenderWay.length(); i++) {
 			if (RenderWay[i] == ' ') {
 				glEnd();
@@ -117,17 +117,17 @@ struct DottedSymbol {
 	inline float _YUnitSize() const {
 		return Points[3].y - Points[0].y;
 	}
-	void virtual RefillGradient(DWORD* RGBAColor, DWORD* gRGBAColor, BYTE BaseColorPoint, BYTE GradColorPoint) {
+	void virtual RefillGradient(std::uint32_t* RGBAColor, std::uint32_t* gRGBAColor, std::uint8_t BaseColorPoint, std::uint8_t GradColorPoint) {
 		return;
 	}
-	void virtual RefillGradient(BYTE Red = 255, BYTE Green = 255, BYTE Blue = 255, BYTE Alpha = 255,
-		BYTE gRed = 255, BYTE gGreen = 255, BYTE gBlue = 255, BYTE gAlpha = 255,
-		BYTE BaseColorPoint = 5, BYTE GradColorPoint = 8) {
+	void virtual RefillGradient(std::uint8_t Red = 255, std::uint8_t Green = 255, std::uint8_t Blue = 255, std::uint8_t Alpha = 255,
+		std::uint8_t gRed = 255, std::uint8_t gGreen = 255, std::uint8_t gBlue = 255, std::uint8_t gAlpha = 255,
+		std::uint8_t BaseColorPoint = 5, std::uint8_t GradColorPoint = 8) {
 		return;
 	}
 };
 
-FLOAT lFONT_HEIGHT_TO_WIDTH = 2.5;
+float lFONT_HEIGHT_TO_WIDTH = 2.5;
 namespace lFontSymbolsInfo {
 	bool IsInitialised = false;
 	GLuint CurrentFont = 0;
@@ -135,7 +135,7 @@ namespace lFontSymbolsInfo {
 	INT32 Size = 16;
 
 	INT32 PrevSize = Size;
-	FLOAT Prev_lFONT_HEIGHT_TO_WIDTH = lFONT_HEIGHT_TO_WIDTH;
+	float Prev_lFONT_HEIGHT_TO_WIDTH = lFONT_HEIGHT_TO_WIDTH;
 	std::string PrevFontName;
 
 	struct lFontSymbInfosListDestructor {
@@ -161,8 +161,8 @@ namespace lFontSymbolsInfo {
 			IsInitialised = true;
 		}
 
-		auto height = Size * (BEG_RANGE / RANGE);
-		auto width = (Size > 0) ? Size * (BEG_RANGE / RANGE) / lFONT_HEIGHT_TO_WIDTH : 0;
+		auto height = Size * (base_internal_range / internal_range);
+		auto width = (Size > 0) ? Size * (base_internal_range / internal_range) / lFONT_HEIGHT_TO_WIDTH : 0;
 
 		SelectedFont = CreateFontA(
 			height,
@@ -211,14 +211,14 @@ namespace lFontSymbolsInfo {
 struct lFontSymbol : DottedSymbol {
 	char Symb;
 	GLYPHMETRICS GM = { 0 };
-	lFontSymbol(char Symb, float CXpos, float CYpos, float XUnitSize, float YUnitSize, DWORD RGBA) :
+	lFontSymbol(char Symb, float CXpos, float CYpos, float XUnitSize, float YUnitSize, std::uint32_t RGBA) :
 		DottedSymbol(" ", CXpos, CYpos, XUnitSize, YUnitSize, 1, RGBA >> 24, (RGBA >> 16) & 0xFF, (RGBA >> 8) & 0xFF, RGBA & 0xFF) {
 		this->Symb = Symb;
 	}
 	void Draw() override {
 		if (!lFontSymbolsInfo::SelectedFont)
 			return;
-		float PixelSize = (RANGE * 2) / WINDXSIZE;
+		float PixelSize = (internal_range * 2) / window_base_width;
 		float rotX = Xpos, rotY = Ypos;
 		//rotate(rotX, rotY);
 		if (fabsf(rotX) + lFONT_HEIGHT_TO_WIDTH > PixelSize * WindX / 2 || 
@@ -233,13 +233,13 @@ struct lFontSymbol : DottedSymbol {
 };
 
 struct BiColoredDottedSymbol : DottedSymbol {
-	BYTE gR[9], gG[9], gB[9], gA[9];
-	BYTE _PointData;
-	BiColoredDottedSymbol(std::string RenderWay, float Xpos, float Ypos, float XUnitSize, float YUnitSize, BYTE LineWidth = 2,
-		BYTE Red = 255, BYTE Green = 255, BYTE Blue = 255, BYTE Alpha = 255,
-		BYTE gRed = 255, BYTE gGreen = 255, BYTE gBlue = 255, BYTE gAlpha = 255,
-		BYTE BaseColorPoint = 5, BYTE GradColorPoint = 8) :
-		DottedSymbol(RenderWay, Xpos, Ypos, XUnitSize, YUnitSize, LineWidth, new DWORD(0)) {
+	std::uint8_t gR[9], gG[9], gB[9], gA[9];
+	std::uint8_t _PointData;
+	BiColoredDottedSymbol(std::string RenderWay, float Xpos, float Ypos, float XUnitSize, float YUnitSize, std::uint8_t LineWidth = 2,
+		std::uint8_t Red = 255, std::uint8_t Green = 255, std::uint8_t Blue = 255, std::uint8_t Alpha = 255,
+		std::uint8_t gRed = 255, std::uint8_t gGreen = 255, std::uint8_t gBlue = 255, std::uint8_t gAlpha = 255,
+		std::uint8_t BaseColorPoint = 5, std::uint8_t GradColorPoint = 8) :
+		DottedSymbol(RenderWay, Xpos, Ypos, XUnitSize, YUnitSize, LineWidth, new std::uint32_t(0)) {
 		this->_PointData = (((BaseColorPoint & 0xF) << 4) | (GradColorPoint & 0xF));
 		if (BaseColorPoint == GradColorPoint) {
 			for (int i = 0; i < 9; i++) {
@@ -255,26 +255,26 @@ struct BiColoredDottedSymbol : DottedSymbol {
 			RefillGradient(Red, Green, Blue, Alpha, gRed, gGreen, gBlue, gAlpha, BaseColorPoint, GradColorPoint);
 		}
 	}
-	BiColoredDottedSymbol(char Symbol, float Xpos, float Ypos, float XUnitSize, float YUnitSize, BYTE LineWidth = 2,
-		BYTE Red = 255, BYTE Green = 255, BYTE Blue = 255, BYTE Alpha = 255,
-		BYTE gRed = 255, BYTE gGreen = 255, BYTE gBlue = 255, BYTE gAlpha = 255,
-		BYTE BaseColorPoint = 5, BYTE GradColorPoint = 8) : BiColoredDottedSymbol(ASCII[Symbol], Xpos, Ypos, XUnitSize, YUnitSize, LineWidth, Red, Green, Blue, Alpha, gRed, gGreen, gBlue, gAlpha, BaseColorPoint, GradColorPoint) {}
+	BiColoredDottedSymbol(char Symbol, float Xpos, float Ypos, float XUnitSize, float YUnitSize, std::uint8_t LineWidth = 2,
+		std::uint8_t Red = 255, std::uint8_t Green = 255, std::uint8_t Blue = 255, std::uint8_t Alpha = 255,
+		std::uint8_t gRed = 255, std::uint8_t gGreen = 255, std::uint8_t gBlue = 255, std::uint8_t gAlpha = 255,
+		std::uint8_t BaseColorPoint = 5, std::uint8_t GradColorPoint = 8) : BiColoredDottedSymbol(ASCII[Symbol], Xpos, Ypos, XUnitSize, YUnitSize, LineWidth, Red, Green, Blue, Alpha, gRed, gGreen, gBlue, gAlpha, BaseColorPoint, GradColorPoint) {}
 
-	BiColoredDottedSymbol(char Symbol, float Xpos, float Ypos, float XUnitSize, float YUnitSize, BYTE LineWidth,
-		DWORD* RGBAColor, DWORD* gRGBAColor,
-		BYTE BaseColorPoint = 5, BYTE GradColorPoint = 8) : BiColoredDottedSymbol(ASCII[Symbol], Xpos, Ypos, XUnitSize, YUnitSize, LineWidth, *RGBAColor >> 24, (*RGBAColor >> 16) & 0xFF, (*RGBAColor >> 8) & 0xFF, (*RGBAColor) & 0xFF, *gRGBAColor >> 24, (*gRGBAColor >> 16) & 0xFF, (*gRGBAColor >> 8) & 0xFF, *gRGBAColor & 0xFF, BaseColorPoint, GradColorPoint) {
+	BiColoredDottedSymbol(char Symbol, float Xpos, float Ypos, float XUnitSize, float YUnitSize, std::uint8_t LineWidth,
+		std::uint32_t* RGBAColor, std::uint32_t* gRGBAColor,
+		std::uint8_t BaseColorPoint = 5, std::uint8_t GradColorPoint = 8) : BiColoredDottedSymbol(ASCII[Symbol], Xpos, Ypos, XUnitSize, YUnitSize, LineWidth, *RGBAColor >> 24, (*RGBAColor >> 16) & 0xFF, (*RGBAColor >> 8) & 0xFF, (*RGBAColor) & 0xFF, *gRGBAColor >> 24, (*gRGBAColor >> 16) & 0xFF, (*gRGBAColor >> 8) & 0xFF, *gRGBAColor & 0xFF, BaseColorPoint, GradColorPoint) {
 		delete RGBAColor;
 		delete gRGBAColor;
 	}
-	BiColoredDottedSymbol(std::string RenderWay, float Xpos, float Ypos, float XUnitSize, float YUnitSize, BYTE LineWidth,
-		DWORD* RGBAColor, DWORD* gRGBAColor,
-		BYTE BaseColorPoint = 5, BYTE GradColorPoint = 8) : BiColoredDottedSymbol(RenderWay, Xpos, Ypos, XUnitSize, YUnitSize, LineWidth, *RGBAColor >> 24, (*RGBAColor >> 16) & 0xFF, (*RGBAColor >> 8) & 0xFF, (*RGBAColor) & 0xFF, *gRGBAColor >> 24, (*gRGBAColor >> 16) & 0xFF, (*gRGBAColor >> 8) & 0xFF, *gRGBAColor & 0xFF, BaseColorPoint, GradColorPoint) {
+	BiColoredDottedSymbol(std::string RenderWay, float Xpos, float Ypos, float XUnitSize, float YUnitSize, std::uint8_t LineWidth,
+		std::uint32_t* RGBAColor, std::uint32_t* gRGBAColor,
+		std::uint8_t BaseColorPoint = 5, std::uint8_t GradColorPoint = 8) : BiColoredDottedSymbol(RenderWay, Xpos, Ypos, XUnitSize, YUnitSize, LineWidth, *RGBAColor >> 24, (*RGBAColor >> 16) & 0xFF, (*RGBAColor >> 8) & 0xFF, (*RGBAColor) & 0xFF, *gRGBAColor >> 24, (*gRGBAColor >> 16) & 0xFF, (*gRGBAColor >> 8) & 0xFF, *gRGBAColor & 0xFF, BaseColorPoint, GradColorPoint) {
 		delete RGBAColor;
 		delete gRGBAColor;
 	}
-	void RefillGradient(BYTE Red = 255, BYTE Green = 255, BYTE Blue = 255, BYTE Alpha = 255,
-		BYTE gRed = 255, BYTE gGreen = 255, BYTE gBlue = 255, BYTE gAlpha = 255,
-		BYTE BaseColorPoint = 5, BYTE GradColorPoint = 8) override {
+	void RefillGradient(std::uint8_t Red = 255, std::uint8_t Green = 255, std::uint8_t Blue = 255, std::uint8_t Alpha = 255,
+		std::uint8_t gRed = 255, std::uint8_t gGreen = 255, std::uint8_t gBlue = 255, std::uint8_t gAlpha = 255,
+		std::uint8_t BaseColorPoint = 5, std::uint8_t GradColorPoint = 8) override {
 		float xbase = (((float)(BaseColorPoint % 3)) - 1.f), ybase = (((float)(BaseColorPoint / 3)) - 1.f),
 			xgrad = (((float)(GradColorPoint % 3)) - 1.f), ygrad = (((float)(GradColorPoint / 3)) - 1.f);
 		float ax = xgrad - xbase, ay = ygrad - ybase, t;
@@ -320,7 +320,7 @@ struct BiColoredDottedSymbol : DottedSymbol {
 			}
 		}
 	}
-	void RefillGradient(DWORD* RGBAColor, DWORD* gRGBAColor, BYTE BaseColorPoint, BYTE GradColorPoint) override {
+	void RefillGradient(std::uint32_t* RGBAColor, std::uint32_t* gRGBAColor, std::uint8_t BaseColorPoint, std::uint8_t GradColorPoint) override {
 		RefillGradient(*RGBAColor >> 24, (*RGBAColor >> 16) & 0xFF, (*RGBAColor >> 8) & 0xFF, (*RGBAColor) & 0xFF, *gRGBAColor >> 24, (*gRGBAColor >> 16) & 0xFF, (*gRGBAColor >> 8) & 0xFF, *gRGBAColor & 0xFF, BaseColorPoint, GradColorPoint);
 		delete RGBAColor;
 		delete gRGBAColor;
@@ -343,7 +343,7 @@ struct BiColoredDottedSymbol : DottedSymbol {
 		}
 		if (is_fonted)
 			VerticalFlag = 0;
-		BYTE IO;
+		std::uint8_t IO;
 		glLineWidth(LineWidth);
 		glPointSize(LineWidth);
 		glBegin(GL_LINE_STRIP);

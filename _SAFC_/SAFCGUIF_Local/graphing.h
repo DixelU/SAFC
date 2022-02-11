@@ -17,9 +17,9 @@ struct Graphing : HandleableUIPart {
 	ordered_map_type* Graph;
 	SingleTextLine* STL_Info;
 	local_fp_type Width, TargetHeight, ScaleCoef, Shift;
-	BIT AutoAdjusting, IsHovered;
-	DWORD Color, NearestLineColor, PointColor, SelectionColor;
-	Graphing(float CXpos, float CYpos, float Width, float TargetHeight, float ScaleCoef, BIT AutoAdjusting, DWORD Color, DWORD TextColor, DWORD NearestLineColor, DWORD PointColor, DWORD SelectionColor, ordered_map_type* Graph, SingleTextLineSettings* STLS, BIT Enabled) :
+	bool AutoAdjusting, IsHovered;
+	std::uint32_t Color, NearestLineColor, PointColor, SelectionColor;
+	Graphing(float CXpos, float CYpos, float Width, float TargetHeight, float ScaleCoef, bool AutoAdjusting, std::uint32_t Color, std::uint32_t TextColor, std::uint32_t NearestLineColor, std::uint32_t PointColor, std::uint32_t SelectionColor, ordered_map_type* Graph, SingleTextLineSettings* STLS, bool Enabled) :
 		CXpos(CXpos), CYpos(CYpos), Width(Width), TargetHeight(TargetHeight), ScaleCoef(ScaleCoef), Color(Color), AutoAdjusting(AutoAdjusting), Graph(Graph), NearestLineColor(NearestLineColor), PointColor(PointColor), SelectionColor(SelectionColor)
 	{
 		this->Enabled = Enabled;
@@ -49,7 +49,7 @@ struct Graphing : HandleableUIPart {
 			local_fp_type max_value = -1e31f, min_value = 1e31f;
 			local_fp_type prev_value = CYpos - 0.5 * TargetHeight + (ScaleCoef * Graph->begin()->second + Shift) * TargetHeight;
 			local_fp_type t_prev_value = prev_value;
-			BIT IsLastLoopComplete = false;
+			bool IsLastLoopComplete = false;
 			GLCOLOR(Color);
 			glBegin(GL_LINE_STRIP);
 			glVertex2f(CXpos - 0.5f * Width, t_prev_value);
@@ -165,15 +165,15 @@ struct Graphing : HandleableUIPart {
 		NewY -= CYpos;
 		SafeMove(NewX, NewY);
 	}
-	void SafeChangePosition_Argumented(BYTE Arg, float NewX, float NewY) override {
+	void SafeChangePosition_Argumented(std::uint8_t Arg, float NewX, float NewY) override {
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		float CW = 0.5f * (
-			(INT32)((BIT)(GLOBAL_LEFT & Arg))
-			- (INT32)((BIT)(GLOBAL_RIGHT & Arg))
+			(INT32)((bool)(GLOBAL_LEFT & Arg))
+			- (INT32)((bool)(GLOBAL_RIGHT & Arg))
 			) * Width,
 			CH = 0.5f * (
-				(INT32)((BIT)(GLOBAL_BOTTOM & Arg))
-				- (INT32)((BIT)(GLOBAL_TOP & Arg))
+				(INT32)((bool)(GLOBAL_BOTTOM & Arg))
+				- (INT32)((bool)(GLOBAL_TOP & Arg))
 				) * TargetHeight;
 		SafeChangePosition(NewX + CW, NewY + CH);
 	}
@@ -214,7 +214,7 @@ struct Graphing : HandleableUIPart {
 	void SafeStringReplace(std::string Meaningless) override {
 		return;
 	}
-	BIT MouseHandler(float mx, float my, CHAR Button, CHAR State) override {
+	bool MouseHandler(float mx, float my, CHAR Button, CHAR State) override {
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		if (abs(mx - CXpos) <= 0.5f * Width && abs(my - CYpos) <= 0.5f * TargetHeight) {
 			IsHovered = true;

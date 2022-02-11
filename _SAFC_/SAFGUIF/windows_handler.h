@@ -16,7 +16,7 @@ struct WindowsHandler {
 #define Map(WindowName,ElementName) (*Map[WindowName])[ElementName]
 	std::list<std::map<std::string, MoveableWindow*>::iterator> ActiveWindows;
 	std::string MainWindow_ID, MW_ID_Holder;
-	BIT WindowWasDisabledDuringMouseHandling;
+	bool WindowWasDisabledDuringMouseHandling;
 	std::recursive_mutex Lock;
 	static constexpr float alerttext_vert_pos = -7.5, alertheight = 65;
 	WindowsHandler() {
@@ -44,7 +44,7 @@ struct WindowsHandler {
 		//printf("%X\n", Button);
 		std::list<std::map<std::string, MoveableWindow*>::iterator>::iterator AWIterator = ActiveWindows.begin(), CurrentAW;
 		CurrentAW = AWIterator;
-		//BIT flag = 0;
+		//bool flag = 0;
 		if (!Button && !ActiveWindows.empty())(*ActiveWindows.begin())->second->MouseHandler(mx, my, 0, 0);
 		else {
 			while (AWIterator != ActiveWindows.end() && !((*AWIterator)->second->MouseHandler(mx, my, Button, State)) && !WindowWasDisabledDuringMouseHandling)
@@ -55,7 +55,7 @@ struct WindowsHandler {
 				WindowWasDisabledDuringMouseHandling = 0;
 		}
 	}
-	void ThrowPrompt(std::string StaticTipText, std::string WindowTitle, void(*OnSubmit)(), _Align STipAlign, InputField::Type InputType, std::string DefaultString = "", DWORD MaxChars = 0) {
+	void ThrowPrompt(std::string StaticTipText, std::string WindowTitle, void(*OnSubmit)(), _Align STipAlign, InputField::Type InputType, std::string DefaultString = "", std::uint32_t MaxChars = 0) {
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		auto wptr = Map["PROMPT"];
 		auto ifptr = ((InputField*)(*wptr)["FLD"]);
@@ -71,7 +71,7 @@ struct WindowsHandler {
 		wptr->SafeChangePosition(-50, 50);
 		EnableWindow("PROMPT");
 	}
-	void ThrowAlert(std::string AlertText, std::string AlertHeader, void(*SpecialSignsDrawFunc)(float, float, float, DWORD, DWORD), BIT Update = false, DWORD FRGBA = 0, DWORD SRGBA = 0) {
+	void ThrowAlert(std::string AlertText, std::string AlertHeader, void(*SpecialSignsDrawFunc)(float, float, float, std::uint32_t, std::uint32_t), bool Update = false, std::uint32_t FRGBA = 0, std::uint32_t SRGBA = 0) {
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		auto AlertWptr = Map["ALERT"];
 		AlertWptr->SafeWindowRename(AlertHeader);
@@ -163,7 +163,7 @@ struct WindowsHandler {
 	}
 	void Draw() {
 		std::lock_guard<std::recursive_mutex> locker(Lock);
-		BIT MetMain = 0;
+		bool MetMain = 0;
 		if (!ActiveWindows.empty()) {//if only reverse iterators could be easily converted to usual iterators...
 			auto Y = (++ActiveWindows.rbegin()).base();
 

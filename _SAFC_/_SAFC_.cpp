@@ -53,17 +53,17 @@
 #include "SAFC_InnerModules/SAFC_IM.h"
 #include "SAFCGUIF_Local/SAFGUIF_L.h"
 
-std::tuple<WORD, WORD, WORD, WORD> ___GetVersion() {
+std::tuple<std::uint16_t, std::uint16_t, std::uint16_t, std::uint16_t> ___GetVersion() {
 	// get the filename of the executable containing the version resource
 	TCHAR szFilename[MAX_PATH + 1] = { 0 };
 	if (GetModuleFileName(NULL, szFilename, MAX_PATH) == 0) 
 		return {0,0,0,0};
 	// allocate a block of memory for the version info
 	DWORD dummy;
-	DWORD dwSize = GetFileVersionInfoSize(szFilename, &dummy);
+	std::uint32_t dwSize = GetFileVersionInfoSize(szFilename, &dummy);
 	if (dwSize == 0) 
 		return { 0,0,0,0 };
-	std::vector<BYTE> data(dwSize);
+	std::vector<std::uint8_t> data(dwSize);
 	// load the version info
 	if (!GetFileVersionInfo(szFilename, 0, dwSize, &data[0])) 
 		return { 0,0,0,0 };
@@ -190,7 +190,7 @@ void SAFC_VersionCheck() {
 				input.close();
 				auto JSON_Value = JSON::Parse(temp_buffer.c_str());
 				auto git_latest_version = ((JSON_Value)->AsArray()[0])->AsObject().find(L"name")->second->AsString();
-				WORD version_partied[4] = { 0,0,0,0 };
+				std::uint16_t version_partied[4] = { 0,0,0,0 };
 				std::vector<std::string> ans;
 				std::wstring git_version_numbers_only = git_latest_version.substr(1);//v?.?.?.?
 				boost::algorithm::split(ans, git_version_numbers_only, boost::is_any_of("."));
@@ -272,22 +272,23 @@ size_t GetAvailableMemory(){
 ButtonSettings 
 					*BS_List_Black_Small = new ButtonSettings(System_White, 0, 0, 100, 10, 1, 0, 0, 0xFFEFDFFF, 0x00003F7F, 0x7F7F7FFF);
 
-DWORD DefaultBoolSettings = _BoolSettings::remove_remnants | _BoolSettings::remove_empty_tracks | _BoolSettings::all_instruments_to_piano;
+std::uint32_t DefaultBoolSettings = _BoolSettings::remove_remnants | _BoolSettings::remove_empty_tracks | _BoolSettings::all_instruments_to_piano;
 
 struct FileSettings {////per file settings
 	std::wstring Filename;
 	std::wstring PostprocessedFile_Name, WFileNamePostfix;
 	std::string AppearanceFilename, AppearancePath, FileNamePostfix;
-	WORD NewPPQN, OldPPQN, OldTrackNumber, MergeMultiplier;
-	INT16 GroupID;
-	FLOAT NewTempo;
+	std::uint16_t NewPPQN, OldPPQN, OldTrackNumber, MergeMultiplier;
+	std::int16_t GroupID;
+	float NewTempo;
 	UINT64 FileSize;
-	INT64 SelectionStart, SelectionLength;
-	BIT IsMIDI, InplaceMergeEnabled, OffsetResetOnSelection, AllowLegacyRunningStatusMetaIgnorance;
+	std::int64_t SelectionStart, SelectionLength;
+	bool IsMIDI, InplaceMergeEnabled, OffsetResetOnSelection, AllowLegacyRunningStatusMetaIgnorance;
 	std::shared_ptr<CutAndTransposeKeys> KeyMap;
-	std::shared_ptr<PLC<BYTE, BYTE>> VolumeMap;
-	std::shared_ptr<PLC<WORD, WORD>> PitchBendMap;
-	DWORD OffsetTicks, BoolSettings;
+	std::shared_ptr<PLC<std::uint8_t, std::uint8_t>> VolumeMap;
+	std::shared_ptr<PLC<std::uint16_t, std::uint16_t>> PitchBendMap;
+	std::uint32_t BoolSettings;
+	std::int64_t OffsetTicks;
 	FileSettings(const std::wstring& Filename) {
 		this->Filename = Filename;
 		AppearanceFilename = AppearancePath = "";
@@ -312,10 +313,10 @@ struct FileSettings {////per file settings
 		WFileNamePostfix = L"_.mid";
 		AllowLegacyRunningStatusMetaIgnorance = false;
 	}
-	inline void SwitchBoolSetting(DWORD SMP_BoolSetting) {
+	inline void SwitchBoolSetting(std::uint32_t SMP_BoolSetting) {
 		BoolSettings ^= SMP_BoolSetting;
 	}
-	inline void SetBoolSetting(DWORD SMP_BoolSetting, BIT NewState) {
+	inline void SetBoolSetting(std::uint32_t SMP_BoolSetting, bool NewState) {
 		if (BoolSettings&SMP_BoolSetting && NewState)return;
 		if (!(BoolSettings&SMP_BoolSetting) && !NewState)return;
 		SwitchBoolSetting(SMP_BoolSetting);
@@ -329,24 +330,24 @@ struct FileSettings {////per file settings
 };
 struct _SFD_RSP {
 	INT32 ID;
-	INT64 FileSize;
-	_SFD_RSP(INT32 ID, INT64 FileSize) {
+	std::int64_t FileSize;
+	_SFD_RSP(INT32 ID, std::int64_t FileSize) {
 		this->ID = ID;
 		this->FileSize = FileSize;
 	}
-	inline BIT operator<(_SFD_RSP a) {
+	inline bool operator<(_SFD_RSP a) {
 		return FileSize < a.FileSize;
 	}
 };
 struct SAFCData {////overall settings and storing perfile settings....
 	std::vector<FileSettings> Files;
 	std::wstring SaveDirectory;
-	WORD GlobalPPQN;
-	DWORD GlobalOffset;
-	FLOAT GlobalNewTempo;
-	BIT IncrementalPPQN;
-	BIT InplaceMergeFlag;
-	WORD DetectedThreads;
+	std::uint16_t GlobalPPQN;
+	std::uint32_t GlobalOffset;
+	float GlobalNewTempo;
+	bool IncrementalPPQN;
+	bool InplaceMergeFlag;
+	std::uint16_t DetectedThreads;
 	SAFCData() {
 		GlobalPPQN = GlobalOffset = GlobalNewTempo = 0;
 		IncrementalPPQN = 1;
@@ -354,7 +355,7 @@ struct SAFCData {////overall settings and storing perfile settings....
 		InplaceMergeFlag = 0;
 		SaveDirectory = L"";
 	}
-	void ResolveSubdivisionProblem_GroupIDAssign(WORD ThreadsCount=0) {
+	void ResolveSubdivisionProblem_GroupIDAssign(std::uint16_t ThreadsCount=0) {
 		if (!ThreadsCount)
 			ThreadsCount = DetectedThreads;
 		if (Files.empty()) {
@@ -369,8 +370,8 @@ struct SAFCData {////overall settings and storing perfile settings....
 			return;
 		}
 		std::vector<_SFD_RSP> Sizes;
-		std::vector<INT64> SumSize;
-		INT64 T=0;
+		std::vector<std::int64_t> SumSize;
+		std::int64_t T=0;
 		for (int i = 0; i < Files.size(); i++) {
 			Sizes.push_back(_SFD_RSP(i, Files[i].FileSize));
 		}
@@ -380,11 +381,11 @@ struct SAFCData {////overall settings and storing perfile settings....
 		}
 
 		for (int i = 0; i < SumSize.size(); i++) {
-			Files[Sizes[i].ID].GroupID = (WORD)(ceil(((float)SumSize[i] / ((float)SumSize.back()))*ThreadsCount) - 1.);
+			Files[Sizes[i].ID].GroupID = (std::uint16_t)(ceil(((float)SumSize[i] / ((float)SumSize.back()))*ThreadsCount) - 1.);
 			std::cout << "Thread " << Files[Sizes[i].ID].GroupID << ": " << Sizes[i].FileSize << ":\t" << Sizes[i].ID << std::endl;
 		}
 	}
-	void SetGlobalPPQN(WORD NewPPQN=0,BIT ForceGlobalPPQNOverride=false) {
+	void SetGlobalPPQN(std::uint16_t NewPPQN=0,bool ForceGlobalPPQNOverride=false) {
 		if (!NewPPQN && ForceGlobalPPQNOverride)
 			return;
 		if (!ForceGlobalPPQNOverride)
@@ -397,17 +398,17 @@ struct SAFCData {////overall settings and storing perfile settings....
 			Files[i].NewPPQN = NewPPQN;
 		GlobalPPQN = NewPPQN;
 	}
-	void SetGlobalOffset(DWORD Offset) {
+	void SetGlobalOffset(std::uint32_t Offset) {
 		for (int i = 0; i < Files.size(); i++)
 			Files[i].OffsetTicks = Offset;
 		GlobalOffset = Offset;
 	}
-	void SetGlobalTempo(FLOAT NewTempo) {
+	void SetGlobalTempo(float NewTempo) {
 		for (int i = 0; i < Files.size(); i++)
 			Files[i].NewTempo = NewTempo;
 		GlobalNewTempo = NewTempo;
 	}
-	void RemoveByID(DWORD ID) {
+	void RemoveByID(std::uint32_t ID) {
 		if (ID < Files.size()) {
 			Files.erase(Files.begin() + ID);
 		}
@@ -550,7 +551,7 @@ void AddFiles(std::vector<std::wstring> Filenames) {
 		if (Filenames[i].empty())continue;
 		_Data.Files.push_back(FileSettings(Filenames[i]));
 		if (_Data.Files.back().IsMIDI) {
-			DWORD Counter = 0;
+			std::uint32_t Counter = 0;
 			_WH_t("MAIN", "List", SelectablePropertedList*)->SafePushBackNewString(_Data.Files.back().AppearanceFilename);
 			_Data.Files.back().NewTempo = _Data.GlobalNewTempo;
 			_Data.Files.back().OffsetTicks = _Data.GlobalOffset;
@@ -578,7 +579,7 @@ void OnAdd() {
 namespace PropsAndSets {
 	std::string* PPQN = new std::string(""), * OFFSET = new std::string(""), * TEMPO = new std::string("");
 	int currentID=-1,CaTID=-1,VMID=-1,PMID=-1;
-	BIT ForPersonalUse = true;
+	bool ForPersonalUse = true;
 	SingleMIDIInfoCollector* SMICptr = nullptr;
 	std::string CSV_DELIM = ";";
 	void OGPInMIDIList(int ID) {
@@ -760,14 +761,14 @@ namespace PropsAndSets {
 				InfoLine->SafeStringReplace("Collecting data for exporting...");
 
 				using line_data = struct {
-					INT64 Polyphony;
+					std::int64_t Polyphony;
 					double Seconds;
 					double Tempo;
 				};
 
-				INT64 Polyphony = 0;
-				WORD PPQ = SMICptr->PPQ; 
-				INT64 last_tick = 0;
+				std::int64_t Polyphony = 0;
+				std::uint16_t PPQ = SMICptr->PPQ; 
+				std::int64_t last_tick = 0;
 				std::string header = "";
 				double tempo = 0;
 				double seconds = 0;
@@ -778,7 +779,7 @@ namespace PropsAndSets {
 					+ "Time(seconds)" + CSV_DELIM
 					+ "Tempo"
 					+ "\n");
-				btree::btree_map<INT64, line_data> info;
+				btree::btree_map<std::int64_t, line_data> info;
 				for (auto cur_pair : SMICptr->Polyphony)
 					info[cur_pair.first] = line_data({
 						cur_pair.second, 0., 0.
@@ -852,15 +853,15 @@ namespace PropsAndSets {
 				auto UIOutput = (TextBox*)(*(*WH)["SMIC"])["ANSWER"];
 				InfoLine->SafeStringReplace("Integration has begun");
 
-				INT64 ticks_limit = 0;
+				std::int64_t ticks_limit = 0;
 				ticks_limit = std::stoi(UITicks->GetCurrentInput("0"));
 
-				INT64 prev_tick = 0, cur_tick = 0;
+				std::int64_t prev_tick = 0, cur_tick = 0;
 				double cur_seconds = 0;
 				double prev_second = 0;
 				double PPQ = SMICptr->PPQ;
 				double prev_tempo = 120;
-				INT64 last_tick = (*SMICptr->TempoMap.rbegin()).first;
+				std::int64_t last_tick = (*SMICptr->TempoMap.rbegin()).first;
 				for (auto cur_pair : SMICptr->TempoMap/*; cur_pair != SMICptr->TempoMap.end(); cur_pair++*/) {
 					cur_tick = cur_pair.first;
 					cur_seconds += (cur_tick - prev_tick) * (60 / (prev_tempo * PPQ));
@@ -907,12 +908,12 @@ namespace PropsAndSets {
 			seconds_limit += std::stoi(UISeconds->GetCurrentInput("0"));
 			seconds_limit += std::stoi(UIMilliseconds->GetCurrentInput("0"))/1000.;
 
-			INT64 prev_tick = 0, cur_tick = 0;
+			std::int64_t prev_tick = 0, cur_tick = 0;
 			double cur_seconds = 0;
 			double prev_second = 0;
 			double PPQ = SMICptr->PPQ;
 			double prev_tempo = 120;
-			INT64 last_tick = (*SMICptr->TempoMap.rbegin()).first;
+			std::int64_t last_tick = (*SMICptr->TempoMap.rbegin()).first;
 			for (auto cur_pair : SMICptr->TempoMap/*; cur_pair != SMICptr->TempoMap.end(); cur_pair++*/) {
 				cur_tick = cur_pair.first;
 				cur_seconds += (cur_tick - prev_tick) * (60 / (prev_tempo * PPQ));
@@ -925,7 +926,7 @@ namespace PropsAndSets {
 			cur_seconds -= prev_second;
 			seconds_limit -= prev_second;
 			auto rate = (seconds_limit == 0) ? 0 : seconds_limit / cur_seconds;
-			INT64 tick = (cur_tick - prev_tick) * rate + prev_tick;
+			std::int64_t tick = (cur_tick - prev_tick) * rate + prev_tick;
 
 			UIOutput->SafeStringReplace("Tick: " + std::to_string(tick));
 
@@ -953,13 +954,13 @@ namespace PropsAndSets {
 
 		CurStr = ((InputField*)(*SMPASptr)["TEMPO"])->GetCurrentInput("0");
 		if (CurStr.size()) {
-			FLOAT F = stof(CurStr);
+			float F = stof(CurStr);
 			_Data[currentID].NewTempo = F;
 		}
 
 		CurStr = ((InputField*)(*SMPASptr)["OFFSET"])->GetCurrentInput("0");
 		if (CurStr.size()) {
-			T = stoi(CurStr);
+			T = stoll (CurStr);
 			_Data[currentID].OffsetTicks = T;
 		}
 
@@ -1013,8 +1014,8 @@ namespace PropsAndSets {
 	}
 
 	namespace CutAndTranspose {
-		BYTE TMax=0, TMin=0;
-		SHORT TTransp=0;
+		std::uint8_t TMax=0, TMin=0;
+		std::int16_t TTransp=0;
 		void OnCaT() {
 			auto Wptr = (*WH)["CAT"];
 			auto CATptr = (CAT_Piano*)((*Wptr)["CAT_ITSELF"]);
@@ -1082,7 +1083,7 @@ namespace PropsAndSets {
 			VM->Hovered = 0;
 			VM->RePutMode = 0;
 			if (!_Data[currentID].VolumeMap)
-				_Data[currentID].VolumeMap = std::make_shared<PLC<BYTE, BYTE>>();
+				_Data[currentID].VolumeMap = std::make_shared<PLC<std::uint8_t, std::uint8_t>>();
 			VM->PLC_bb = _Data[currentID].VolumeMap;
 			WH->EnableWindow("VM");
 		}
@@ -1116,7 +1117,7 @@ namespace PropsAndSets {
 			auto VM = ((PLC_VolumeWorker*)(*Wptr)["VM_PLC"]);
 			if (VM->PLC_bb) {
 				if (VM->PLC_bb->ConversionMap.empty())return;
-				BYTE C[256];
+				std::uint8_t C[256];
 				for (int i = 0; i < 255; i++) {
 					C[i] = VM->PLC_bb->AskForValue(i);
 				}
@@ -1184,7 +1185,7 @@ void OnRemAll() {
 void OnSubmitGlobalPPQN() {
 	auto pptr = (*WH)["PROMPT"];
 	std::string t = ((InputField*)(*pptr)["FLD"])->GetCurrentInput("0");
-	WORD PPQN = (t.size())?stoi(t):_Data.GlobalPPQN;
+	std::uint16_t PPQN = (t.size())?stoi(t):_Data.GlobalPPQN;
 	_Data.SetGlobalPPQN(PPQN, true);
 	WH->DisableWindow("PROMPT");
 	//PropsAndSets::OGPInMIDIList(PropsAndSets::currentID);
@@ -1196,7 +1197,7 @@ void OnGlobalPPQN() {
 void OnSubmitGlobalOffset() {
 	auto pptr = (*WH)["PROMPT"];
 	std::string t = ((InputField*)(*pptr)["FLD"])->GetCurrentInput("0");
-	DWORD O = (t.size()) ? std::stoi(t) : _Data.GlobalOffset;
+	std::uint32_t O = (t.size()) ? std::stoi(t) : _Data.GlobalOffset;
 	_Data.SetGlobalOffset(O);
 	WH->DisableWindow("PROMPT");
 	//PropsAndSets::OGPInMIDIList(PropsAndSets::currentID);
@@ -1209,7 +1210,7 @@ void OnGlobalOffset() {
 void OnSubmitGlobalTempo() {
 	auto pptr = (*WH)["PROMPT"];
 	std::string t = ((InputField*)(*pptr)["FLD"])->GetCurrentInput("0");
-	FLOAT Tempo = (t.size()) ? std::stof(t) : _Data.GlobalNewTempo;
+	float Tempo = (t.size()) ? std::stof(t) : _Data.GlobalNewTempo;
 	_Data.SetGlobalTempo(Tempo);
 	WH->DisableWindow("PROMPT");
 	//PropsAndSets::OGPInMIDIList(PropsAndSets::currentID);
@@ -1256,7 +1257,7 @@ namespace Settings {
 		//WH->ThrowAlert("Please read the docs! Changing some of these settings might cause graphics driver failure!","Warning!",SpecialSigns::DrawExTriangle,1,0x007FFFFF,0x7F7F7FFF);
 		auto pptr = (*WH)["APP_SETTINGS"];
 		((InputField*)(*pptr)["AS_BCKGID"])->UpdateInputString(std::to_string(ShaderMode));
-		((InputField*)(*pptr)["AS_ROT_ANGLE"])->UpdateInputString(std::to_string(ROT_ANGLE));
+		((InputField*)(*pptr)["AS_ROT_ANGLE"])->UpdateInputString(std::to_string(dumb_rotation_angle));
 		((InputField*)(*pptr)["AS_THREADS_COUNT"])->UpdateInputString(std::to_string(_Data.DetectedThreads));
 
 		((CheckBox*)((*pptr)["BOOL_REM_TRCKS"]))->State = DefaultBoolSettings & _BoolSettings::remove_empty_tracks;
@@ -1273,7 +1274,7 @@ namespace Settings {
 	void OnSetApply() {
 		bool isRegestryOpened = false;
 		try {
-			Settings::RegestryAccess.Open(HKEY_CURRENT_USER, RegPath);
+			Settings::RegestryAccess.Open(HKEY_CURRENT_USER, default_reg_path);
 			isRegestryOpened = true;
 		}
 		catch (...) {
@@ -1293,9 +1294,9 @@ namespace Settings {
 		T = ((InputField*)(*pptr)["AS_ROT_ANGLE"])->GetCurrentInput("0");
 		std::cout << "ROT_ANGLE " << T << std::endl;
 		if (T.size() && !is_fonted) {
-			ROT_ANGLE = stof(T);
+			dumb_rotation_angle = stof(T);
 		}
-		std::cout << ROT_ANGLE << std::endl;
+		std::cout << dumb_rotation_angle << std::endl;
 
 		T = ((InputField*)(*pptr)["AS_THREADS_COUNT"])->GetCurrentInput(std::to_string(_Data.DetectedThreads));
 		std::cout << "AS_THREADS_COUNT " << T << std::endl;
@@ -1322,14 +1323,14 @@ namespace Settings {
 		if (isRegestryOpened) { 
 			TRY_CATCH(RegestryAccess.SetDwordValue(L"DEFAULT_BOOL_SETTINGS", DefaultBoolSettings); , "Failed on setting DEFAULT_BOOL_SETTINGS") 
 			TRY_CATCH(RegestryAccess.SetDwordValue(L"FONTSIZE", lFontSymbolsInfo::Size);, "Failed on setting FONTSIZE") 
-			TRY_CATCH(RegestryAccess.SetDwordValue(L"FLOAT_FONTHTW", *(DWORD*)(&lFONT_HEIGHT_TO_WIDTH));, "Failed on setting FLOAT_FONTHTW")
+			TRY_CATCH(RegestryAccess.SetDwordValue(L"FLOAT_FONTHTW", *(std::uint32_t*)(&lFONT_HEIGHT_TO_WIDTH));, "Failed on setting FLOAT_FONTHTW")
 		}
 
 		_Data.InplaceMergeFlag = (((CheckBox*)(*pptr)["INPLACE_MERGE"])->State);
 		if (isRegestryOpened)TRY_CATCH(RegestryAccess.SetDwordValue(L"AS_INPLACE_FLAG", _Data.InplaceMergeFlag); , "Failed on setting AS_INPLACE_FLAG")
 
 		((InputField*)(*pptr)["AS_FONT_NAME"])->PutIntoSource();
-		std::wstring ws(FONTNAME.begin(), FONTNAME.end());
+		std::wstring ws(default_font_name.begin(), default_font_name.end());
 		if (isRegestryOpened)TRY_CATCH(RegestryAccess.SetStringValue(L"COLLAPSEDFONTNAME", ws.c_str());, "Failed on setting AS_BCKGID")
 		if(isRegestryOpened)
 			Settings::RegestryAccess.Close();
@@ -1407,7 +1408,7 @@ void OnStart() {
 			auto Vis = new SMRP_Vis(Q.first, Q.second, System_White);
 			std::string temp = "";
 			MW->AddUIElement(temp = "SMRP_C" + std::to_string(ID), Vis);
-			std::thread TH([](MIDICollectionThreadedMerger *pMCTM, MoveableWindow *MW, DWORD ID) {
+			std::thread TH([](MIDICollectionThreadedMerger *pMCTM, MoveableWindow *MW, std::uint32_t ID) {
 				std::string SID = "SMRP_C" + std::to_string(ID);
 				std::cout << SID << " Processing started" << std::endl;
 				auto pVIS = ((SMRP_Vis*)(*MW)[SID]);
@@ -1479,11 +1480,11 @@ void OnSaveTo() {
 void RestoreRegSettings() {
 	bool Opened = false;
 	try{
-		Settings::RegestryAccess.Create(HKEY_CURRENT_USER, RegPath);
+		Settings::RegestryAccess.Create(HKEY_CURRENT_USER, default_reg_path);
 	}
 	catch(...){ std::cout << "Exception thrown while creating registry key\n"; }
 	try {
-		Settings::RegestryAccess.Open(HKEY_CURRENT_USER, RegPath);
+		Settings::RegestryAccess.Open(HKEY_CURRENT_USER, default_reg_path);
 		Opened = true;
 	}
 	catch (...) { std::cout << "Exception thrown while opening RK\n"; }
@@ -1510,7 +1511,7 @@ void RestoreRegSettings() {
 		catch (...) { std::cout << "Exception thrown while restoring INPLACE_MERGE from registry\n"; }
 		try {
 			std::wstring ws = Settings::RegestryAccess.GetStringValue(L"COLLAPSEDFONTNAME");//COLLAPSEDFONTNAME
-			FONTNAME = std::string(ws.begin(), ws.end());
+			default_font_name = std::string(ws.begin(), ws.end());
 		}
 		catch (...) { std::cout << "Exception thrown while restoring COLLAPSEDFONTNAME from registry\n"; }
 		try {
@@ -1518,7 +1519,7 @@ void RestoreRegSettings() {
 		}
 		catch (...) { std::cout << "Exception thrown while restoring FONTSIZE from registry\n"; }
 		try {
-			DWORD B = Settings::RegestryAccess.GetDwordValue(L"FLOAT_FONTHTW");//COLLAPSEDFONTNAME
+			std::uint32_t B = Settings::RegestryAccess.GetDwordValue(L"FLOAT_FONTHTW");//COLLAPSEDFONTNAME
 			lFONT_HEIGHT_TO_WIDTH = *(float*)&B;
 		}
 		catch (...) { std::cout << "Exception thrown while restoring FLOAT_FONTHTW from registry\n"; }
@@ -1531,15 +1532,15 @@ void Init() {///SetIsFontedVar
 	hDc = GetDC(hWnd);
 	_Data.DetectedThreads = 
 		std::max(
-			std::min((WORD)(
-				(WORD)std::max(
+			std::min((std::uint16_t)(
+				(std::uint16_t)std::max(
 					std::thread::hardware_concurrency(), 
 					1u
 				)
 				- 1
 				), 
-				(WORD)(ceil(GetAvailableMemory() / 2048))
-			), (WORD)1
+				(std::uint16_t)(ceil(GetAvailableMemory() / 2048))
+			), (std::uint16_t)1
 		);
 
 	SelectablePropertedList* SPL = new SelectablePropertedList(BS_List_Black_Small, NULL, PropsAndSets::OGPInMIDIList, -50, 172, 300, 12, 65, 30);
@@ -1589,7 +1590,7 @@ void Init() {///SetIsFontedVar
 	(*T)["FileName"] = new TextBox("_", System_White, 0, 88.5 - WindowHeapSize, 6, 200 - 1.5 * WindowHeapSize, 7.5, 0, 0, 0, _Align::left, TextBox::VerticalOverflow::cut);
 	(*T)["PPQN"] = new InputField(" ", -90 + WindowHeapSize, 75 - WindowHeapSize, 10, 25, System_White, PropsAndSets::PPQN, 0x007FFFFF, System_White, "PPQN is lesser than 65536.", 5, _Align::center, _Align::left, InputField::Type::NaturalNumbers);
 	(*T)["TEMPO"] = new InputField(" ", -45 + WindowHeapSize, 75 - WindowHeapSize, 10, 55, System_White, PropsAndSets::TEMPO, 0x007FFFFF, System_White, "Specific tempo override field", 8, _Align::center, _Align::left, InputField::Type::FP_PositiveNumbers);
-	(*T)["OFFSET"] = new InputField(" ", 17.5 + WindowHeapSize, 75 - WindowHeapSize, 10, 60, System_White, PropsAndSets::OFFSET, 0x007FFFFF, System_White, "Offset from begining in ticks", 10, _Align::center, _Align::right, InputField::Type::NaturalNumbers);
+	(*T)["OFFSET"] = new InputField(" ", 17.5 + WindowHeapSize, 75 - WindowHeapSize, 10, 60, System_White, PropsAndSets::OFFSET, 0x007FFFFF, System_White, "Offset from begining in ticks", 10, _Align::center, _Align::right, InputField::Type::WholeNumbers);
 
 	(*T)["BOOL_REM_TRCKS"] = new CheckBox(-97.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, System_White, _Align::left, "Remove empty tracks");
 	(*T)["BOOL_REM_REM"] = new CheckBox(-82.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, System_White, _Align::left, "Remove merge \"remnants\"");
@@ -1641,7 +1642,7 @@ void Init() {///SetIsFontedVar
 	(*WH)["CAT"] = T;
 
 	T = new MoveableWindow("Volume map.", System_White, -150, 150, 300, 350, 0x3F3F3FCF, 0x7F7F7F7F, 0x7F6F8FCF);
-	(*T)["VM_PLC"] = new PLC_VolumeWorker(0, 0 - WindowHeapSize, 300 - WindowHeapSize * 2, 300 - WindowHeapSize * 2, std::make_shared<PLC<BYTE, BYTE>>());///todo: interface
+	(*T)["VM_PLC"] = new PLC_VolumeWorker(0, 0 - WindowHeapSize, 300 - WindowHeapSize * 2, 300 - WindowHeapSize * 2, std::make_shared<PLC<std::uint8_t, std::uint8_t>>());///todo: interface
 	(*T)["VM_SSBDIIF"] = Butt = new Button("Shape alike x^y", System_White, PropsAndSets::VolumeMap::OnDegreeShape, -110 + WindowHeapSize, -150 - WindowHeapSize, 80, 10, 1, 0xFFFFFF3F, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFAFFF3F, 0xFFAFFFFF, System_White, "Where y is from frame bellow");///Set shape by degree in input field;
 	Butt->Tip->SafeChangePosition_Argumented(_Align::left, -150 + WindowHeapSize, -160 - WindowHeapSize);
 	(*T)["VM_DEGREE"] = new InputField("1", -140 + WindowHeapSize, -170 - WindowHeapSize, 10, 20, System_White, NULL, 0x007FFFFF, NULL, " ", 4, _Align::center, _Align::center, InputField::Type::FP_PositiveNumbers);
@@ -1662,10 +1663,10 @@ void Init() {///SetIsFontedVar
 	(*T)["AS_GLOBALSETTINGS"] = new TextBox("Global settings for new MIDIs", System_White, 0, 85 - WindowHeapSize, 30, 200, 12, 0x007FFF1F, 0x007FFF7F, 1, _Align::center);
 	(*T)["AS_APPLY"] = Butt = new Button("Apply", System_White, Settings::OnSetApply, 85 - WindowHeapSize, -87.5 - WindowHeapSize, 40, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, NULL, "_");
 	(*T)["AS_EN_FONT"] = Butt = new Button((is_fonted) ? "Disable fonts" : "Enable fonts", System_White, Settings::ChangeIsFontedVar, 72.5 - WindowHeapSize, -67.5 - WindowHeapSize, 65, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, System_White, " ");
-	(*T)["AS_ROT_ANGLE"] = new InputField(std::to_string(ROT_ANGLE), -87.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 30, System_White, NULL, 0x007FFFFF, System_White, "Rotation angle", 6, _Align::center, _Align::left, InputField::Type::FP_Any);
+	(*T)["AS_ROT_ANGLE"] = new InputField(std::to_string(dumb_rotation_angle), -87.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 30, System_White, NULL, 0x007FFFFF, System_White, "Rotation angle", 6, _Align::center, _Align::left, InputField::Type::FP_Any);
 	(*T)["AS_FONT_SIZE"] = new WheelVariableChanger(Settings::ApplyFSWheel, -37.5, -82.5, lFontSymbolsInfo::Size, 1, System_White, "Font size", "Delta", WheelVariableChanger::Type::addictable);
 	(*T)["AS_FONT_P"] = new WheelVariableChanger(Settings::ApplyRelWheel, -37.5, -22.5, lFONT_HEIGHT_TO_WIDTH, 0.01, System_White, "Font rel.", "Delta", WheelVariableChanger::Type::addictable);
-	(*T)["AS_FONT_NAME"] = new InputField(FONTNAME, 52.5 - WindowHeapSize, 55 - WindowHeapSize, 10, 100, _STLS_WhiteSmall, &FONTNAME, 0x007FFFFF, System_White, "Font name", 32, _Align::center, _Align::left, InputField::Type::Text);
+	(*T)["AS_FONT_NAME"] = new InputField(default_font_name, 52.5 - WindowHeapSize, 55 - WindowHeapSize, 10, 100, _STLS_WhiteSmall, &default_font_name, 0x007FFFFF, System_White, "Font name", 32, _Align::center, _Align::left, InputField::Type::Text);
 
 	(*T)["BOOL_REM_TRCKS"] = new CheckBox(-97.5 + WindowHeapSize, 85 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, System_White, _Align::left, "DV: Remove empty tracks");
 	(*T)["BOOL_REM_REM"] = new CheckBox(-82.5 + WindowHeapSize, 85 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, System_White, _Align::left, "DV: Remove merge \"remnants\"");
@@ -1758,7 +1759,7 @@ void Init() {///SetIsFontedVar
 
 void onTimer(int v);
 void mDisplay() {
-	lFontSymbolsInfo::InitialiseFont(FONTNAME);
+	lFontSymbolsInfo::InitialiseFont(default_font_name);
 	glClear(GL_COLOR_BUFFER_BIT | GL_ACCUM_BUFFER_BIT);
 	glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 	if (FIRSTBOOT) {
@@ -1783,53 +1784,53 @@ void mDisplay() {
 	if (YearsOld >= 0 || Settings::ShaderMode == 100) {
 		glBegin(GL_QUADS);
 		glColor4f(1, 1, 1, (DRAG_OVER) ? 0.25f : 1);
-		glVertex2f(0 - RANGE * (WindX / WINDXSIZE), 0 - RANGE * (WindY / WINDYSIZE));
+		glVertex2f(0 - internal_range * (WindX / window_base_width), 0 - internal_range * (WindY / window_base_height));
 		glColor4f(1, 1, 1, (DRAG_OVER) ? 0.25f : 1);
-		glVertex2f(0 - RANGE * (WindX / WINDXSIZE), RANGE * (WindY / WINDYSIZE));
+		glVertex2f(0 - internal_range * (WindX / window_base_width), internal_range * (WindY / window_base_height));
 		glColor4f(1, 0.9f, 0.8f, (DRAG_OVER) ? 0.25f : 1);
-		glVertex2f(RANGE * (WindX / WINDXSIZE), RANGE * (WindY / WINDYSIZE));
+		glVertex2f(internal_range * (WindX / window_base_width), internal_range * (WindY / window_base_height));
 		glColor4f(0.8f, 0.9f, 1, (DRAG_OVER) ? 0.25f : 1);
-		glVertex2f(RANGE * (WindX / WINDXSIZE), 0 - RANGE * (WindY / WINDYSIZE));
+		glVertex2f(internal_range * (WindX / window_base_width), 0 - internal_range * (WindY / window_base_height));
 		glEnd();
 	}
 	else if (APRIL_FOOL || Settings::ShaderMode == 69) {
 		glBegin(GL_QUADS);
 		glColor4f(1, 0, 1, (DRAG_OVER) ? 0.25f : 1);
-		glVertex2f(0 - RANGE * (WindX / WINDXSIZE), 0 - RANGE * (WindY / WINDYSIZE));
+		glVertex2f(0 - internal_range * (WindX / window_base_width), 0 - internal_range * (WindY / window_base_height));
 		glColor4f(0, 1, 0, (DRAG_OVER) ? 0.25f : 1);
-		glVertex2f(0 - RANGE * (WindX / WINDXSIZE), RANGE * (WindY / WINDYSIZE));
+		glVertex2f(0 - internal_range * (WindX / window_base_width), internal_range * (WindY / window_base_height));
 		glColor4f(1, 0.5f, 0, (DRAG_OVER) ? 0.25f : 1);
-		glVertex2f(RANGE * (WindX / WINDXSIZE), RANGE * (WindY / WINDYSIZE));
+		glVertex2f(internal_range * (WindX / window_base_width), internal_range * (WindY / window_base_height));
 		glColor4f(0, 0.5f, 1, (DRAG_OVER) ? 0.25f : 1);
-		glVertex2f(RANGE * (WindX / WINDXSIZE), 0 - RANGE * (WindY / WINDYSIZE));
+		glVertex2f(internal_range * (WindX / window_base_width), 0 - internal_range * (WindY / window_base_height));
 		glEnd();
 	}
 	else if (Settings::ShaderMode < 4) {
 		glBegin(GL_QUADS);
 		glColor4f(1, 0.5f, 0, (DRAG_OVER) ? 0.25f : 1);
-		glVertex2f(0 - RANGE * (WindX / WINDXSIZE), 0 - RANGE * (WindY / WINDYSIZE));
-		glVertex2f(0 - RANGE * (WindX / WINDXSIZE), RANGE * (WindY / WINDYSIZE));
+		glVertex2f(0 - internal_range * (WindX / window_base_width), 0 - internal_range * (WindY / window_base_height));
+		glVertex2f(0 - internal_range * (WindX / window_base_width), internal_range * (WindY / window_base_height));
 		glColor4f(0, 0.5f, 1, (DRAG_OVER) ? 0.25f : 1);
-		glVertex2f(RANGE * (WindX / WINDXSIZE), RANGE * (WindY / WINDYSIZE));
-		glVertex2f(RANGE * (WindX / WINDXSIZE), 0 - RANGE * (WindY / WINDYSIZE));
+		glVertex2f(internal_range * (WindX / window_base_width), internal_range * (WindY / window_base_height));
+		glVertex2f(internal_range * (WindX / window_base_width), 0 - internal_range * (WindY / window_base_height));
 		glEnd();
 	}
 	else {
 		glBegin(GL_QUADS);
 		glColor4f(0.25f, 0.25f, 0.25f, (DRAG_OVER) ? 0.25f : 1);
-		glVertex2f(0 - RANGE * (WindX / WINDXSIZE), 0 - RANGE * (WindY / WINDYSIZE));
-		glVertex2f(0 - RANGE * (WindX / WINDXSIZE), RANGE * (WindY / WINDYSIZE));
-		glVertex2f(RANGE * (WindX / WINDXSIZE), RANGE * (WindY / WINDYSIZE));
-		glVertex2f(RANGE * (WindX / WINDXSIZE), 0 - RANGE * (WindY / WINDYSIZE));
+		glVertex2f(0 - internal_range * (WindX / window_base_width), 0 - internal_range * (WindY / window_base_height));
+		glVertex2f(0 - internal_range * (WindX / window_base_width), internal_range * (WindY / window_base_height));
+		glVertex2f(internal_range * (WindX / window_base_width), internal_range * (WindY / window_base_height));
+		glVertex2f(internal_range * (WindX / window_base_width), 0 - internal_range * (WindY / window_base_height));
 		glEnd();
 	}
 	//ROT_ANGLE += 0.02;
 
-	glRotatef(ROT_ANGLE, 0, 0, 1);
+	glRotatef(dumb_rotation_angle, 0, 0, 1);
 	if (WH)
 		WH->Draw();
 	if (DRAG_OVER)SpecialSigns::DrawFileSign(0, 0, 50, 0xFFFFFFFF, 0);
-	glRotatef(-ROT_ANGLE, 0, 0, 1);
+	glRotatef(-dumb_rotation_angle, 0, 0, 1);
 
 	glutSwapBuffers();
 }
@@ -1837,7 +1838,7 @@ void mDisplay() {
 void mInit() {
 	glMatrixMode(GL_PROJECTION);
 	glLoadIdentity();
-	gluOrtho2D((0 - RANGE)*(WindX / WINDXSIZE), RANGE*(WindX / WINDXSIZE), (0 - RANGE)*(WindY / WINDYSIZE), RANGE*(WindY / WINDYSIZE));
+	gluOrtho2D((0 - internal_range)*(WindX / window_base_width), internal_range*(WindX / window_base_width), (0 - internal_range)*(WindY / window_base_height), internal_range*(WindY / window_base_height));
 }
 
 void onTimer(int v) {
@@ -1856,29 +1857,29 @@ void OnResize(int x, int y) {
 	if (WH) {
 		auto SMRP = (*WH)["SMRP_CONTAINER"];
 		SMRP->SafeChangePosition_Argumented(0, 0, 0);
-		SMRP->_NotSafeResize_Centered(RANGE * 3 *(WindY / WINDYSIZE) + 2*WindowHeapSize, RANGE * 3 *(WindX / WINDXSIZE));
+		SMRP->_NotSafeResize_Centered(internal_range * 3 *(WindY / window_base_height) + 2*WindowHeapSize, internal_range * 3 *(WindX / window_base_width));
 	}
 }
 void inline rotate(float& x, float& y) {
-	float t = x * cos(ROT_RAD) + y * sin(ROT_RAD);
-	y = 0.f - x * sin(ROT_RAD) + y * cos(ROT_RAD);
+	float t = x * cos(rotation_angle()) + y * sin(rotation_angle());
+	y = 0.f - x * sin(rotation_angle()) + y * cos(rotation_angle());
 	x = t;
 }
 void inline absoluteToActualCoords(int ix, int iy, float &x, float &y) {
 	float wx = WindX, wy = WindY;
-	x = ((float)(ix - wx * 0.5f)) / (0.5f*(wx / (RANGE*(WindX / WINDXSIZE))));
-	y = ((float)(0 - iy + wy * 0.5f)) / (0.5f*(wy / (RANGE*(WindY / WINDYSIZE))));
+	x = ((float)(ix - wx * 0.5f)) / (0.5f*(wx / (internal_range*(WindX / window_base_width))));
+	y = ((float)(0 - iy + wy * 0.5f)) / (0.5f*(wy / (internal_range*(WindY / window_base_height))));
 	rotate(x, y);
 }
 void mMotion(int ix, int iy) {
 	float fx, fy;
 	absoluteToActualCoords(ix, iy, fx, fy);
-	MXPOS = fx;
-	MYPOS = fy;
+	mouse_x_position = fx;
+	mouse_y_position = fy;
 	if (WH)
 		WH->MouseHandler(fx, fy, 0, 0);
 }
-void mKey(BYTE k, int x, int y) {
+void mKey(std::uint8_t k, int x, int y) {
 	if (WH)WH->KeyboardHandler(k);
 
 	if (k == 27)
@@ -1917,11 +1918,11 @@ void mSpecialKey(int Key,int x, int y) {
 		}
 	}
 	if (modif == GLUT_ACTIVE_ALT && Key == GLUT_KEY_DOWN) {
-		RANGE *= 1.1f;
+		internal_range *= 1.1f;
 		OnResize(WindX, WindY);
 	}
 	else if(modif == GLUT_ACTIVE_ALT && Key == GLUT_KEY_UP) {
-		RANGE /= 1.1f;
+		internal_range /= 1.1f;
 		OnResize(WindX, WindY);
 	}
 }
@@ -1946,17 +1947,17 @@ int main(int argc, char ** argv) {
 	//srand(1);
 	//srand(clock());
 	InitASCIIMap();
-	//cout << to_string((WORD)0) << endl;
+	//cout << to_string((std::uint16_t)0) << endl;
 
 	srand(TIMESEED());
 	__glutInitWithExit(&argc, argv, mExit);
 	//cout << argv[0] << endl;
 	glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGBA | GLUT_ALPHA | GLUT_MULTISAMPLE);
-	glutInitWindowSize(WINDXSIZE, WINDYSIZE);
+	glutInitWindowSize(window_base_width, window_base_height);
 	//glutInitWindowPosition(50, 0);
-	glutCreateWindow(WINDOWTITLE);
+	glutCreateWindow(window_title);
 
-	hWnd = FindWindowA(NULL, WINDOWTITLE);
+	hWnd = FindWindowA(NULL, window_title);
 
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);//_MINUS_SRC_ALPHA
 	glEnable(GL_BLEND); 

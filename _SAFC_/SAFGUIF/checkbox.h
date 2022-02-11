@@ -8,16 +8,16 @@
 
 struct CheckBox : HandleableUIPart {///NeedsTest
 	float Xpos, Ypos, SideSize;
-	DWORD BorderRGBAColor, UncheckedRGBABackground, CheckedRGBABackground;
+	std::uint32_t BorderRGBAColor, UncheckedRGBABackground, CheckedRGBABackground;
 	SingleTextLine* Tip;
-	BIT State, Focused;
-	BYTE BorderWidth;
+	bool State, Focused;
+	std::uint8_t BorderWidth;
 	~CheckBox() override {
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		if (Tip)
 			delete Tip;
 	}
-	CheckBox(float Xpos, float Ypos, float SideSize, DWORD BorderRGBAColor, DWORD UncheckedRGBABackground, DWORD CheckedRGBABackground, BYTE BorderWidth, BIT StartState = false, SingleTextLineSettings* TipSettings = NULL, _Align TipAlign = _Align::left, std::string TipText = " ") {
+	CheckBox(float Xpos, float Ypos, float SideSize, std::uint32_t BorderRGBAColor, std::uint32_t UncheckedRGBABackground, std::uint32_t CheckedRGBABackground, std::uint8_t BorderWidth, bool StartState = false, SingleTextLineSettings* TipSettings = NULL, _Align TipAlign = _Align::left, std::string TipText = " ") {
 		this->Xpos = Xpos;
 		this->Ypos = Ypos;
 		this->SideSize = SideSize;
@@ -45,7 +45,7 @@ struct CheckBox : HandleableUIPart {///NeedsTest
 		glVertex2f(Xpos - hSideSize, Ypos - hSideSize);
 		glVertex2f(Xpos + hSideSize, Ypos - hSideSize);
 		glEnd();
-		if ((BYTE)BorderRGBAColor && BorderWidth) {
+		if ((std::uint8_t)BorderRGBAColor && BorderWidth) {
 			GLCOLOR(BorderRGBAColor);
 			glLineWidth(BorderWidth);
 			glBegin(GL_LINE_LOOP);
@@ -77,15 +77,15 @@ struct CheckBox : HandleableUIPart {///NeedsTest
 		NewY -= Ypos;
 		SafeMove(NewX, NewY);
 	}
-	void SafeChangePosition_Argumented(BYTE Arg, float NewX, float NewY) override {
+	void SafeChangePosition_Argumented(std::uint8_t Arg, float NewX, float NewY) override {
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		float CW = 0.5f * (
-			(INT32)((BIT)(GLOBAL_LEFT & Arg))
-			- (INT32)((BIT)(GLOBAL_RIGHT & Arg))
+			(INT32)((bool)(GLOBAL_LEFT & Arg))
+			- (INT32)((bool)(GLOBAL_RIGHT & Arg))
 			) * SideSize,
 			CH = 0.5f * (
-				(INT32)((BIT)(GLOBAL_BOTTOM & Arg))
-				- (INT32)((BIT)(GLOBAL_TOP & Arg))
+				(INT32)((bool)(GLOBAL_BOTTOM & Arg))
+				- (INT32)((bool)(GLOBAL_TOP & Arg))
 				) * SideSize;
 		SafeChangePosition(NewX + CW, NewY + CH);
 	}
@@ -102,7 +102,7 @@ struct CheckBox : HandleableUIPart {///NeedsTest
 		this->Focused = !this->Focused;
 		BorderRGBAColor = (((~(BorderRGBAColor >> 8)) << 8) | (BorderRGBAColor & 0xFF));
 	}
-	BIT MouseHandler(float mx, float my, CHAR Button, CHAR State) override {
+	bool MouseHandler(float mx, float my, CHAR Button, CHAR State) override {
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		if (fabsf(mx - Xpos) < 0.5 * SideSize && fabsf(my - Ypos) < 0.5 * SideSize) {
 			if (!Focused)
@@ -122,7 +122,7 @@ struct CheckBox : HandleableUIPart {///NeedsTest
 			return 0;
 		}
 	}
-	inline DWORD TellType() override {
+	inline std::uint32_t TellType() override {
 		return _TellType::checkbox;
 	}
 };

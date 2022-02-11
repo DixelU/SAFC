@@ -24,12 +24,12 @@ struct InputField : HandleableUIPart {
 	Type InputType;
 	std::string CurrentString, DefaultString;
 	std::string* OutputSource;
-	DWORD MaxChars, BorderRGBAColor;
+	std::uint32_t MaxChars, BorderRGBAColor;
 	float Xpos, Ypos, Height, Width;
-	BIT Focused, FirstInput;
+	bool Focused, FirstInput;
 	SingleTextLine* STL;
 	SingleTextLine* Tip;
-	InputField(std::string DefaultString, float Xpos, float Ypos, float Height, float Width, SingleTextLineSettings* DefaultStringSettings, std::string* OutputSource, DWORD BorderRGBAColor, SingleTextLineSettings* TipLineSettings = NULL, std::string TipLineText = " ", DWORD MaxChars = 0, _Align InputAlign = _Align::left, _Align TipAlign = _Align::center, Type InputType = Type::Text) {
+	InputField(std::string DefaultString, float Xpos, float Ypos, float Height, float Width, SingleTextLineSettings* DefaultStringSettings, std::string* OutputSource, std::uint32_t BorderRGBAColor, SingleTextLineSettings* TipLineSettings = NULL, std::string TipLineText = " ", std::uint32_t MaxChars = 0, _Align InputAlign = _Align::left, _Align TipAlign = _Align::center, Type InputType = Type::Text) {
 		this->DefaultString = DefaultString;
 		DefaultStringSettings->SetNewPos(Xpos, Ypos);
 		this->STL = DefaultStringSettings->CreateOne(DefaultString);
@@ -56,7 +56,7 @@ struct InputField : HandleableUIPart {
 		delete STL;
 		delete Tip;
 	}
-	BIT MouseHandler(float mx, float my, CHAR Button/*-1 left, 1 right, 0 move*/, CHAR State /*-1 down, 1 up*/) override {
+	bool MouseHandler(float mx, float my, CHAR Button/*-1 left, 1 right, 0 move*/, CHAR State /*-1 down, 1 up*/) override {
 		if (abs(mx - Xpos) < 0.5 * Width && abs(my - Ypos) < 0.5 * Height) {
 			if (!Focused)
 				FocusChange();
@@ -151,7 +151,7 @@ struct InputField : HandleableUIPart {
 			this->STL->SafeStringReplace(" ");
 		}
 	}
-	void FlushCurrentStringWithoutGUIUpdate(BIT SetDefault = false) {
+	void FlushCurrentStringWithoutGUIUpdate(bool SetDefault = false) {
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		this->CurrentString = (SetDefault) ? this->DefaultString : "";
 	}
@@ -219,15 +219,15 @@ struct InputField : HandleableUIPart {
 			UpdateInputString();
 		}
 	}
-	void SafeChangePosition_Argumented(BYTE Arg, float NewX, float NewY) {
+	void SafeChangePosition_Argumented(std::uint8_t Arg, float NewX, float NewY) {
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		float CW = 0.5f * (
-			(INT32)((BIT)(GLOBAL_LEFT & Arg))
-			- (INT32)((BIT)(GLOBAL_RIGHT & Arg))
+			(INT32)((bool)(GLOBAL_LEFT & Arg))
+			- (INT32)((bool)(GLOBAL_RIGHT & Arg))
 			) * Width,
 			CH = 0.5f * (
-				(INT32)((BIT)(GLOBAL_BOTTOM & Arg))
-				- (INT32)((BIT)(GLOBAL_TOP & Arg))
+				(INT32)((bool)(GLOBAL_BOTTOM & Arg))
+				- (INT32)((bool)(GLOBAL_TOP & Arg))
 				) * Height;
 		SafeChangePosition(NewX + CW, NewY + CH);
 	}
@@ -251,7 +251,7 @@ struct InputField : HandleableUIPart {
 		if (Focused && Tip)
 			Tip->Draw();
 	}
-	inline DWORD TellType() override {
+	inline std::uint32_t TellType() override {
 		return TT_INPUT_FIELD;
 	}
 };

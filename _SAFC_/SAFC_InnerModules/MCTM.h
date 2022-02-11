@@ -12,23 +12,23 @@ void ThrowAlert_Warning(std::string&& AlertText);
 
 struct MIDICollectionThreadedMerger {
 	std::wstring SaveTo;
-	BIT FirstStageComplete;
-	BIT IntermediateRegularFlag;
-	BIT IntermediateInplaceFlag;
-	BIT CompleteFlag;
-	BIT RemnantsRemove;
-	WORD FinalPPQN;
-	WORD IRTrackCount;
-	WORD IITrackCount;
+	bool FirstStageComplete;
+	bool IntermediateRegularFlag;
+	bool IntermediateInplaceFlag;
+	bool CompleteFlag;
+	bool RemnantsRemove;
+	std::uint16_t FinalPPQN;
+	std::uint16_t IRTrackCount;
+	std::uint16_t IITrackCount;
 	std::vector<SingleMIDIReProcessor*> SMRP, Cur_Processing;
 	struct DegeneratedTrackIterator {
-		INT64 CurPosition;
-		INT64 CurTick;
-		BYTE* TrackData;
+		std::int64_t CurPosition;
+		std::int64_t CurTick;
+		std::uint8_t* TrackData;
 		UINT64 TrackSize;
-		std::array<INT64, 4096> Holded;
+		std::array<std::int64_t, 4096> Holded;
 		bool Processing;
-		DegeneratedTrackIterator(std::vector<BYTE>& Vec) {
+		DegeneratedTrackIterator(std::vector<std::uint8_t>& Vec) {
 			TrackData = Vec.data();
 			TrackSize = Vec.size();
 			CurTick = 0;
@@ -37,8 +37,8 @@ struct MIDICollectionThreadedMerger {
 			for (auto& a : Holded)
 				a = 0;
 		}
-		INT64 TellPoliphony() {
-			INT64 T = 0;
+		std::int64_t TellPoliphony() {
+			std::int64_t T = 0;
 			for (auto& q : Holded) {
 				T += q;
 			}
@@ -46,7 +46,7 @@ struct MIDICollectionThreadedMerger {
 		}
 		void SingleEventAdvance() {
 			if (Processing && CurPosition < TrackSize) {
-				DWORD VLV = 0, IO = 0;
+				std::uint32_t VLV = 0, IO = 0;
 				do {
 					IO = TrackData[CurPosition];
 					CurPosition++;
@@ -72,12 +72,12 @@ struct MIDICollectionThreadedMerger {
 					}
 				}
 				else if (TrackData[CurPosition] >= 0x80 && TrackData[CurPosition] <= 0x9F) {
-					WORD FTD = TrackData[CurPosition];
+					std::uint16_t FTD = TrackData[CurPosition];
 					CurPosition++;
-					WORD KEY = TrackData[CurPosition];
+					std::uint16_t KEY = TrackData[CurPosition];
 					CurPosition++;
 					CurPosition++;//volume - meh;
-					WORD Argument = (KEY << 4) | (FTD & 0xF);
+					std::uint16_t Argument = (KEY << 4) | (FTD & 0xF);
 					if (FTD & 0x10) //if noteon
 						Holded[Argument]++;
 					else if (Holded[Argument] > 0) {
@@ -93,16 +93,16 @@ struct MIDICollectionThreadedMerger {
 			}
 			else Processing = false;
 		}
-		bool AdvanceUntilReachingPositionOf(INT64 Position) {
+		bool AdvanceUntilReachingPositionOf(std::int64_t Position) {
 			while (Processing && CurPosition < Position)
 				SingleEventAdvance();
 			return Processing;
 		}
-		void PutCurrentHoldedNotes(std::vector<BYTE>& out, bool output_noteon_wall) {
-			constexpr DWORD LocalDeltaTimeTrunkEdge = 0xF000000;//BC808000 in vlv
+		void PutCurrentHoldedNotes(std::vector<std::uint8_t>& out, bool output_noteon_wall) {
+			constexpr std::uint32_t LocalDeltaTimeTrunkEdge = 0xF000000;//BC808000 in vlv
 			//bool first_nonzero_delta_output = output_noteon_wall;
 			UINT64 LocalTick = CurTick;
-			BYTE DeltaLen = 0;
+			std::uint8_t DeltaLen = 0;
 			while (output_noteon_wall && LocalTick > LocalDeltaTimeTrunkEdge) {//fillers
 				SingleMIDIReProcessor::SingleMIDIReProcessor::push_vlv(LocalDeltaTimeTrunkEdge, out);
 				out.push_back(0xFF);//empty text event
@@ -116,7 +116,7 @@ struct MIDICollectionThreadedMerger {
 			else
 				out.push_back(0);
 			for (int i = 0; i < 4096; i++) {
-				INT64 key = Holded[i];
+				std::int64_t key = Holded[i];
 				while (key) {
 					out.push_back((0x10 * output_noteon_wall) | (i & 0xF) | 0x80);//note data;
 					out.push_back(i >> 4);//key;
@@ -132,7 +132,7 @@ struct MIDICollectionThreadedMerger {
 	~MIDICollectionThreadedMerger() {
 		ResetEverything();
 	}
-	MIDICollectionThreadedMerger(std::vector<SingleMIDIReProcessor*> SMRP, WORD FinalPPQN, std::wstring SaveTo) {
+	MIDICollectionThreadedMerger(std::vector<SingleMIDIReProcessor*> SMRP, std::uint16_t FinalPPQN, std::wstring SaveTo) {
 		this->SaveTo = SaveTo;
 		this->SMRP = SMRP;
 		this->FinalPPQN = FinalPPQN;
@@ -151,14 +151,14 @@ struct MIDICollectionThreadedMerger {
 		}
 		SMRP.clear();
 	}
-	BIT CheckSMRPFinishedFlags() {
+	bool CheckSMRPFinishedFlags() {
 		for (int i = 0; i < SMRP.size(); i++)
 			if (!SMRP[i]->Finished)return 0;
 		this->ResetCurProcessing();
 		this->Start_RI_Merge();
 		return 1;
 	}
-	BIT CheckRIMerge() {
+	bool CheckRIMerge() {
 		if (IntermediateRegularFlag && IntermediateInplaceFlag)
 			FinalMerge();
 		else return 0;
@@ -166,8 +166,8 @@ struct MIDICollectionThreadedMerger {
 		return 1;
 	}
 	void ProcessMIDIs() {//
-		std::set<DWORD> IDs;
-		DWORD Counter = 0;
+		std::set<std::uint32_t> IDs;
+		std::uint32_t Counter = 0;
 		std::vector<SingleMIDIReProcessor*> SMRPv;
 		for (int i = 0; i < SMRP.size(); i++) {
 			IDs.insert((SMRP[i])->ThreadID);
@@ -179,7 +179,7 @@ struct MIDICollectionThreadedMerger {
 					SMRPv.push_back(SMRP[i]);
 				}
 			}
-			std::thread TH([this](std::vector<SingleMIDIReProcessor*> SMRPv, DWORD Counter) {
+			std::thread TH([this](std::vector<SingleMIDIReProcessor*> SMRPv, std::uint32_t Counter) {
 				for (int i = 0; i < SMRPv.size(); i++) {
 					this->Cur_Processing[Counter] = SMRPv[i];
 					SMRPv[i]->ReProcess();
@@ -195,19 +195,19 @@ struct MIDICollectionThreadedMerger {
 		for (int i = 0; i < SMRP.size(); i++)
 			if (SMRP[i]->InQueueToInplaceMerge)InplaceMergeCandidats->push_back(SMRP[i]);
 		IITrackCount = 0;
-		std::thread IMC_Processor([](std::vector<SingleMIDIReProcessor*>* IMC, BIT* FinishedFlag, WORD PPQN, std::wstring _SaveTo, WORD* TrackCount) {
+		std::thread IMC_Processor([](std::vector<SingleMIDIReProcessor*>* IMC, bool* FinishedFlag, std::uint16_t PPQN, std::wstring _SaveTo, std::uint16_t* TrackCount) {
 			if (IMC->empty()) {
 				delete IMC;
 				(*FinishedFlag) = 1; /// Will this work?
 				return;
 			}
-			BIT ActiveStreamFlag = 1;
-			BIT ActiveTrackReading = 1;
+			bool ActiveStreamFlag = 1;
+			bool ActiveTrackReading = 1;
 			std::vector<bbb_ffr*> fiv;
 #define pfiv (*fiv[i])
-			std::vector<INT64> DecayingDeltaTimes;
+			std::vector<std::int64_t> DecayingDeltaTimes;
 #define ddt (DecayingDeltaTimes[i])
-			std::vector<BYTE> Track, FrontEdge, BackEdge;
+			std::vector<std::uint8_t> Track, FrontEdge, BackEdge;
 			bbb_ffr* fi;
 			std::ofstream file_output(_SaveTo + L".I.mid", std::ios::binary | std::ios::out);
 			file_output << "MThd" << '\0' << '\0' << '\0' << (char)6 << '\0' << (char)1;
@@ -225,10 +225,10 @@ struct MIDICollectionThreadedMerger {
 			file_output.put(PPQN);
 			while (ActiveStreamFlag) {
 				///reading tracks
-				DWORD Header = 0, DIO, DeltaLen = 0;
-				//DWORD POS = 0;
+				std::uint32_t Header = 0, DIO, DeltaLen = 0;
+				//std::uint32_t POS = 0;
 				UINT64 InTrackDelta = 0;
-				BIT ITD_Flag = 1 /*, NotNoteEvents_ProcessedFlag = 0*/;
+				bool ITD_Flag = 1 /*, NotNoteEvents_ProcessedFlag = 0*/;
 				for (int i = 0; i < fiv.size(); i++) {
 					while (pfiv.good() && Header != MTrk) {
 						Header = (Header << 8) | pfiv.get();
@@ -242,7 +242,7 @@ struct MIDICollectionThreadedMerger {
 						ddt = -1;
 				}
 				for (UINT64 Tick = 0; ActiveTrackReading; Tick++, InTrackDelta++) {
-					BYTE IO, EVENTTYPE;///yas
+					std::uint8_t IO, EVENTTYPE;///yas
 					ActiveTrackReading = 0;
 					ActiveStreamFlag = 0;
 					//NotNoteEvents_ProcessedFlag = 0;
@@ -353,7 +353,7 @@ struct MIDICollectionThreadedMerger {
 					std::cout << "TrackSize overflow!!!\n";
 				else if (Track.empty())continue;
 				if (Track.size() > EDGE * 2) {
-					INT64 TotalShift = EDGE, PrevEdgePos = 0;
+					std::int64_t TotalShift = EDGE, PrevEdgePos = 0;
 					DegeneratedTrackIterator DTI(Track);
 					FrontEdge.clear();
 					while (DTI.AdvanceUntilReachingPositionOf(TotalShift)) {
@@ -403,7 +403,7 @@ struct MIDICollectionThreadedMerger {
 					file_output.put(Track.size());
 
 					SingleMIDIReProcessor::ostream_write(Track, file_output);
-					//copy(Track.begin(), Track.end(), ostream_iterator<BYTE>(file_output));
+					//copy(Track.begin(), Track.end(), ostream_iterator<std::uint8_t>(file_output));
 					(*TrackCount)++;
 				}
 				Track.clear();
@@ -431,14 +431,14 @@ struct MIDICollectionThreadedMerger {
 		for (int i = 0; i < SMRP.size(); i++)
 			if (!SMRP[i]->InQueueToInplaceMerge)RegularMergeCandidats->push_back(SMRP[i]);
 		IRTrackCount = 0;
-		std::thread RMC_Processor([](std::vector<SingleMIDIReProcessor*>* RMC, BIT* FinishedFlag, WORD PPQN, std::wstring _SaveTo, WORD* TrackCount) {
+		std::thread RMC_Processor([](std::vector<SingleMIDIReProcessor*>* RMC, bool* FinishedFlag, std::uint16_t PPQN, std::wstring _SaveTo, std::uint16_t* TrackCount) {
 			if (RMC->empty()) {
 				(*FinishedFlag) = 1; /// Will this work?
 				return;
 			}
-			//BIT FirstFlag = 1;
+			//bool FirstFlag = 1;
 			const size_t buffer_size = 20000000;
-			BYTE* buffer = new BYTE[buffer_size];
+			std::uint8_t* buffer = new std::uint8_t[buffer_size];
 			std::ofstream file_output(_SaveTo + L".R.mid", std::ios::binary | std::ios::out);
 			bbb_ffr file_input(((*(RMC->begin()))->FileName + (*(RMC->begin()))->Postfix).c_str());
 			std::wstring filename = ((*(RMC->begin()))->FileName + (*(RMC->begin()))->Postfix);
@@ -475,11 +475,11 @@ struct MIDICollectionThreadedMerger {
 		InplaceMerge();
 	}
 	void FinalMerge() {
-		std::thread RMC_Processor([this](BIT* FinishedFlag, std::wstring _SaveTo) {
+		std::thread RMC_Processor([this](bool* FinishedFlag, std::wstring _SaveTo) {
 			bbb_ffr* IM = new bbb_ffr((_SaveTo + L".I.mid").c_str()),
 				* RM = new bbb_ffr((_SaveTo + L".R.mid").c_str());
 			std::ofstream F(_SaveTo, std::ios::binary | std::ios::out);
-			BIT IMgood = !IM->eof(), RMgood = !RM->eof();
+			bool IMgood = !IM->eof(), RMgood = !RM->eof();
 			if (!IMgood || !RMgood) {
 				IM->close();
 				RM->close();
@@ -495,8 +495,8 @@ struct MIDICollectionThreadedMerger {
 				return;
 			}
 			printf("Active merging at last stage (untested)\n");
-			WORD T = 0;
-			BYTE A = 0, B = 0;
+			std::uint16_t T = 0;
+			std::uint8_t A = 0, B = 0;
 			F << "MThd" << '\0' << '\0' << '\0' << (char)6 << '\0' << (char)1;
 			for (int i = 0; i < 10; i++)
 				IM->get();

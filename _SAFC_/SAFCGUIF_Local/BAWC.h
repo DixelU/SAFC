@@ -8,10 +8,10 @@
 
 struct BoolAndWORDChecker : HandleableUIPart {
 	float XPos, YPos;
-	BIT* Flag;
-	WORD* Number;
+	bool* Flag;
+	std::uint16_t* Number;
 	SingleTextLine* STL_Info;
-	BoolAndWORDChecker(float XPos, float YPos, SingleTextLineSettings* STLS, BIT* Flag, WORD* Number) {
+	BoolAndWORDChecker(float XPos, float YPos, SingleTextLineSettings* STLS, bool* Flag, std::uint16_t* Number) {
 		this->XPos = XPos;
 		this->YPos = YPos;
 		this->Flag = Flag;
@@ -34,7 +34,7 @@ struct BoolAndWORDChecker : HandleableUIPart {
 		NewY -= YPos;
 		SafeMove(NewX, NewY);
 	}
-	void SafeChangePosition_Argumented(BYTE Arg, float NewX, float NewY) override {
+	void SafeChangePosition_Argumented(std::uint8_t Arg, float NewX, float NewY) override {
 		return;
 	}
 	void KeyboardHandler(CHAR CH) override {
@@ -65,7 +65,7 @@ struct BoolAndWORDChecker : HandleableUIPart {
 		else SpecialSigns::DrawNo(XPos, YPos, 15, 0xFF0000FF);
 		STL_Info->Draw();
 	}
-	BIT MouseHandler(float mx, float my, CHAR Button, CHAR State) override {
+	bool MouseHandler(float mx, float my, CHAR Button, CHAR State) override {
 		return 0;
 	}
 };

@@ -5,7 +5,7 @@
 #include "../SAFGUIF/SAFGUIF.h"
 #include "../SAFC_InnerModules/SAFC_IM.h"
 
-BIT IsWhiteKey(BYTE Key) {
+bool IsWhiteKey(std::uint8_t Key) {
 	Key %= 12;
 	if (Key < 5)return !(Key & 1);
 	else return (Key & 1);
@@ -15,7 +15,7 @@ struct CAT_Piano :HandleableUIPart {
 	SingleTextLine* MinCont, * MaxCont, * Transp;
 	float CalculatedHeight, CalculatedWidth;
 	float BaseXPos, BaseYPos, PianoHeight, KeyWidth;
-	BIT Focused;
+	bool Focused;
 	~CAT_Piano() override {
 		delete MinCont;
 		delete MaxCont;
@@ -50,8 +50,8 @@ struct CAT_Piano :HandleableUIPart {
 	}
 	void Draw() override {
 		std::lock_guard<std::recursive_mutex> locker(Lock);
-		float x = BaseXPos - 128 * KeyWidth, pixsz = RANGE / WINDXSIZE;
-		BIT Inside = 0;
+		float x = BaseXPos - 128 * KeyWidth, pixsz = internal_range / window_base_width;
+		bool Inside = 0;
 
 		MinCont->Draw();
 		MaxCont->Draw();
@@ -134,15 +134,15 @@ struct CAT_Piano :HandleableUIPart {
 		NewY -= BaseYPos;
 		SafeMove(NewX, NewY);
 	}
-	void SafeChangePosition_Argumented(BYTE Arg, float NewX, float NewY) override {
+	void SafeChangePosition_Argumented(std::uint8_t Arg, float NewX, float NewY) override {
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		float CW = 0.5f * (
-			(INT32)((BIT)(GLOBAL_LEFT & Arg))
-			- (INT32)((BIT)(GLOBAL_RIGHT & Arg))
+			(INT32)((bool)(GLOBAL_LEFT & Arg))
+			- (INT32)((bool)(GLOBAL_RIGHT & Arg))
 			) * CalculatedWidth,
 			CH = 0.5f * (
-				(INT32)((BIT)(GLOBAL_BOTTOM & Arg))
-				- (INT32)((BIT)(GLOBAL_TOP & Arg))
+				(INT32)((bool)(GLOBAL_BOTTOM & Arg))
+				- (INT32)((bool)(GLOBAL_TOP & Arg))
 				) * CalculatedHeight;
 		SafeChangePosition(NewX + CW, NewY + CH);
 	}
@@ -200,7 +200,7 @@ struct CAT_Piano :HandleableUIPart {
 	void SafeStringReplace(std::string Meaningless) override {
 		return;
 	}
-	BIT MouseHandler(float mx, float my, CHAR Button, CHAR State) override {
+	bool MouseHandler(float mx, float my, CHAR Button, CHAR State) override {
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		mx -= BaseXPos;
 		my -= BaseYPos;

@@ -9,12 +9,12 @@ struct MoveableResizeableWindow : MoveableWindow {
 	enum class PinSide {
 		left, right, bottom, top, center
 	};
-	BIT ResizeCornerIsActive = false;
-	BIT ResizeCornerIsHovered = false;
+	bool ResizeCornerIsActive = false;
+	bool ResizeCornerIsHovered = false;
 	float MinHeight = 0, MinWidth = 0;
 	std::multimap<std::string, PinSide> PinnedWindowActivities;
 	std::function<void(float, float, float, float)> OnResize;
-	MoveableResizeableWindow(std::string WindowName, SingleTextLineSettings* WindowNameSettings, float XPos, float YPos, float Width, float Height, DWORD RGBABackground, DWORD RGBAThemeColor, DWORD RGBAGradBackground = 0, std::function<void(float, float, float, float)> OnResize = [](float dH, float dW, float NewHeight, float NewWidth){}) : MoveableWindow(WindowName, WindowNameSettings, XPos, YPos, Width, Height, RGBABackground, RGBAThemeColor, RGBAGradBackground), OnResize(OnResize) {
+	MoveableResizeableWindow(std::string WindowName, SingleTextLineSettings* WindowNameSettings, float XPos, float YPos, float Width, float Height, std::uint32_t RGBABackground, std::uint32_t RGBAThemeColor, std::uint32_t RGBAGradBackground = 0, std::function<void(float, float, float, float)> OnResize = [](float dH, float dW, float NewHeight, float NewWidth){}) : MoveableWindow(WindowName, WindowNameSettings, XPos, YPos, Width, Height, RGBABackground, RGBAThemeColor, RGBAGradBackground), OnResize(OnResize) {
 
 	}
 	bool virtual IsResizeable() {
@@ -65,7 +65,7 @@ struct MoveableResizeableWindow : MoveableWindow {
 		for (auto& val : list) 
 			PinnedWindowActivities.insert({ val, side });
 	}
-	BIT MouseHandler(float mx, float my, CHAR Button/*-1 left, 1 right, 0 move*/, CHAR State /*-1 down, 1 up*/) override {
+	bool MouseHandler(float mx, float my, CHAR Button/*-1 left, 1 right, 0 move*/, CHAR State /*-1 down, 1 up*/) override {
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		if (!Drawable) 
 			return 0;

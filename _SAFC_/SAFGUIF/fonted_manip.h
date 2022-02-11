@@ -6,11 +6,11 @@
 #include "../WinReg.h"
 #include "header_utils.h"
 
-BIT RestoreIsFontedVar() {
+bool RestoreIsFontedVar() {
 	bool RK_OP = false;
 	WinReg::RegKey RK;
 	try {
-		RK.Open(HKEY_CURRENT_USER, RegPath);
+		RK.Open(HKEY_CURRENT_USER, default_reg_path);
 		RK_OP = true;
 	}
 	catch (...) {
@@ -26,11 +26,11 @@ BIT RestoreIsFontedVar() {
 		RK.Close();
 	return false;
 }
-void SetIsFontedVar(BIT VAL) {
+void SetIsFontedVar(bool VAL) {
 	bool RK_OP = false;
 	WinReg::RegKey RK;
 	try {
-		RK.Open(HKEY_CURRENT_USER, RegPath);
+		RK.Open(HKEY_CURRENT_USER, default_reg_path);
 		RK_OP = true;
 	}
 	catch (...) {
@@ -45,6 +45,6 @@ void SetIsFontedVar(BIT VAL) {
 	if (RK_OP)
 		RK.Close();
 }
-BIT _______unused = RestoreIsFontedVar();
+bool _______unused = RestoreIsFontedVar();
 
 #endif 

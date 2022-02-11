@@ -16,15 +16,15 @@ struct TextBox : HandleableUIPart {
 	float Width, Height;
 	float VerticalOffset, CalculatedTextHeight;
 	SingleTextLineSettings* STLS;
-	BYTE BorderWidth;
-	DWORD RGBABorder, RGBABackground, SymbolsPerLine;
+	std::uint8_t BorderWidth;
+	std::uint32_t RGBABorder, RGBABackground, SymbolsPerLine;
 	~TextBox() override {
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		for (auto i = Lines.begin(); i != Lines.end(); i++)
 			if (*i)delete* i;
 		Lines.clear();
 	}
-	TextBox(std::string Text, SingleTextLineSettings* STLS, float Xpos, float Ypos, float Height, float Width, float VerticalOffset, DWORD RGBABackground, DWORD RGBABorder, BYTE BorderWidth, _Align TextAlign = _Align::left, VerticalOverflow VOverflow = VerticalOverflow::cut) {
+	TextBox(std::string Text, SingleTextLineSettings* STLS, float Xpos, float Ypos, float Height, float Width, float VerticalOffset, std::uint32_t RGBABackground, std::uint32_t RGBABorder, std::uint8_t BorderWidth, _Align TextAlign = _Align::left, VerticalOverflow VOverflow = VerticalOverflow::cut) {
 		this->TextAlign = TextAlign;
 		this->VOverflow = VOverflow;
 		this->BorderWidth = BorderWidth;
@@ -103,13 +103,13 @@ struct TextBox : HandleableUIPart {
 			}
 		}
 	}
-	void SafeTextColorChange(DWORD NewColor) {
+	void SafeTextColorChange(std::uint32_t NewColor) {
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		for (auto i = Lines.begin(); i != Lines.end(); i++) {
 			(*i)->SafeColorChange(NewColor);
 		}
 	}
-	BIT MouseHandler(float mx, float my, CHAR Button/*-1 left, 1 right, 0 move*/, CHAR State /*-1 down, 1 up*/)  override {
+	bool MouseHandler(float mx, float my, CHAR Button/*-1 left, 1 right, 0 move*/, CHAR State /*-1 down, 1 up*/)  override {
 		return 0;
 	}
 	void SafeStringReplace(std::string NewString) override {
@@ -141,21 +141,21 @@ struct TextBox : HandleableUIPart {
 		NewY -= Ypos;
 		SafeMove(NewX, NewY);
 	}
-	void SafeChangePosition_Argumented(BYTE Arg, float NewX, float NewY) {
+	void SafeChangePosition_Argumented(std::uint8_t Arg, float NewX, float NewY) {
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		float CW = 0.5f * (
-			(INT32)((BIT)(GLOBAL_LEFT & Arg))
-			- (INT32)((BIT)(GLOBAL_RIGHT & Arg))
+			(INT32)((bool)(GLOBAL_LEFT & Arg))
+			- (INT32)((bool)(GLOBAL_RIGHT & Arg))
 			) * Width,
 			CH = 0.5f * (
-				(INT32)((BIT)(GLOBAL_BOTTOM & Arg))
-				- (INT32)((BIT)(GLOBAL_TOP & Arg))
+				(INT32)((bool)(GLOBAL_BOTTOM & Arg))
+				- (INT32)((bool)(GLOBAL_TOP & Arg))
 				) * Height;
 		SafeChangePosition(NewX + CW, NewY + CH);
 	}
 	void Draw() override {
 		std::lock_guard<std::recursive_mutex> locker(Lock);
-		if ((BYTE)RGBABackground) {
+		if ((std::uint8_t)RGBABackground) {
 			GLCOLOR(RGBABackground);
 			glBegin(GL_QUADS);
 			glVertex2f(Xpos - (Width * 0.5f), Ypos + (0.5f * Height));
@@ -164,7 +164,7 @@ struct TextBox : HandleableUIPart {
 			glVertex2f(Xpos - (Width * 0.5f), Ypos - (0.5f * Height));
 			glEnd();
 		}
-		if ((BYTE)RGBABorder) {
+		if ((std::uint8_t)RGBABorder) {
 			GLCOLOR(RGBABorder);
 			glLineWidth(BorderWidth);
 			glBegin(GL_LINE_LOOP);
@@ -177,7 +177,7 @@ struct TextBox : HandleableUIPart {
 		for (int i = 0; i < Lines.size(); i++) 
 			Lines[i]->Draw();
 	}
-	inline DWORD TellType() override {
+	inline std::uint32_t TellType() override {
 		return TT_TEXTBOX;
 	}
 };

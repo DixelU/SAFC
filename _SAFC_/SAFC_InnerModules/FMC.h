@@ -12,8 +12,8 @@
 
 struct FastMIDIChecker {
 	std::wstring File;
-	BIT IsAcssessable, IsMIDI;
-	WORD PPQN, ExpectedTrackNumber;
+	bool IsAcssessable, IsMIDI;
+	std::uint16_t PPQN, ExpectedTrackNumber;
 	UINT64 FileSize;
 	FastMIDIChecker(std::wstring File) {
 		this->File = File;
@@ -26,7 +26,7 @@ struct FastMIDIChecker {
 	}
 	void Collect() {
 		std::ifstream f(File, std::ios::in | std::ios::binary);
-		DWORD MTHD = 0;
+		std::uint32_t MTHD = 0;
 		MTHD = (MTHD << 8) | (f.get());
 		MTHD = (MTHD << 8) | (f.get());
 		MTHD = (MTHD << 8) | (f.get());

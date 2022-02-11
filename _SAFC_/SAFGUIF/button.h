@@ -10,16 +10,16 @@ struct Button : HandleableUIPart {
 	SingleTextLine* STL, * Tip;
 	float Xpos, Ypos;
 	float Width, Height;
-	DWORD RGBAColor, RGBABackground, RGBABorder;
-	DWORD HoveredRGBAColor, HoveredRGBABackground, HoveredRGBABorder;
-	BYTE BorderWidth;
-	BIT Hovered;
+	std::uint32_t RGBAColor, RGBABackground, RGBABorder;
+	std::uint32_t HoveredRGBAColor, HoveredRGBABackground, HoveredRGBABorder;
+	std::uint8_t BorderWidth;
+	bool Hovered;
 	void(*OnClick)();
 	~Button() override {
 		delete STL;
 		if (Tip)delete Tip;
 	}
-	Button(std::string ButtonText, void(*OnClick)(), float Xpos, float Ypos, float Width, float Height, float CharHeight, DWORD RGBAColor, DWORD gRGBAColor, BYTE BasePoint/*15 if gradient is disabled*/, BYTE GradPoint, BYTE BorderWidth, DWORD RGBABackground, DWORD RGBABorder, DWORD HoveredRGBAColor, DWORD HoveredRGBABackground, DWORD HoveredRGBABorder, SingleTextLineSettings* Tip, std::string TipText = " ") {
+	Button(std::string ButtonText, void(*OnClick)(), float Xpos, float Ypos, float Width, float Height, float CharHeight, std::uint32_t RGBAColor, std::uint32_t gRGBAColor, std::uint8_t BasePoint/*15 if gradient is disabled*/, std::uint8_t GradPoint, std::uint8_t BorderWidth, std::uint32_t RGBABackground, std::uint32_t RGBABorder, std::uint32_t HoveredRGBAColor, std::uint32_t HoveredRGBABackground, std::uint32_t HoveredRGBABorder, SingleTextLineSettings* Tip, std::string TipText = " ") {
 		SingleTextLineSettings STLS(ButtonText, Xpos, Ypos, CharHeight, RGBAColor, gRGBAColor, BasePoint, GradPoint);
 		this->STL = STLS.CreateOne();
 		if (Tip) {
@@ -42,7 +42,7 @@ struct Button : HandleableUIPart {
 		this->OnClick = OnClick;
 		this->Enabled = true;
 	}
-	Button(std::string ButtonText, SingleTextLineSettings* ButtonTextSTLS, void(*OnClick)(), float Xpos, float Ypos, float Width, float Height, BYTE BorderWidth, DWORD RGBABackground, DWORD RGBABorder, DWORD HoveredRGBAColor, DWORD HoveredRGBABackground, DWORD HoveredRGBABorder, SingleTextLineSettings* Tip, std::string TipText = " ") {
+	Button(std::string ButtonText, SingleTextLineSettings* ButtonTextSTLS, void(*OnClick)(), float Xpos, float Ypos, float Width, float Height, std::uint8_t BorderWidth, std::uint32_t RGBABackground, std::uint32_t RGBABorder, std::uint32_t HoveredRGBAColor, std::uint32_t HoveredRGBABackground, std::uint32_t HoveredRGBABorder, SingleTextLineSettings* Tip, std::string TipText = " ") {
 		ButtonTextSTLS->SetNewPos(Xpos, Ypos);
 		this->STL = ButtonTextSTLS->CreateOne(ButtonText);
 		if (Tip) {
@@ -65,7 +65,7 @@ struct Button : HandleableUIPart {
 		this->OnClick = OnClick;
 		this->Enabled = true;
 	}
-	BIT MouseHandler(float mx, float my, CHAR Button/*-1 left, 1 right, 0 move*/, CHAR State /*-1 down, 1 up*/)  override {
+	bool MouseHandler(float mx, float my, CHAR Button/*-1 left, 1 right, 0 move*/, CHAR State /*-1 down, 1 up*/)  override {
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		if (!Enabled) 
 			return 0;
@@ -117,15 +117,15 @@ struct Button : HandleableUIPart {
 		NewY -= Ypos;
 		SafeMove(NewX, NewY);
 	}
-	void SafeChangePosition_Argumented(BYTE Arg, float NewX, float NewY) {
+	void SafeChangePosition_Argumented(std::uint8_t Arg, float NewX, float NewY) {
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		float CW = 0.5f * (
-			(INT32)((BIT)(GLOBAL_LEFT & Arg))
-			- (INT32)((BIT)(GLOBAL_RIGHT & Arg))
+			(INT32)((bool)(GLOBAL_LEFT & Arg))
+			- (INT32)((bool)(GLOBAL_RIGHT & Arg))
 			) * Width,
 			CH = 0.5f * (
-				(INT32)((BIT)(GLOBAL_BOTTOM & Arg))
-				- (INT32)((BIT)(GLOBAL_TOP & Arg))
+				(INT32)((bool)(GLOBAL_BOTTOM & Arg))
+				- (INT32)((bool)(GLOBAL_TOP & Arg))
 				) * Height;
 		SafeChangePosition(NewX + CW, NewY + CH);
 	}
@@ -134,7 +134,7 @@ struct Button : HandleableUIPart {
 		if (!Enabled) 
 			return;
 		if (Hovered) {
-			if ((BYTE)HoveredRGBABackground) {
+			if ((std::uint8_t)HoveredRGBABackground) {
 				GLCOLOR(HoveredRGBABackground);
 				glBegin(GL_QUADS);
 				glVertex2f(Xpos - Width * 0.5f, Ypos + 0.5f * Height);
@@ -143,7 +143,7 @@ struct Button : HandleableUIPart {
 				glVertex2f(Xpos - Width * 0.5f, Ypos - 0.5f * Height);
 				glEnd();
 			}
-			if ((BYTE)HoveredRGBABorder) {
+			if ((std::uint8_t)HoveredRGBABorder) {
 				GLCOLOR(HoveredRGBABorder);
 				glLineWidth(BorderWidth);
 				glBegin(GL_LINE_LOOP);
@@ -155,7 +155,7 @@ struct Button : HandleableUIPart {
 			}
 		}
 		else {
-			if ((BYTE)RGBABackground) {
+			if ((std::uint8_t)RGBABackground) {
 				GLCOLOR(RGBABackground);
 				glBegin(GL_QUADS);
 				glVertex2f(Xpos - Width * 0.5f, Ypos + 0.5f * Height);
@@ -164,7 +164,7 @@ struct Button : HandleableUIPart {
 				glVertex2f(Xpos - Width * 0.5f, Ypos - 0.5f * Height);
 				glEnd();
 			}
-			if ((BYTE)RGBABorder) {
+			if ((std::uint8_t)RGBABorder) {
 				GLCOLOR(RGBABorder);
 				glLineWidth(BorderWidth);
 				glBegin(GL_LINE_LOOP);
@@ -179,7 +179,7 @@ struct Button : HandleableUIPart {
 			Tip->Draw();
 		STL->Draw();
 	}
-	inline DWORD TellType() override {
+	inline std::uint32_t TellType() override {
 		return TT_BUTTON;
 	}
 };

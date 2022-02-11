@@ -55,8 +55,8 @@ struct PLC {
 };
 
 struct BYTE_PLC_Core {
-	BYTE Core[256];
-	BYTE_PLC_Core(std::shared_ptr<PLC<BYTE, BYTE>> PLC_bb) {
+	std::uint8_t Core[256];
+	BYTE_PLC_Core(std::shared_ptr<PLC<std::uint8_t, std::uint8_t>> PLC_bb) {
 		if (PLC_bb)
 			for (int i = 0; i < 256; i++) {
 				Core[i] = PLC_bb->AskForValue(i);
@@ -66,23 +66,23 @@ struct BYTE_PLC_Core {
 				Core[i] = 0;
 			}
 	}
-	inline BYTE& operator[](BYTE Index) {
+	inline std::uint8_t& operator[](std::uint8_t Index) {
 		return Core[Index];
 	}
 };
 
 struct _14BIT_PLC_Core {
-	WORD Core[1 << 14];
-	_14BIT_PLC_Core(std::shared_ptr<PLC<WORD, WORD>> PLC_bb) {
-		constexpr WORD _14bit = 1 << 14;
+	std::uint16_t Core[1 << 14];
+	_14BIT_PLC_Core(std::shared_ptr<PLC<std::uint16_t, std::uint16_t>> PLC_bb) {
+		constexpr std::uint16_t _14bit = 1 << 14;
 		for (int i = 0; i < (_14bit); i++) {
 			Core[i] = PLC_bb->AskForValue(i);
 			if (Core[i] >= _14bit)
 				Core[i] = 0x2000;
 		}
 	}
-	inline WORD& operator[](WORD Index) {
-		constexpr WORD _14bit = 1 << 14;
+	inline std::uint16_t& operator[](std::uint16_t Index) {
+		constexpr std::uint16_t _14bit = 1 << 14;
 		if (Index < _14bit)
 			return Core[Index];
 		else

@@ -8,12 +8,12 @@
 struct SMRP_Vis : HandleableUIPart {
 	SingleMIDIReProcessor* SMRP;
 	float XPos, YPos;
-	BIT Processing, Finished, Hovered;
+	bool Processing, Finished, Hovered;
 	SingleTextLine* STL_Log, * STL_War, * STL_Err, * STL_Info;
 	SMRP_Vis(float XPos, float YPos, SingleTextLineSettings* STLS) {
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		SMRP = nullptr;
-		DWORD BASERGBA;
+		std::uint32_t BASERGBA;
 		this->Processing = this->Hovered = this->Finished = 0;
 		this->XPos = XPos;
 		this->YPos = YPos;
@@ -52,7 +52,7 @@ struct SMRP_Vis : HandleableUIPart {
 		NewY -= YPos;
 		SafeMove(NewX, NewY);
 	}
-	void SafeChangePosition_Argumented(BYTE Arg, float NewX, float NewY) override {
+	void SafeChangePosition_Argumented(std::uint8_t Arg, float NewX, float NewY) override {
 		return;
 	}
 	void KeyboardHandler(CHAR CH) override {
@@ -116,7 +116,7 @@ struct SMRP_Vis : HandleableUIPart {
 			}
 		}
 	}
-	BIT MouseHandler(float mx, float my, CHAR Button, CHAR State) override {
+	bool MouseHandler(float mx, float my, CHAR Button, CHAR State) override {
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		mx -= XPos;
 		my -= YPos;
