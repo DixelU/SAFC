@@ -150,9 +150,6 @@
     <ClInclude Include="MRWF.h">
       <Filter>Файлы заголовков\MIDI Processing</Filter>
     </ClInclude>
-    <ClInclude Include="PIPE.h">
-      <Filter>Файлы заголовков\MIDI Processing</Filter>
-    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="_SAFC_.cpp">

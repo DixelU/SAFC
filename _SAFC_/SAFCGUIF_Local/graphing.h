@@ -118,7 +118,7 @@ struct Graphing : HandleableUIPart {
 				if (abs(last_pos_x) <= 0.5f) {
 					last_pos_x = last_pos_x * Width + CXpos;
 					GLCOLOR(NearestLineColor);
-					glLineWidth(3);
+					glLineWidth(1);
 					glBegin(GL_LINES);
 					glVertex2f(last_pos_x, CYpos - TargetHeight * 0.5f);
 					glVertex2f(last_pos_x, CYpos + TargetHeight * 0.5f);
