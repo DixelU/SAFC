@@ -1766,8 +1766,6 @@ void Init() {///SetIsFontedVar
 	std::cout << "Registering Drag&Drop: " << (RegisterDragDrop(hWnd, &DNDH_Global)) << std::endl;
 	
 	SAFC_VersionCheck();
-
-	(0.47f + 0.53f);
 }
 
 ///////////////////////////////////////
