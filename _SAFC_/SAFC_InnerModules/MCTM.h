@@ -484,9 +484,14 @@ struct MIDICollectionThreadedMerger {
 				IM->close();
 				RM->close();
 				F.close();
+
+				auto inplaceFilename = _SaveTo + L".I.mid";
+				auto regularFilename = _SaveTo + L".R.mid";
+
 				auto remove = _wremove(_SaveTo.c_str());
-				auto remove_i = _wrename((_SaveTo + L".I.mid").c_str(), _SaveTo.c_str());
-				auto remove_r = _wrename((_SaveTo + L".R.mid").c_str(), _SaveTo.c_str());//one of these will not work
+				auto remove_i = _wrename(inplaceFilename.c_str(), _SaveTo.c_str());
+				auto remove_r = _wrename(regularFilename.c_str(), _SaveTo.c_str());//one of these will not work
+
 				printf("S2 status: %i\nI status: %i\nR status: %i\n", remove, remove_i, remove_r);
 				delete IM;
 				delete RM;
@@ -497,7 +502,16 @@ struct MIDICollectionThreadedMerger {
 			printf("Active merging at last stage (untested)\n");
 			WORD T = 0;
 			BYTE A = 0, B = 0;
-			F << "MThd" << '\0' << '\0' << '\0' << (char)6 << '\0' << (char)1;
+			F.put('M');
+			F.put('T');
+			F.put('h');
+			F.put('d');
+			F.put(0);
+			F.put(0);
+			F.put(0);
+			F.put(6);
+			F.put(0);
+			F.put(1);
 			for (int i = 0; i < 10; i++)
 				IM->get();
 			for (int i = 0; i < 10; i++)
@@ -505,7 +519,7 @@ struct MIDICollectionThreadedMerger {
 			A = IM->get();
 			B = IM->get();
 			T = (A + RM->get()) << 8;
-			T += (B + RM->get());
+			T |= (B + RM->get());
 			A = T >> 8;
 			B = T;
 			F.put(A);
