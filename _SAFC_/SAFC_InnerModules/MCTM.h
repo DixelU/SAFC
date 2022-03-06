@@ -242,7 +242,7 @@ struct MIDICollectionThreadedMerger {
 						ddt = -1;
 				}
 				for (UINT64 Tick = 0; ActiveTrackReading; Tick++, InTrackDelta++) {
-					std::uint8_t IO, EVENTTYPE;///yas
+					std::uint8_t IO = 0, EVENTTYPE = 0;///yas
 					ActiveTrackReading = 0;
 					ActiveStreamFlag = 0;
 					//NotNoteEvents_ProcessedFlag = 0;
@@ -484,10 +484,16 @@ struct MIDICollectionThreadedMerger {
 				IM->close();
 				RM->close();
 				F.close();
+
+				auto inplaceFilename = _SaveTo + L".I.mid";
+				auto regularFilename = _SaveTo + L".R.mid";
+
 				auto remove = _wremove(_SaveTo.c_str());
-				auto remove_i = _wrename((_SaveTo + L".I.mid").c_str(), _SaveTo.c_str());
-				auto remove_r = _wrename((_SaveTo + L".R.mid").c_str(), _SaveTo.c_str());//one of these will not work
+				auto remove_i = _wrename(inplaceFilename.c_str(), _SaveTo.c_str());
+				auto remove_r = _wrename(regularFilename.c_str(), _SaveTo.c_str());//one of these will not work
+
 				printf("S2 status: %i\nI status: %i\nR status: %i\n", remove, remove_i, remove_r);
+
 				delete IM;
 				delete RM;
 				printf("Escaped last stage\n");

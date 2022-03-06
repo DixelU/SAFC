@@ -179,8 +179,8 @@ struct SingleMIDIReProcessor {
 		auto type_size = sizeof(T);
 		auto current_index = vec.size();
 		vec.resize(current_index + type_size);
-		auto& tick = *(T*)(&vec[current_index]);
-		tick = current_tick;
+		auto& value_ref = *(T*)(&vec[current_index]);
+		value_ref = value;
 		return type_size;
 	}
 

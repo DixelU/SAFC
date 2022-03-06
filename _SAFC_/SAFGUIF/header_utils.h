@@ -33,7 +33,8 @@ constexpr float angle_to_radians(float a)
 {
 	return 0.0174532925f * a;
 }
-constexpr float rotation_angle()
+
+inline float rotation_angle()
 {
 	return angle_to_radians(dumb_rotation_angle);
 }
@@ -45,10 +46,10 @@ inline float RANDFLOAT(float range)
 
 inline float RANDSGN()
 { 
-	return ((rand() & 1) ? -1 : 1); 
+	return ((rand() & 1) ? -1.f : 1.f); 
 }
 
-constexpr float SLOWDPROG(float a, float b, float progressrate)
+inline float SLOWDPROG(float a, float b, float progressrate)
 {
 	return ((a + (progressrate - 1) * b) / progressrate);
 }
