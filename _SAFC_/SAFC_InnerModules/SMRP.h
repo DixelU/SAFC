@@ -13,11 +13,14 @@
 
 #include <ranges>
 
+#include "SMRP2.h"
+
 #include "BS.h"
 #include "SMIC.h"
 #include "PLC.h"
 #include "CAT.h"
 #include "../bbb_ffio.h"
+
 
 template<typename T>
 struct optional {
@@ -693,7 +696,7 @@ struct SingleMIDIReProcessor {
 					std::uint8_t Key = file_input.get();
 					Track.push_back(CurByte);///Event|Channel data
 					if (this->KeyConverter && !DeleteEvent) {////key data processing
-						auto T = (this->KeyConverter->Process(Key));
+						auto T = (this->KeyConverter->process(Key));
 						if (T.has_value())
 							Track.push_back(Key = T.value());
 						else {
@@ -890,7 +893,7 @@ struct SingleMIDIReProcessor {
 							std::uint8_t Key = CurByte;
 							Track.push_back(RunningStatusByte);///Event|Channel data
 							if (this->KeyConverter) {////key data processing
-								auto T = (this->KeyConverter->Process(Key));
+								auto T = (this->KeyConverter->process(Key));
 								if (T.has_value())
 									Track.push_back(Key = T.value());
 								else {

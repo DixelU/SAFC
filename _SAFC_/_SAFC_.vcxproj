@@ -287,6 +287,7 @@
     <ClInclude Include="SAFC_InnerModules\SAFC_IM.h" />
     <ClInclude Include="SAFC_InnerModules\SMIC.h" />
     <ClInclude Include="SAFC_InnerModules\SMRP.h" />
+    <ClInclude Include="SAFC_InnerModules\SMRP2.h" />
     <ClInclude Include="SAFGUIF\button.h" />
     <ClInclude Include="SAFGUIF\button_settings.h" />
     <ClInclude Include="SAFGUIF\charmap.h" />

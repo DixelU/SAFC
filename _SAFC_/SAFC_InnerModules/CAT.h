@@ -13,7 +13,7 @@ struct CutAndTransposeKeys {
 		this->Max = Max;
 		this->TransposeVal = TransposeVal;
 	}
-	inline std::optional<std::uint8_t> Process(std::uint8_t Value) {
+	inline std::optional<std::uint8_t> process(std::uint8_t Value) {
 		if (Value <= Max && Value >= Min) {
 			std::int16_t SValue = (std::int16_t)Value + TransposeVal;
 			if (SValue < 0 || SValue>255)return {};
