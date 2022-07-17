@@ -8,7 +8,7 @@
 struct HandleableUIPart {
 	std::recursive_mutex Lock;
 	bool Enabled;
-	HandleableUIPart() {}
+	HandleableUIPart() { Enabled = true; }
 	//HandleableUIPart(HandleableUIPart&&) = delete;
 	virtual ~HandleableUIPart() {}
 	bool virtual MouseHandler(float mx, float my, CHAR Button/*-1 left, 1 right*/, CHAR State /*-1 down, 1 up*/) = 0;

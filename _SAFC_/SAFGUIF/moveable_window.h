@@ -32,6 +32,8 @@ struct MoveableWindow :HandleableUIPart {
 			this->WindowName = WindowNameSettings->CreateOne(WindowName);
 			this->WindowName->SafeMove(this->WindowName->CalculatedWidth * 0.5 + WindowHeapSize * 0.5f, 0 - WindowHeapSize * 0.5f);
 		}
+		else
+			this->WindowName = nullptr;
 		this->HUIP_MapWasChanged = false;
 		this->XWindowPos = XPos;
 		this->YWindowPos = YPos;

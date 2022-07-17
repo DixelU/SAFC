@@ -305,7 +305,7 @@ struct MIDICollectionThreadedMerger {
 								Track.push_back(pfiv.get());
 							}
 							else {///RSB CANNOT APPEAR ON THIS STAGE
-								printf("Inplace error %X\n", pfiv.tellg());
+								printf("Inplace error @%X\n", pfiv.tellg());
 								Track.push_back(0xCA);
 								Track.push_back(0);
 								goto trackending;

@@ -38,6 +38,8 @@ struct SelectablePropertedList : HandleableUIPart {
 		this->HeaderYPos = HeaderYPos;
 		this->CurrentTopLineID = 0;
 		this->TextInButtonsAlign = TextInButtonsAlign;
+		this->BottomArrowHovered = this->TopArrowHovered = false;
+		this->CalculatedHeight = 0;
 		//SelectedID = 0xFFFFFFFF;
 	}
 	void RecalculateCurrentHeight() {

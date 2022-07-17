@@ -49,7 +49,7 @@ public:
 		auto err_no = _wfopen_s(&file, filename, L"rb");
 		is_open = !(err_no);
 		next_chunk_is_unavailable = (is_eof = (file) ? feof(file) : true);
-		if (err_no | is_eof) {
+		if (err_no || is_eof) {
 			file_pos = 0;
 			buffer = nullptr;
 			buffer_size = 0;
@@ -74,7 +74,7 @@ public:
 		auto err_no = _wfopen_s(&file, filename, L"rb");
 		is_open = !(err_no);
 		next_chunk_is_unavailable = (is_eof = (file) ? feof(file) : true);
-		if ((err_no | is_eof) && buffer_size) {
+		if ((err_no || is_eof) && buffer_size) {
 			file_pos = 0;
 			buffer_size = 0;
 			inner_buffer_pos = 0;
