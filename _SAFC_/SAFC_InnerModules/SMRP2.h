@@ -59,7 +59,7 @@ public:
 	void operator<<(std::string&& message) override
 	{
 		std::lock_guard locker(mtx);
-		message = std::move(message);
+		this->message = std::move(message);
 	}
 	std::string getLast() const override
 	{
@@ -76,8 +76,8 @@ public:
 	void operator<<(std::string&& message) override
 	{
 		std::lock_guard locker(mtx);
-		message = std::move(message);
-		std::cout << message << std::endl;
+		this->message = std::move(message);
+		std::cout << this->message << std::endl;
 	}
 };
 
@@ -620,13 +620,11 @@ struct single_midi_processor_2
 		auto db_current = data_buffer.begin();
 
 		auto size = data_buffer.size();
-		std::size_t i = 0;
 
-		if (size < 9) [[unlikely]]
-		{
-			(*buffers.error) << "BP: Empty/corrupted buffer";
-			return false;
-		}
+		if (size == 0) [[unlikely]]
+			return ((*buffers.error) << "End of processing"), false;
+
+		std::size_t i = 0;
 
 		while (i < size)
 		{
@@ -761,9 +759,9 @@ struct single_midi_processor_2
 						case 0x51:
 						{
 							constexpr auto base_position = get_meta_param_index(1, 0);
-							const auto& tempo_byte1 = get_value<base_type>(cur, base_position + 1);
-							const auto& tempo_byte2 = get_value<base_type>(cur, base_position + 2);
-							const auto& tempo_byte3 = get_value<base_type>(cur, base_position + 3);
+							const auto& tempo_byte1 = get_value<base_type>(cur, base_position + 0);
+							const auto& tempo_byte2 = get_value<base_type>(cur, base_position + 1);
+							const auto& tempo_byte3 = get_value<base_type>(cur, base_position + 2);
 
 							std_ref.selection_data.frontal_tempo = (tempo_byte1 << 16) | (tempo_byte2 << 8) | tempo_byte3;
 							break;
@@ -776,7 +774,7 @@ struct single_midi_processor_2
 							if (size != 0x8 && size != 0xB) [[unlikely]]
 								break;
 
-							const auto& signature = get_value<base_type>(cur, base_position + 1);
+							const auto& signature = get_value<base_type>(cur, base_position + 0);
 							if (signature) [[unlikely]]
 								break;
 							std_ref.selection_data.frontal_color_event.is_empty = false;
@@ -918,9 +916,9 @@ struct single_midi_processor_2
 
 				constexpr auto base_position = get_meta_param_index(1, 0);
 
-				auto& tempo_bit1 = get_value<base_type>(cur, base_position + 1);
-				auto& tempo_bit2 = get_value<base_type>(cur, base_position + 2);
-				auto& tempo_bit3 = get_value<base_type>(cur, base_position + 3);
+				auto& tempo_bit1 = get_value<base_type>(cur, base_position + 0);
+				auto& tempo_bit2 = get_value<base_type>(cur, base_position + 1);
+				auto& tempo_bit3 = get_value<base_type>(cur, base_position + 2);
 				auto new_tempo = tempo.process((tempo_bit1 << 16) | (tempo_bit2 << 8) | tempo_bit3);
 
 				if (!new_tempo)
@@ -1023,15 +1021,17 @@ struct single_midi_processor_2
 			if (disallow_empty_tracks && data.empty())
 				return;
 
+			auto size_plus_4 = data.size() + 4;
+
 			base_type header[8];
 			header[0] = 'M';
 			header[1] = 'T';
 			header[2] = 'r';
 			header[3] = 'k';
-			header[4] = (data.size() >> 24) & 0xFF;
-			header[5] = (data.size() >> 16) & 0xFF;
-			header[6] = (data.size() >> 8) & 0xFF;
-			header[7] = (data.size()) & 0xFF;
+			header[4] = (size_plus_4 >> 24) & 0xFF;
+			header[5] = (size_plus_4 >> 16) & 0xFF;
+			header[6] = (size_plus_4 >> 8) & 0xFF;
+			header[7] = (size_plus_4) & 0xFF;
 
 			base_type ending[4];
 			ending[0] = 0;
@@ -1268,35 +1268,40 @@ struct single_midi_processor_2
 		auto filters = filters_constructor(data.settings);
 
 		data_buffers track_buffers;
-		std::vector<base_type> track_buffer;
+		//std::vector<base_type> track_buffer;
 		track_data<channels_split> write_buffer;
 
 		tick_type track_counter = 0;
 		while (file_input.good())
 		{
+			track_buffers.data_buffer.clear();
+
 			put_data_in_buffer(file_input, track_buffers, loggers, data.settings);
 			single_track_data track_processing_data;
-			process_buffer(track_buffers.data_buffer, filters, track_processing_data, loggers);
+			if (!process_buffer(track_buffers.data_buffer, filters, track_processing_data, loggers))
+				break;
 
 			if(data.settings.legacy.rsb_compression)
 				write_track<true, channels_split>(
-					track_buffer, 
+					track_buffers.data_buffer,
 					track_processing_data, 
 					loggers, 
 					data,
 					write_buffer);
 			else 
 				write_track<false, channels_split>(
-					track_buffer, 
+					track_buffers.data_buffer,
 					track_processing_data, 
 					loggers, 
 					data,
 					write_buffer);
 
-			track_counter += write_buffer.count();
+			auto current_count = write_buffer.count();
+			track_counter += current_count;
 			write_buffer.dump(file_output, data.settings.proc_details.remove_empty_tracks);
 			write_buffer.clear();
 			loggers.last_input_position = file_input.tellg();
+			(*loggers.log) << (std::to_string(track_counter) + " tracks processed. (" + std::to_string(current_count) + ") new.");
 		}
 
 		file_input.close();

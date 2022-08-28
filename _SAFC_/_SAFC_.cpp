@@ -388,6 +388,8 @@ struct FileSettings
 		settings.tempo.set_override_value(NewTempo);
 		settings.selection_data = single_midi_processor_2::settings_obj::selection(SelectionStart, SelectionLength);
 
+		smrp_data->appearance_filename = AppearanceFilename;
+
 		return smrp_data;
 	}
 };

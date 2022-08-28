@@ -84,6 +84,7 @@ struct SMRP_Vis : HandleableUIPart
 	{
 		if (!SMRP.first || !SMRP.second)
 			return;
+
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		auto& logger_ptr = SMRP.second;
 
@@ -104,6 +105,7 @@ struct SMRP_Vis : HandleableUIPart
 		if (_finished != SMRP.second->finished)
 			_finished = SMRP.second->finished;
 		auto T = std::to_string((SMRP.second->last_input_position * 100.) / (SMRP.first->settings.details.initial_filesize)).substr(0, 5) + "%";
+
 		if (_hovered && _processing)
 		{
 			T = SMRP.first->appearance_filename.substr(0, 30) + " " + T;
@@ -113,6 +115,7 @@ struct SMRP_Vis : HandleableUIPart
 		{
 			_stl_info->SafeColorChange(0xFFFFFFFF);
 		}
+
 		if (_stl_info->_CurrentText != T)
 			_stl_info->SafeStringReplace(T);
 	}
