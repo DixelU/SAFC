@@ -12,6 +12,7 @@
 #include <functional>
 #include <stack>
 #include <array>
+#include <atomic>
 #include <ostream>
 
 #include "../bbb_ffio.h"
@@ -45,9 +46,29 @@ public:
 		std::lock_guard locker(mtx);
 		return (messages.size()) ? messages.back() : "";
 	}
+}; 
+
+struct singleline_logger :
+	logger_base
+{
+private:
+	std::string message;
+	mutable std::mutex mtx;
+public:
+	~singleline_logger() override {}
+	void operator<<(std::string&& message) override
+	{
+		std::lock_guard locker(mtx);
+		message = std::move(message);
+	}
+	std::string getLast() const override
+	{
+		std::lock_guard locker(mtx);
+		return message;
+	}
 };
 
-struct single_midi_processor_beta2
+struct single_midi_processor_2
 {
 	inline static constexpr std::uint32_t MTrk_header = 1297379947;
 	inline static constexpr std::uint32_t MThd_header = 1297377380;
@@ -68,7 +89,6 @@ struct single_midi_processor_beta2
 	inline static constexpr std::size_t event_param4 = 12;
 	inline static constexpr std::size_t event_param5 = 13;
 
-
 	struct single_track_data
 	{
 		struct selection
@@ -81,7 +101,16 @@ struct single_midi_processor_beta2
 				bool is_empty = true;
 			};
 
-			std::unordered_map<std::uint16_t, std::uint16_t> events_at_selection_front;
+			struct event_data_fixed_size_2
+			{
+				base_type field1 = 0;
+				base_type field2 = 0;
+				bool field1_is_set = true;
+				bool field2_is_set = false;
+			};
+
+			std::map<std::uint16_t, base_type> key_events_at_selection_front;
+			std::map<base_type, event_data_fixed_size_2> channel_events_at_selection_front;
 			std::uint32_t frontal_tempo = default_tempo;
 			color_event frontal_color_event;
 		};
@@ -97,20 +126,34 @@ struct single_midi_processor_beta2
 
 	struct message_buffers
 	{
-		std::shared_ptr<logger> log;
-		std::shared_ptr<logger> warning;
-		std::shared_ptr<logger> error;
+		std::shared_ptr<logger_base> log;
+		std::shared_ptr<logger_base> warning;
+		std::shared_ptr<logger_base> error;
+		std::atomic_uint64_t last_input_position;
+		std::atomic_bool processing;
+		std::atomic_bool finished;
+
+		message_buffers():
+			log(std::make_shared<singleline_logger>()),
+			warning(std::make_shared<singleline_logger>()),
+			error(std::make_shared<singleline_logger>()),
+			last_input_position(0),
+			processing(false),
+			finished(false)		
+		{
+		}
 	};
 
 	struct settings_obj
 	{
 		struct selection
 		{
-			const tick_type begin;
-			const tick_type end;
-			const sgtick_type length;
-			selection(tick_type begin = 0, sgtick_type length = -1) :
-				begin(begin), length(length), end(begin + length) {	}
+			tick_type begin;
+			tick_type end;
+			tick_type length;
+			bool enable_selection_front;
+			selection(tick_type begin = 0, tick_type length = ~0ULL) :
+				begin(begin), length(length), end(begin + length), enable_selection_front(true) {}
 		};
 
 		struct legacy_filter_settings
@@ -149,25 +192,45 @@ struct single_midi_processor_beta2
 			bool rsb_compression = false;
 		};
 
+		struct details_data
+		{
+			tick_type initial_filesize;
+			ppq_type group_id;
+			bool inplace_mergable;
+		};
+
+		struct processing_details
+		{
+			bool remove_remnants;
+			bool remove_empty_tracks;
+			bool channel_split;
+		};
+
 		sgtick_type offset;
 		ppq_type old_ppqn;
 		ppq_type new_ppqn;
+		std::uint32_t thread_id;
 
 		legacy_midi_standard legacy;
 		legacy_filter_settings filter;
 		tempo_override tempo;
-		selection selection;
+		selection selection_data;
 
 		std::shared_ptr<BYTE_PLC_Core> volume_map;
 		std::shared_ptr<_14BIT_PLC_Core> pitch_map;
 		std::shared_ptr<CutAndTransposeKeys> key_converter;
+		details_data details;
+		processing_details proc_details;
 	};
 
 	struct processing_data
 	{
-		settings_obj settigns;
+		settings_obj settings;
 		std::wstring filename;
 		std::wstring postfix;
+
+		std::string appearance_filename;
+		std::atomic_uint64_t tracks_count;
 	};
 
 	inline static void ostream_write(
@@ -446,6 +509,7 @@ struct single_midi_processor_beta2
 		return is_good;
 	}
 
+	template<bool ready_for_write = false>
 	inline constexpr static std::ptrdiff_t expected_size(base_type v)
 	{
 		switch (v)
@@ -453,7 +517,7 @@ struct single_midi_processor_beta2
 			MH_CASE(0xA0) : MH_CASE(0xB0) : MH_CASE(0xE0) :
 				return 8ll + 3ll;
 			MH_CASE(0x80) : MH_CASE(0x90) :
-				return 8ll + 3ll + 8ll;
+				return 8ll + 3ll + (8ll * !ready_for_write);
 			MH_CASE(0xC0) : MH_CASE(0xD0) :
 				return 8ll + 2ll;
 		default:
@@ -461,10 +525,11 @@ struct single_midi_processor_beta2
 		}
 	}
 
+	template<bool ready_for_write = false>
 	inline static std::ptrdiff_t expected_size(data_iterator cur)
 	{
 		const auto& type = cur[8];
-		auto size = expected_size(type);
+		auto size = expected_size<ready_for_write>(type);
 		if (size > 0)
 			return size;
 
@@ -539,13 +604,13 @@ struct single_midi_processor_beta2
 	{
 		std::multimap<base_type, event_transforming_filter> filters;
 
-		event_transforming_filter selection = [selection = settings.selection]
+		event_transforming_filter selection_filter = [selection_data = settings.selection_data]
 		(data_iterator begin, data_iterator end, data_iterator cur, single_track_data& std_ref) -> bool
 		{
 			auto& tick = get_value<tick_type>(cur, tick_position);
 			
-			bool before_selection = tick < selection.begin;
-			bool after_selection = tick >= selection.end;
+			bool before_selection = tick < selection_data.begin;
+			bool after_selection = tick >= selection_data.end;
 
 			if (!before_selection && !after_selection) [[likely]]
 				return true;
@@ -562,8 +627,8 @@ struct single_midi_processor_beta2
 
 				auto& reference_event_pair = get_value<tick_type>(cur, event_param3);
 				auto& reference_event_tick = get_value<tick_type>(begin, reference_event_pair);
-				bool trim_condition = (is_note_on && before_selection && (reference_event_tick >= selection.begin)) ||
-										(!is_note_on && after_selection && (reference_event_tick < selection.end));
+				bool trim_condition = (is_note_on && before_selection && (reference_event_tick >= selection_data.begin)) ||
+										(!is_note_on && after_selection && (reference_event_tick < selection_data.end));
 				if (!trim_condition)
 				{
 					reference_event_tick = disable_tick;
@@ -575,11 +640,11 @@ struct single_midi_processor_beta2
 				{
 					auto& volume = get_value<base_type>(cur, event_param2);
 					volume = 1;
-					tick = selection.begin;
+					tick = selection_data.begin;
 				}
 				else
 				{
-					tick = selection.end - 1;
+					tick = selection_data.end - 1;
 				}
 				return true;
 				break;
@@ -596,7 +661,8 @@ struct single_midi_processor_beta2
 						const auto& param1 = get_value<base_type>(cur, event_param1);
 						const auto& param2 = get_value<base_type>(cur, event_param2);
 						std::uint16_t key = (type << 8) | (param1);
-						std_ref.selection_data.events_at_selection_front[key] = param2;
+						auto& data = std_ref.selection_data.key_events_at_selection_front[key];
+						data = param2;
 						break;
 					}
 					case 0xC0:
@@ -604,7 +670,8 @@ struct single_midi_processor_beta2
 					{
 						const auto& param = get_value<base_type>(cur, event_param1);
 						std::uint16_t key = (type << 8);
-						std_ref.selection_data.events_at_selection_front[key] = param;
+						auto& data = std_ref.selection_data.channel_events_at_selection_front[key];
+						data.field1 = param;
 						break;
 					}
 					case 0xE0:
@@ -612,7 +679,10 @@ struct single_midi_processor_beta2
 						const auto& param1 = get_value<base_type>(cur, event_param1);
 						const auto& param2 = get_value<base_type>(cur, event_param2);
 						std::uint16_t key = (type << 8);
-						std_ref.selection_data.events_at_selection_front[key] = (param1 << 8) | param2;
+						auto& data = std_ref.selection_data.channel_events_at_selection_front[key];
+						data.field1 = param1;
+						data.field2 = param2;
+						data.field2_is_set = true;
 						break;
 					}
 					case 0xF0:
@@ -637,13 +707,14 @@ struct single_midi_processor_beta2
 							if (size != 0x8 && size != 0xB) [[unlikely]]
 								break;
 							const auto& signature = get_value<base_type>(cur, event_param3);
-							if (!signature) [[unlikely]]
+							if (signature) [[unlikely]]
 								break;
 							std_ref.selection_data.frontal_color_event.is_empty = false;
 							std_ref.selection_data.frontal_color_event.size = size;
 							std_ref.selection_data.frontal_color_event.data[0] = signature;
 							for(size_t i = 1; i < size; ++i)
 								std_ref.selection_data.frontal_color_event.data[i] = get_value<base_type>(cur, event_param3 + i);
+							break;
 						}
 						default:
 							break;
@@ -815,14 +886,14 @@ struct single_midi_processor_beta2
 		};
 
 		event_transforming_filter tick_positive_linear_transform =
-			[selection = settings.selection, old_ppqn = settings.old_ppqn, new_ppqn = settings.new_ppqn, offset = settings.offset]
+			[selection_data = settings.selection_data, old_ppqn = settings.old_ppqn, new_ppqn = settings.new_ppqn, offset = settings.offset]
 		(data_iterator begin, data_iterator end, data_iterator cur, single_track_data& std_ref) -> bool
 		{
 			auto& tick = get_value<tick_type>(cur, tick_position);
 
-			if (tick < selection.begin)
+			if (tick < selection_data.begin)
 				return (tick = disable_tick), false;
-			if (tick >= selection.end)
+			if (tick >= selection_data.end)
 				return (tick = disable_tick), false;
 
 			if (offset < 0 && tick < -offset)
@@ -834,7 +905,7 @@ struct single_midi_processor_beta2
 			return true;
 		};
 
-		filters.insert({ 0, selection });
+		filters.insert({ 0, selection_filter });
 		filters.insert({ 0, tick_positive_linear_transform });
 		filters.insert({ 0x80, key_transform });
 		filters.insert({ 0x90, key_transform });
@@ -873,9 +944,9 @@ struct single_midi_processor_beta2
 		{
 			return !data.empty();
 		}
-		inline void dump(std::ostream& out)
+		inline void dump(std::ostream& out, bool disallow_empty_tracks)
 		{
-			if (data.empty())
+			if (disallow_empty_tracks && data.empty())
 				return;
 
 			base_type header[8];
@@ -925,18 +996,91 @@ struct single_midi_processor_beta2
 		{
 			return data[channel].get_tick(channel);
 		}
-		inline void dump(std::ostream& out)
+		inline void dump(std::ostream& out, bool disallow_empty_tracks)
 		{
 			for (auto& singleData : data)
-				singleData.dump(out);
+				singleData.dump(out, disallow_empty_tracks);
 		}
 	};
+
+	template<bool compression, bool channels_split>
+	inline static void write_selection_front(
+		tick_type selection_front_tick,
+		single_track_data& std_ref,
+		message_buffers& buffers,
+		track_data<channels_split>& out_buffer)
+	{
+		if (std_ref.selection_data.frontal_tempo != single_track_data::selection::default_tempo)
+		{
+			auto& prev_tick = out_buffer.get_tick(0);
+			auto& track_data = out_buffer.get_vec(0);
+			auto delta = selection_front_tick - prev_tick;
+			prev_tick = selection_front_tick;
+			push_vlv_s(delta, track_data);
+
+			track_data.push_back(0xFF);
+			track_data.push_back(0x51);
+			track_data.push_back(0x03);
+			track_data.push_back(std_ref.selection_data.frontal_tempo >> 16);
+			track_data.push_back((std_ref.selection_data.frontal_tempo >> 8) & 0xFF);
+			track_data.push_back(std_ref.selection_data.frontal_tempo & 0xFF);
+		}
+
+		if (!std_ref.selection_data.frontal_color_event.is_empty)
+		{
+			auto& prev_tick = out_buffer.get_tick(0);
+			auto& track_data = out_buffer.get_vec(0);
+			auto delta = selection_front_tick - prev_tick;
+			prev_tick = selection_front_tick;
+			push_vlv_s(delta, track_data);
+
+			track_data.push_back(0xFF);
+			track_data.push_back(0x0A);
+			track_data.push_back(std_ref.selection_data.frontal_color_event.size);
+			for(int i = 0; i < std_ref.selection_data.frontal_color_event.size; ++i)
+				track_data.push_back(std_ref.selection_data.frontal_color_event.data[i]);
+		}
+
+		for (auto& [key_param1, param2] : std_ref.selection_data.key_events_at_selection_front)
+		{
+			auto event_kind = key_param1 >> 8;
+			auto param_1 = key_param1 & 0xFF;
+			auto channel = event_kind & 0xF;
+
+			auto& prev_tick = out_buffer.get_tick(channel);
+			auto& track_data = out_buffer.get_vec(channel);
+			auto delta = selection_front_tick - prev_tick;
+			prev_tick = selection_front_tick;
+			push_vlv_s(delta, track_data);
+
+			track_data.push_back(event_kind);
+			track_data.push_back(param_1);
+			track_data.push_back(param2);
+		}
+
+		for (auto& [event_kind, data] : std_ref.selection_data.channel_events_at_selection_front)
+		{
+			auto channel = event_kind & 0xF;
+
+			auto& prev_tick = out_buffer.get_tick(channel);
+			auto& track_data = out_buffer.get_vec(channel);
+			auto delta = selection_front_tick - prev_tick;
+			prev_tick = selection_front_tick;
+			push_vlv_s(delta, track_data);
+
+			track_data.push_back(event_kind);
+			track_data.push_back(data.field1);
+			if(data.field2_is_set)
+				track_data.push_back(data.field2);
+		}
+	}
 
 	template<bool compression, bool channels_split>
 	inline static bool write_track(
 		std::vector<base_type>& data_buffer,
 		single_track_data& std_ref,
 		message_buffers& buffers,
+		processing_data& settings_data,
 		track_data<channels_split>& out_buffer)
 	{
 		out_buffer.clear();
@@ -949,7 +1093,7 @@ struct single_midi_processor_beta2
 		std::size_t i = 0;
 		uint8_t rsb = 0;
 
-		// todo: add selection's edge data dump
+		bool first_tick = settings_data.settings.selection_data.enable_selection_front;
 
 		while (i < size)
 		{
@@ -965,46 +1109,75 @@ struct single_midi_processor_beta2
 			di = expected_size(db_current);
 			if (tick != disable_tick)
 			{
-				const auto& event_type = get_value<base_type>(data_buffer, i + event_type);
-				const auto channel = event_type & 0xF;
+				if (first_tick)
+				{
+					write_selection_front<compression, channels_split>(
+						settings_data.settings.selection_data.begin,
+						std_ref, 
+						buffers, 
+						out_buffer);
+					first_tick = false;
+				}
+
+				const auto& event_kind = get_value<base_type>(data_buffer, i + event_type);
+				const auto channel = event_kind & 0xF;
 				auto& prev_tick = out_buffer.get_tick(channel);
 				auto& track_data = out_buffer.get_vec(channel);
 				auto delta = tick - prev_tick;
 				prev_tick = tick;
+
 				push_vlv_s(delta, track_data);
 
+				auto actual_event_size = expected_size<true>(db_current);
+
 				if(!compression)
-					track_data.insert(track_data.end(), db_current + event_type, db_current + di);
+					track_data.insert(track_data.end(), 
+						db_current + event_type, 
+						db_current + actual_event_size);
 				else
 				{
-					if (rsb != event_type || ((rsb & 0xF0) == 0xF0)) [[likely]]
-						track_data.push_back(event_type);
-					track_data.insert(track_data.end(), db_current + event_param1, db_current + di);
-					rsb = event_type;
+					if (rsb != event_kind || ((rsb & 0xF0) == 0xF0)) [[likely]]
+						track_data.push_back(event_kind);
+					track_data.insert(track_data.end(),
+						db_current + event_param1,
+						db_current + actual_event_size);
+					rsb = event_kind;
 				}
+				first_tick = false;
 			}
-
 			db_current += di;
 			i += di;
 		}
+
+		if (first_tick)
+		{
+			write_selection_front<compression, channels_split>(
+				settings_data.settings.selection_data.begin,
+				std_ref,
+				buffers,
+				out_buffer);
+			first_tick = false;
+		}
+
 		return true;
 	}
 		
 	template<bool channels_split>
-	static void sync_processing(processing_data data, message_buffers loggers)
+	static void sync_processing(processing_data& data, message_buffers& loggers)
 	{
+		loggers.processing = true;
 		bbb_ffr file_input(data.filename.c_str());
 		std::ofstream file_output(data.filename + data.postfix, std::ios::binary | std::ios::out);
 
 		for (int i = 0; i < 12 && file_input.good(); i++)
 			file_output.put(file_input.get());
 
-		data.settigns.old_ppqn = ((std::uint16_t)file_input.get()) << 8;
-		data.settigns.old_ppqn |= ((std::uint16_t)file_input.get());
-		file_output.put(data.settigns.new_ppqn >> 8);
-		file_output.put(data.settigns.new_ppqn & 0xFF);
+		data.settings.old_ppqn = ((std::uint16_t)file_input.get()) << 8;
+		data.settings.old_ppqn |= ((std::uint16_t)file_input.get());
+		file_output.put(data.settings.new_ppqn >> 8);
+		file_output.put(data.settings.new_ppqn & 0xFF);
 
-		auto filters = filters_constructor(data.settigns);
+		auto filters = filters_constructor(data.settings);
 
 		std::vector<base_type> track_buffer;
 		track_data<channels_split> write_buffer;
@@ -1012,20 +1185,40 @@ struct single_midi_processor_beta2
 		tick_type track_counter = 0;
 		while (file_input.good())
 		{
-			put_data_in_buffer(file_input, track_buffer, loggers, data.settigns);
+			put_data_in_buffer(file_input, track_buffer, loggers, data.settings);
 			single_track_data track_processing_data;
 			process_buffer(track_buffer, filters, track_processing_data, loggers);
 
-			if(data.settigns.legacy.rsb_compression)
-				write_track<true, channels_split>(track_buffer, track_processing_data, loggers, write_buffer);
+			if(data.settings.legacy.rsb_compression)
+				write_track<true, channels_split>(
+					track_buffer, 
+					track_processing_data, 
+					loggers, 
+					data,
+					write_buffer);
 			else 
-				write_track<false, channels_split>(track_buffer, track_processing_data, loggers, write_buffer);
-			track_counter += write_buffer.counter();
-			write_buffer.dump(file_output);
+				write_track<false, channels_split>(
+					track_buffer, 
+					track_processing_data, 
+					loggers, 
+					data,
+					write_buffer);
+			track_counter += write_buffer.count();
+			write_buffer.dump(file_output, data.settings.proc_details.remove_empty_tracks);
 			write_buffer.clear();
+			loggers.last_input_position = file_input.tellg();
 		}
 
+		file_input.close();
+		file_output.seekp(10, std::ios::beg);
+		file_output.put(track_counter >> 8);
+		file_output.put(track_counter & 0xFF);
+		file_output.close();
 
+		data.tracks_count = track_counter;
+
+		loggers.processing = false;
+		loggers.finished = true;
 	}
 };
 

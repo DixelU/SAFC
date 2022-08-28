@@ -6,7 +6,8 @@
 #define SMP_BOOL_SETTINGS_IGNORE_PITCHES 0b100000u
 #define SMP_BOOL_SETTINGS_IGNORE_NOTES 0b1000000u
 
-enum _BoolSettings {
+enum _BoolSettings 
+{
 	remove_empty_tracks = SMP_BOOL_SETTINGS_EMPTY_TRACKS_RMV,
 	remove_remnants = SMP_BOOL_SETTINGS_REMNANTS_RMV,
 	all_instruments_to_piano = SMP_BOOL_SETTINGS_ALL_INSTRUMENTS_TO_PIANO,
@@ -25,7 +26,8 @@ enum _BoolSettings {
 #define TT_CHECKBOX 0b100000
 #define TT_GRAPH 0b1000000
 
-enum _TellType {
+enum _TellType 
+{
 	unspecified = TT_UNSPECIFIED,
 	input_field = TT_INPUT_FIELD,
 	moveable_window = TT_MOVEABLE_WINDOW,
@@ -41,11 +43,14 @@ enum _TellType {
 #define GLOBAL_TOP 0b0100
 #define GLOBAL_BOTTOM 0b1000
 
-enum _Positioning {
+enum _Positioning 
+{
 	vertical=0b1,
 	horizontal=0b10
 };
-enum _Align{
+
+enum _Align
+{
 	center=0,
 	left=GLOBAL_LEFT,
 	right=GLOBAL_RIGHT,

@@ -10,12 +10,14 @@
 #include "BS.h"
 #include "MCTM.h"
 
-struct FastMIDIChecker {
+struct FastMIDIChecker
+{
 	std::wstring File;
 	bool IsAcssessable, IsMIDI;
 	std::uint16_t PPQN, ExpectedTrackNumber;
 	UINT64 FileSize;
-	FastMIDIChecker(std::wstring File) {
+	FastMIDIChecker(std::wstring File)
+	{
 		this->File = File;
 		std::ifstream f(File, std::ios::in);
 		if (f)IsAcssessable = 1;
@@ -24,14 +26,16 @@ struct FastMIDIChecker {
 		f.close();
 		Collect();
 	}
-	void Collect() {
+	void Collect()
+	{
 		std::ifstream f(File, std::ios::in | std::ios::binary);
 		std::uint32_t MTHD = 0;
 		MTHD = (MTHD << 8) | (f.get());
 		MTHD = (MTHD << 8) | (f.get());
 		MTHD = (MTHD << 8) | (f.get());
 		MTHD = (MTHD << 8) | (f.get());
-		if (MTHD == MThd && f.good()) {
+		if (MTHD == MThd && f.good())
+		{
 			IsMIDI = 1;
 			f.seekg(10, std::ios::beg);
 			ExpectedTrackNumber = (ExpectedTrackNumber << 8) | (f.get());
@@ -42,7 +46,8 @@ struct FastMIDIChecker {
 			FileSize = std::filesystem::file_size(File);
 			//cout << FileSize;
 		}
-		else {
+		else
+		{
 			IsMIDI = 0;
 			ThrowAlert_Error("Error accured while getting the MIDI file info!");
 			f.close();
@@ -50,6 +55,5 @@ struct FastMIDIChecker {
 		f.close();
 	}
 };
-
 
 #endif 

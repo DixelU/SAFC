@@ -5,7 +5,7 @@
 #include "PLC.h"
 #include "CAT.h"
 #include "SMIC.h"
-#include "SMRP.h"
+#include "SMRP2.h"
 #include "MCTM.h"
 #include "FMC.h"
 

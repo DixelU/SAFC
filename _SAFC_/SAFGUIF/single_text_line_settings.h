@@ -5,18 +5,21 @@
 #include "header_utils.h"
 #include "single_text_line.h"
 
-#define CharWidthPerHeight_Fonted 0.666f
-#define CharWidthPerHeight 0.5f
+constexpr auto CharWidthPerHeight_Fonted = 0.666f;
+constexpr auto CharWidthPerHeight = 0.5f;
 #define CharSpaceBetween(CharHeight) CharHeight/2.f
 #define CharLineWidth(CharHeight) ceil(CharHeight/7.5f)
-struct SingleTextLineSettings {
+
+struct SingleTextLineSettings
+{
 	std::string STLstring;
 	float CXpos, CYpos, XUnitSize, YUnitSize;
 	std::uint8_t BasePoint, GradPoint, LineWidth, SpaceWidth;
 	bool isFonted;
 	std::uint32_t default_RGBAC, default_gRGBAC;
 	std::uint32_t RGBAColor, gRGBAColor;
-	SingleTextLineSettings(std::string Text, float CXpos, float CYpos, float XUnitSize, float YUnitSize, std::uint8_t LineWidth, std::uint8_t SpaceWidth, std::uint32_t RGBAColor, std::uint32_t gRGBAColor, std::uint8_t BasePoint, std::uint8_t GradPoint) {
+	SingleTextLineSettings(std::string Text, float CXpos, float CYpos, float XUnitSize, float YUnitSize, std::uint8_t LineWidth, std::uint8_t SpaceWidth, std::uint32_t RGBAColor, std::uint32_t gRGBAColor, std::uint8_t BasePoint, std::uint8_t GradPoint)
+	{
 		this->STLstring = Text;
 		this->CXpos = CXpos;
 		this->CYpos = CYpos;
@@ -37,7 +40,8 @@ struct SingleTextLineSettings {
 	SingleTextLineSettings(std::string Text, float CXpos, float CYpos, float CharHeight, std::uint32_t RGBAColor) :
 		SingleTextLineSettings(Text, CXpos, CYpos, CharHeight, RGBAColor, 0, 255, 255) {}
 	SingleTextLineSettings(float XUnitSize, float YUnitSize, std::uint32_t RGBAColor) :
-		SingleTextLineSettings("_", 0, 0, YUnitSize, RGBAColor) {
+		SingleTextLineSettings("_", 0, 0, YUnitSize, RGBAColor)
+	{
 		this->isFonted = 1;
 		this->XUnitSize = XUnitSize;
 		this->YUnitSize = YUnitSize;
@@ -50,10 +54,12 @@ struct SingleTextLineSettings {
 		SingleTextLineSettings(
 		((KeepText) ? Example->_CurrentText : " "), Example->CXpos, Example->CYpos, Example->_XUnitSize, Example->_YUnitSize, Example->Chars.front()->LineWidth, Example->SpaceWidth, Example->RGBAColor, Example->gRGBAColor,
 			((Example->isBicolored) ? (((BiColoredDottedSymbol*)(Example->Chars.front()))->_PointData & 0xF0) >> 4 : 0xF), ((Example->isBicolored) ? (((BiColoredDottedSymbol*)(Example->Chars.front()))->_PointData) & 0xF : 0xF)
-			) {
+			)
+	{
 		this->isFonted = Example->isListedFont;
 	}
-	SingleTextLine* CreateOne() {
+	SingleTextLine* CreateOne()
+	{
 		SingleTextLine* ptr = nullptr;
 		if (GradPoint & 0xF0 && !isFonted)
 			ptr = new SingleTextLine(STLstring, CXpos, CYpos, XUnitSize, YUnitSize, SpaceWidth, LineWidth, RGBAColor);
@@ -65,7 +71,8 @@ struct SingleTextLineSettings {
 		gRGBAColor = default_gRGBAC;
 		return ptr;
 	}
-	SingleTextLine* CreateOne(std::string TextOverride) {
+	SingleTextLine* CreateOne(std::string TextOverride)
+	{
 		SingleTextLine* ptr = nullptr;
 		if (GradPoint & 0xF0 && !isFonted)
 			ptr = new SingleTextLine(TextOverride, CXpos, CYpos, XUnitSize, YUnitSize, SpaceWidth, LineWidth, RGBAColor);
@@ -77,11 +84,13 @@ struct SingleTextLineSettings {
 		gRGBAColor = default_gRGBAC;
 		return ptr;
 	}
-	void SetNewPos(float NewXPos, float NewYPos) {
+	void SetNewPos(float NewXPos, float NewYPos)
+	{
 		this->CXpos = NewXPos;
 		this->CYpos = NewYPos;
 	}
-	void Move(float dx, float dy) {
+	void Move(float dx, float dy)
+	{
 		this->CXpos += dx;
 		this->CYpos += dy;
 	}

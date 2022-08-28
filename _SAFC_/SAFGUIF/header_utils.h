@@ -80,7 +80,8 @@ bool AutoUpdatesCheck = true;
 
 void absoluteToActualCoords(int ix, int iy, float& x, float& y);
 void inline rotate(float& x, float& y);
-int TIMESEED() {
+int TIMESEED()
+{
 	SYSTEMTIME t;
 	GetLocalTime(&t);
 	if (t.wMonth == 4 && t.wDay == 1)

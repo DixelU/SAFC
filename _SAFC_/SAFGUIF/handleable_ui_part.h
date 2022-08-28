@@ -18,23 +18,29 @@ struct HandleableUIPart {
 	void virtual SafeChangePosition_Argumented(std::uint8_t, float, float) = 0;
 	void virtual SafeStringReplace(std::string) = 0;
 	void virtual KeyboardHandler(char CH) = 0;
-	void Enable() {
+	void Enable()
+	{
 		Enabled = true;
 	}
-	void Disable() {
+	void Disable()
+	{
 		Enabled = false;
 	}
-	void Invert_Enable() {
+	void Invert_Enable()
+	{
 		Enabled ^= true;
 	}
-	bool virtual IsResizeable() {
+	bool virtual IsResizeable()
+	{
 		return false;
 	}
 	/* relative to right-bottom corner */
-	void virtual SafeResize(float NewHeight, float NewWidth) {
+	void virtual SafeResize(float NewHeight, float NewWidth)
+	{
 		return;
 	}
-	inline std::uint32_t virtual TellType() {
+	inline std::uint32_t virtual TellType()
+	{
 		return TT_UNSPECIFIED;
 	}
 };

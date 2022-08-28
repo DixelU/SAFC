@@ -5,7 +5,8 @@
 #include "header_utils.h"
 #include "symbols.h"
 
-struct SingleTextLine {
+struct SingleTextLine 
+{
 	std::string _CurrentText;
 	float CXpos, CYpos;
 	float SpaceWidth;
@@ -14,12 +15,14 @@ struct SingleTextLine {
 	bool isBicolored, isListedFont;
 	float _XUnitSize, _YUnitSize;
 	std::vector<DottedSymbol*> Chars;
-	~SingleTextLine() {
+	~SingleTextLine() 
+	{
 		for (auto i = Chars.begin(); i != Chars.end(); i++)
 			if (*i)delete* i;
 		Chars.clear();
 	}
-	SingleTextLine(std::string Text, float CXpos, float CYpos, float XUnitSize, float YUnitSize, float SpaceWidth, std::uint8_t LineWidth = 2, std::uint32_t RGBAColor = 0xFFFFFFFF, std::uint32_t* RGBAGradColor = NULL, std::uint8_t OrigNGradPoints = ((5 << 4) | 5), bool isListedFont = false) {
+	SingleTextLine(std::string Text, float CXpos, float CYpos, float XUnitSize, float YUnitSize, float SpaceWidth, std::uint8_t LineWidth = 2, std::uint32_t RGBAColor = 0xFFFFFFFF, std::uint32_t* RGBAGradColor = NULL, std::uint8_t OrigNGradPoints = ((5 << 4) | 5), bool isListedFont = false) 
+	{
 		if (!Text.size())Text = " ";
 		this->_CurrentText = Text;
 		CalculatedHeight = 2 * YUnitSize;
@@ -32,7 +35,8 @@ struct SingleTextLine {
 		this->_YUnitSize = YUnitSize;
 		this->isListedFont = isListedFont;
 		float CharXPosition = CXpos - (CalculatedWidth * 0.5) + XUnitSize, CharXPosIncrement = 2.f * XUnitSize + SpaceWidth;
-		for (int i = 0; i < Text.size(); i++) {
+		for (int i = 0; i < Text.size(); i++)
+		{
 			if (!RGBAGradColor && !isListedFont)Chars.push_back(
 				new DottedSymbol(Text[i], CharXPosition, CYpos, XUnitSize, YUnitSize, LineWidth, new std::uint32_t(RGBAColor))
 				);
@@ -44,7 +48,8 @@ struct SingleTextLine {
 				);
 			CharXPosition += CharXPosIncrement;
 		}
-		if (RGBAGradColor) {
+		if (RGBAGradColor)
+		{
 			this->isBicolored = true;
 			this->gRGBAColor = *RGBAGradColor;
 			delete RGBAGradColor;
@@ -52,8 +57,10 @@ struct SingleTextLine {
 		else
 			this->isBicolored = false;
 	}
-	void SafeColorChange(std::uint32_t NewRGBAColor) {
-		if (isBicolored) {
+	void SafeColorChange(std::uint32_t NewRGBAColor)
+	{
+		if (isBicolored)
+		{
 			SafeColorChange(NewRGBAColor, gRGBAColor,
 				((BiColoredDottedSymbol*)(this->Chars.front()))->_PointData >> 4,
 				((BiColoredDottedSymbol*)(this->Chars.front()))->_PointData & 0xF
@@ -62,60 +69,68 @@ struct SingleTextLine {
 		}
 		std::uint8_t R = (NewRGBAColor >> 24), G = (NewRGBAColor >> 16) & 0xFF, B = (NewRGBAColor >> 8) & 0xFF, A = (NewRGBAColor) & 0xFF;
 		RGBAColor = NewRGBAColor;
-		for (int i = 0; i < Chars.size(); i++) {
+		for (int i = 0; i < Chars.size(); i++)
+		{
 			Chars[i]->R = R;
 			Chars[i]->G = G;
 			Chars[i]->B = B;
 			Chars[i]->A = A;
 		}
 	}
-	void SafeColorChange(std::uint32_t NewBaseRGBAColor, std::uint32_t NewGRGBAColor, std::uint8_t BasePoint, std::uint8_t gPoint) {
-		if (!isBicolored) {
-			SafeColorChange(NewBaseRGBAColor);
-			return;
-		}
-		for (int i = 0; i < Chars.size(); i++) {
+	void SafeColorChange(std::uint32_t NewBaseRGBAColor, std::uint32_t NewGRGBAColor, std::uint8_t BasePoint, std::uint8_t gPoint)
+	{
+		if (!isBicolored)
+			return SafeColorChange(NewBaseRGBAColor);
+		for (int i = 0; i < Chars.size(); i++)
 			Chars[i]->RefillGradient(new std::uint32_t(NewBaseRGBAColor), new std::uint32_t(NewGRGBAColor), BasePoint, gPoint);
-		}
 	}
-	void SafeChangePosition(float NewCXPos, float NewCYPos) {
+	void SafeChangePosition(float NewCXPos, float NewCYPos)
+	{
 		NewCXPos = NewCXPos - CXpos;
 		NewCYPos = NewCYPos - CYpos;
 		SafeMove(NewCXPos, NewCYPos);
 	}
-	void SafeMove(float dx, float dy) {
+	void SafeMove(float dx, float dy)
+	{
 		CXpos += dx;
 		CYpos += dy;
 		for (int i = 0; i < Chars.size(); i++)
 			Chars[i]->SafeCharMove(dx, dy);
 	}
-	bool SafeReplaceChar(int i, char CH) {
-		if (i >= Chars.size())return 0;
-		if (isListedFont) {
+	bool SafeReplaceChar(int i, char CH)
+	{
+		if (i >= Chars.size()) return 0;
+		if (isListedFont)
+		{
 			((lFontSymbol*)Chars[i])->Symb = CH;
 		}
-		else {
+		else
+		{
 			Chars[i]->RenderWay = ASCII[CH];
 			Chars[i]->UpdatePointPlacementPositions();
 		}
 		return 1;
 	}
-	bool SafeReplaceChar(int i, std::string CHrenderway) {
+	bool SafeReplaceChar(int i, std::string CHrenderway)
+	{
 		if (i >= Chars.size())return 0;
 		if (isListedFont) return 0;
 		Chars[i]->RenderWay = CHrenderway;
 		Chars[i]->UpdatePointPlacementPositions();
 		return 1;
 	}
-	void RecalculateWidth() {
+	void RecalculateWidth()
+	{
 		CalculatedWidth = Chars.size() * (2.f * _XUnitSize) + (Chars.size() - 1) * SpaceWidth;
 		float CharXPosition = CXpos - (CalculatedWidth * 0.5f) + _XUnitSize, CharXPosIncrement = 2.f * _XUnitSize + SpaceWidth;
-		for (int i = 0; i < Chars.size(); i++) {
+		for (int i = 0; i < Chars.size(); i++)
+		{
 			Chars[i]->Xpos = CharXPosition;
 			CharXPosition += CharXPosIncrement;
 		}
 	}
-	void SafeChangePosition_Argumented(std::uint8_t Arg, float newX, float newY) {
+	void SafeChangePosition_Argumented(std::uint8_t Arg, float newX, float newY)
+	{
 		///STL_CHANGE_POSITION_ARGUMENT_LEFT
 		float CW = 0.5f * (
 			(INT32)((bool)(GLOBAL_LEFT & Arg))
@@ -127,10 +142,12 @@ struct SingleTextLine {
 				) * CalculatedHeight;
 		SafeChangePosition(newX + CW, newY + CH);
 	}
-	void SafeStringReplace(std::string NewString) {
+	void SafeStringReplace(std::string NewString)
+	{
 		if (!NewString.size()) NewString = " ";
 		_CurrentText = NewString;
-		while (NewString.size() > Chars.size()) {
+		while (NewString.size() > Chars.size())
+		{
 			if (isBicolored)
 				Chars.push_back(new BiColoredDottedSymbol((*((BiColoredDottedSymbol*)(Chars.front())))));
 			else if (isListedFont)
@@ -138,7 +155,8 @@ struct SingleTextLine {
 			else
 				Chars.push_back(new DottedSymbol(*(Chars.front())));
 		}
-		while (NewString.size() < Chars.size()) {
+		while (NewString.size() < Chars.size())
+		{
 			delete Chars.back();
 			Chars.pop_back();
 		}
@@ -147,7 +165,8 @@ struct SingleTextLine {
 		RecalculateWidth();
 	}
 	void Draw() {
-		for (int i = 0; i < Chars.size(); i++) {
+		for (int i = 0; i < Chars.size(); i++) 
+		{
 			Chars[i]->Draw();
 		}
 	}
