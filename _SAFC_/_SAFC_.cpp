@@ -1568,7 +1568,7 @@ void OnStart()
 
 	auto start_timepoint = std::chrono::high_resolution_clock::now();
 
-	GlobalMCTM->ProcessMIDIs();
+	GlobalMCTM->StartProcessingMIDIs();
 
 	MoveableWindow* MW;
 	std::uint32_t ID = 0;
@@ -1585,6 +1585,8 @@ void OnStart()
 	auto difference = std::chrono::duration_cast<std::chrono::milliseconds>(now - start_timepoint);
 	timer_ptr->SafeStringReplace(std::to_string(difference.count() * 0.001) + " s");
 
+	std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
 	decltype(GlobalMCTM->currently_processed) currently_processed_copy;
 
 	{
@@ -1595,20 +1597,19 @@ void OnStart()
 
 	for (ID = 0; ID < currently_processed_copy.size(); ID++)
 	{
-		std::cout << ID << std::endl;
-
 		auto Q = GetPositionForOneOf(ID, currently_processed_copy.size(), 140, 0.7);
 		auto Vis = new SMRP_Vis(Q.first, Q.second, System_White);
 		std::string temp = "";
 		MW->AddUIElement(temp = "SMRP_C" + std::to_string(ID), Vis);
 
-		std::thread([](std::shared_ptr<MIDICollectionThreadedMerger> pMCTM, MoveableWindow* MW, std::uint32_t ID)
+
+		std::thread([](std::shared_ptr<MIDICollectionThreadedMerger> pMCTM, SMRP_Vis* pVIS, std::uint32_t ID)
 		{
 			std::string SID = "SMRP_C" + std::to_string(ID);
 			std::cout << SID << " Processing started" << std::endl;
-			auto pVIS = ((SMRP_Vis*)(*MW)[SID]);
 			bool finished = false;
-			while (GlobalMCTM->CheckSMRPProcessing()) {
+			while (GlobalMCTM->CheckSMRPProcessing()) 
+			{
 				GlobalMCTM->currently_processed_locker.lock();
 				finished = GlobalMCTM->currently_processed[ID].second->finished;
 				pVIS->SetSMRP(GlobalMCTM->currently_processed[ID]);
@@ -1616,13 +1617,13 @@ void OnStart()
 
 				std::this_thread::sleep_for(std::chrono::milliseconds(66));
 			}
-			std::cout << ID << " Processing stopped" << std::endl;
-		}, GlobalMCTM, MW, ID).detach();
+			std::cout << SID << " Processing stopped" << std::endl;
+		}, GlobalMCTM, Vis, ID).detach();
 	}
 
 	std::thread([](std::shared_ptr<MIDICollectionThreadedMerger> pMCTM, SAFCData* SD, MoveableWindow* MW)
 	{
-		while (!pMCTM->CheckSMRPProcessingAndStartNextStep())
+		while (pMCTM->CheckSMRPProcessingAndStartNextStep())
 			//that's some really dumb synchronization... TODO: MAKE BETTER
 			std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
@@ -1641,6 +1642,7 @@ void OnStart()
 			{
 				std::this_thread::sleep_for(std::chrono::milliseconds(66));
 			}
+
 			std::cout << "RI: Out from sleep!\n";
 			MW->DeleteUIElementByName("IM");
 			MW->DeleteUIElementByName("RM");

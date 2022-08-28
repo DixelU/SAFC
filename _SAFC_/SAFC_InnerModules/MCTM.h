@@ -178,7 +178,7 @@ struct MIDICollectionThreadedMerger
 	bool CheckSMRPProcessing()
 	{
 		for (auto& el : midi_processing_data)
-			if (!el.second->finished)
+			if (!el.second->finished || el.second->processing)
 				return 1;
 		return 0;
 	}
@@ -188,7 +188,7 @@ struct MIDICollectionThreadedMerger
 			return 1;
 		this->ResetCurProcessing();
 		this->Start_RI_Merge();
-		return 1;
+		return 0;
 	}
 	bool CheckRIMerge()
 	{
@@ -198,13 +198,17 @@ struct MIDICollectionThreadedMerger
 		//cout << "Final_Finished\n";
 		return 1;
 	}
-	void ProcessMIDIs() 
+	void StartProcessingMIDIs() 
 	{//
 		std::set<std::uint32_t> IDs;
 
 		for (auto& el: midi_processing_data) 
 			IDs.insert(el.first->settings.details.group_id);
+
+		currently_processed_locker.lock();
 		currently_processed.clear();
+		currently_processed.resize(IDs.size());
+		currently_processed_locker.unlock();
 		uint32_t thread_counter = 0;
 		
 		for (auto Y = IDs.begin(); Y != IDs.end(); Y++)

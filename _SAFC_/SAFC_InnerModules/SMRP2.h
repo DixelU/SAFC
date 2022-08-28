@@ -29,9 +29,9 @@ struct logger_base
 };
 
 struct logger :
-	logger_base
+	public logger_base
 {
-private:
+protected:
 	std::vector<std::string> messages;
 	mutable std::mutex mtx;
 public:
@@ -49,9 +49,9 @@ public:
 }; 
 
 struct singleline_logger :
-	logger_base
+	public logger_base
 {
-private:
+protected:
 	std::string message;
 	mutable std::mutex mtx;
 public:
@@ -65,6 +65,19 @@ public:
 	{
 		std::lock_guard locker(mtx);
 		return message;
+	}
+};
+
+struct printing_logger :
+	public singleline_logger
+{
+public:
+	~printing_logger() override {}
+	void operator<<(std::string&& message) override
+	{
+		std::lock_guard locker(mtx);
+		message = std::move(message);
+		std::cout << message << std::endl;
 	}
 };
 
@@ -88,6 +101,13 @@ struct single_midi_processor_2
 	inline static constexpr std::size_t event_param3 = 11;
 	inline static constexpr std::size_t event_param4 = 12;
 	inline static constexpr std::size_t event_param5 = 13;
+
+	// meta:   8 tick  1 type  1 metatype  1 vlv size  4 size  ...<raw meta>~vlv+data
+	inline static constexpr std::size_t event_meta_raw = 8 + 1 + 1 + 1 + 4;
+	inline constexpr static std::size_t get_meta_param_index(std::size_t vlv_size, base_type parameter)
+	{
+		return event_meta_raw + vlv_size + parameter;
+	}
 
 	struct single_track_data
 	{
@@ -134,9 +154,9 @@ struct single_midi_processor_2
 		std::atomic_bool finished;
 
 		message_buffers():
-			log(std::make_shared<singleline_logger>()),
-			warning(std::make_shared<singleline_logger>()),
-			error(std::make_shared<singleline_logger>()),
+			log(std::make_shared<printing_logger>()),
+			warning(std::make_shared<printing_logger>()),
+			error(std::make_shared<printing_logger>()),
 			last_input_position(0),
 			processing(false),
 			finished(false)		
@@ -182,7 +202,7 @@ struct single_midi_processor_2
 			{
 				if (tempo_override_value)
 					return tempo_override_value;
-				return (std::max)((metasize_type)(a / tempo_multiplier), 0xFFFF7Fu);
+				return (std::min)((metasize_type)(a / tempo_multiplier), 0xFFFF7Fu);
 			}
 		};
 
@@ -302,21 +322,30 @@ struct single_midi_processor_2
 		return *(T*)&vec[index];
 	}
 
-
 	template<typename T>
 	static bool is_valid_index(std::vector<base_type>& vec, size_t index)
 	{
 		return vec.size() <= index + sizeof(T);
 	}
 
+	struct data_buffers
+	{
+		std::vector<base_type> data_buffer;
+		std::vector<base_type> meta_buffer;
+	};
+
 	inline static bool put_data_in_buffer(
 		bbb_ffr& file_input,
-		std::vector<base_type>& data_buffer,
+		data_buffers& data_buffers,
 		message_buffers& buffers,
 		const settings_obj& settings
 	)
 	{
 		std::array<std::stack<tick_type>, 4096> current_polyphony;
+
+		auto& meta_buffer = data_buffers.meta_buffer;
+		auto& data_buffer = data_buffers.data_buffer;
+
 		tick_type current_tick = 0;
 
 		std::uint32_t header = 0;
@@ -404,7 +433,7 @@ struct single_midi_processor_2
 					base_type vel = file_input.get();
 					tick_type reference = disable_tick;
 
-					com ^= ((!vel) << 4);
+					com ^= ((!vel && bool(com & 0x10)) << 4);
 
 					std::uint16_t key_polyindex = (com & 0xF) | (((std::uint16_t)key) << 4);
 					bool polyphony_error = false;
@@ -474,7 +503,7 @@ struct single_midi_processor_2
 				base_type com = command;
 				base_type type = param_buffer;
 
-				is_going &= (type != 0x2F && com != 0xFF);
+				is_going &= (type != 0x2F && com == 0xFF);
 				if (!settings.legacy.ignore_meta_rsb)
 					rsb = 0;
 
@@ -488,11 +517,21 @@ struct single_midi_processor_2
 				push_back<base_type>(data_buffer, com);
 				push_back<base_type>(data_buffer, type);
 
+				// 8 tick  1 type  1 metatype  1 vlv size  4 size  ...<raw meta>~vlv+data
+
 				auto length = get_vlv(file_input);
-				push_back<metasize_type>(data_buffer, length);
+				auto encoded_length = push_vlv_s(length, meta_buffer);
+
+				push_back<base_type>(data_buffer, encoded_length);
 
 				for (std::size_t i = 0; i < length; ++i)
-					push_back<base_type>(data_buffer, file_input.get());
+					push_back<base_type>(meta_buffer, file_input.get());
+				length += encoded_length;
+
+				push_back<metasize_type>(data_buffer, length);
+				data_buffer.insert(data_buffer.end(), meta_buffer.begin(), meta_buffer.end());
+
+				meta_buffer.clear();
 
 				break;
 			}
@@ -525,16 +564,40 @@ struct single_midi_processor_2
 		}
 	}
 
+	inline static constexpr int gapped_size_legnth = 2 * (1) + 1;
+
 	template<bool ready_for_write = false>
-	inline static std::ptrdiff_t expected_size(data_iterator cur)
+	inline static std::enable_if<!ready_for_write, std::ptrdiff_t>::type expected_size(data_iterator cur)
 	{
 		const auto& type = cur[8];
 		auto size = expected_size<ready_for_write>(type);
 		if (size > 0)
 			return size;
 
-		const auto& meta_size = get_value<metasize_type>(cur, 10);
-		return std::ptrdiff_t(8 + 2 + 4) + std::ptrdiff_t(meta_size);
+		// 8 tick  1 type  1 metatype  _1 vlv size_  4 size  ...<raw meta>~vlv+data	
+		const auto& meta_size = get_value<metasize_type>(cur, event_param3);
+
+		return std::ptrdiff_t(event_meta_raw) + std::ptrdiff_t(meta_size);
+	}
+
+	template<bool ready_for_write = false>
+	inline static std::enable_if<ready_for_write, std::array<std::ptrdiff_t, gapped_size_legnth>>::type
+		expected_size(data_iterator cur)
+	{
+		const auto& type = cur[8];
+		auto size = expected_size<ready_for_write>(type);
+		if (size > 0)
+			return { size, 0, 0 };
+
+		// 8 tick  1 type  1 metatype  _1 vlv size_  4 size  ...<raw meta>~vlv+data	
+		const auto& meta_size = get_value<metasize_type>(cur, event_param3);
+
+		return 
+		{ 
+			std::ptrdiff_t(event_param2), 
+			std::ptrdiff_t(event_meta_raw),
+			std::ptrdiff_t(event_meta_raw + meta_size)
+		};
 	}
 
 	inline static tick_type convert_ppq(tick_type value, ppq_type from, ppq_type to)
@@ -690,23 +753,30 @@ struct single_midi_processor_2
 						if (type != 0xFF) [[unlikely]] break;
 						const auto& meta_subtype = get_value<base_type>(cur, event_param1);
 
+						// 8 tick  1 type  1 metatype  1 vlv size  4 size  ...<raw meta>~vlv+data
+						//const auto& vlv_size = get_value<base_type>(cur, event_param3);
+
 						switch (meta_subtype)
 						{
 						case 0x51:
 						{
-							const auto& tempo_byte1 = get_value<base_type>(cur, event_param3);
-							const auto& tempo_byte2 = get_value<base_type>(cur, event_param4);
-							const auto& tempo_byte3 = get_value<base_type>(cur, event_param5);
+							constexpr auto base_position = get_meta_param_index(1, 0);
+							const auto& tempo_byte1 = get_value<base_type>(cur, base_position + 1);
+							const auto& tempo_byte2 = get_value<base_type>(cur, base_position + 2);
+							const auto& tempo_byte3 = get_value<base_type>(cur, base_position + 3);
 
 							std_ref.selection_data.frontal_tempo = (tempo_byte1 << 16) | (tempo_byte2 << 8) | tempo_byte3;
 							break;
 						}
 						[[unlikely]] case 0x0A:
 						{
-							const auto& size = get_value<base_type>(cur, event_param2);
+							constexpr auto base_position = get_meta_param_index(1, 0);
+
+							const auto& size = get_value<base_type>(cur, base_position);
 							if (size != 0x8 && size != 0xB) [[unlikely]]
 								break;
-							const auto& signature = get_value<base_type>(cur, event_param3);
+
+							const auto& signature = get_value<base_type>(cur, base_position + 1);
 							if (signature) [[unlikely]]
 								break;
 							std_ref.selection_data.frontal_color_event.is_empty = false;
@@ -836,6 +906,8 @@ struct single_midi_processor_2
 			auto& tick = get_value<tick_type>(cur, tick_position);
 			const auto& meta_type = get_value<base_type>(cur, event_param1);
 
+			// 8 tick  1 type  1 metatype  1 vlv size  4 size  ...<raw meta>~vlv+data
+
 			if (meta_type == 0x51)
 			{
 				if (!filtering.pass_tempo)
@@ -844,9 +916,11 @@ struct single_midi_processor_2
 					return false;
 				}
 
-				auto& tempo_bit1 = get_value<base_type>(cur, event_param3);
-				auto& tempo_bit2 = get_value<base_type>(cur, event_param4);
-				auto& tempo_bit3 = get_value<base_type>(cur, event_param5);
+				constexpr auto base_position = get_meta_param_index(1, 0);
+
+				auto& tempo_bit1 = get_value<base_type>(cur, base_position + 1);
+				auto& tempo_bit2 = get_value<base_type>(cur, base_position + 2);
+				auto& tempo_bit3 = get_value<base_type>(cur, base_position + 3);
 				auto new_tempo = tempo.process((tempo_bit1 << 16) | (tempo_bit2 << 8) | tempo_bit3);
 
 				if (!new_tempo)
@@ -1130,17 +1204,31 @@ struct single_midi_processor_2
 
 				auto actual_event_size = expected_size<true>(db_current);
 
-				if(!compression)
-					track_data.insert(track_data.end(), 
-						db_current + event_type, 
-						db_current + actual_event_size);
+				if (!compression)
+				{
+					track_data.insert(track_data.end(),
+						db_current + event_type,
+						db_current + actual_event_size[0]);
+
+					if(actual_event_size[1] != actual_event_size[2])
+						track_data.insert(track_data.end(),
+							db_current + actual_event_size[1],
+							db_current + actual_event_size[2]);
+				}
 				else
 				{
 					if (rsb != event_kind || ((rsb & 0xF0) == 0xF0)) [[likely]]
 						track_data.push_back(event_kind);
+
 					track_data.insert(track_data.end(),
 						db_current + event_param1,
-						db_current + actual_event_size);
+						db_current + actual_event_size[0]);
+
+					if (actual_event_size[1] != actual_event_size[2])
+						track_data.insert(track_data.end(),
+							db_current + actual_event_size[1],
+							db_current + actual_event_size[2]);
+
 					rsb = event_kind;
 				}
 				first_tick = false;
@@ -1179,15 +1267,16 @@ struct single_midi_processor_2
 
 		auto filters = filters_constructor(data.settings);
 
+		data_buffers track_buffers;
 		std::vector<base_type> track_buffer;
 		track_data<channels_split> write_buffer;
 
 		tick_type track_counter = 0;
 		while (file_input.good())
 		{
-			put_data_in_buffer(file_input, track_buffer, loggers, data.settings);
+			put_data_in_buffer(file_input, track_buffers, loggers, data.settings);
 			single_track_data track_processing_data;
-			process_buffer(track_buffer, filters, track_processing_data, loggers);
+			process_buffer(track_buffers.data_buffer, filters, track_processing_data, loggers);
 
 			if(data.settings.legacy.rsb_compression)
 				write_track<true, channels_split>(
@@ -1203,6 +1292,7 @@ struct single_midi_processor_2
 					loggers, 
 					data,
 					write_buffer);
+
 			track_counter += write_buffer.count();
 			write_buffer.dump(file_output, data.settings.proc_details.remove_empty_tracks);
 			write_buffer.clear();

@@ -136,7 +136,7 @@ struct MoveableWindow : HandleableUIPart
 		NewYpos -= YWindowPos;
 		SafeMove(NewXpos, NewYpos);
 	}
-	bool DeleteUIElementByName(std::string ElementName)
+	bool DeleteUIElementByName(std::string ElementName, bool DeleteElement = true)
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		HUIP_MapWasChanged = true;
@@ -145,7 +145,8 @@ struct MoveableWindow : HandleableUIPart
 			return 0;
 		auto deletable = ptr->second;
 		WindowActivities.erase(ElementName);
-		delete deletable;
+		if(DeleteElement)
+			delete deletable;
 		return 1;
 	}
 	bool AddUIElement(std::string ElementName, HandleableUIPart* Elem)
