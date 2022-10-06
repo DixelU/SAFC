@@ -186,7 +186,7 @@ struct MIDICollectionThreadedMerger
 	{
 		if (CheckSMRPProcessing())
 			return 1;
-		this->ResetCurProcessing();
+		//this->ResetCurProcessing();
 		this->Start_RI_Merge();
 		return 0;
 	}

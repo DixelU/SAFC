@@ -197,6 +197,7 @@ void SAFC_VersionCheck()
 		std::wstring filename = ExtractDirectory(current_file_path);
 		std::wstring pathway = filename;
 		filename += L"tags.json";
+		// if you have error here -> https://github.com/Microsoft/WSL/issues/22#issuecomment-207788173
 		HRESULT res = URLDownloadToFileW(NULL, SAFC_tags_link, filename.c_str(), 0, NULL);
 		try 
 		{
@@ -379,6 +380,7 @@ struct FileSettings
 		settings.filter.piano_only = (BoolSettings & _BoolSettings::all_instruments_to_piano);
 		settings.proc_details.remove_remnants = BoolSettings & _BoolSettings::remove_remnants;
 		settings.proc_details.remove_empty_tracks = BoolSettings & _BoolSettings::remove_empty_tracks;
+		settings.proc_details.channel_split = ChannelsSplit;
 		settings.legacy.ignore_meta_rsb = AllowLegacyRunningStatusMetaIgnorance;
 		settings.legacy.rsb_compression = RSBCompression;
 		settings.details.inplace_mergable = InplaceMergeEnabled && !RSBCompression;
@@ -417,6 +419,8 @@ struct SAFCData
 	float GlobalNewTempo;
 	bool IncrementalPPQN;
 	bool InplaceMergeFlag;
+	bool ChannelsSplit;
+	bool RSBCompression;
 	std::uint16_t DetectedThreads;
 	SAFCData()
 	{
@@ -425,6 +429,7 @@ struct SAFCData
 		DetectedThreads = 1;
 		InplaceMergeFlag = 0;
 		SaveDirectory = L"";
+		ChannelsSplit = RSBCompression = false;
 	}
 	void ResolveSubdivisionProblem_GroupIDAssign(std::uint16_t ThreadsCount = 0)
 	{
@@ -654,6 +659,9 @@ void AddFiles(std::vector<std::wstring> Filenames)
 			_Data.Files.back().NewTempo = _Data.GlobalNewTempo;
 			_Data.Files.back().OffsetTicks = _Data.GlobalOffset;
 			_Data.Files.back().InplaceMergeEnabled = _Data.InplaceMergeFlag;
+			_Data.Files.back().ChannelsSplit = _Data.ChannelsSplit;
+			_Data.Files.back().RSBCompression = _Data.RSBCompression;
+
 			for (int q = 0; q < _Data.Files.size(); q++)
 			{
 				if (_Data[q].Filename == _Data.Files.back().Filename)
@@ -709,6 +717,8 @@ namespace PropsAndSets
 			((CheckBox*)((*PASWptr)["BOOL_IGN_PITCH"]))->State = _Data[ID].BoolSettings & _BoolSettings::ignore_pitches;
 			((CheckBox*)((*PASWptr)["BOOL_IGN_NOTES"]))->State = _Data[ID].BoolSettings & _BoolSettings::ignore_notes;
 			((CheckBox*)((*PASWptr)["BOOL_IGN_ALL_EX_TPS"]))->State = _Data[ID].BoolSettings & _BoolSettings::ignore_all_but_tempos_notes_and_pitch;
+			((CheckBox*)((*PASWptr)["SPLIT_TRACKS"]))->State = _Data[ID].ChannelsSplit;
+			((CheckBox*)((*PASWptr)["RSB_COMPRESS"]))->State = _Data[ID].RSBCompression;
 
 			((CheckBox*)((*PASWptr)["INPLACE_MERGE"]))->State = _Data[ID].InplaceMergeEnabled;
 			((CheckBox*)((*PASWptr)["LEGACY_META_RSB_BEHAVIOR"]))->State = _Data[ID].AllowLegacyRunningStatusMetaIgnorance;
@@ -1145,7 +1155,12 @@ namespace PropsAndSets
 		_Data[currentID].SetBoolSetting(_BoolSettings::ignore_notes, (((CheckBox*)(*SMPASptr)["BOOL_IGN_NOTES"])->State));
 		_Data[currentID].SetBoolSetting(_BoolSettings::ignore_all_but_tempos_notes_and_pitch, (((CheckBox*)(*SMPASptr)["BOOL_IGN_ALL_EX_TPS"])->State));
 
-		_Data[currentID].InplaceMergeEnabled = ((CheckBox*)(*SMPASptr)["INPLACE_MERGE"])->State;
+		_Data[currentID].RSBCompression = ((CheckBox*)(*SMPASptr)["RSB_COMPRESS"])->State;
+		_Data[currentID].ChannelsSplit = ((CheckBox*)(*SMPASptr)["SPLIT_TRACKS"])->State;
+		auto& inplaceMergeState = ((CheckBox*)(*SMPASptr)["INPLACE_MERGE"])->State;
+
+		inplaceMergeState &= !_Data[currentID].RSBCompression;
+		_Data[currentID].InplaceMergeEnabled = inplaceMergeState;
 	}
 	void OnApplyBS2A()
 	{
@@ -1449,6 +1464,9 @@ namespace Settings
 		((CheckBox*)((*pptr)["BOOL_IGN_NOTES"]))->State = DefaultBoolSettings & _BoolSettings::ignore_notes;
 		((CheckBox*)((*pptr)["BOOL_IGN_ALL_EX_TPS"]))->State = DefaultBoolSettings & _BoolSettings::ignore_all_but_tempos_notes_and_pitch;
 
+		((CheckBox*)((*pptr)["SPLIT_TRACKS"]))->State = _Data.ChannelsSplit;
+		((CheckBox*)((*pptr)["RSB_COMPRESS"]))->State = _Data.RSBCompression;
+
 		((CheckBox*)((*pptr)["INPLACE_MERGE"]))->State = _Data.InplaceMergeFlag;
 		((CheckBox*)((*pptr)["AUTOUPDATECHECK"]))->State = AutoUpdatesCheck;
 	}
@@ -1502,21 +1520,24 @@ namespace Settings
 
 		AutoUpdatesCheck = ((CheckBox*)(*pptr)["AUTOUPDATECHECK"])->State;
 
-		if (isRegestryOpened)
-			TRY_CATCH(RegestryAccess.SetDwordValue(L"AUTOUPDATECHECK", AutoUpdatesCheck);, "Failed on setting AUTOUPDATECHECK")
+		_Data.ChannelsSplit = ((CheckBox*)((*pptr)["SPLIT_TRACKS"]))->State;
+		_Data.RSBCompression = ((CheckBox*)((*pptr)["RSB_COMPRESS"]))->State;
 
-			if (isRegestryOpened)
-			{
-				TRY_CATCH(RegestryAccess.SetDwordValue(L"DEFAULT_BOOL_SETTINGS", DefaultBoolSettings);, "Failed on setting DEFAULT_BOOL_SETTINGS")
-					TRY_CATCH(RegestryAccess.SetDwordValue(L"FONTSIZE", lFontSymbolsInfo::Size); , "Failed on setting FONTSIZE")
-					TRY_CATCH(RegestryAccess.SetDwordValue(L"FLOAT_FONTHTW", *(std::uint32_t*)(&lFONT_HEIGHT_TO_WIDTH)); , "Failed on setting FLOAT_FONTHTW")
-			}
+		if (isRegestryOpened)
+		{
+			TRY_CATCH(RegestryAccess.SetDwordValue(L"AUTOUPDATECHECK", AutoUpdatesCheck);, "Failed on setting AUTOUPDATECHECK")
+			TRY_CATCH(RegestryAccess.SetDwordValue(L"SPLIT_TRACKS", _Data.ChannelsSplit);, "Failed on setting SPLIT_TRACKS")
+			//TRY_CATCH(RegestryAccess.SetDwordValue(L"RSB_COMPRESS", AutoUpdatesCheck);, "Failed on setting RSB_COMPRESS")
+			TRY_CATCH(RegestryAccess.SetDwordValue(L"DEFAULT_BOOL_SETTINGS", DefaultBoolSettings);, "Failed on setting DEFAULT_BOOL_SETTINGS")
+			TRY_CATCH(RegestryAccess.SetDwordValue(L"FONTSIZE", lFontSymbolsInfo::Size); , "Failed on setting FONTSIZE")
+			TRY_CATCH(RegestryAccess.SetDwordValue(L"FLOAT_FONTHTW", *(std::uint32_t*)(&lFONT_HEIGHT_TO_WIDTH)); , "Failed on setting FLOAT_FONTHTW")
+		}
 
 		_Data.InplaceMergeFlag = (((CheckBox*)(*pptr)["INPLACE_MERGE"])->State);
 		if (isRegestryOpened)
 			TRY_CATCH(RegestryAccess.SetDwordValue(L"AS_INPLACE_FLAG", _Data.InplaceMergeFlag);, "Failed on setting AS_INPLACE_FLAG")
 
-			((InputField*)(*pptr)["AS_FONT_NAME"])->PutIntoSource();
+		((InputField*)(*pptr)["AS_FONT_NAME"])->PutIntoSource();
 		std::wstring ws(default_font_name.begin(), default_font_name.end());
 		if (isRegestryOpened)
 			TRY_CATCH(RegestryAccess.SetStringValue(L"COLLAPSEDFONTNAME", ws.c_str()); , "Failed on setting AS_BCKGID")
@@ -1535,7 +1556,9 @@ namespace Settings
 		for (auto Y = _Data.Files.begin(); Y != _Data.Files.end(); Y++)
 		{
 			Y->BoolSettings = DefaultBoolSettings;
-			Y->InplaceMergeEnabled = _Data.InplaceMergeFlag;
+			Y->InplaceMergeEnabled = _Data.InplaceMergeFlag && !_Data.ChannelsSplit;
+			Y->ChannelsSplit = _Data.ChannelsSplit;
+			Y->RSBCompression = _Data.RSBCompression;
 		}
 	}
 	void ApplyFSWheel(double new_val)
@@ -1714,6 +1737,11 @@ void RestoreRegSettings()
 		catch (...) { std::cout << "Exception thrown while restoring AUTOUPDATECHECK from registry\n"; }
 		try
 		{
+			_Data.ChannelsSplit = Settings::RegestryAccess.GetDwordValue(L"SPLIT_TRACKS");
+		}
+		catch (...) { std::cout << "Exception thrown while restoring SPLIT_TRACKS from registry\n"; }
+		try
+		{
 			_Data.DetectedThreads = Settings::RegestryAccess.GetDwordValue(L"AS_THREADS_COUNT");
 		}
 		catch (...) { std::cout << "Exception thrown while restoring AS_THREADS_COUNT from registry\n"; }
@@ -1822,6 +1850,9 @@ void Init()
 	(*T)["BOOL_IGN_PITCH"] = new CheckBox(-37.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::center, "Ignore pitch bending events");
 	(*T)["BOOL_IGN_NOTES"] = new CheckBox(-22.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::center, "Ignore note events");
 	(*T)["BOOL_IGN_ALL_EX_TPS"] = new CheckBox(-7.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::center, "Ignore everything except specified");
+	(*T)["SPLIT_TRACKS"] = new CheckBox(7.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, 0, System_White, _Align::center, "Multichannel split");
+	(*T)["RSB_COMPRESS"] = new CheckBox(22.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, 0, System_White, _Align::center, "Enable RSB compression");
+	
 	(*T)["BOOL_APPLY_TO_ALL_MIDIS"] = Butt = new Button("A2A", System_White, PropsAndSets::OnApplyBS2A, 80 - WindowHeapSize, 55 - WindowHeapSize, 15, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, System_White, "Sets \"bool settings\" to all midis");
 	Butt->Tip->SafeChangePosition_Argumented(_Align::right, 87.5 - WindowHeapSize, Butt->Tip->CYpos);
 
@@ -1879,11 +1910,11 @@ void Init()
 
 	(*WH)["VM"] = T;
 
-	T = new MoveableWindow("App settings", System_White, -100, 100, 200, 220, 0x3F3F3FCF, 0x7F7F7F7F);
+	T = new MoveableWindow("App settings", System_White, -100, 110, 200, 240, 0x3F3F3FCF, 0x7F7F7F7F);
 
 	(*T)["AS_BCKGID"] = new InputField(std::to_string(Settings::ShaderMode), -35, 55 - WindowHeapSize, 10, 30, System_White, NULL, 0x007FFFFF, System_White, "Background ID", 2, _Align::center, _Align::right, InputField::Type::NaturalNumbers);
 
-	(*T)["AS_GLOBALSETTINGS"] = new TextBox("Global settings for new MIDIs", System_White, 0, 85 - WindowHeapSize, 30, 200, 12, 0x007FFF1F, 0x007FFF7F, 1, _Align::center);
+	(*T)["AS_GLOBALSETTINGS"] = new TextBox("Global settings for new MIDIs", System_White, 0, 85 - WindowHeapSize, 50, 200, 12, 0x007FFF1F, 0x007FFF7F, 1, _Align::center);
 	(*T)["AS_APPLY"] = Butt = new Button("Apply", System_White, Settings::OnSetApply, 85 - WindowHeapSize, -87.5 - WindowHeapSize, 40, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, NULL, "_");
 	(*T)["AS_EN_FONT"] = Butt = new Button((is_fonted) ? "Disable fonts" : "Enable fonts", System_White, Settings::ChangeIsFontedVar, 72.5 - WindowHeapSize, -67.5 - WindowHeapSize, 65, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, System_White, " ");
 	(*T)["AS_ROT_ANGLE"] = new InputField(std::to_string(dumb_rotation_angle), -87.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 30, System_White, NULL, 0x007FFFFF, System_White, "Rotation angle", 6, _Align::center, _Align::left, InputField::Type::FP_Any);
@@ -1891,19 +1922,22 @@ void Init()
 	(*T)["AS_FONT_P"] = new WheelVariableChanger(Settings::ApplyRelWheel, -37.5, -22.5, lFONT_HEIGHT_TO_WIDTH, 0.01, System_White, "Font rel.", "Delta", WheelVariableChanger::Type::addictable);
 	(*T)["AS_FONT_NAME"] = new InputField(default_font_name, 52.5 - WindowHeapSize, 55 - WindowHeapSize, 10, 100, _STLS_WhiteSmall, &default_font_name, 0x007FFFFF, System_White, "Font name", 32, _Align::center, _Align::left, InputField::Type::Text);
 
-	(*T)["BOOL_REM_TRCKS"] = new CheckBox(-97.5 + WindowHeapSize, 85 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, System_White, _Align::left, "DV: Remove empty tracks");
-	(*T)["BOOL_REM_REM"] = new CheckBox(-82.5 + WindowHeapSize, 85 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, System_White, _Align::left, "DV: Remove merge \"remnants\"");
-	(*T)["BOOL_PIANO_ONLY"] = new CheckBox(-67.5 + WindowHeapSize, 85 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, System_White, _Align::left, "DV: All instuments to piano");
-	(*T)["BOOL_IGN_TEMPO"] = new CheckBox(-52.5 + WindowHeapSize, 85 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::left, "DV: Ignore tempo events");
-	(*T)["BOOL_IGN_PITCH"] = new CheckBox(-37.5 + WindowHeapSize, 85 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::center, "DV: Ignore pitch bending events");
-	(*T)["BOOL_IGN_NOTES"] = new CheckBox(-22.5 + WindowHeapSize, 85 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::center, "DV: Ignore note events");
-	(*T)["BOOL_IGN_ALL_EX_TPS"] = new CheckBox(-7.5 + WindowHeapSize, 85 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::center, "DV: Ignore everything except specified");
+	(*T)["BOOL_REM_TRCKS"] = new CheckBox(-97.5 + WindowHeapSize, 95 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, System_White, _Align::left, "DV: Remove empty tracks");
+	(*T)["BOOL_REM_REM"] = new CheckBox(-82.5 + WindowHeapSize, 95 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, System_White, _Align::left, "DV: Remove merge \"remnants\"");
+	(*T)["BOOL_PIANO_ONLY"] = new CheckBox(-67.5 + WindowHeapSize, 95 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, System_White, _Align::left, "DV: All instuments to piano");
+	(*T)["BOOL_IGN_TEMPO"] = new CheckBox(-52.5 + WindowHeapSize, 95 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::left, "DV: Ignore tempo events");
+	(*T)["BOOL_IGN_PITCH"] = new CheckBox(-37.5 + WindowHeapSize, 95 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::center, "DV: Ignore pitch bending events");
+	(*T)["BOOL_IGN_NOTES"] = new CheckBox(-22.5 + WindowHeapSize, 95 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::center, "DV: Ignore note events");
+	(*T)["BOOL_IGN_ALL_EX_TPS"] = new CheckBox(-7.5 + WindowHeapSize, 95 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::center, "DV: Ignore everything except specified");
+	(*T)["SPLIT_TRACKS"] = new CheckBox(7.5 + WindowHeapSize, 95 - WindowHeapSize, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, 0, System_White, _Align::center, "Multichannel split");
+	(*T)["RSB_COMPRESS"] = new CheckBox(22.5 + WindowHeapSize, 95 - WindowHeapSize, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, 0, System_White, _Align::center, "Enable RSB compression");
 
-	(*T)["BOOL_APPLY_TO_ALL_MIDIS"] = Butt = new Button("A2A", System_White, Settings::ApplyToAll, 80 - WindowHeapSize, 85 - WindowHeapSize, 15, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, System_White, "The same as A2A in MIDI's props.");
+	(*T)["BOOL_APPLY_TO_ALL_MIDIS"] = Butt = new Button("A2A", System_White, Settings::ApplyToAll, 80 - WindowHeapSize, 95 - WindowHeapSize, 15, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, System_White, "The same as A2A in MIDI's props.");
 	Butt->Tip->SafeChangePosition_Argumented(_Align::right, 87.5 - WindowHeapSize, Butt->Tip->CYpos);
 
-	(*T)["INPLACE_MERGE"] = new CheckBox(97.5 - WindowHeapSize, 85 - WindowHeapSize, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, 0, System_White, _Align::right, "DV: Enable/disable inplace merge");
-	(*T)["AS_THREADS_COUNT"] = new InputField(std::to_string(_Data.DetectedThreads), 57.5 - WindowHeapSize, 85 - WindowHeapSize, 10, 20, System_White, NULL, 0x007FFFFF, System_White, "Threads count", 2, _Align::center, _Align::left, InputField::Type::NaturalNumbers);
+	(*T)["INPLACE_MERGE"] = new CheckBox(97.5 - WindowHeapSize, 95 - WindowHeapSize, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, 0, System_White, _Align::right, "DV: Enable/disable inplace merge");
+
+	(*T)["AS_THREADS_COUNT"] = new InputField(std::to_string(_Data.DetectedThreads), 92.5 - WindowHeapSize, 75 - WindowHeapSize, 10, 20, System_White, NULL, 0x007FFFFF, System_White, "Threads count", 2, _Align::center, _Align::right, InputField::Type::NaturalNumbers);
 
 	(*T)["AUTOUPDATECHECK"] = new CheckBox(-97.5 + WindowHeapSize, 35 - WindowHeapSize, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, AutoUpdatesCheck, System_White, _Align::left, "Check for updates automatically");
 

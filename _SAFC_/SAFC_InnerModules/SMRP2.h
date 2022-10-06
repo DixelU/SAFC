@@ -305,14 +305,29 @@ struct single_midi_processor_2
 		return value;
 	}
 
+	template<typename V>
+	inline static void __hack_resize(V& v, size_t newSize)
+	{
+		//hack beyond hacks
+		struct vt { typename V::value_type v; vt() {} };
+		static_assert(sizeof(vt[10]) == sizeof(typename V::value_type[10]), "alignment error");
+		typedef std::vector<vt, typename std::allocator_traits<typename V::allocator_type>::template rebind_alloc<vt>> V2;
+		reinterpret_cast<V2&>(v).resize(newSize);
+	}
+
 #define SAFC_S2B_PUSH_BACK
+#define SAFC_S2B_HACK_RESIZE
 	template<typename T>
 	static size_t push_back(std::vector<base_type>& vec, const T& value)
 	{
 		auto type_size = sizeof(T);
 		auto current_index = vec.size();		
 #ifdef SAFC_S2B_PUSH_BACK
+#ifdef SAFC_S2B_HACK_RESIZE
+		__hack_resize(vec, current_index + type_size);
+#else
 		vec.resize(current_index + type_size);
+#endif
 		auto& value_ref = *(T*)(&vec[current_index]);
 		value_ref = value;
 #else
@@ -620,9 +635,19 @@ struct single_midi_processor_2
 		return value * (hi * to / from) * radix + (lo * to / from);
 	}
 
+	using filters_multimap = std::multimap<base_type, event_transforming_filter>;
+	using filters_iterators = std::pair<filters_multimap::const_iterator, filters_multimap::const_iterator>;
+	inline static std::array<filters_iterators, 16> make_filter_bounding_iters(const filters_multimap& map)
+	{
+		std::array<filters_iterators, 16> iters;
+		for (int i = 0; i < 16; ++i)
+			iters[i] = map.equal_range(i << 4);
+		return iters;
+	}
+
 	inline static bool process_buffer(
 		std::vector<base_type>& data_buffer,
-		const std::multimap<base_type, event_transforming_filter>& filters,
+		std::array<filters_iterators, 16>& filters,
 		single_track_data& std_ref,
 		message_buffers& buffers)
 	{
@@ -648,22 +673,25 @@ struct single_midi_processor_2
 			}
 
 			auto type = get_value<base_type>(data_buffer, i + event_type);
-			auto channellless_type = type & 0xF0;
+			auto channellless_type = type >> 4;
 			di = expected_size(db_current);
 			bool isActive = true;
 
+			//todo: move "equal range" outside of the loop
 			{
-				auto [begin, end] = filters.equal_range(0x00);
+				auto& [begin, end] = filters[0];
+				auto beg_copy = begin;
 
-				for (; isActive && begin != end; ++begin)
-					isActive &= (begin->second)(db_begin, db_end, db_current, std_ref);
+				for (; isActive && beg_copy != end; ++beg_copy)
+					isActive &= (beg_copy->second)(db_begin, db_end, db_current, std_ref);
 			}
 
 			{
-				auto [begin, end] = filters.equal_range(channellless_type);
+				auto& [begin, end] = filters[channellless_type];
+				auto beg_copy = begin;
 
-				for (; isActive && begin != end; ++begin)
-					isActive &= (begin->second)(db_begin, db_end, db_current, std_ref);
+				for (; isActive && beg_copy != end; ++beg_copy)
+					isActive &= (beg_copy->second)(db_begin, db_end, db_current, std_ref);
 			}
 
 			db_current += di;
@@ -985,7 +1013,7 @@ struct single_midi_processor_2
 			else
 				tick += offset;
 
-			convert_ppq(tick, old_ppqn, new_ppqn);
+			tick = convert_ppq(tick, old_ppqn, new_ppqn);
 			return true;
 		};
 
@@ -1282,11 +1310,12 @@ struct single_midi_processor_2
 
 		for (auto& el : polyphony_stacks)
 			el.reserve(1000);
-		track_buffers.data_buffer.reserve(1 << 26);
-		write_buffer.reserve(1 << (24 - 4 * channels_split));
-		track_buffers.meta_buffer.reserve(1 << 10);
+		track_buffers.data_buffer.reserve(1ull << 26);
+		write_buffer.reserve(1ull << (24 - 4 * channels_split));
+		track_buffers.meta_buffer.reserve(1ull << 10);
 
 		auto filters = filters_constructor(data.settings);
+		auto filter_iters = make_filter_bounding_iters(filters);
 
 		bbb_ffr file_input(data.filename.c_str());
 		std::ofstream file_output(data.filename + data.postfix, std::ios::binary | std::ios::out);
@@ -1306,7 +1335,7 @@ struct single_midi_processor_2
 
 			put_data_in_buffer(file_input, track_buffers, loggers, data.settings, polyphony_stacks);
 			single_track_data track_processing_data;
-			if (!process_buffer(track_buffers.data_buffer, filters, track_processing_data, loggers))
+			if (!process_buffer(track_buffers.data_buffer, filter_iters, track_processing_data, loggers))
 				break;
 
 			if(data.settings.legacy.rsb_compression)
