@@ -153,10 +153,12 @@ struct single_midi_processor_2
 		std::atomic_bool processing;
 		std::atomic_bool finished;
 
+		using logger_t = singleline_logger;
+
 		message_buffers():
-			log(std::make_shared<singleline_logger>()),
-			warning(std::make_shared<singleline_logger>()),
-			error(std::make_shared<singleline_logger>()),
+			log(std::make_shared<logger_t>()),
+			warning(std::make_shared<logger_t>()),
+			error(std::make_shared<logger_t>()),
 			last_input_position(0),
 			processing(false),
 			finished(false)		
@@ -318,7 +320,7 @@ struct single_midi_processor_2
 #define SAFC_S2B_PUSH_BACK
 #define SAFC_S2B_HACK_RESIZE
 	template<typename T>
-	static size_t push_back(std::vector<base_type>& vec, const T& value)
+	inline static size_t push_back(std::vector<base_type>& vec, const T& value)
 	{
 		constexpr auto type_size = sizeof(T);
 		auto current_index = vec.size();		
@@ -335,6 +337,35 @@ struct single_midi_processor_2
 		vec.insert(vec.end(), begin, begin + type_size);
 #endif
 		return type_size;
+	}
+
+	inline static void copy_back(
+		std::vector<base_type>& vec,
+		const std::vector<base_type>::iterator& begin,
+		const std::vector<base_type>::iterator& end, 
+		const size_t expected_size)
+	{
+#ifdef SAFC_S2B_HACK_RESIZE
+		//damn slow memcpy
+		switch (expected_size)
+		{
+			case 1: { push_back(vec, get_value<uint8_t>(begin, 0)); break; }
+			case 2: { push_back(vec, get_value<uint16_t>(begin, 0)); break; }
+			case 3: { push_back(vec, get_value<uint16_t>(begin, 0)); push_back(vec, get_value<uint8_t>(begin, 2)); break; }
+			case 4: { push_back(vec, get_value<uint32_t>(begin, 0)); break; }
+			case 5: { push_back(vec, get_value<uint32_t>(begin, 0)); push_back(vec, get_value<uint8_t>(begin, 4)); break; }
+			case 6: { push_back(vec, get_value<uint32_t>(begin, 0)); push_back(vec, get_value<uint16_t>(begin, 2)); break; }
+			case 7: { push_back(vec, get_value<uint32_t>(begin, 0)); push_back(vec, get_value<uint16_t>(begin, 2)); push_back(vec, get_value<uint8_t>(begin, 6)); break; }
+			case 8: { push_back(vec, get_value<uint64_t>(begin, 0)); break; }
+			default:
+			{
+				vec.insert(vec.end(), begin, end);
+				break;
+			}
+		}
+#else
+		vec.insert(vec.end(), begin, end);
+#endif
 	}
 
 	template<typename T>
@@ -376,6 +407,7 @@ struct single_midi_processor_2
 
 		std::uint32_t header = 0;
 		std::uint32_t rsb = 0;
+		std::uint32_t track_expected_size = 0;
 		size_t noteoff_misses = 0;
 
 		bool is_good = true;
@@ -384,9 +416,8 @@ struct single_midi_processor_2
 		while (header != MTrk_header && file_input.good()) //MTrk = 1297379947
 			header = (header << 8) | file_input.get();
 
-		///here was header;
 		for (int i = 0; i < 4 && file_input.good(); i++)
-			file_input.get();
+			track_expected_size = (track_expected_size << 8) | file_input.get();
 
 		if (file_input.eof())
 			return false;
@@ -1011,11 +1042,6 @@ struct single_midi_processor_2
 		(const data_iterator& begin, const data_iterator& end, const data_iterator& cur, single_track_data& std_ref) -> bool
 		{
 			auto& tick = get_value<tick_type>(cur, tick_position);
-			/*
-			if (tick < selection_data.begin)
-				return (tick = disable_tick), false;
-			if (tick >= selection_data.end)
-				return (tick = disable_tick), false;*/ // seems to be unneed
 
 			if (offset < 0 && tick < -offset)
 				return (tick = disable_tick), false;
@@ -1285,28 +1311,32 @@ struct single_midi_processor_2
 
 				if (!compression)
 				{
-					track_data.insert(track_data.end(),
-						db_current + event_type,
-						db_current + actual_event_size[0]);
+					copy_back(track_data, 
+						db_current + event_type, 
+						db_current + actual_event_size[0], 
+						actual_event_size[0] - event_type);
 
 					if(actual_event_size[1] != actual_event_size[2])
-						track_data.insert(track_data.end(),
-							db_current + actual_event_size[1],
-							db_current + actual_event_size[2]);
+						copy_back(track_data,
+							db_current + actual_event_size[1], 
+							db_current + actual_event_size[2], 
+							actual_event_size[2] - actual_event_size[1]);
 				}
 				else
 				{
 					if (rsb != event_kind || ((rsb & 0xF0) == 0xF0)) [[likely]]
 						track_data.push_back(event_kind);
 
-					track_data.insert(track_data.end(),
+					copy_back(track_data,
 						db_current + event_param1,
-						db_current + actual_event_size[0]);
+						db_current + actual_event_size[0],
+						actual_event_size[0] - event_param1);
 
 					if (actual_event_size[1] != actual_event_size[2])
-						track_data.insert(track_data.end(),
+						copy_back(track_data,
 							db_current + actual_event_size[1],
-							db_current + actual_event_size[2]);
+							db_current + actual_event_size[2],
+							actual_event_size[2] - actual_event_size[1]);
 
 					rsb = event_kind;
 				}

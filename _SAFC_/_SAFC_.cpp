@@ -2234,7 +2234,7 @@ int main(int argc, char** argv)
 #else // _DEBUG 
 	ShowWindow(GetConsoleWindow(), SW_HIDE);
 #endif
-	ShowWindow(GetConsoleWindow(), SW_SHOW);
+	//ShowWindow(GetConsoleWindow(), SW_SHOW);
 
 	SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS);
 	//srand(1);
