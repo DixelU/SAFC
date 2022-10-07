@@ -320,7 +320,7 @@ struct single_midi_processor_2
 	template<typename T>
 	static size_t push_back(std::vector<base_type>& vec, const T& value)
 	{
-		auto type_size = sizeof(T);
+		constexpr auto type_size = sizeof(T);
 		auto current_index = vec.size();		
 #ifdef SAFC_S2B_PUSH_BACK
 #ifdef SAFC_S2B_HACK_RESIZE
@@ -716,6 +716,9 @@ struct single_midi_processor_2
 			if (!before_selection && !after_selection) [[likely]]
 				return true;
 
+			if (tick == disable_tick)
+				return false;
+
 			const auto& type = get_value<base_type>(cur, event_type);
 			auto channelless_type = type & 0xF0;
 
@@ -728,8 +731,13 @@ struct single_midi_processor_2
 
 				auto& reference_event_pair = get_value<tick_type>(cur, event_param3);
 				auto& reference_event_tick = get_value<tick_type>(begin, reference_event_pair);
-				bool trim_condition = (is_note_on && before_selection && (reference_event_tick >= selection_data.begin)) ||
-										(!is_note_on && after_selection && (reference_event_tick < selection_data.end));
+				bool trim_condition = 
+					(is_note_on && before_selection && (
+						reference_event_tick >= selection_data.begin && 
+						reference_event_tick != disable_tick)
+					) ||
+					(!is_note_on && after_selection && (reference_event_tick < selection_data.end));
+
 				if (!trim_condition)
 				{
 					reference_event_tick = disable_tick;
@@ -761,7 +769,7 @@ struct single_midi_processor_2
 					{
 						const auto& param1 = get_value<base_type>(cur, event_param1);
 						const auto& param2 = get_value<base_type>(cur, event_param2);
-						std::uint16_t key = (type << 8) | (param1);
+						const std::uint16_t key = (type << 8) | (param1);
 						auto& data = std_ref.selection_data.key_events_at_selection_front[key];
 						data = param2;
 						break;
@@ -770,16 +778,17 @@ struct single_midi_processor_2
 					case 0xD0:
 					{
 						const auto& param = get_value<base_type>(cur, event_param1);
-						std::uint16_t key = (type << 8);
+						const std::uint16_t key = type;
 						auto& data = std_ref.selection_data.channel_events_at_selection_front[key];
 						data.field1 = param;
+						data.field2_is_set = false;
 						break;
 					}
 					case 0xE0:
 					{
 						const auto& param1 = get_value<base_type>(cur, event_param1);
 						const auto& param2 = get_value<base_type>(cur, event_param2);
-						std::uint16_t key = (type << 8);
+						const std::uint16_t key = type;
 						auto& data = std_ref.selection_data.channel_events_at_selection_front[key];
 						data.field1 = param1;
 						data.field2 = param2;
@@ -1002,16 +1011,19 @@ struct single_midi_processor_2
 		(const data_iterator& begin, const data_iterator& end, const data_iterator& cur, single_track_data& std_ref) -> bool
 		{
 			auto& tick = get_value<tick_type>(cur, tick_position);
-
+			/*
 			if (tick < selection_data.begin)
 				return (tick = disable_tick), false;
 			if (tick >= selection_data.end)
-				return (tick = disable_tick), false;
+				return (tick = disable_tick), false;*/ // seems to be unneed
 
 			if (offset < 0 && tick < -offset)
 				return (tick = disable_tick), false;
 			else
 				tick += offset;
+
+			if (old_ppqn == new_ppqn)
+				return true;
 
 			tick = convert_ppq(tick, old_ppqn, new_ppqn);
 			return true;
@@ -1148,6 +1160,7 @@ struct single_midi_processor_2
 			track_data.push_back((std_ref.selection_data.frontal_tempo >> 8) & 0xFF);
 			track_data.push_back(std_ref.selection_data.frontal_tempo & 0xFF);
 		}
+		std_ref.selection_data.frontal_tempo = single_track_data::selection::default_tempo;
 
 		if (!std_ref.selection_data.frontal_color_event.is_empty)
 		{
@@ -1163,6 +1176,7 @@ struct single_midi_processor_2
 			for(int i = 0; i < std_ref.selection_data.frontal_color_event.size; ++i)
 				track_data.push_back(std_ref.selection_data.frontal_color_event.data[i]);
 		}
+		std_ref.selection_data.frontal_color_event.is_empty = true;
 
 		for (auto& [key_param1, param2] : std_ref.selection_data.key_events_at_selection_front)
 		{
@@ -1180,6 +1194,7 @@ struct single_midi_processor_2
 			track_data.push_back(param_1);
 			track_data.push_back(param2);
 		}
+		std_ref.selection_data.key_events_at_selection_front.clear();
 
 		for (auto& [event_kind, data] : std_ref.selection_data.channel_events_at_selection_front)
 		{
@@ -1196,6 +1211,7 @@ struct single_midi_processor_2
 			if(data.field2_is_set)
 				track_data.push_back(data.field2);
 		}
+		std_ref.selection_data.channel_events_at_selection_front.clear();
 	}
 
 	template<bool compression, bool channels_split>
@@ -1218,6 +1234,28 @@ struct single_midi_processor_2
 
 		bool first_tick = settings_data.settings.selection_data.enable_selection_front;
 
+		auto write_selection_front_wrap = [&]() {
+			if (first_tick)
+			{
+				auto original_front_tick = settings_data.settings.selection_data.begin + settings_data.settings.offset;
+				original_front_tick = (original_front_tick < 0) ? 0 : original_front_tick;
+
+				auto selection_front_tick =
+					convert_ppq(
+						original_front_tick,
+						settings_data.settings.old_ppqn,
+						settings_data.settings.new_ppqn
+					);
+
+				write_selection_front<compression, channels_split>(
+					selection_front_tick,
+					std_ref,
+					buffers,
+					out_buffer);
+				first_tick = false;
+			}
+		};
+
 		while (i < size)
 		{
 			std::size_t di = 0;
@@ -1232,15 +1270,7 @@ struct single_midi_processor_2
 			di = expected_size(db_current);
 			if (tick != disable_tick)
 			{
-				if (first_tick)
-				{
-					write_selection_front<compression, channels_split>(
-						settings_data.settings.selection_data.begin,
-						std_ref, 
-						buffers, 
-						out_buffer);
-					first_tick = false;
-				}
+				write_selection_front_wrap();
 
 				const auto& event_kind = get_value<base_type>(data_buffer, i + event_type);
 				const auto channel = event_kind & 0xF;
@@ -1286,15 +1316,7 @@ struct single_midi_processor_2
 			i += di;
 		}
 
-		if (first_tick)
-		{
-			write_selection_front<compression, channels_split>(
-				settings_data.settings.selection_data.begin,
-				std_ref,
-				buffers,
-				out_buffer);
-			first_tick = false;
-		}
+		write_selection_front_wrap();
 
 		return true;
 	}

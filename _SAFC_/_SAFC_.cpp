@@ -388,6 +388,10 @@ struct FileSettings
 		settings.details.initial_filesize = FileSize;
 		settings.offset = OffsetTicks;
 		settings.tempo.set_override_value(NewTempo);
+		if (OffsetTicks < 0 && -OffsetTicks > SelectionStart)
+			SelectionStart = -OffsetTicks;
+		if (SelectionStart && (SelectionLength < 0))
+			SelectionLength -= SelectionStart;
 		settings.selection_data = single_midi_processor_2::settings_obj::selection(SelectionStart, SelectionLength);
 
 		smrp_data->appearance_filename = AppearanceFilename;
@@ -1732,7 +1736,7 @@ void RestoreRegSettings()
 		catch (...) { std::cout << "Exception thrown while restoring AS_BCKGID from registry\n"; }
 		try
 		{
-			AutoUpdatesCheck = Settings::RegestryAccess.GetDwordValue(L"AUTOUPDATECHECK");
+			//AutoUpdatesCheck = Settings::RegestryAccess.GetDwordValue(L"AUTOUPDATECHECK");
 		}
 		catch (...) { std::cout << "Exception thrown while restoring AUTOUPDATECHECK from registry\n"; }
 		try
