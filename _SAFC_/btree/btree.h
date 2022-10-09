@@ -937,7 +937,7 @@ class btree : public Params::key_compare {
   typedef typename Params::allocator_type allocator_type;
   typedef typename std::allocator_traits<allocator_type>::template rebind_alloc<char>
     internal_allocator_type;
-
+  //std::allocator_traits<allocator_type>::template rebind_alloc<char>
  public:
   // Default constructor.
   btree(const key_compare &comp, const allocator_type &alloc);

@@ -605,16 +605,26 @@ struct MIDICollectionThreadedMerger
 				return;
 			}
 			printf("Active merging at last stage (untested)\n");
-			std::uint16_t T = 0;
-			std::uint8_t A = 0, B = 0;
-			F << "MThd" << '\0' << '\0' << '\0' << (char)6 << '\0' << (char)1;
-
-			for (int i = 0; i < 12; i++)
+			WORD T = 0;
+			BYTE A = 0, B = 0;
+			F.put('M');
+			F.put('T');
+			F.put('h');
+			F.put('d');
+			F.put(0);
+			F.put(0);
+			F.put(0);
+			F.put(6);
+			F.put(0);
+			F.put(1);
+			for (int i = 0; i < 10; i++
 				IM->get();
 			for (int i = 0; i < 12; i++)
 				RM->get();
-
-			T = TotalTracks;
+			A = IM->get();
+			B = IM->get();
+			T = (A + RM->get()) << 8;
+			T |= (B + RM->get());
 			A = T >> 8;
 			B = T;
 			F.put(A);
