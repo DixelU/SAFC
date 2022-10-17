@@ -6,14 +6,17 @@
 #include "handleable_ui_part.h"
 #include "single_text_line_settings.h"
 
-struct InputField : HandleableUIPart {
-	enum PassCharsType {
+struct InputField : HandleableUIPart
+{
+	enum PassCharsType
+	{
 		PassNumbers = 0b1,
 		PassFirstPoint = 0b10,
 		PassFrontMinusSign = 0b100,
 		PassAll = 0xFF
 	};
-	enum Type {
+	enum Type
+	{
 		NaturalNumbers = PassCharsType::PassNumbers,
 		WholeNumbers = PassCharsType::PassNumbers | PassCharsType::PassFrontMinusSign,
 		FP_PositiveNumbers = PassCharsType::PassNumbers | PassCharsType::PassFirstPoint,
@@ -24,16 +27,18 @@ struct InputField : HandleableUIPart {
 	Type InputType;
 	std::string CurrentString, DefaultString;
 	std::string* OutputSource;
-	DWORD MaxChars, BorderRGBAColor;
+	std::uint32_t MaxChars, BorderRGBAColor;
 	float Xpos, Ypos, Height, Width;
-	BIT Focused, FirstInput;
+	bool Focused, FirstInput;
 	SingleTextLine* STL;
 	SingleTextLine* Tip;
-	InputField(std::string DefaultString, float Xpos, float Ypos, float Height, float Width, SingleTextLineSettings* DefaultStringSettings, std::string* OutputSource, DWORD BorderRGBAColor, SingleTextLineSettings* TipLineSettings = NULL, std::string TipLineText = " ", DWORD MaxChars = 0, _Align InputAlign = _Align::left, _Align TipAlign = _Align::center, Type InputType = Type::Text) {
+	InputField(std::string DefaultString, float Xpos, float Ypos, float Height, float Width, SingleTextLineSettings* DefaultStringSettings, std::string* OutputSource, std::uint32_t BorderRGBAColor, SingleTextLineSettings* TipLineSettings = NULL, std::string TipLineText = " ", std::uint32_t MaxChars = 0, _Align InputAlign = _Align::left, _Align TipAlign = _Align::center, Type InputType = Type::Text)
+	{
 		this->DefaultString = DefaultString;
 		DefaultStringSettings->SetNewPos(Xpos, Ypos);
 		this->STL = DefaultStringSettings->CreateOne(DefaultString);
-		if (TipLineSettings) {
+		if (TipLineSettings)
+		{
 			this->Tip = TipLineSettings->CreateOne(TipLineText);
 			this->Tip->SafeChangePosition_Argumented(TipAlign, Xpos - ((TipAlign == _Align::left) ? 0.5f : ((TipAlign == _Align::right) ? -0.5f : 0)) * Width, Ypos - Height);
 		}
@@ -52,35 +57,43 @@ struct InputField : HandleableUIPart {
 		this->FirstInput = this->Focused = false;
 		this->OutputSource = OutputSource;
 	}
-	~InputField() override {
+	~InputField() override
+	{
 		delete STL;
 		delete Tip;
 	}
-	BIT MouseHandler(float mx, float my, CHAR Button/*-1 left, 1 right, 0 move*/, CHAR State /*-1 down, 1 up*/) override {
-		if (abs(mx - Xpos) < 0.5 * Width && abs(my - Ypos) < 0.5 * Height) {
+	bool MouseHandler(float mx, float my, CHAR Button/*-1 left, 1 right, 0 move*/, CHAR State /*-1 down, 1 up*/) override
+	{
+		if (abs(mx - Xpos) < 0.5 * Width && abs(my - Ypos) < 0.5 * Height)
+		{
 			if (!Focused)
 				FocusChange();
 			if (Button)return 1;
 			else return 0;
 		}
-		else {
+		else
+		{
 			if (Focused)
 				FocusChange();
 			return 0;
 		}
 	}
-	inline static bool CheckStringOnType(const std::string& String, InputField::Type CheckType) {
+	inline static bool CheckStringOnType(const std::string& String, InputField::Type CheckType) 
+	{
 		bool first_symb = true;
 		bool met_minus = false;
 		bool met_point = false;
-		for (const auto& ch : String) {
-			switch (CheckType) {
+		for (const auto& ch : String) 
+		{
+			switch (CheckType) 
+			{
 			case InputField::NaturalNumbers:
 				if (!(ch >= '0' && ch <= '9'))
 					return false;
 				break;
 			case InputField::WholeNumbers:
-				if (!((ch >= '0' && ch <= '9'))) {
+				if (!((ch >= '0' && ch <= '9')))
+				{
 					if (first_symb && !met_minus && ch == '-')
 						met_minus = true;
 					else
@@ -88,7 +101,8 @@ struct InputField : HandleableUIPart {
 				}
 				break;
 			case InputField::FP_PositiveNumbers:
-				if (!((ch >= '0' && ch <= '9'))) {
+				if (!((ch >= '0' && ch <= '9')))
+				{
 					if (!met_point && ch == '.')
 						met_point = true;
 					else
@@ -96,7 +110,8 @@ struct InputField : HandleableUIPart {
 				}
 				break;
 			case InputField::FP_Any:
-				if (!((ch >= '0' && ch <= '9'))) {
+				if (!((ch >= '0' && ch <= '9')))
+				{
 					if (!met_point && ch == '.')
 						met_point = true;
 					else if (first_symb && !met_minus && ch == '-')
@@ -114,25 +129,29 @@ struct InputField : HandleableUIPart {
 		}
 		return !first_symb;
 	}
-	void SafeMove(float dx, float dy) {
+	void SafeMove(float dx, float dy) 
+	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		STL->SafeMove(dx, dy);
 		if (Tip)Tip->SafeMove(dx, dy);
 		Xpos += dx;
 		Ypos += dy;
 	}
-	void SafeChangePosition(float NewX, float NewY) {
+	void SafeChangePosition(float NewX, float NewY)
+	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		NewX = Xpos - NewX;
 		NewY = Ypos - NewY;
 		SafeMove(NewX, NewY);
 	}
-	void FocusChange() {
+	void FocusChange() 
+	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		this->Focused = !this->Focused;
 		BorderRGBAColor = (((~(BorderRGBAColor >> 8)) << 8) | (BorderRGBAColor & 0xFF));
 	}
-	void UpdateInputString(std::string NewString = "") {
+	void UpdateInputString(std::string NewString = "")
+	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		if (NewString.size())
 			CurrentString = "";
@@ -140,24 +159,28 @@ struct InputField : HandleableUIPart {
 		this->STL->SafeStringReplace((NewString.size()) ? NewString.substr(0, this->MaxChars) : CurrentString);
 		this->STL->SafeChangePosition_Argumented(InputAlign, x, Ypos);
 	}
-	void BackSpace() {
+	void BackSpace()
+	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		ProcessFirstInput();
-		if (CurrentString.size()) {
+		if (CurrentString.size()) 
+		{
 			CurrentString.pop_back();
 			UpdateInputString();
 		}
-		else {
+		else 
 			this->STL->SafeStringReplace(" ");
-		}
 	}
-	void FlushCurrentStringWithoutGUIUpdate(BIT SetDefault = false) {
+	void FlushCurrentStringWithoutGUIUpdate(bool SetDefault = false)
+	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		this->CurrentString = (SetDefault) ? this->DefaultString : "";
 	}
-	void PutIntoSource(std::string* AnotherSource = NULL) {
+	void PutIntoSource(std::string* AnotherSource = NULL)
+	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
-		if (OutputSource) {
+		if (OutputSource) 
+		{
 			if (CurrentString.size())
 				*OutputSource = CurrentString;
 		}
@@ -165,14 +188,17 @@ struct InputField : HandleableUIPart {
 			if (CurrentString.size())
 				*AnotherSource = CurrentString;
 	}
-	void ProcessFirstInput() {
+	void ProcessFirstInput() 
+	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
-		if (FirstInput) {
+		if (FirstInput) 
+		{
 			FirstInput = 0;
 			CurrentString = "";
 		}
 	}
-	std::string GetCurrentInput(std::string Replacement) {
+	std::string GetCurrentInput(std::string Replacement)
+	{
 		if (InputField::CheckStringOnType(CurrentString, InputType))
 			return CurrentString;
 		if (STL && InputField::CheckStringOnType(STL->_CurrentText, InputType))
@@ -182,24 +208,33 @@ struct InputField : HandleableUIPart {
 		else
 			return "0";
 	}
-	void KeyboardHandler(char CH) {
+	void KeyboardHandler(char CH) 
+	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
-		if (Focused) {
-			if (CH >= 32) {
-				if (InputType & PassCharsType::PassNumbers) {
-					if (CH >= '0' && CH <= '9') {
+		if (Focused)
+		{
+			if (CH >= 32)
+			{
+				if (InputType & PassCharsType::PassNumbers)
+				{
+					if (CH >= '0' && CH <= '9')
+					{
 						Input(CH);
 						return;
 					}
 				}
-				if (InputType & PassCharsType::PassFrontMinusSign) {
-					if (CH == '-' && CurrentString.empty()) {
+				if (InputType & PassCharsType::PassFrontMinusSign)
+				{
+					if (CH == '-' && CurrentString.empty())
+					{
 						Input(CH);
 						return;
 					}
 				}
-				if (InputType & PassCharsType::PassFirstPoint) {
-					if (CH == '.' && CurrentString.find('.') >= CurrentString.size()) {
+				if (InputType & PassCharsType::PassFirstPoint)
+				{
+					if (CH == '.' && CurrentString.find('.') >= CurrentString.size())
+					{
 						Input(CH);
 						return;
 					}
@@ -211,33 +246,38 @@ struct InputField : HandleableUIPart {
 			else if (CH == 8)BackSpace();
 		}
 	}
-	void Input(char CH) {
+	void Input(char CH) 
+	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		ProcessFirstInput();
-		if (!MaxChars || CurrentString.size() < MaxChars) {
+		if (!MaxChars || CurrentString.size() < MaxChars)
+		{
 			CurrentString.push_back(CH);
 			UpdateInputString();
 		}
 	}
-	void SafeChangePosition_Argumented(BYTE Arg, float NewX, float NewY) {
+	void SafeChangePosition_Argumented(std::uint8_t Arg, float NewX, float NewY)
+	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		float CW = 0.5f * (
-			(INT32)((BIT)(GLOBAL_LEFT & Arg))
-			- (INT32)((BIT)(GLOBAL_RIGHT & Arg))
+			(INT32)((bool)(GLOBAL_LEFT & Arg))
+			- (INT32)((bool)(GLOBAL_RIGHT & Arg))
 			) * Width,
 			CH = 0.5f * (
-				(INT32)((BIT)(GLOBAL_BOTTOM & Arg))
-				- (INT32)((BIT)(GLOBAL_TOP & Arg))
+				(INT32)((bool)(GLOBAL_BOTTOM & Arg))
+				- (INT32)((bool)(GLOBAL_TOP & Arg))
 				) * Height;
 		SafeChangePosition(NewX + CW, NewY + CH);
 	}
-	void SafeStringReplace(std::string NewString) override {
+	void SafeStringReplace(std::string NewString) override 
+	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		CurrentString = NewString.substr(0, this->MaxChars);
 		UpdateInputString(NewString);
 		FirstInput = true;
 	}
-	void Draw() override {
+	void Draw() override
+	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		GLCOLOR(BorderRGBAColor);
 		glLineWidth(1);
@@ -251,7 +291,8 @@ struct InputField : HandleableUIPart {
 		if (Focused && Tip)
 			Tip->Draw();
 	}
-	inline DWORD TellType() override {
+	inline std::uint32_t TellType() override
+	{
 		return TT_INPUT_FIELD;
 	}
 };

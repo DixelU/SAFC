@@ -7,34 +7,40 @@
 
 struct HandleableUIPart {
 	std::recursive_mutex Lock;
-	BIT Enabled;
-	HandleableUIPart() {}
+	bool Enabled;
+	HandleableUIPart() { Enabled = true; }
 	//HandleableUIPart(HandleableUIPart&&) = delete;
 	virtual ~HandleableUIPart() {}
-	BIT virtual MouseHandler(float mx, float my, CHAR Button/*-1 left, 1 right*/, CHAR State /*-1 down, 1 up*/) = 0;
+	bool virtual MouseHandler(float mx, float my, CHAR Button/*-1 left, 1 right*/, CHAR State /*-1 down, 1 up*/) = 0;
 	void virtual Draw() = 0;
 	void virtual SafeMove(float, float) = 0;
 	void virtual SafeChangePosition(float, float) = 0;
-	void virtual SafeChangePosition_Argumented(BYTE, float, float) = 0;
+	void virtual SafeChangePosition_Argumented(std::uint8_t, float, float) = 0;
 	void virtual SafeStringReplace(std::string) = 0;
 	void virtual KeyboardHandler(char CH) = 0;
-	void Enable() {
+	void Enable()
+	{
 		Enabled = true;
 	}
-	void Disable() {
+	void Disable()
+	{
 		Enabled = false;
 	}
-	void Invert_Enable() {
+	void Invert_Enable()
+	{
 		Enabled ^= true;
 	}
-	bool virtual IsResizeable() {
+	bool virtual IsResizeable()
+	{
 		return false;
 	}
 	/* relative to right-bottom corner */
-	void virtual SafeResize(float NewHeight, float NewWidth) {
+	void virtual SafeResize(float NewHeight, float NewWidth)
+	{
 		return;
 	}
-	inline DWORD virtual TellType() {
+	inline std::uint32_t virtual TellType()
+	{
 		return TT_UNSPECIFIED;
 	}
 };

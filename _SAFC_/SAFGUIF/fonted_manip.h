@@ -6,18 +6,23 @@
 #include "../WinReg.h"
 #include "header_utils.h"
 
-BIT RestoreIsFontedVar() {
+bool RestoreIsFontedVar()
+{
 	bool RK_OP = false;
 	WinReg::RegKey RK;
-	try {
-		RK.Open(HKEY_CURRENT_USER, RegPath);
+	try
+	{
+		RK.Open(HKEY_CURRENT_USER, default_reg_path);
 		RK_OP = true;
 	}
-	catch (...) {
+	catch (...)
+	{
 		std::cout << "RK opening failed\n";
 	}
-	if (RK_OP) {
-		try {
+	if (RK_OP)
+	{
+		try
+		{
 			is_fonted = RK.GetDwordValue(L"FONTS_ENABLED");
 		}
 		catch (...) { std::cout << "Exception thrown while restoring FONTS_ENABLED from registry\n"; }
@@ -26,18 +31,24 @@ BIT RestoreIsFontedVar() {
 		RK.Close();
 	return false;
 }
-void SetIsFontedVar(BIT VAL) {
+
+void SetIsFontedVar(bool VAL)
+{
 	bool RK_OP = false;
 	WinReg::RegKey RK;
-	try {
-		RK.Open(HKEY_CURRENT_USER, RegPath);
+	try
+	{
+		RK.Open(HKEY_CURRENT_USER, default_reg_path);
 		RK_OP = true;
 	}
-	catch (...) {
+	catch (...)
+	{
 		std::cout << "RK opening failed\n";
 	}
-	if (RK_OP) {
-		try {
+	if (RK_OP)
+	{
+		try
+		{
 			RK.SetDwordValue(L"FONTS_ENABLED", VAL);
 		}
 		catch (...) { std::cout << "Exception thrown while saving FONTS_ENABLED from registry\n"; }
@@ -45,6 +56,6 @@ void SetIsFontedVar(BIT VAL) {
 	if (RK_OP)
 		RK.Close();
 }
-BIT _______unused = RestoreIsFontedVar();
+bool _______unused = RestoreIsFontedVar();
 
 #endif 
