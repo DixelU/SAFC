@@ -481,82 +481,76 @@ struct single_midi_processor_2
 			const auto current_index = data_buffer.size();
 			const auto tick_size = push_back<tick_type>(data_buffer, current_tick);
 
-			switch (command)
+			switch (command >> 4)
 			{
-				MH_CASE(0x80) : MH_CASE(0x90) :
+			case 0x8: case 0x9:	{
+				base_type com = command;
+				base_type key = param_buffer;
+				base_type vel = file_input.get();
+				tick_type reference = disable_tick;
+
+				com ^= ((!vel && bool(com & 0x10)) << 4);
+
+				std::uint16_t key_polyindex = (com & 0xF) | (((std::uint16_t)key) << 4);
+				bool polyphony_error = false;
+				auto& current_polyphony_object = current_polyphony[key_polyindex];
+				if (com & 0x10)
+					current_polyphony_object.push_back(current_index);
+				else if (current_polyphony_object.size())
 				{
-					base_type com = command;
-					base_type key = param_buffer;
-					base_type vel = file_input.get();
-					tick_type reference = disable_tick;
-
-					com ^= ((!vel && bool(com & 0x10)) << 4);
-
-					std::uint16_t key_polyindex = (com & 0xF) | (((std::uint16_t)key) << 4);
-					bool polyphony_error = false;
-					auto& current_polyphony_object = current_polyphony[key_polyindex];
-					if (com & 0x10)
-						current_polyphony_object.push_back(current_index);
-					else if (current_polyphony_object.size())
-					{
-						reference = current_polyphony_object.back();
-						current_polyphony_object.pop_back();
-						auto other_note_reference = reference + event_param3;
-						if (true || is_valid_index<tick_type>(data_buffer, other_note_reference)) [[likely]]
-							get_value<tick_type>(data_buffer, other_note_reference) = current_index;
-						else
-						{
-							polyphony_error = true;
-							(*buffers.warning) << (std::to_string(file_input.tellg()) +
-								": Incorrect index of note reference " + std::to_string(other_note_reference));
-						}
-					}
+					reference = current_polyphony_object.back();
+					current_polyphony_object.pop_back();
+					auto other_note_reference = reference + event_param3;
+					if (true || is_valid_index<tick_type>(data_buffer, other_note_reference)) [[likely]]
+						get_value<tick_type>(data_buffer, other_note_reference) = current_index;
 					else
 					{
 						polyphony_error = true;
-						++noteoff_misses;
-						(*buffers.warning) << (std::to_string(file_input.tellg()) + ": OFF of nonON Note: " + std::to_string(noteoff_misses));
+						(*buffers.warning) << (std::to_string(file_input.tellg()) +
+							": Incorrect index of note reference " + std::to_string(other_note_reference));
 					}
-
-					if (polyphony_error)
-					{
-						data_buffer.resize(current_index);
-						continue;
-					}
-
-					push_back<base_type>(data_buffer, com);
-					push_back<base_type>(data_buffer, key);
-					push_back<base_type>(data_buffer, vel);
-					push_back<tick_type>(data_buffer, reference);
-
-					break;
 				}
-				MH_CASE(0xA0) : MH_CASE(0xB0) : MH_CASE(0xE0) :
+				else
 				{
-					base_type com = command;
-					base_type p1 = param_buffer;
-					base_type p2 = file_input.get();
-
-					push_back<base_type>(data_buffer, com);
-					push_back<base_type>(data_buffer, p1);
-					push_back<base_type>(data_buffer, p2);
-
-					break;
+					polyphony_error = true;
+					++noteoff_misses;
+					(*buffers.warning) << (std::to_string(file_input.tellg()) + ": OFF of nonON Note: " + std::to_string(noteoff_misses));
 				}
-				MH_CASE(0xC0) : MH_CASE(0xD0) :
+
+				if (polyphony_error)
 				{
-					base_type com = command;
-					base_type p1 = param_buffer;
-
-					push_back<base_type>(data_buffer, com);
-					push_back<base_type>(data_buffer, p1);
-
-					break;
+					data_buffer.resize(current_index);
+					continue;
 				}
-			case 0xF0:
-			case 0xF7:
-			case 0xFF:
-			{
+
+				push_back<base_type>(data_buffer, com);
+				push_back<base_type>(data_buffer, key);
+				push_back<base_type>(data_buffer, vel);
+				push_back<tick_type>(data_buffer, reference);
+
+				break;
+			}
+			case 0xA: case 0xB: case 0xE: {
+				base_type com = command;
+				base_type p1 = param_buffer;
+				base_type p2 = file_input.get();
+
+				push_back<base_type>(data_buffer, com);
+				push_back<base_type>(data_buffer, p1);
+				push_back<base_type>(data_buffer, p2);
+
+				break;
+			}
+			case 0xC: case 0xD: {
+				base_type com = command;
+				base_type p1 = param_buffer;
+
+				push_back<base_type>(data_buffer, com);
+				push_back<base_type>(data_buffer, p1);
+
+				break;
+			}
+			case 0xF: {
 				base_type com = command;
 				base_type type = param_buffer;
 
@@ -592,8 +586,7 @@ struct single_midi_processor_2
 
 				break;
 			}
-			default:
-			{
+			default: {
 				(*buffers.error) << (std::to_string(file_input.tellg()) + ": Unknown event type " + std::to_string(command));
 				break;
 			}
@@ -627,7 +620,7 @@ struct single_midi_processor_2
 	inline static constexpr int gapped_size_legnth = 2 * (1) + 1;
 
 	template<bool ready_for_write = false>
-	inline static std::enable_if<!ready_for_write, std::ptrdiff_t>::type expected_size(const data_iterator& cur)
+	FORCEDINLINE inline static std::enable_if<!ready_for_write, std::ptrdiff_t>::type expected_size(const data_iterator& cur)
 	{
 		const auto& type = cur[8];
 		auto size = expected_size<ready_for_write>(type);
@@ -641,7 +634,7 @@ struct single_midi_processor_2
 	}
 
 	template<bool ready_for_write = false>
-	inline static std::enable_if<ready_for_write, std::array<std::ptrdiff_t, gapped_size_legnth>>::type
+	FORCEDINLINE inline static std::enable_if<ready_for_write, std::array<std::ptrdiff_t, gapped_size_legnth>>::type
 		expected_size(const data_iterator& cur)
 	{
 		const auto& type = cur[8];
