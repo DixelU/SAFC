@@ -81,6 +81,124 @@ public:
 	}
 };
 
+namespace 
+{
+	using base_type = std::uint8_t;
+	FORCEDINLINE inline static void ostream_write(std::vector<base_type>& vec, std::ostream& out)
+	{
+		out.write(((char*)vec.data()), vec.size());;
+	}
+}
+
+
+template<bool channels_split>
+struct track_data;
+
+template<>
+struct track_data<false>
+{
+	using tick_type = std::uint64_t;
+	using metasize_type = std::uint32_t;
+	using sgsize_type = std::int32_t;
+	using sgtick_type = std::int64_t;
+	using ppq_type = std::uint16_t;
+	
+	std::vector<uint8_t> data;
+	tick_type prev_tick;
+	inline std::vector<uint8_t>& get_vec(const uint8_t&)
+	{
+		return data;
+	}
+	inline void clear()
+	{
+		data.clear();
+		prev_tick = 0;
+	}
+	inline tick_type& get_tick(const uint8_t&)
+	{
+		return prev_tick;
+	}
+	inline tick_type count()
+	{
+		return !data.empty();
+	}
+	inline void reserve(const uint64_t& size)
+	{
+		data.reserve(size);
+	}
+	inline void dump(std::ostream& out, bool disallow_empty_tracks)
+	{
+		if (disallow_empty_tracks && data.empty())
+			return;
+
+		auto size_plus_4 = data.size() + 4;
+
+		base_type header[8];
+		header[0] = 'M';
+		header[1] = 'T';
+		header[2] = 'r';
+		header[3] = 'k';
+		header[4] = (size_plus_4 >> 24) & 0xFF;
+		header[5] = (size_plus_4 >> 16) & 0xFF;
+		header[6] = (size_plus_4 >> 8) & 0xFF;
+		header[7] = (size_plus_4) & 0xFF;
+
+		base_type ending[4];
+		ending[0] = 0;
+		ending[1] = 0xFF;
+		ending[2] = 0x2F;
+		ending[3] = 0;
+
+		out.write((const char*) &header[0], sizeof(header));
+		ostream_write(data, out);
+		out.write((const char*)&ending[0], sizeof(ending));
+	}
+};
+
+template<>
+struct track_data<true>
+{
+	using tick_type = std::uint64_t;
+	using base_type = std::uint8_t;
+	using metasize_type = std::uint32_t;
+	using sgsize_type = std::int32_t;
+	using sgtick_type = std::int64_t;
+	using ppq_type = std::uint16_t;
+
+	track_data<false> data[16];
+
+	inline std::vector<uint8_t>& get_vec(const uint8_t& channel)
+	{
+		return data[channel].get_vec(channel);
+	}
+	inline void clear()
+	{
+		for (auto& singleData : data)
+			singleData.clear();
+	}
+	inline tick_type count()
+	{
+		tick_type counter = 0;
+		for (auto& singleData : data)
+			counter += singleData.count();
+		return counter;
+	}
+	inline tick_type& get_tick(const uint8_t& channel)
+	{
+		return data[channel].get_tick(channel);
+	}
+	inline void dump(std::ostream& out, bool disallow_empty_tracks)
+	{
+		for (auto& singleData : data)
+			singleData.dump(out, disallow_empty_tracks);
+	}
+	inline void reserve(const uint64_t& size)
+	{
+		for (auto& singleData : data)
+			singleData.reserve(size);
+	}
+};
+
 struct single_midi_processor_2
 {
 	inline static constexpr std::uint32_t MTrk_header = 1297379947;
@@ -620,7 +738,7 @@ struct single_midi_processor_2
 	inline static constexpr int gapped_size_legnth = 2 * (1) + 1;
 
 	template<bool ready_for_write = false>
-	FORCEDINLINE inline static std::enable_if<!ready_for_write, std::ptrdiff_t>::type expected_size(const data_iterator& cur)
+	FORCEDINLINE inline static typename std::enable_if<!ready_for_write, std::ptrdiff_t>::type expected_size(const data_iterator& cur)
 	{
 		const auto& type = cur[8];
 		auto size = expected_size<ready_for_write>(type);
@@ -634,7 +752,7 @@ struct single_midi_processor_2
 	}
 
 	template<bool ready_for_write = false>
-	FORCEDINLINE inline static std::enable_if<ready_for_write, std::array<std::ptrdiff_t, gapped_size_legnth>>::type
+	FORCEDINLINE inline static typename std::enable_if<ready_for_write, std::array<std::ptrdiff_t, gapped_size_legnth>>::type
 		expected_size(const data_iterator& cur)
 	{
 		const auto& type = cur[8];
@@ -1065,101 +1183,6 @@ struct single_midi_processor_2
 		return filters;
 	}
 
-	template<bool channels_split>
-	struct track_data;
-
-	template<>
-	struct track_data<false>
-	{
-		std::vector<uint8_t> data;
-		tick_type prev_tick;
-		inline std::vector<uint8_t>& get_vec(const uint8_t&)
-		{
-			return data;
-		}
-		inline void clear()
-		{
-			data.clear();
-			prev_tick = 0;
-		}
-		inline tick_type& get_tick(const uint8_t&)
-		{
-			return prev_tick;
-		}
-		inline tick_type count()
-		{
-			return !data.empty();
-		}
-		inline void reserve(const uint64_t& size)
-		{
-			data.reserve(size);
-		}
-		inline void dump(std::ostream& out, bool disallow_empty_tracks)
-		{
-			if (disallow_empty_tracks && data.empty())
-				return;
-
-			auto size_plus_4 = data.size() + 4;
-
-			base_type header[8];
-			header[0] = 'M';
-			header[1] = 'T';
-			header[2] = 'r';
-			header[3] = 'k';
-			header[4] = (size_plus_4 >> 24) & 0xFF;
-			header[5] = (size_plus_4 >> 16) & 0xFF;
-			header[6] = (size_plus_4 >> 8) & 0xFF;
-			header[7] = (size_plus_4) & 0xFF;
-
-			base_type ending[4];
-			ending[0] = 0;
-			ending[1] = 0xFF;
-			ending[2] = 0x2F;
-			ending[3] = 0;
-
-			out.write((const char*) &header[0], sizeof(header));
-			ostream_write(data, out);
-			out.write((const char*)&ending[0], sizeof(ending));
-		}
-	};
-
-	template<>
-	struct track_data<true>
-	{
-		track_data<false> data[16];
-
-		inline std::vector<uint8_t>& get_vec(const uint8_t& channel)
-		{
-			return data[channel].get_vec(channel);
-		}
-		inline void clear()
-		{
-			for (auto& singleData : data)
-				singleData.clear();
-		}
-		inline tick_type count()
-		{
-			tick_type counter = 0;
-			for (auto& singleData : data)
-				counter += singleData.count();
-			return counter;
-		}
-		inline tick_type& get_tick(const uint8_t& channel)
-		{
-			return data[channel].get_tick(channel);
-		}
-		inline void dump(std::ostream& out, bool disallow_empty_tracks)
-		{
-			for (auto& singleData : data)
-				singleData.dump(out, disallow_empty_tracks);
-		}
-		inline void reserve(const uint64_t& size)
-		{
-			for (auto& singleData : data)
-				singleData.reserve(size);
-		}
-	};
-
 	template<bool compression, bool channels_split>
 	inline static void write_selection_front(
 		tick_type selection_front_tick,
@@ -1366,8 +1389,9 @@ struct single_midi_processor_2
 		auto filter_iters = make_filter_bounding_iters(filters);
 
 		bbb_ffr file_input(data.filename.c_str());
-		std::ofstream file_output(data.filename + data.postfix, std::ios::binary | std::ios::out);
-
+		auto [file_output_ptr, fo_ptr] = open_wide_stream<std::ostream>(data.filename + data.postfix, L"wb");
+		auto& file_output = *file_output_ptr;
+		
 		for (int i = 0; i < 12 && file_input.good(); i++)
 			file_output.put(file_input.get());
 
@@ -1413,7 +1437,8 @@ struct single_midi_processor_2
 		file_output.seekp(10, std::ios::beg);
 		file_output.put(track_counter >> 8);
 		file_output.put(track_counter & 0xFF);
-		file_output.close();
+		fclose(fo_ptr);
+		delete file_output_ptr;
 
 		data.tracks_count = track_counter;
 
@@ -1422,4 +1447,4 @@ struct single_midi_processor_2
 	}
 };
 
-#endif SAF_SMRP2
+#endif

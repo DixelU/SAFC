@@ -616,7 +616,7 @@ std::wstring SOFD(const wchar_t* Title)
 	ofn.lpstrFileTitle = NULL;
 	ofn.nMaxFileTitle = 0;
 	ofn.lpstrInitialDir = NULL;
-	if (GetSaveFileName(&ofn)) return std::wstring(filename);
+	if (GetSaveFileNameW(&ofn)) return std::wstring(filename);
 	else 
 	{
 		switch (CommDlgExtendedError())
@@ -1683,14 +1683,14 @@ void OnStart()
 		ILO.detach();
 	}, GlobalMCTM, &_Data, MW).detach();
 
-	std::thread([](std::shared_ptr<MIDICollectionThreadedMerger> pMCTM, MoveableWindow* MW, std::chrono::steady_clock::time_point start_timepoint)
+	std::thread([](std::shared_ptr<MIDICollectionThreadedMerger> pMCTM, MoveableWindow* MW, std::chrono::high_resolution_clock::time_point start_timepoint)
 	{
 		auto timer_ptr = (InputField*)(*MW)["TIMER"];
 		while (!pMCTM->CompleteFlag)
 		{
 			auto now = std::chrono::high_resolution_clock::now();
-			auto difference = std::chrono::duration_cast<std::chrono::duration<double>>(now - start_timepoint);
-			timer_ptr->SafeStringReplace(std::to_string(difference.count()) + " s");
+			auto difference = std::chrono::duration_cast<std::chrono::microseconds>(now - start_timepoint);
+			timer_ptr->SafeStringReplace(std::to_string(difference.count() * 1.0e-6) + " s");
 			std::this_thread::sleep_for(std::chrono::milliseconds(50));
 		}
 		std::cout << "F: Out from sleep!!!\n";
@@ -1726,18 +1726,14 @@ void RestoreRegSettings()
 	{
 		Settings::RegestryAccess.Open(HKEY_CURRENT_USER, default_reg_path);
 		Opened = true;
-	} catch (...) {
-		std::cout << "Exception thrown while opening RK\n";
-	}
+	} 
 	catch (...) { std::cout << "Exception thrown while opening RK\n"; }
 	if (Opened)
 	{
 		try
 		{
 			Settings::ShaderMode = Settings::RegestryAccess.GetDwordValue(L"AS_BCKGID");
-		} catch (...) {
-			std::cout << "Exception thrown while restoring AS_BCKGID from registry\n";
-		}
+		} 
 		catch (...) { std::cout << "Exception thrown while restoring AS_BCKGID from registry\n"; }
 		try
 		{
@@ -1752,22 +1748,16 @@ void RestoreRegSettings()
 		try
 		{
 			_Data.DetectedThreads = Settings::RegestryAccess.GetDwordValue(L"AS_THREADS_COUNT");
-		} catch (...) {
-			std::cout << "Exception thrown while restoring AS_THREADS_COUNT from registry\n";
-		}
+		} 
 		catch (...) { std::cout << "Exception thrown while restoring AS_THREADS_COUNT from registry\n"; }
 		try
 		{
 			DefaultBoolSettings = Settings::RegestryAccess.GetDwordValue(L"DEFAULT_BOOL_SETTINGS");
-		} catch (...) {
-			std::cout << "Exception thrown while restoring AS_INPLACE_FLAG from registry\n";
 		}
 		catch (...) { std::cout << "Exception thrown while restoring AS_INPLACE_FLAG from registry\n"; }
 		try
 		{
 			_Data.InplaceMergeFlag = Settings::RegestryAccess.GetDwordValue(L"AS_INPLACE_FLAG");
-		} catch (...) {
-			std::cout << "Exception thrown while restoring INPLACE_MERGE from registry\n";
 		}
 		catch (...) { std::cout << "Exception thrown while restoring INPLACE_MERGE from registry\n"; }
 		try
@@ -1779,17 +1769,13 @@ void RestoreRegSettings()
 		try
 		{
 			lFontSymbolsInfo::Size = Settings::RegestryAccess.GetDwordValue(L"FONTSIZE");//COLLAPSEDFONTNAME
-		} catch (...) {
-			std::cout << "Exception thrown while restoring FONTSIZE from registry\n";
 		}
 		catch (...) { std::cout << "Exception thrown while restoring FONTSIZE from registry\n"; }
 		try
 		{
 			std::uint32_t B = Settings::RegestryAccess.GetDwordValue(L"FLOAT_FONTHTW");//COLLAPSEDFONTNAME
 			lFONT_HEIGHT_TO_WIDTH = *(float*)&B;
-		} catch (...) {
-			std::cout << "Exception thrown while restoring FLOAT_FONTHTW from registry\n";
-		}
+		} catch (...) {	std::cout << "Exception thrown while restoring FLOAT_FONTHTW from registry\n"; }
 		Settings::RegestryAccess.Close();
 	}
 }

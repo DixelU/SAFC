@@ -7,7 +7,7 @@ void ThrowAlert_Warning(std::string&& AlertText);
 
 #include <set>
 #include <thread>
-#include <ranges>
+//#include <ranges>
 
 #include "SMRP2.h"
 

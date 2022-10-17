@@ -31,11 +31,11 @@ struct FastMIDIChecker
 	void Collect() {
 		auto [f, fo_ptr] = open_wide_stream<std::istream, std::ios::in>(File, L"rb");
 		std::uint32_t MTHD = 0;
-		MTHD = (MTHD << 8) | (f.get());
-		MTHD = (MTHD << 8) | (f.get());
-		MTHD = (MTHD << 8) | (f.get());
-		MTHD = (MTHD << 8) | (f.get());
-		if (MTHD == MThd && f.good())
+		MTHD = (MTHD << 8) | (f->get());
+		MTHD = (MTHD << 8) | (f->get());
+		MTHD = (MTHD << 8) | (f->get());
+		MTHD = (MTHD << 8) | (f->get());
+		if (MTHD == MThd && f->good())
 		{
 			IsMIDI = 1;
 			f->seekg(10, std::ios::beg);
