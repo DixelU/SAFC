@@ -255,7 +255,7 @@ struct single_midi_processor_2
 		std::atomic_uint64_t tracks_count;
 	};
 
-	inline static void ostream_write(
+	FORCEDINLINE inline static void ostream_write(
 		std::vector<base_type>& vec,
 		const std::vector<base_type>::iterator& beg, 
 		const std::vector<base_type>::iterator& end, 
@@ -263,17 +263,17 @@ struct single_midi_processor_2
 		out.write(((char*)vec.data()) + (beg - vec.begin()), end - beg);
 	}
 
-	inline static void ostream_write(std::vector<base_type>& vec, std::ostream& out)
+	FORCEDINLINE inline static void ostream_write(std::vector<base_type>& vec, std::ostream& out)
 	{
 		out.write(((char*)vec.data()), vec.size());;
 	}
 
-	inline static uint8_t push_vlv(const uint32_t& value, std::vector<base_type>& vec) 
+	FORCEDINLINE inline static uint8_t push_vlv(const uint32_t& value, std::vector<base_type>& vec)
 	{
 		return push_vlv_s(value, vec);
 	};
 
-	inline static uint8_t push_vlv_s(const tick_type& s_value, std::vector<base_type>& vec)
+	FORCEDINLINE inline static uint8_t push_vlv_s(const tick_type& s_value, std::vector<base_type>& vec)
 	{
 		constexpr uint8_t $7byte_mask = 0x7F, max_size = 10, $7byte_mask_size = 7;
 		constexpr uint8_t $adjacent7byte_mask = ~$7byte_mask;
@@ -295,7 +295,7 @@ struct single_midi_processor_2
 		return r_size;
 	}
 
-	inline static uint64_t get_vlv(bbb_ffr& file_input)
+	FORCEDINLINE inline static uint64_t get_vlv(bbb_ffr& file_input)
 	{
 		uint64_t value = 0;
 		base_type single_byte;
@@ -308,7 +308,7 @@ struct single_midi_processor_2
 	}
 
 	template<typename V>
-	inline static void __hack_resize(V& v, size_t newSize)
+	FORCEDINLINE inline static void __hack_resize(V& v, size_t newSize)
 	{
 		//hack beyond hacks
 		struct vt { typename V::value_type v; vt() {} };
@@ -320,7 +320,7 @@ struct single_midi_processor_2
 #define SAFC_S2B_PUSH_BACK
 #define SAFC_S2B_HACK_RESIZE
 	template<typename T>
-	inline static size_t push_back(std::vector<base_type>& vec, const T& value)
+	FORCEDINLINE inline static size_t push_back(std::vector<base_type>& vec, const T& value)
 	{
 		constexpr auto type_size = sizeof(T);
 		auto current_index = vec.size();		
@@ -339,7 +339,7 @@ struct single_midi_processor_2
 		return type_size;
 	}
 
-	inline static void copy_back(
+	FORCEDINLINE inline static void copy_back(
 		std::vector<base_type>& vec,
 		const std::vector<base_type>::iterator& begin,
 		const std::vector<base_type>::iterator& end, 
@@ -369,19 +369,19 @@ struct single_midi_processor_2
 	}
 
 	template<typename T>
-	static T& get_value(std::vector<base_type>& vec, const size_t& index)
+	FORCEDINLINE static T& get_value(std::vector<base_type>& vec, const size_t& index)
 	{
 		return *(T*)&vec[index];
 	}
 
 	template<typename T>
-	static T& get_value(const std::vector<base_type>::iterator& vec, const size_t& index)
+	FORCEDINLINE static T& get_value(const std::vector<base_type>::iterator& vec, const size_t& index)
 	{
 		return *(T*)&vec[index];
 	}
 
 	template<typename T>
-	static bool is_valid_index(std::vector<base_type>& vec, const size_t& index)
+	FORCEDINLINE static bool is_valid_index(std::vector<base_type>& vec, const size_t& index)
 	{
 		return vec.size() <= index + sizeof(T);
 	}
@@ -606,16 +606,19 @@ struct single_midi_processor_2
 	}
 
 	template<bool ready_for_write = false>
-	inline constexpr static std::ptrdiff_t expected_size(const base_type& v)
+	FORCEDINLINE inline constexpr static std::ptrdiff_t expected_size(const base_type& v)
 	{
-		switch (v)
+		switch (v >> 4)
 		{
-			MH_CASE(0xA0) : MH_CASE(0xB0) : MH_CASE(0xE0) :
-				return 8ll + 3ll;
-			MH_CASE(0x80) : MH_CASE(0x90) :
-				return 8ll + 3ll + (8ll * !ready_for_write);
-			MH_CASE(0xC0) : MH_CASE(0xD0) :
-				return 8ll + 2ll;
+			//MH_CASE(0xA0) : MH_CASE(0xB0) : MH_CASE(0xE0) :
+		case 0xA: case 0xB: case 0xE:
+			return 8ll + 3ll;
+			//MH_CASE(0x80) : MH_CASE(0x90) :
+		case 0x8: case 0x9:
+			return 8ll + 3ll + (8ll * !ready_for_write);
+			//MH_CASE(0xC0) : MH_CASE(0xD0) :
+		case 0xC: case 0xD:
+			return 8ll + 2ll;
 		default:
 			return -1ll;
 		}
@@ -657,7 +660,7 @@ struct single_midi_processor_2
 		};
 	}
 
-	inline static tick_type convert_ppq(const tick_type& value, const ppq_type& from, const ppq_type& to)
+	FORCEDINLINE inline static tick_type convert_ppq(const tick_type& value, const ppq_type& from, const ppq_type& to)
 	{
 		constexpr auto radix = 1ull << 32;
 		auto hi = value >> 32;

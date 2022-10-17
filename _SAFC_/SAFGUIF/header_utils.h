@@ -29,6 +29,12 @@ float dumb_rotation_angle = 0.f;
 constexpr int window_base_width = 720;
 constexpr int window_base_height = 720;
 
+#ifdef _MSC_VER
+#define FORCEDINLINE __forceinline
+#else
+#define FORCEDINLINE __attribute__((always_inline))
+#endif
+
 constexpr float angle_to_radians(float a)
 {
 	return 0.0174532925f * a;

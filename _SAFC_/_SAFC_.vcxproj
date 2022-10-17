@@ -216,6 +216,7 @@
       <BufferSecurityCheck>false</BufferSecurityCheck>
       <AdditionalOptions>/Zc:lambda %(AdditionalOptions)</AdditionalOptions>
       <RuntimeTypeInfo>false</RuntimeTypeInfo>
+      <AssemblerOutput>All</AssemblerOutput>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -264,6 +265,7 @@
       <LanguageStandard_C>stdc17</LanguageStandard_C>
       <BufferSecurityCheck>false</BufferSecurityCheck>
       <AdditionalOptions>/Zc:lambda %(AdditionalOptions)</AdditionalOptions>
+      <AssemblerOutput>All</AssemblerOutput>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
