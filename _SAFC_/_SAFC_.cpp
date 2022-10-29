@@ -2489,15 +2489,11 @@ int main(int argc, char** argv)
 
 	std::shared_ptr<SafcRuntime> runtime;
 
-	if (argc > 1) try
-	{
+	if (argc > 1)
 		runtime = std::make_shared<SafcCliRuntime>();
-		(*runtime)(argc, argv);
-		return 0;
-	}
-	catch (...) {}
+	else
+		runtime = std::make_shared<SafcGuiRuntime>();
 
-	runtime = std::make_shared<SafcGuiRuntime>();
 	(*runtime)(argc, argv);
 
 	return 0;
