@@ -7,7 +7,8 @@
 #include <fstream>
 
 std::unordered_map<char, std::string> ASCII;
-void InitASCIIMap() {
+void InitASCIIMap()
+{
 	ASCII.clear();
 	std::ifstream file("ascii.dotmap", std::ios::in);
 	std::string T;
@@ -108,10 +109,12 @@ void InitASCIIMap() {
 		ASCII['}'] = "7856521";
 		ASCII['~'] = "4859~";
 		ASCII[127] = "71937 97 31";
-		for (int i = 128; i < 256; i++)ASCII[i] = " ";
+		for (int i = 128; i < 256; i++) ASCII[i] = " ";
 	}
-	else {
-		for (int i = 0; i < 256; i++) {
+	else
+	{
+		for (int i = 0; i < 256; i++)
+		{
 			getline(file, T);
 			ASCII[(char)i] = T;
 		}

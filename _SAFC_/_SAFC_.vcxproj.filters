@@ -135,9 +135,6 @@
     <ClInclude Include="SAFGUIF\fonted_manip.h">
       <Filter>Файлы заголовков</Filter>
     </ClInclude>
-    <ClInclude Include="BWMR.h">
-      <Filter>Файлы заголовков</Filter>
-    </ClInclude>
     <ClInclude Include="SAFC_InnerModules\HTDBR.h">
       <Filter>Файлы заголовков\MIDI Processing</Filter>
     </ClInclude>
@@ -147,16 +144,13 @@
     <ClInclude Include="SAFGUIF\editbox.h">
       <Filter>Файлы заголовков\SAFGUIF</Filter>
     </ClInclude>
-    <ClInclude Include="movable_resizeable_window.h">
-      <Filter>Файлы заголовков</Filter>
-    </ClInclude>
     <ClInclude Include="SAFGUIF\movable_resizeable_window.h">
       <Filter>Файлы заголовков\SAFGUIF</Filter>
     </ClInclude>
     <ClInclude Include="MRWF.h">
       <Filter>Файлы заголовков\MIDI Processing</Filter>
     </ClInclude>
-    <ClInclude Include="PIPE.h">
+    <ClInclude Include="SAFC_InnerModules\SMRP2.h">
       <Filter>Файлы заголовков\MIDI Processing</Filter>
     </ClInclude>
   </ItemGroup>

@@ -5,19 +5,22 @@
 #include "../SAFGUIF/SAFGUIF.h"
 #include "../SAFC_InnerModules/SAFC_IM.h"
 
-struct PLC_VolumeWorker :HandleableUIPart {
-	std::shared_ptr<PLC<BYTE, BYTE>> PLC_bb;
-	std::pair<BYTE, BYTE> _HoveredPoint;
+struct PLC_VolumeWorker : HandleableUIPart
+{
+	std::shared_ptr<PLC<std::uint8_t, std::uint8_t>> PLC_bb;
+	std::pair<std::uint8_t, std::uint8_t> _HoveredPoint;
 	SingleTextLine* STL_MSG;
 	float CXPos, CYPos, HorizontalSidesSize, VerticalSidesSize;
 	float MouseX, MouseY, _xsqsz, _ysqsz;
-	BIT Hovered, ActiveSetting, RePutMode/*JustPut=0*/;
-	BYTE XCP, YCP;
-	BYTE FPX, FPY;
-	~PLC_VolumeWorker() override {
+	bool Hovered, ActiveSetting, RePutMode/*JustPut=0*/;
+	std::uint8_t XCP, YCP;
+	std::uint8_t FPX, FPY;
+	~PLC_VolumeWorker() override
+	{
 		delete STL_MSG;
 	}
-	PLC_VolumeWorker(float CXPos, float CYPos, float Width, float Height, std::shared_ptr<PLC<BYTE, BYTE>> PLC_bb = nullptr) {
+	PLC_VolumeWorker(float CXPos, float CYPos, float Width, float Height, std::shared_ptr<PLC<std::uint8_t, std::uint8_t>> PLC_bb = nullptr)
+	{
 		this->PLC_bb = PLC_bb;
 		this->CXPos = CXPos;
 		this->CYPos = CYPos;
@@ -26,12 +29,13 @@ struct PLC_VolumeWorker :HandleableUIPart {
 		this->HorizontalSidesSize = Width;
 		this->VerticalSidesSize = Height;
 
-		this->STL_MSG = new SingleTextLine("_", CXPos, CYPos, System_White->XUnitSize, System_White->YUnitSize, System_White->SpaceWidth, 2, 0xFFAFFFCF, new DWORD(0xAFFFAFCF), (7 << 4) | 3);
+		this->STL_MSG = new SingleTextLine("_", CXPos, CYPos, System_White->XUnitSize, System_White->YUnitSize, System_White->SpaceWidth, 2, 0xFFAFFFCF, new std::uint32_t(0xAFFFAFCF), (7 << 4) | 3);
 		this->MouseX = this->MouseY = 0.f;
-		this->_HoveredPoint = std::pair<BYTE, BYTE>(0, 0);
+		this->_HoveredPoint = std::pair<std::uint8_t, std::uint8_t>(0, 0);
 		ActiveSetting = Hovered = FPX = FPY = XCP = YCP = 0;
 	}
-	void Draw() override {
+	void Draw() override
+	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		float begx = CXPos - 0.5f * HorizontalSidesSize, begy = CYPos - 0.5f * VerticalSidesSize;
 		glColor4f(1, 1, 1, (Hovered) ? 0.85f : 0.5f);
@@ -50,7 +54,8 @@ struct PLC_VolumeWorker :HandleableUIPart {
 		glVertex2f(begx + 0.5f * HorizontalSidesSize, begy);
 		glEnd();
 
-		if (Hovered) {
+		if (Hovered)
+		{
 			glColor4f(1, 1, 1, 0.25);
 			glBegin(GL_LINES);
 			glVertex2f(begx + _xsqsz * XCP, begy);
@@ -63,7 +68,8 @@ struct PLC_VolumeWorker :HandleableUIPart {
 			glVertex2f(begx + HorizontalSidesSize, begy + _ysqsz * (YCP + 1));
 			glEnd();
 		}
-		if (PLC_bb && PLC_bb->ConversionMap.size()) {
+		if (PLC_bb && PLC_bb->ConversionMap.size())
+		{
 			glLineWidth(3);
 			glColor4f(1, 0.75f, 1, 0.5f);
 			glBegin(GL_LINE_STRIP);
@@ -81,19 +87,23 @@ struct PLC_VolumeWorker :HandleableUIPart {
 				glVertex2f(begx + (Y->first + 0.5f) * _xsqsz, begy + (Y->second + 0.5f) * _ysqsz);
 			glEnd();
 		}
-		if (ActiveSetting) {
-			std::map<BYTE, BYTE>::iterator Y;
+		if (ActiveSetting)
+		{
+			std::map<std::uint8_t, std::uint8_t>::iterator Y;
 			glBegin(GL_LINES);
 			glVertex2f(begx + (FPX + 0.5f) * _xsqsz, begy + (FPY + 0.5f) * _ysqsz);
 			glVertex2f(begx + (XCP + 0.5f) * _xsqsz, begy + (YCP + 0.5f) * _ysqsz);
-			if (FPX < XCP) {
+			if (FPX < XCP)
+			{
 				Y = PLC_bb->ConversionMap.upper_bound(XCP);
-				if (Y != PLC_bb->ConversionMap.end()) {
+				if (Y != PLC_bb->ConversionMap.end())
+				{
 					glVertex2f(begx + (Y->first + 0.5f) * _xsqsz, begy + (Y->second + 0.5f) * _ysqsz);
 					glVertex2f(begx + (XCP + 0.5f) * _xsqsz, begy + (YCP + 0.5f) * _ysqsz);
 				}
 				Y = PLC_bb->ConversionMap.lower_bound(FPX);
-				if (Y != PLC_bb->ConversionMap.end() && Y != PLC_bb->ConversionMap.begin()) {
+				if (Y != PLC_bb->ConversionMap.end() && Y != PLC_bb->ConversionMap.begin())
+				{
 					Y--;
 					glVertex2f(begx + (Y->first + 0.5f) * _xsqsz, begy + (Y->second + 0.5f) * _ysqsz);
 					glVertex2f(begx + (FPX + 0.5f) * _xsqsz, begy + (FPY + 0.5f) * _ysqsz);
@@ -101,12 +111,14 @@ struct PLC_VolumeWorker :HandleableUIPart {
 			}
 			else {
 				Y = PLC_bb->ConversionMap.upper_bound(FPX);
-				if (Y != PLC_bb->ConversionMap.end()) {
+				if (Y != PLC_bb->ConversionMap.end())
+				{
 					glVertex2f(begx + (Y->first + 0.5f) * _xsqsz, begy + (Y->second + 0.5f) * _ysqsz);
 					glVertex2f(begx + (FPX + 0.5f) * _xsqsz, begy + (FPY + 0.5f) * _ysqsz);
 				}
 				Y = PLC_bb->ConversionMap.lower_bound(XCP);
-				if (Y != PLC_bb->ConversionMap.end() && Y != PLC_bb->ConversionMap.begin()) {
+				if (Y != PLC_bb->ConversionMap.end() && Y != PLC_bb->ConversionMap.begin())
+				{
 					Y--;
 					glVertex2f(begx + (Y->first + 0.5f) * _xsqsz, begy + (Y->second + 0.5f) * _ysqsz);
 					glVertex2f(begx + (XCP + 0.5f) * _xsqsz, begy + (YCP + 0.5f) * _ysqsz);
@@ -116,69 +128,81 @@ struct PLC_VolumeWorker :HandleableUIPart {
 		}
 		STL_MSG->Draw();
 	}
-	void UpdateInfo() {
+	void UpdateInfo()
+	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
-		SHORT tx = (128. + floor(255 * (MouseX - CXPos) / HorizontalSidesSize)),
+		std::int16_t tx = (128. + floor(255 * (MouseX - CXPos) / HorizontalSidesSize)),
 			ty = (128. + floor(255 * (MouseY - CYPos) / VerticalSidesSize));
-		if (tx < 0 || tx>255 || ty < 0 || ty>255) {
-			if (Hovered) {
+		if (tx < 0 || tx>255 || ty < 0 || ty>255)
+		{
+			if (Hovered)
+			{
 				STL_MSG->SafeStringReplace("-:-");
 				Hovered = 0;
 			}
 		}
-		else {
+		else
+		{
 			Hovered = 1;
 			STL_MSG->SafeStringReplace(std::to_string(XCP = tx) + ":" + std::to_string(YCP = ty));
 		}
 	}
-	void _MakeMapMoreSimple() {
+	void _MakeMapMoreSimple() 
+	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
-		if (PLC_bb) {
-			BYTE TF, TS;
-			for (auto Y = PLC_bb->ConversionMap.begin(); Y != PLC_bb->ConversionMap.end();) {
+		if (PLC_bb)
+		{
+			std::uint8_t TF, TS;
+			for (auto Y = PLC_bb->ConversionMap.begin(); Y != PLC_bb->ConversionMap.end();) 
+			{
 				TF = Y->first;
 				TS = Y->second;
 				Y = PLC_bb->ConversionMap.erase(Y);
-				if (PLC_bb->AskForValue(TF) != TS) {
+				if (PLC_bb->AskForValue(TF) != TS) 
 					PLC_bb->ConversionMap[TF] = TS;
-				}
 			}
 		}
 	}
-	void SafeMove(float dx, float dy) override {
+	void SafeMove(float dx, float dy) override
+	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		CXPos += dx;
 		CYPos += dy;
 		this->STL_MSG->SafeMove(dx, dy);
 	}
-	void SafeChangePosition(float NewX, float NewY) override {
+	void SafeChangePosition(float NewX, float NewY) override
+	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		NewX -= CXPos;
 		NewY -= CYPos;
 		SafeMove(NewX, NewY);
 	}
-	void SafeChangePosition_Argumented(BYTE Arg, float NewX, float NewY) override {
+	void SafeChangePosition_Argumented(std::uint8_t Arg, float NewX, float NewY) override
+	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		float CW = 0.5f * (
-			(INT32)((BIT)(GLOBAL_LEFT & Arg))
-			- (INT32)((BIT)(GLOBAL_RIGHT & Arg))
+			(INT32)((bool)(GLOBAL_LEFT & Arg))
+			- (INT32)((bool)(GLOBAL_RIGHT & Arg))
 			) * HorizontalSidesSize,
 			CH = 0.5f * (
-				(INT32)((BIT)(GLOBAL_BOTTOM & Arg))
-				- (INT32)((BIT)(GLOBAL_TOP & Arg))
+				(INT32)((bool)(GLOBAL_BOTTOM & Arg))
+				- (INT32)((bool)(GLOBAL_TOP & Arg))
 				) * VerticalSidesSize;
 		SafeChangePosition(NewX + CW, NewY + CH);
 	}
-	void KeyboardHandler(CHAR CH) override {
-		///hmmmm ... should i... meh...
+	void KeyboardHandler(CHAR CH) override
+	{
 	}
-	void SafeStringReplace(std::string Meaningless) override {
-		/// ... ///
+	void SafeStringReplace(std::string Meaningless) override
+	{
 	}
-	void RePutFromAtoB(BYTE A, BYTE B, BYTE ValA, BYTE ValB) {
+	void RePutFromAtoB(std::uint8_t A, std::uint8_t B, std::uint8_t ValA, std::uint8_t ValB)
+	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
-		if (PLC_bb) {
-			if (B < A) {
+		if (PLC_bb)
+		{
+			if (B < A) 
+			{
 				std::swap(A, B);
 				std::swap(ValA, ValB);
 			}
@@ -190,47 +214,63 @@ struct PLC_VolumeWorker :HandleableUIPart {
 			PLC_bb->InsertNewPoint(B, ValB);
 		}
 	}
-	void JustPutNewValue(BYTE A, BYTE ValA) {
+	void JustPutNewValue(std::uint8_t A, std::uint8_t ValA)
+	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		if (PLC_bb)
 			PLC_bb->InsertNewPoint(A, ValA);
 	}
-	BIT MouseHandler(float mx, float my, CHAR Button, CHAR State) override {
+	bool MouseHandler(float mx, float my, CHAR Button, CHAR State) override
+	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		this->MouseX = mx;
 		this->MouseY = my;
 		UpdateInfo();
-		if (Hovered) {
-			if (Button) {
-				if (Button == -1) {
-					if (this->ActiveSetting) {
-						if (State == 1) {
+		if (Hovered)
+		{
+			if (Button)
+			{
+				if (Button == -1)
+				{
+					if (this->ActiveSetting)
+					{
+						if (State == 1)
+						{
 							ActiveSetting = 0;
 							RePutFromAtoB(FPX, XCP, FPY, YCP);
 						}
 					}
-					else {
-						if (this->RePutMode) {
-							if (State == 1) {
+					else
+					{
+						if (this->RePutMode)
+						{
+							if (State == 1)
+							{
 								ActiveSetting = 1;
 								FPX = XCP;
 								FPY = YCP;
 							}
 						}
-						else {
-							if (State == 1) {
+						else
+						{
+							if (State == 1)
+							{
 								JustPutNewValue(XCP, YCP);
 							}
 						}
 					}
 				}
-				else {//Removing some point
+				else
+				{
+					//Removing some point
 					///i give up
 				}
 			}
-			else {
-				if (PLC_bb) {
-					///no ne///here i should've implement approaching to point.... meh
+			else
+			{
+				if (PLC_bb)
+				{
+					//here i should've implement approaching to point.... meh
 				}
 			}
 		}

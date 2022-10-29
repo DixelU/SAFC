@@ -7,31 +7,37 @@
 #include "handleable_ui_part.h"
 #include "single_text_line_settings.h"
 
-#define WindowHeapSize 15
-struct MoveableWindow :HandleableUIPart {
+constexpr int WindowHeapSize = 15;
+struct MoveableWindow : HandleableUIPart
+{
 	float XWindowPos, YWindowPos;//leftup corner coordinates
 	float Width, Height;
-	DWORD RGBABackground, RGBAThemeColor, RGBAGradBackground;
+	std::uint32_t RGBABackground, RGBAThemeColor, RGBAGradBackground;
 	SingleTextLine* WindowName;
 	std::map<std::string, HandleableUIPart*> WindowActivities;
-	BIT Drawable;
-	BIT HoveredCloseButton;
-	BIT CursorFollowMode;
-	BIT HUIP_MapWasChanged;
+	bool Drawable;
+	bool HoveredCloseButton;
+	bool CursorFollowMode;
+	bool HUIP_MapWasChanged;
 	float PCurX, PCurY;
-	~MoveableWindow() override {
+	~MoveableWindow() override
+	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		delete WindowName;
 		for (auto i = WindowActivities.begin(); i != WindowActivities.end(); i++)
 			delete i->second;
 		WindowActivities.clear();
 	}
-	MoveableWindow(std::string WindowName, SingleTextLineSettings* WindowNameSettings, float XPos, float YPos, float Width, float Height, DWORD RGBABackground, DWORD RGBAThemeColor, DWORD RGBAGradBackground = 0) {
-		if (WindowNameSettings) {
+	MoveableWindow(std::string WindowName, SingleTextLineSettings* WindowNameSettings, float XPos, float YPos, float Width, float Height, std::uint32_t RGBABackground, std::uint32_t RGBAThemeColor, std::uint32_t RGBAGradBackground = 0)
+	{
+		if (WindowNameSettings)
+		{
 			WindowNameSettings->SetNewPos(XPos, YPos);
 			this->WindowName = WindowNameSettings->CreateOne(WindowName);
 			this->WindowName->SafeMove(this->WindowName->CalculatedWidth * 0.5 + WindowHeapSize * 0.5f, 0 - WindowHeapSize * 0.5f);
 		}
+		else
+			this->WindowName = nullptr;
 		this->HUIP_MapWasChanged = false;
 		this->XWindowPos = XPos;
 		this->YWindowPos = YPos;
@@ -46,7 +52,8 @@ struct MoveableWindow :HandleableUIPart {
 		this->PCurX = 0.;
 		this->PCurY = 0.;
 	}
-	void KeyboardHandler(char CH) {
+	void KeyboardHandler(char CH)
+	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		for (auto i = WindowActivities.begin(); i != WindowActivities.end(); i++) {
 			i->second->KeyboardHandler(CH);
@@ -56,43 +63,53 @@ struct MoveableWindow :HandleableUIPart {
 			}
 		}
 	}
-	BIT MouseHandler(float mx, float my, CHAR Button/*-1 left, 1 right, 0 move*/, CHAR State /*-1 down, 1 up*/) override {
+	bool MouseHandler(float mx, float my, CHAR Button/*-1 left, 1 right, 0 move*/, CHAR State /*-1 down, 1 up*/) override
+	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		if (!Drawable) 
 			return 0;
 		HoveredCloseButton = 0;
-		if (mx > XWindowPos + Width - WindowHeapSize && mx < XWindowPos + Width && my < YWindowPos && my > YWindowPos - WindowHeapSize) {///close button
-			if (Button && State == 1) {
+		if (mx > XWindowPos + Width - WindowHeapSize && mx < XWindowPos + Width && my < YWindowPos && my > YWindowPos - WindowHeapSize)
+		{///close button
+			if (Button && State == 1)
+			{
 				Drawable = 0;
 				CursorFollowMode = false;
 				return 1;
 			}
-			else if (!Button) {
+			else if (!Button)
+			{
 				HoveredCloseButton = 1;
 			}
 		}
-		else if (mx - XWindowPos < Width && mx - XWindowPos>0 && my<YWindowPos && my>YWindowPos - WindowHeapSize) {
-			if (Button == -1) {///window header
-				if (State == -1) {
+		else if (mx - XWindowPos < Width && mx - XWindowPos>0 && my<YWindowPos && my>YWindowPos - WindowHeapSize)
+		{
+			if (Button == -1)
+			{///window header
+				if (State == -1)
+				{
 					CursorFollowMode = !CursorFollowMode;
 					PCurX = mx;
 					PCurY = my;
 				}
-				else if (State == 1) {
+				else if (State == 1)
+				{
 					CursorFollowMode = !CursorFollowMode;
 				}
 			}
 		}
-		if (CursorFollowMode) {
+		if (CursorFollowMode)
+		{
 			SafeMove(mx - PCurX, my - PCurY);
 			PCurX = mx;
 			PCurY = my;
 			return 1;
 		}
 
-		BIT flag = 0;
+		bool flag = 0;
 		auto Y = WindowActivities.begin();
-		while (Y != WindowActivities.end()) {
+		while (Y != WindowActivities.end())
+		{
 			if (Y->second)
 				flag = Y->second->MouseHandler(mx, my, Button, State);
 			if (HUIP_MapWasChanged) {
@@ -105,19 +122,22 @@ struct MoveableWindow :HandleableUIPart {
 		if (mx - XWindowPos < Width && mx - XWindowPos > 0 && YWindowPos - my > 0 && YWindowPos - my < Height)
 			if (Button)
 				return 1;
-			else {
+			else
+			{
 				return flag;
 			}
 		else 
 			return flag;
 	}
-	void SafeChangePosition(float NewXpos, float NewYpos) override {
+	void SafeChangePosition(float NewXpos, float NewYpos) override
+	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		NewXpos -= XWindowPos;
 		NewYpos -= YWindowPos;
 		SafeMove(NewXpos, NewYpos);
 	}
-	BIT DeleteUIElementByName(std::string ElementName) {
+	bool DeleteUIElementByName(std::string ElementName, bool DeleteElement = true)
+	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		HUIP_MapWasChanged = true;
 		auto ptr = WindowActivities.find(ElementName);
@@ -125,16 +145,19 @@ struct MoveableWindow :HandleableUIPart {
 			return 0;
 		auto deletable = ptr->second;
 		WindowActivities.erase(ElementName);
-		delete deletable;
+		if(DeleteElement)
+			delete deletable;
 		return 1;
 	}
-	BIT AddUIElement(std::string ElementName, HandleableUIPart* Elem) {
+	bool AddUIElement(std::string ElementName, HandleableUIPart* Elem)
+	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		HUIP_MapWasChanged = true;
 		auto ans = WindowActivities.insert_or_assign(ElementName, Elem);
 		return ans.second;
 	}
-	void SafeMove(float dx, float dy) override {
+	void SafeMove(float dx, float dy) override
+	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		XWindowPos += dx;
 		YWindowPos += dy;
@@ -143,7 +166,8 @@ struct MoveableWindow :HandleableUIPart {
 			if (Y->second)
 				Y->second->SafeMove(dx, dy);
 	}
-	void SafeChangePosition_Argumented(BYTE Arg, float NewX, float NewY) {
+	void SafeChangePosition_Argumented(std::uint8_t Arg, float NewX, float NewY)
+	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		float CW = 0.5f * (
 			(INT32)(!!(GLOBAL_LEFT & Arg))
@@ -155,7 +179,8 @@ struct MoveableWindow :HandleableUIPart {
 				+ 1) * Height;
 		SafeChangePosition(NewX + CW, NewY + CH);
 	}
-	void Draw() override {
+	void Draw() override
+	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		if (!Drawable) 
 			return;
@@ -194,12 +219,14 @@ struct MoveableWindow :HandleableUIPart {
 			if (Y->second)
 				Y->second->Draw();
 	}
-	void _NotSafeResize(float NewHeight, float NewWidth) {
+	void _NotSafeResize(float NewHeight, float NewWidth)
+	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		this->Height = NewHeight;
 		this->Width = NewWidth;
 	}
-	void _NotSafeResize_Centered(float NewHeight, float NewWidth) {
+	void _NotSafeResize_Centered(float NewHeight, float NewWidth)
+	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		float dx, dy;
 		XWindowPos += (dx = -0.5f * (NewWidth - Width));
@@ -208,21 +235,25 @@ struct MoveableWindow :HandleableUIPart {
 		Width = NewWidth;
 		Height = NewHeight;
 	}
-	void SafeStringReplace(std::string NewWindowTitle) override {
+	void SafeStringReplace(std::string NewWindowTitle) override
+	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		SafeWindowRename(NewWindowTitle);
 	}
-	void SafeWindowRename(std::string NewWindowTitle) {
+	void SafeWindowRename(std::string NewWindowTitle)
+	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		if (WindowName) {
 			WindowName->SafeStringReplace(NewWindowTitle);
 			WindowName->SafeChangePosition_Argumented(GLOBAL_LEFT, XWindowPos + WindowHeapSize * 0.5f, WindowName->CYpos);
 		}
 	}
-	HandleableUIPart*& operator[](std::string ID) {
+	HandleableUIPart*& operator[](std::string ID)
+	{
 		return WindowActivities[ID];
 	}
-	DWORD TellType() {
+	std::uint32_t TellType()
+	{
 		return TT_MOVEABLE_WINDOW;
 	}
 };
