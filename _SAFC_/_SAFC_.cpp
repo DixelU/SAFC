@@ -1739,7 +1739,7 @@ void RestoreRegSettings()
 		catch (...) { std::cout << "Exception thrown while restoring AS_BCKGID from registry\n"; }
 		try
 		{
-			//AutoUpdatesCheck = Settings::RegestryAccess.GetDwordValue(L"AUTOUPDATECHECK");
+			AutoUpdatesCheck = Settings::RegestryAccess.GetDwordValue(L"AUTOUPDATECHECK");
 		}
 		catch (...) { std::cout << "Exception thrown while restoring AUTOUPDATECHECK from registry\n"; }
 		try
