@@ -15,6 +15,8 @@
 #include <atomic>
 #include <ostream>
 
+#include <syncstream>
+
 #include "../bbb_ffio.h"
 #include "../SAFGUIF/header_utils.h"
 
@@ -77,7 +79,7 @@ public:
 	{
 		std::lock_guard locker(mtx);
 		this->message = std::move(message);
-		std::cout << this->message << std::endl;
+		std::osyncstream(std::cout) << this->message << std::endl;
 	}
 };
 
@@ -155,10 +157,16 @@ struct single_midi_processor_2
 
 		using logger_t = singleline_logger;
 
-		message_buffers():
-			log(std::make_shared<logger_t>()),
-			warning(std::make_shared<logger_t>()),
-			error(std::make_shared<logger_t>()),
+		message_buffers(bool is_console_oriented = false):
+			log(is_console_oriented ? 
+				std::make_shared<printing_logger>() : 
+				std::make_shared<logger_t>()),
+			warning(is_console_oriented ? 
+				std::make_shared<printing_logger>() : 
+				std::make_shared<logger_t>()),
+			error(is_console_oriented ? 
+				std::make_shared<printing_logger>() : 
+				std::make_shared<logger_t>()),
 			last_input_position(0),
 			processing(false),
 			finished(false)		
@@ -422,7 +430,10 @@ struct single_midi_processor_2
 		if (file_input.eof())
 			return false;
 
-		const auto back_note_event_inserter = [&current_polyphony, &current_tick, &data_buffer]() {
+		const auto back_note_event_inserter =
+		[](decltype(current_polyphony)& current_polyphony, 
+			decltype(current_tick)& current_tick, 
+			decltype(data_buffer)& data_buffer) {
 			for (size_t idx = 0; idx < current_polyphony.size(); idx++)
 			{
 				auto& cur_note_stack = current_polyphony[idx];
@@ -598,7 +609,7 @@ struct single_midi_processor_2
 			}
 		}
 
-		back_note_event_inserter();
+		back_note_event_inserter(current_polyphony, current_tick, data_buffer);
 
 		return is_good;
 	}

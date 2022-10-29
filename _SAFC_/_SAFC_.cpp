@@ -315,7 +315,6 @@ struct FileSettings
 	bool
 		IsMIDI,
 		InplaceMergeEnabled,
-		OffsetResetOnSelection,
 		AllowLegacyRunningStatusMetaIgnorance,
 		RSBCompression,
 		ChannelsSplit;
@@ -341,7 +340,6 @@ struct FileSettings
 		OffsetTicks = InplaceMergeEnabled = 0;
 		FileSize = FMIC.FileSize;
 		GroupID = NewTempo = 0;
-		OffsetResetOnSelection = false;
 		SelectionStart = 0;
 		SelectionLength = -1;
 		BoolSettings = DefaultBoolSettings;
@@ -383,7 +381,8 @@ struct FileSettings
 		settings.proc_details.channel_split = ChannelsSplit;
 		settings.legacy.ignore_meta_rsb = AllowLegacyRunningStatusMetaIgnorance;
 		settings.legacy.rsb_compression = RSBCompression;
-		settings.details.inplace_mergable = InplaceMergeEnabled && !RSBCompression;
+		InplaceMergeEnabled = 
+			settings.details.inplace_mergable = InplaceMergeEnabled && !RSBCompression;
 		settings.details.group_id = GroupID;
 		settings.details.initial_filesize = FileSize;
 		settings.offset = OffsetTicks;
@@ -425,13 +424,15 @@ struct SAFCData
 	bool InplaceMergeFlag;
 	bool ChannelsSplit;
 	bool RSBCompression;
+	bool IsCLIMode;
 	std::uint16_t DetectedThreads;
 	SAFCData()
 	{
 		GlobalPPQN = GlobalOffset = GlobalNewTempo = 0;
-		IncrementalPPQN = 1;
 		DetectedThreads = 1;
-		InplaceMergeFlag = 0;
+		IncrementalPPQN = true;
+		InplaceMergeFlag = false;
+		IsCLIMode = false;
 		SaveDirectory = L"";
 		ChannelsSplit = RSBCompression = false;
 	}
@@ -512,7 +513,7 @@ struct SAFCData
 		std::vector<proc_data_ptr> SMRPv;
 		for (int i = 0; i < Files.size(); i++)
 			SMRPv.push_back(Files[i].BuildSMRPProcessingData());
-		return std::make_shared<MIDICollectionThreadedMerger>(SMRPv, GlobalPPQN, SaveDirectory);
+		return std::make_shared<MIDICollectionThreadedMerger>(SMRPv, GlobalPPQN, SaveDirectory, IsCLIMode);
 	}
 	FileSettings& operator[](std::int32_t ID)
 	{
@@ -650,7 +651,8 @@ std::wstring SOFD(const wchar_t* Title)
 
 void AddFiles(std::vector<std::wstring> Filenames)
 {
-	WH->DisableAllWindows();
+	if(WH)
+		WH->DisableAllWindows();
 	for (int i = 0; i < Filenames.size(); i++)
 	{
 		if (Filenames[i].empty())
@@ -658,8 +660,10 @@ void AddFiles(std::vector<std::wstring> Filenames)
 		_Data.Files.push_back(FileSettings(Filenames[i]));
 		if (_Data.Files.back().IsMIDI)
 		{
+			if (WH)
+				_WH_t("MAIN", "List", SelectablePropertedList*)->SafePushBackNewString(_Data.Files.back().AppearanceFilename);
+
 			std::uint32_t Counter = 0;
-			_WH_t("MAIN", "List", SelectablePropertedList*)->SafePushBackNewString(_Data.Files.back().AppearanceFilename);
 			_Data.Files.back().NewTempo = _Data.GlobalNewTempo;
 			_Data.Files.back().OffsetTicks = _Data.GlobalOffset;
 			_Data.Files.back().InplaceMergeEnabled = _Data.InplaceMergeFlag;
@@ -686,7 +690,6 @@ void AddFiles(std::vector<std::wstring> Filenames)
 }
 void OnAdd()
 {
-	//throw "";
 	std::vector<std::wstring> Filenames = MOFD(L"Select midi files");
 	AddFiles(Filenames);
 }
@@ -2222,65 +2225,280 @@ void mExit(int a)
 	Settings::RegestryAccess.Close();
 }
 
+struct SafcRuntime
+{
+	virtual void operator()(int argc, char** argv) = 0;
+};
+
+struct SafcGuiRuntime :
+	public SafcRuntime
+{
+	virtual void operator()(int argc, char** argv) override
+	{
+		_wremove(L"_s");
+		_wremove(L"_f");
+		_wremove(L"_g");
+
+#ifdef _DEBUG 
+		ShowWindow(GetConsoleWindow(), SW_SHOW);
+#else // _DEBUG 
+		ShowWindow(GetConsoleWindow(), SW_HIDE);
+#endif
+		//ShowWindow(GetConsoleWindow(), SW_SHOW);
+
+		SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS);
+		//srand(1);
+		//srand(clock());
+		InitASCIIMap();
+		//cout << to_string((std::uint16_t)0) << endl;
+
+		srand(TIMESEED());
+		__glutInitWithExit(&argc, argv, mExit);
+		//cout << argv[0] << endl;
+		glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGBA | GLUT_ALPHA | GLUT_MULTISAMPLE);
+		glutInitWindowSize(window_base_width, window_base_height);
+		//glutInitWindowPosition(50, 0);
+		glutCreateWindow(window_title);
+
+		hWnd = FindWindowA(NULL, window_title);
+
+		glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);//_MINUS_SRC_ALPHA
+		glEnable(GL_BLEND);
+		//glutSetOption(GLUT_MULTISAMPLE, 4);
+
+		//auto vendor = glGetString(GL_VENDOR);
+		//auto renderer = glGetString(GL_RENDERER);
+		//auto version = glGetString(GL_VERSION);
+		//printf("%s - %s.\nVersion %s\n", vendor, renderer, version);
+
+		//glEnable(GL_POLYGON_SMOOTH);//laggy af
+		//glEnable(GL_LINE_SMOOTH);//GL_POLYGON_SMOOTH
+		//glEnable(GL_POINT_SMOOTH);
+
+		//glShadeModel(GL_SMOOTH); 
+		//glEnable(GLUT_MULTISAMPLE); 
+		//glutSetOption(GLUT_MULTISAMPLE, 8);
+
+		glHint(GL_LINE_SMOOTH_HINT, GL_FASTEST);//GL_FASTEST//GL_NICEST
+		glHint(GL_POINT_SMOOTH_HINT, GL_FASTEST);
+		glHint(GL_POLYGON_SMOOTH_HINT, GL_FASTEST);
+
+		glutMouseFunc(mClick);
+		glutReshapeFunc(OnResize);
+		glutSpecialFunc(mSpecialKey);
+		glutMotionFunc(mDrag);
+		glutPassiveMotionFunc(mMotion);
+		glutKeyboardFunc(mKey);
+		glutDisplayFunc(mDisplay);
+		mInit();
+		glutMainLoop();
+	}
+};
+
+
+/*
+
+{
+	"global_ppq_override": 3860,					// optional; signed long long int;
+	"global_tempo_override": 485,					// optional; double;
+	"global_offset_override": 4558,					// optional; signed long long int;
+	"save_to": "C:\\MIDIs\\merge.mid",				// optional; string (utf8)
+	"files":
+	[
+		{
+			"filename": "D:\\Download\\Downloads\\Paprika's Aua Ah Community Merge (FULL).mid", // string (utf8)
+			"ppq_override": 960, 					// optional; unisnged short;
+			"tempo_override": 3.94899, 				// optional; double;
+			"offset": 0, 							// optional; signed long long int;
+			"selection_start": 50, 					// optional; signed long long int;
+			"selection_length": 50, 				// optional; signed long long int;
+			"ignore_notes": false, 					// optional; bool;
+			"ignore_pitches": false, 				// optional; bool;
+			"ignore_tempos": false, 				// optional; bool;
+			"ignore_other": false, 					// optional; bool;
+			"piano_only": true, 					// optional; bool;
+			"remove_remnants": true, 				// optional; bool;
+			"remove_empty_tracks": true, 			// optional; bool;
+			"channel_split": false, 				// optional; bool;
+			"ignore_meta_rsb": false, 				// optional; bool;
+			"rsb_compression": false, 				// optional; bool;
+			"inplace_mergable": false, 				// optional; bool;
+		}
+	]
+}
+
+*/
+
+struct SafcCliRuntime:
+	public SafcRuntime
+{
+	virtual void operator()(int argc, char** argv) override
+	{
+		ShowWindow(GetConsoleWindow(), SW_SHOW);
+		_Data.DetectedThreads =
+			std::max(
+				std::min((std::uint16_t)(
+					(std::uint16_t)std::max(
+						std::thread::hardware_concurrency(),
+						1u
+					)
+					- 1
+					),
+					(std::uint16_t)(ceil(GetAvailableMemory() / 2048))
+				), (std::uint16_t)1
+			);
+		_Data.IsCLIMode = true;
+
+		if (argc < 2)
+			throw std::runtime_error("No config provided");
+
+		auto config_path = std::filesystem::u8path(argv[1]);
+		std::ifstream fin(config_path);
+		std::stringstream ss;
+		ss << fin.rdbuf();
+		auto config_content = ss.str();
+		auto config_object = JSON::Parse(config_content.c_str());
+		auto config = config_object->AsObject();
+
+		auto global_ppq_override = config.find(L"global_ppq_override");
+		auto global_tempo_override = config.find(L"global_tempo_override");
+		auto global_offset = config.find(L"global_offset");
+		auto files = config.find(L"files");
+
+		if (files == config.end())
+			return;
+
+		if (global_ppq_override != config.end())
+			_Data.SetGlobalPPQN(global_ppq_override->second->AsNumber());
+
+		if (global_tempo_override != config.end())
+			_Data.SetGlobalTempo(global_tempo_override->second->AsNumber());
+
+		if (global_offset != config.end())
+			_Data.SetGlobalOffset(global_offset->second->AsNumber());
+
+		auto filesArray = files->second->AsArray();
+		std::vector<std::wstring> filenames;
+
+		for (auto singleEntry : filesArray)
+		{
+			auto object = singleEntry->AsObject();
+			auto filename = object[L"filename"]->AsString();
+			filenames.push_back(std::move(filename));
+		}
+
+		AddFiles(filenames);
+
+		size_t index = 0;
+		for (auto singleEntry : filesArray)
+		{
+			auto object = singleEntry->AsObject();
+			
+			auto ppq_override = object.find(L"ppq_override");
+			if (ppq_override != object.end())
+				_Data.Files[index].NewPPQN = ppq_override->second->AsNumber();
+
+			auto tempo_override = object.find(L"tempo_override");
+			if (tempo_override != object.end())
+				_Data.Files[index].NewTempo = tempo_override->second->AsNumber();
+
+			auto offset = object.find(L"offset");
+			if (offset != object.end())
+				_Data.Files[index].OffsetTicks = offset->second->AsNumber();
+
+			auto selection_start = object.find(L"selection_start");
+			if (selection_start != object.end())
+				_Data.Files[index].SelectionStart = selection_start->second->AsNumber();
+
+			auto selection_length = object.find(L"selection_length");
+			if (selection_length != object.end())
+				_Data.Files[index].SelectionLength = selection_length->second->AsNumber();
+
+			auto ignore_notes = object.find(L"ignore_notes");
+			if (ignore_notes != object.end())
+				_Data.Files[index].SetBoolSetting(_BoolSettings::ignore_notes, ignore_notes->second->AsBool());
+
+			auto ignore_pitches = object.find(L"ignore_pitches");
+			if (ignore_pitches != object.end())
+				_Data.Files[index].SetBoolSetting(_BoolSettings::ignore_pitches, ignore_pitches->second->AsBool());
+
+			auto ignore_tempos = object.find(L"ignore_tempos");
+			if (ignore_tempos != object.end())
+				_Data.Files[index].SetBoolSetting(_BoolSettings::ignore_tempos, ignore_tempos->second->AsBool());
+
+			auto ignore_other = object.find(L"ignore_other");
+			if (ignore_other != object.end())
+				_Data.Files[index].SetBoolSetting(_BoolSettings::ignore_all_but_tempos_notes_and_pitch, ignore_other->second->AsBool());
+
+			auto piano_only = object.find(L"piano_only");
+			if (piano_only != object.end())
+				_Data.Files[index].SetBoolSetting(_BoolSettings::all_instruments_to_piano, piano_only->second->AsBool());
+
+			auto remove_remnants = object.find(L"remove_remnants");
+			if (remove_remnants != object.end())
+				_Data.Files[index].SetBoolSetting(_BoolSettings::remove_remnants, remove_remnants->second->AsBool());
+
+			auto remove_empty_tracks = object.find(L"remove_empty_tracks");
+			if (remove_empty_tracks != object.end())
+				_Data.Files[index].SetBoolSetting(_BoolSettings::all_instruments_to_piano, remove_empty_tracks->second->AsBool());
+
+			auto channel_split = object.find(L"channel_split");
+			if (channel_split != object.end())
+				_Data.Files[index].ChannelsSplit = channel_split->second->AsBool();
+
+			auto rsb_compression = object.find(L"rsb_compression");
+			if (rsb_compression != object.end())
+				_Data.Files[index].RSBCompression = rsb_compression->second->AsBool();
+
+			auto ignore_meta_rsb = object.find(L"ignore_meta_rsb");
+			if (ignore_meta_rsb != object.end())
+				_Data.Files[index].AllowLegacyRunningStatusMetaIgnorance = ignore_meta_rsb->second->AsBool();
+
+			auto inplace_mergable = object.find(L"inplace_mergable");
+			if (inplace_mergable != object.end())
+				_Data.Files[index].InplaceMergeEnabled = inplace_mergable->second->AsBool();
+
+			index++;
+		}
+
+		auto save_to = config.find(L"save_to");
+		if (save_to != config.end())
+		{
+			_Data.SaveDirectory = (save_to->second->AsString());
+			size_t Pos = _Data.SaveDirectory.rfind(L".mid");
+			if (Pos >= _Data.SaveDirectory.size() || Pos <= _Data.SaveDirectory.size() - 4)
+				_Data.SaveDirectory += L".mid";
+		}
+
+		auto LocalMCTM = _Data.MCTM_Constructor();
+		LocalMCTM->StartProcessingMIDIs();
+
+		while (LocalMCTM->CheckSMRPProcessingAndStartNextStep())
+			//that's some really dumb synchronization... TODO: MAKE BETTER
+			std::this_thread::sleep_for(std::chrono::milliseconds(5));
+		while (!LocalMCTM->CheckRIMerge())
+			std::this_thread::sleep_for(std::chrono::milliseconds(5));
+		while (!LocalMCTM->CompleteFlag)
+			std::this_thread::sleep_for(std::chrono::milliseconds(5));
+	}
+};
+
 int main(int argc, char** argv)
 {
-	_wremove(L"_s");
-	_wremove(L"_f");
-	_wremove(L"_g");
-
 	std::ios_base::sync_with_stdio(false); //why not
-#ifdef _DEBUG 
-	ShowWindow(GetConsoleWindow(), SW_SHOW);
-#else // _DEBUG 
-	ShowWindow(GetConsoleWindow(), SW_HIDE);
-#endif
-	//ShowWindow(GetConsoleWindow(), SW_SHOW);
 
-	SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS);
-	//srand(1);
-	//srand(clock());
-	InitASCIIMap();
-	//cout << to_string((std::uint16_t)0) << endl;
+	std::shared_ptr<SafcRuntime> runtime;
 
-	srand(TIMESEED());
-	__glutInitWithExit(&argc, argv, mExit);
-	//cout << argv[0] << endl;
-	glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGBA | GLUT_ALPHA | GLUT_MULTISAMPLE);
-	glutInitWindowSize(window_base_width, window_base_height);
-	//glutInitWindowPosition(50, 0);
-	glutCreateWindow(window_title);
+	if (argc > 1) try
+	{
+		runtime = std::make_shared<SafcCliRuntime>();
+		(*runtime)(argc, argv);
+		return 0;
+	}
+	catch (...) {}
 
-	hWnd = FindWindowA(NULL, window_title);
+	runtime = std::make_shared<SafcGuiRuntime>();
+	(*runtime)(argc, argv);
 
-	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);//_MINUS_SRC_ALPHA
-	glEnable(GL_BLEND);
-	//glutSetOption(GLUT_MULTISAMPLE, 4);
-
-	//auto vendor = glGetString(GL_VENDOR);
-	//auto renderer = glGetString(GL_RENDERER);
-	//auto version = glGetString(GL_VERSION);
-	//printf("%s - %s.\nVersion %s\n", vendor, renderer, version);
-
-	//glEnable(GL_POLYGON_SMOOTH);//laggy af
-	//glEnable(GL_LINE_SMOOTH);//GL_POLYGON_SMOOTH
-	//glEnable(GL_POINT_SMOOTH);
-
-	//glShadeModel(GL_SMOOTH); 
-	//glEnable(GLUT_MULTISAMPLE); 
-	//glutSetOption(GLUT_MULTISAMPLE, 8);
-
-	glHint(GL_LINE_SMOOTH_HINT, GL_FASTEST);//GL_FASTEST//GL_NICEST
-	glHint(GL_POINT_SMOOTH_HINT, GL_FASTEST);
-	glHint(GL_POLYGON_SMOOTH_HINT, GL_FASTEST);
-
-	glutMouseFunc(mClick);
-	glutReshapeFunc(OnResize);
-	glutSpecialFunc(mSpecialKey);
-	glutMotionFunc(mDrag);
-	glutPassiveMotionFunc(mMotion);
-	glutKeyboardFunc(mKey);
-	glutDisplayFunc(mDisplay);
-	mInit();
-	glutMainLoop();
 	return 0;
 }

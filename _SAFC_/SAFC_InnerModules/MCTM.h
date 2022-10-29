@@ -163,10 +163,14 @@ struct MIDICollectionThreadedMerger
 	~MIDICollectionThreadedMerger() 
 	{
 	}
-	MIDICollectionThreadedMerger(std::vector<proc_data_ptr> processing_data, std::uint16_t FinalPPQN, std::wstring SaveTo)
+	MIDICollectionThreadedMerger(
+		std::vector<proc_data_ptr> processing_data, 
+		std::uint16_t FinalPPQN, 
+		std::wstring SaveTo,
+		bool is_console_oriented)
 	{
 		for (auto& single_midi_data : processing_data)
-			midi_processing_data.push_back({ single_midi_data , std::make_shared<message_buffer_ptr::element_type>() });
+			midi_processing_data.push_back({ single_midi_data , std::make_shared<message_buffer_ptr::element_type>(is_console_oriented) });
 		this->SaveTo = SaveTo;
 		this->FinalPPQN = FinalPPQN;
 		IntermediateRegularFlag = IntermediateInplaceFlag = CompleteFlag = IRTrackCount = IITrackCount = 0;
