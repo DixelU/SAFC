@@ -131,13 +131,29 @@ struct single_midi_processor_2
 				bool field2_is_set = false;
 			};
 
-			std::map<std::uint16_t, base_type> key_events_at_selection_front;
-			std::map<base_type, event_data_fixed_size_2> channel_events_at_selection_front;
+			std::unordered_map<std::uint16_t, base_type> key_events_at_selection_front;
+			std::unordered_map<base_type, event_data_fixed_size_2> channel_events_at_selection_front;
 			std::uint32_t frontal_tempo = default_tempo;
 			color_event frontal_color_event;
+
+			inline void clear()
+			{
+				key_events_at_selection_front.clear();
+				channel_events_at_selection_front.clear();
+				key_events_at_selection_front.reserve(1 << 16);
+				channel_events_at_selection_front.reserve(1 << 8);
+
+				frontal_tempo = default_tempo;
+				frontal_color_event = {};
+			}
 		};
 
 		selection selection_data;
+
+		inline void clear()
+		{
+			selection_data.clear();
+		}
 	};
 
 	using data_iterator = std::vector<base_type>::iterator;
@@ -201,7 +217,7 @@ struct single_midi_processor_2
 			double tempo_multiplier;
 			metasize_type tempo_override_value;
 			tempo_override():
-				tempo_override_value(0), tempo_multiplier(1)
+				tempo_override_value(single_track_data::selection::default_tempo), tempo_multiplier(1)
 			{
 			}
 			inline void set_override_value(double tempo)
@@ -210,7 +226,7 @@ struct single_midi_processor_2
 			}
 			inline metasize_type process(metasize_type a) const 
 			{
-				if (tempo_override_value)
+				if (tempo_override_value != single_track_data::selection::default_tempo)
 					return tempo_override_value;
 				return (std::min)((metasize_type)(a / tempo_multiplier), 0xFFFF7Fu);
 			}
@@ -750,7 +766,7 @@ struct single_midi_processor_2
 	{
 		std::multimap<base_type, event_transforming_filter> filters;
 
-		const event_transforming_filter selection_filter = [selection_data = settings.selection_data]
+		const event_transforming_filter selection_filter = [&selection_data = settings.selection_data]
 		(const data_iterator& begin, const data_iterator& end, const data_iterator& cur, single_track_data& std_ref) -> bool
 		{
 			auto& tick = get_value<tick_type>(cur, tick_position);
@@ -1053,7 +1069,7 @@ struct single_midi_processor_2
 		};
 
 		const event_transforming_filter tick_positive_linear_transform =
-			[selection_data = settings.selection_data, old_ppqn = settings.old_ppqn, new_ppqn = settings.new_ppqn, offset = settings.offset]
+			[old_ppqn = settings.old_ppqn, new_ppqn = settings.new_ppqn, offset = settings.offset]
 		(const data_iterator& begin, const data_iterator& end, const data_iterator& cur, single_track_data& std_ref) -> bool
 		{
 			auto& tick = get_value<tick_type>(cur, tick_position);
@@ -1396,12 +1412,18 @@ struct single_midi_processor_2
 		file_output.put(data.settings.new_ppqn & 0xFF);
 
 		tick_type track_counter = 0;
+		single_track_data track_processing_data;
+
 		while (file_input.good())
 		{
 			track_buffers.data_buffer.clear();
 
 			bool is_readable = put_data_in_buffer(file_input, track_buffers, loggers, data.settings, polyphony_stacks);
-			single_track_data track_processing_data;
+
+			track_processing_data.selection_data.clear();
+			track_processing_data.selection_data.frontal_tempo =
+				data.settings.tempo.tempo_override_value;
+
 			if (track_buffers.data_buffer.size())
 			{
 				bool successful_processing =
