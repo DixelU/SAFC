@@ -386,7 +386,8 @@ struct FileSettings
 		settings.details.group_id = GroupID;
 		settings.details.initial_filesize = FileSize;
 		settings.offset = OffsetTicks;
-		settings.tempo.set_override_value(NewTempo);
+		if(NewTempo > 3.)
+			settings.tempo.set_override_value(NewTempo);
 		if (OffsetTicks < 0 && -OffsetTicks > SelectionStart)
 			SelectionStart = -OffsetTicks;
 		if (SelectionStart && (SelectionLength < 0))
