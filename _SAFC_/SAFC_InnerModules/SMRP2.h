@@ -208,6 +208,7 @@ struct single_midi_processor_2
 			bool pass_pitch = true;
 			bool pass_notes = true;
 			bool pass_other = true;
+			bool pass_sysex = false;
 
 			bool piano_only = false;
 		};
@@ -1012,12 +1013,12 @@ struct single_midi_processor_2
 		(const data_iterator& begin, const data_iterator& end, const data_iterator& cur, single_track_data& std_ref) -> bool
 		{
 			auto& tick = get_value<tick_type>(cur, tick_position);
-			const auto& meta_class = get_value<base_type>(cur, event_type);
+			const auto& event_class = get_value<base_type>(cur, event_type);
 			const auto& meta_type = get_value<base_type>(cur, event_param1);
 
 			// 8 tick  1 type  1 metatype  1 vlv size  4 size  ...<raw meta>~vlv+data
 
-			if (meta_class == 0xFF && meta_type == 0x51)
+			if (event_class == 0xFF && meta_type == 0x51)
 			{
 				if (!filtering.pass_tempo)
 				{
@@ -1045,13 +1046,19 @@ struct single_midi_processor_2
 				return true;
 			}
 
-			if (!filtering.pass_other)
+			switch (event_class)
 			{
-				tick = disable_tick;
-				return false;
+				case 0xF0:
+				case 0xF7:
+					if (!filtering.pass_sysex)
+						tick = disable_tick;
+				case 0xFF:
+				default: 
+					if (!filtering.pass_other)
+						tick = disable_tick;
 			}
 
-			return true;
+			return tick != disable_tick;
 		};
 
 		const event_transforming_filter others_transform = [ filtering = settings.filter ]
