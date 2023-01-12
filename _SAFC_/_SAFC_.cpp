@@ -34,6 +34,9 @@
 #pragma comment (lib, "Urlmon.lib")//Urlmon.lib
 #pragma comment (lib, "wininet.lib")//Urlmon.lib
 #pragma comment (lib, "dwmapi.lib")
+#pragma comment (lib, "Ws2_32.Lib")
+#pragma comment (lib, "Wldap32.Lib")
+#pragma comment (lib, "Crypt32.Lib")
 
 #include "allocator.h"
 #include "WinReg.h"
@@ -54,6 +57,10 @@
 #include "SAFCGUIF_Local/SAFGUIF_L.h"
 
 #include "SAFC_InnerModules/SMRP2.h"
+
+#include <boost/dll.hpp>
+#include <archive.h>
+#include <archive_entry.h>
 
 std::tuple<std::uint16_t, std::uint16_t, std::uint16_t, std::uint16_t> ___GetVersion() 
 {
@@ -91,6 +98,87 @@ std::wstring ExtractDirectory(const std::wstring& path)
 	return path.substr(0, path.find_last_of(delim) + 1);
 }
 
+static int copy_data(struct archive* ar, struct archive* aw)
+{
+	int r;
+	const void* buff;
+	size_t size;
+	la_int64_t offset;
+
+	for (;;) 
+	{
+		r = archive_read_data_block(ar, &buff, &size, &offset);
+		if (r == ARCHIVE_EOF)
+			return (ARCHIVE_OK);
+		if (r < ARCHIVE_OK)
+			return (r);
+		r = archive_write_data_block(aw, buff, size, offset);
+		if (r < ARCHIVE_OK) 
+		{
+			fprintf(stderr, "%s\n", archive_error_string(aw));
+			return (r);
+		}
+	}
+}
+
+static void extract(const void* data, size_t data_size)
+{
+	struct archive* a;
+	struct archive* ext;
+	struct archive_entry* entry;
+	int flags;
+	int r;
+
+	/* Select which attributes we want to restore. */
+	flags = ARCHIVE_EXTRACT_TIME;
+	flags |= ARCHIVE_EXTRACT_PERM;
+	flags |= ARCHIVE_EXTRACT_ACL;
+	flags |= ARCHIVE_EXTRACT_FFLAGS;
+
+	a = archive_read_new();
+	archive_read_support_format_all(a);
+	archive_read_support_filter_all(a);
+	ext = archive_write_disk_new();
+	archive_write_disk_set_options(ext, flags);
+	archive_write_disk_set_standard_lookup(ext);
+
+	if ((r = archive_read_open_memory(a, data, data_size)))
+		throw std::runtime_error("Failed to open archive: code " + std::to_string(r) + " - " + archive_error_string(a));
+
+	for (;;)
+	{
+		r = archive_read_next_header(a, &entry);
+		if (r == ARCHIVE_EOF)
+			break;
+		if (r < ARCHIVE_OK)
+			fprintf(stderr, "%s\n", archive_error_string(a));
+		if (r < ARCHIVE_WARN)
+			throw std::runtime_error("Failed to read the archive header: code " + std::to_string(r) + " - " + archive_error_string(a));
+
+		r = archive_write_header(ext, entry);
+		if (r < ARCHIVE_OK)
+			fprintf(stderr, "%s\n", archive_error_string(ext));
+		else if (archive_entry_size(entry) > 0)
+		{
+			r = copy_data(a, ext);
+
+			if (r < ARCHIVE_OK)
+				fprintf(stderr, "%s\n", archive_error_string(ext));
+			if (r < ARCHIVE_WARN)
+				throw std::runtime_error("Failed to write the archive data: code " + std::to_string(r) + " - " + archive_error_string(ext));
+		}
+		r = archive_write_finish_entry(ext);
+		if (r < ARCHIVE_OK)
+			fprintf(stderr, "%s\n", archive_error_string(ext));
+		if (r < ARCHIVE_WARN)
+			throw std::runtime_error("Failed to intilise write of archive data: code " + std::to_string(r) + " - " + archive_error_string(ext));
+	}
+	archive_read_close(a);
+	archive_read_free(a);
+	archive_write_close(ext);
+	archive_write_free(ext);
+}
+
 bool SAFC_Update(const std::wstring& latest_release)
 {
 #ifndef __X64
@@ -109,78 +197,58 @@ bool SAFC_Update(const std::wstring& latest_release)
 	//wsprintfW(current_file_path, L"%S%S", filename.c_str(), L"update.7z\0");
 	std::wstring link = L"https://github.com/DixelU/SAFC/releases/download/" + latest_release + L"/" + archive_name;
 	HRESULT co_res = URLDownloadToFileW(NULL, link.c_str(), filename.c_str(), 0, NULL);
-	const std::vector<std::pair<std::wstring, std::wstring>> unpack_lines = {
-		{L"C:\\Program Files\\7-Zip\\7z.exe", (L"x -y \"" + filename + L"\"")},
-		{L"C:\\Program Files (x86)\\7-Zip\\7z.exe", (L"x -y \"" + filename + L"\"")},
-		{L"C:\\Program Files\\WinRAR\\WinRAR.exe", (L"x -y \"" + filename + L"\"")},
-		{L"C:\\Program Files (x86)\\WinRAR\\WinRAR.exe", (L"x -y \"" + filename + L"\"")}
-	};
+	std::string error_msg;
+
+	auto executableFilename = boost::dll::program_location().filename().wstring();
+
 	if (co_res == S_OK) 
 	{
 		errno = 0;
-		_wrename((pathway + L"SAFC.exe").c_str(), (pathway + L"_s").c_str());
-		std::cout << strerror(errno) << std::endl;
-		//_wrename((pathway + L"freeglut.dll").c_str(), (pathway + L"_f").c_str());
-		//std::cout << strerror(errno) << std::endl;
-		//_wrename((pathway + L"glew32.dll").c_str(), (pathway + L"_g").c_str()); 
-		//cout << strerror(errno) << endl; 
-		//wcout << pathway << endl;
-		if (!errno)
+		_wrename((pathway + executableFilename).c_str(), (pathway + L"_s").c_str());
+		std::cout << "Rename status " << strerror(errno) << std::endl;
+		if (!errno) try
 		{
-			std::wstring dir = pathway.substr(0, pathway.length() - 1);
-			for (auto& line : unpack_lines) 
+			std::stringstream container_stringstream;
+			std::ifstream fin(filename, std::ios_base::binary);
+			container_stringstream << fin.rdbuf();
+			fin.close();
+			auto data = container_stringstream.str();
+
+			extract(data.c_str(), data.size());
+
+			if (!_waccess((pathway + L"SAFC.exe").c_str(), 0)) 
+				flag = true;
+			else
 			{
-				std::wstring t = (L"\"" + line.first + L"\" " + line.second);
+				std::wcout << L"Failed: " << errno << std::endl;
 
-				if (_waccess(line.first.c_str(), 0))
-				{
-					std::wcout << L"Unable to find: " << line.first << std::endl;
-					continue;
-				}
-
-				SHELLEXECUTEINFO ShExecInfo = { 0 };
-				ShExecInfo.cbSize = sizeof(SHELLEXECUTEINFO);
-				ShExecInfo.fMask = SEE_MASK_NOCLOSEPROCESS;
-				ShExecInfo.hwnd = NULL;
-				ShExecInfo.lpVerb = NULL;
-				ShExecInfo.lpFile = line.first.data();
-				ShExecInfo.lpParameters = line.second.data();
-				ShExecInfo.lpDirectory = dir.data();
-				ShExecInfo.nShow = SW_SHOW;
-				ShExecInfo.hInstApp = NULL;
-				ShellExecuteExW(&ShExecInfo);
-				WaitForSingleObject(ShExecInfo.hProcess, INFINITE);
-				CloseHandle(ShExecInfo.hProcess);
-
-				if (!_waccess((pathway + L"SAFC.exe").c_str(), 0)) 
-				{
-					flag = true;
-					break;
-				}
-				std::wcout << L"Failed: " << t << std::endl;
+				error_msg = std::string("No SAFC executable found in unpacked data... Aborting...\n") + strerror(errno);
+				_wrename((pathway + L"_s").c_str(), (pathway + executableFilename).c_str());
 			}
-			if (!flag)
-			{
-				if (AutoUpdatesCheck)
-					ThrowAlert_Error("Extraction:\nAutoupdate requres latest 7-Zip or WinRAR installed to default directory.\n");
-				_wrename((pathway + L"_s").c_str(), (pathway + L"SAFC.exe").c_str());
-			}
+		}
+		catch (const std::exception& e) 
+		{
+			error_msg = std::string("Autoudate error (unpack exception):\n") + e.what();
 		}
 		else 
 		{
-			auto error_msg = std::string("Autoudate error:\n") + strerror(errno);
-			if (AutoUpdatesCheck)
-				ThrowAlert_Error(std::move(error_msg));
-			else
-				std::cout << std::move(error_msg) << std::endl;
-			_wrename((pathway + L"_s").c_str(), (pathway + L"SAFC.exe").c_str());
+			auto error_msg = std::string("Autoudate error (unable to access self): \n") + strerror(errno);
 		}
 		_wremove(filename.c_str());
 	}
 	else if (AutoUpdatesCheck)
-		ThrowAlert_Error("Autoupdate error: #" + std::to_string(co_res));
+		error_msg = ("Autoupdate error: #" + std::to_string(co_res));
 	else
 		std::cout << "Autoupdate error: #" + std::to_string(co_res) << std::endl;
+
+	if (AutoUpdatesCheck)
+		ThrowAlert_Error(std::move(error_msg));
+	else
+		std::cout << std::move(error_msg) << std::endl;
+
+	if(error_msg.size())
+		_wrename((pathway + L"_s").c_str(), (pathway + executableFilename).c_str());
+
 	return flag;
 }
 
