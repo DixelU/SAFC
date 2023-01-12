@@ -223,7 +223,6 @@ bool SAFC_Update(const std::wstring& latest_release)
 				std::wcout << L"Failed: " << errno << std::endl;
 
 				error_msg = std::string("No SAFC executable found in unpacked data... Aborting...\n") + strerror(errno);
-				_wrename((pathway + L"_s").c_str(), (pathway + executableFilename).c_str());
 			}
 		}
 		catch (const std::exception& e) 
@@ -232,7 +231,7 @@ bool SAFC_Update(const std::wstring& latest_release)
 		}
 		else 
 		{
-			auto error_msg = std::string("Autoudate error (unable to access self): \n") + strerror(errno);
+			error_msg = std::string("Autoudate error (unable to access self): \n") + strerror(errno);
 		}
 		_wremove(filename.c_str());
 	}
