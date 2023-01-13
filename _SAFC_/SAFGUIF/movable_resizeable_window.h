@@ -117,7 +117,7 @@ struct MoveableResizeableWindow : MoveableWindow
 			return;
 		float CenterDraggableX = XWindowPos + Width, CenterDraggableY = YWindowPos - Height;
 
-		GLCOLOR(RGBAThemeColor | 0xFFFFFFFF*ResizeCornerIsActive);
+		__glcolor(RGBAThemeColor | 0xFFFFFFFF*ResizeCornerIsActive);
 		glLineWidth(1 + ResizeCornerIsHovered);
 		glBegin(GL_LINE_LOOP);
 		glVertex2f(CenterDraggableX + 2.5, CenterDraggableY + 2.5);

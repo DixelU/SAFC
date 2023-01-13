@@ -41,9 +41,9 @@ struct CheckBox : HandleableUIPart
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		float hSideSize = 0.5f * SideSize;
 		if (State)
-			GLCOLOR(CheckedRGBABackground);
+			__glcolor(CheckedRGBABackground);
 		else
-			GLCOLOR(UncheckedRGBABackground);
+			__glcolor(UncheckedRGBABackground);
 		glBegin(GL_QUADS);
 		glVertex2f(Xpos + hSideSize, Ypos + hSideSize);
 		glVertex2f(Xpos - hSideSize, Ypos + hSideSize);
@@ -52,7 +52,7 @@ struct CheckBox : HandleableUIPart
 		glEnd();
 		if ((std::uint8_t)BorderRGBAColor && BorderWidth) 
 		{
-			GLCOLOR(BorderRGBAColor);
+			__glcolor(BorderRGBAColor);
 			glLineWidth(BorderWidth);
 			glBegin(GL_LINE_LOOP);
 			glVertex2f(Xpos + hSideSize, Ypos + hSideSize);

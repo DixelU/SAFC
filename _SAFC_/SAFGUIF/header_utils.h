@@ -45,22 +45,22 @@ inline float rotation_angle()
 	return angle_to_radians(dumb_rotation_angle);
 }
 
-inline float RANDFLOAT(float range) 
+inline float rand_float(float range) 
 {
 	return ((0 - range) + ((float)rand() / ((float)RAND_MAX / (2 * range))));
 }
 
-inline float RANDSGN()
+inline float rand_sign()
 { 
 	return ((rand() & 1) ? -1.f : 1.f); 
 }
 
-inline float SLOWDPROG(float a, float b, float progressrate)
+inline float __slowdprog(float a, float b, float progressrate)
 {
 	return ((a + (progressrate - 1) * b) / progressrate);
 }
 
-inline void GLCOLOR(std::uint32_t uINT)
+inline void __glcolor(std::uint32_t uINT)
 {
 	glColor4ub(((uINT & 0xFF000000) >> 24), ((uINT & 0xFF0000) >> 16), ((uINT & 0xFF00) >> 8), (uINT & 0xFF));
 }
@@ -75,17 +75,19 @@ bool ANIMATION_IS_ACTIVE = 0,
 	 SHIFT_HELD = 0;
 
 std::uint32_t TimerV = 0;
+std::int16_t YearsOld = -1;
+
 HWND hWnd;
 HDC hDc;
-std::int16_t YearsOld = -1;
 auto HandCursor = ::LoadCursor(NULL, IDC_HAND), AllDirectCursor = ::LoadCursor(NULL, IDC_CROSS), NWSECursor = ::LoadCursor(NULL, IDC_SIZENWSE);///AAAAAAAAAAA
 
 //const float singlepixwidth = (float)RANGE / WINDXSIZE;
 
-bool AutoUpdatesCheck = true;
+bool check_autoupdates = true;
 
 void absoluteToActualCoords(int ix, int iy, float& x, float& y);
 void inline rotate(float& x, float& y);
+
 int TIMESEED()
 {
 	SYSTEMTIME t;
@@ -98,6 +100,7 @@ int TIMESEED()
 	}
 	return t.wMilliseconds + (t.wSecond * 1000) + t.wMinute * 60000;
 }
+
 void ThrowAlert_Error(std::string&& AlertText);
 void ThrowAlert_Warning(std::string&& AlertText);
 void AddFiles(std::vector<std::wstring> Filenames);

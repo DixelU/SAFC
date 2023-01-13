@@ -184,15 +184,15 @@ struct MoveableWindow : HandleableUIPart
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		if (!Drawable) 
 			return;
-		GLCOLOR(RGBABackground);
+		__glcolor(RGBABackground);
 		glBegin(GL_QUADS);
 		glVertex2f(XWindowPos, YWindowPos);
 		glVertex2f(XWindowPos + Width, YWindowPos);
-		if (RGBAGradBackground)GLCOLOR(RGBAGradBackground);
+		if (RGBAGradBackground)__glcolor(RGBAGradBackground);
 		glVertex2f(XWindowPos + Width, YWindowPos - Height);
 		glVertex2f(XWindowPos, YWindowPos - Height);
 		glEnd();
-		GLCOLOR(RGBAThemeColor);
+		__glcolor(RGBAThemeColor);
 		glLineWidth(1);
 		glBegin(GL_LINE_LOOP);
 		glVertex2f(XWindowPos, YWindowPos);

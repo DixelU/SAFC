@@ -351,7 +351,7 @@ public:
 			VisibilityCountDown--;
 		if ((std::uint8_t)RGBABackground)
 		{
-			GLCOLOR(RGBABackground);
+			__glcolor(RGBABackground);
 			glBegin(GL_QUADS);
 			glVertex2f(Xpos - (Width * 0.5f), Ypos + (0.5f * Height));
 			glVertex2f(Xpos + (Width * 0.5f), Ypos + (0.5f * Height));
@@ -365,7 +365,7 @@ public:
 			{
 				const float fonted_fix = (is_fonted ? 0.75f : 1.5f);
 				auto t = (*CursorPosition.first)->Chars[CursorPosition.second];
-				GLCOLOR(STLS->RGBAColor);
+				__glcolor(STLS->RGBAColor);
 				glBegin(GL_LINES);
 				glVertex2f(t->Xpos - STLS->XUnitSize - STLS->SpaceWidth * 0.5f, t->Ypos + STLS->YUnitSize * fonted_fix);
 				glVertex2f(t->Xpos - STLS->XUnitSize - STLS->SpaceWidth * 0.5f, t->Ypos - STLS->YUnitSize * fonted_fix);
@@ -374,7 +374,7 @@ public:
 		}
 		if ((std::uint8_t)RGBABorder)
 		{
-			GLCOLOR(RGBABorder);
+			__glcolor(RGBABorder);
 			glLineWidth(BorderWidth);
 			glBegin(GL_LINE_LOOP);
 			glVertex2f(Xpos - (Width * 0.5f), Ypos + (0.5f * Height));

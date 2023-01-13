@@ -238,12 +238,12 @@ bool SAFC_Update(const std::wstring& latest_release)
 		}
 		_wremove(filename.c_str());
 	}
-	else if (AutoUpdatesCheck)
+	else if (check_autoupdates)
 		error_msg = ("Autoupdate error: #" + std::to_string(co_res));
 	else
 		std::cout << "Autoupdate error: #" + std::to_string(co_res) << std::endl;
 
-	if (AutoUpdatesCheck)
+	if (check_autoupdates)
 		ThrowAlert_Error(std::move(error_msg));
 	else
 		std::cout << std::move(error_msg) << std::endl;
@@ -300,7 +300,7 @@ void SAFC_VersionCheck()
 				std::wcout << L"Git latest version: v" << 
 					version_partied[0] << L"." << version_partied[1] << L"." << version_partied[2] << L"." << version_partied[3] << L"\n";
 				std::wcout << L"Current vesion: v" << maj << L"." << min << L"." << ver << L"." << build << L"\n";
-				if (AutoUpdatesCheck &&
+				if (check_autoupdates &&
 					(maj < version_partied[0] ||
 						maj == version_partied[0] && min < version_partied[1] ||
 						maj == version_partied[0] && min == version_partied[1] && ver < version_partied[2] ||
@@ -313,7 +313,7 @@ void SAFC_VersionCheck()
 						ThrowAlert_Warning("SAFC will restart in 3 seconds...");
 				}
 			}
-			else if (AutoUpdatesCheck)
+			else if (check_autoupdates)
 			{
 				auto msg = "Most likely your internet connection is unstable\nSAFC cannot check for updates";
 
@@ -1554,7 +1554,7 @@ namespace Settings
 		((CheckBox*)((*pptr)["RSB_COMPRESS"]))->State = _Data.RSBCompression;
 
 		((CheckBox*)((*pptr)["INPLACE_MERGE"]))->State = _Data.InplaceMergeFlag;
-		((CheckBox*)((*pptr)["AUTOUPDATECHECK"]))->State = AutoUpdatesCheck;
+		((CheckBox*)((*pptr)["AUTOUPDATECHECK"]))->State = check_autoupdates;
 	}
 	void OnSetApply()
 	{
@@ -1604,16 +1604,16 @@ namespace Settings
 		DefaultBoolSettings = (DefaultBoolSettings & (~_BoolSettings::ignore_notes)) | (_BoolSettings::ignore_notes * (!!((CheckBox*)(*pptr)["BOOL_IGN_NOTES"])->State));
 		DefaultBoolSettings = (DefaultBoolSettings & (~_BoolSettings::ignore_all_but_tempos_notes_and_pitch)) | (_BoolSettings::ignore_all_but_tempos_notes_and_pitch * (!!((CheckBox*)(*pptr)["BOOL_IGN_ALL_EX_TPS"])->State));
 
-		AutoUpdatesCheck = ((CheckBox*)(*pptr)["AUTOUPDATECHECK"])->State;
+		check_autoupdates = ((CheckBox*)(*pptr)["AUTOUPDATECHECK"])->State;
 
 		_Data.ChannelsSplit = ((CheckBox*)((*pptr)["SPLIT_TRACKS"]))->State;
 		_Data.RSBCompression = ((CheckBox*)((*pptr)["RSB_COMPRESS"]))->State;
 
 		if (isRegestryOpened)
 		{
-			TRY_CATCH(RegestryAccess.SetDwordValue(L"AUTOUPDATECHECK", AutoUpdatesCheck);, "Failed on setting AUTOUPDATECHECK")
+			TRY_CATCH(RegestryAccess.SetDwordValue(L"AUTOUPDATECHECK", check_autoupdates);, "Failed on setting AUTOUPDATECHECK")
 			TRY_CATCH(RegestryAccess.SetDwordValue(L"SPLIT_TRACKS", _Data.ChannelsSplit);, "Failed on setting SPLIT_TRACKS")
-			//TRY_CATCH(RegestryAccess.SetDwordValue(L"RSB_COMPRESS", AutoUpdatesCheck);, "Failed on setting RSB_COMPRESS")
+			//TRY_CATCH(RegestryAccess.SetDwordValue(L"RSB_COMPRESS", check_autoupdates);, "Failed on setting RSB_COMPRESS")
 			TRY_CATCH(RegestryAccess.SetDwordValue(L"DEFAULT_BOOL_SETTINGS", DefaultBoolSettings);, "Failed on setting DEFAULT_BOOL_SETTINGS")
 			TRY_CATCH(RegestryAccess.SetDwordValue(L"FONTSIZE", lFontSymbolsInfo::Size); , "Failed on setting FONTSIZE")
 			TRY_CATCH(RegestryAccess.SetDwordValue(L"FLOAT_FONTHTW", *(std::uint32_t*)(&lFONT_HEIGHT_TO_WIDTH)); , "Failed on setting FLOAT_FONTHTW")
@@ -1818,7 +1818,7 @@ void RestoreRegSettings()
 		catch (...) { std::cout << "Exception thrown while restoring AS_BCKGID from registry\n"; }
 		try
 		{
-			AutoUpdatesCheck = Settings::RegestryAccess.GetDwordValue(L"AUTOUPDATECHECK");
+			check_autoupdates = Settings::RegestryAccess.GetDwordValue(L"AUTOUPDATECHECK");
 		}
 		catch (...) { std::cout << "Exception thrown while restoring AUTOUPDATECHECK from registry\n"; }
 		try
@@ -2028,7 +2028,7 @@ void Init()
 
 	(*T)["AS_THREADS_COUNT"] = new InputField(std::to_string(_Data.DetectedThreads), 92.5 - WindowHeapSize, 75 - WindowHeapSize, 10, 20, System_White, NULL, 0x007FFFFF, System_White, "Threads count", 2, _Align::center, _Align::right, InputField::Type::NaturalNumbers);
 
-	(*T)["AUTOUPDATECHECK"] = new CheckBox(-97.5 + WindowHeapSize, 35 - WindowHeapSize, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, AutoUpdatesCheck, System_White, _Align::left, "Check for updates automatically"); 
+	(*T)["AUTOUPDATECHECK"] = new CheckBox(-97.5 + WindowHeapSize, 35 - WindowHeapSize, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, check_autoupdates, System_White, _Align::left, "Check for updates automatically"); 
 
 
 	(*WH)["APP_SETTINGS"] = T;

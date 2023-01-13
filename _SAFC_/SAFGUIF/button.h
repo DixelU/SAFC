@@ -154,7 +154,7 @@ struct Button : HandleableUIPart
 		{
 			if ((std::uint8_t)HoveredRGBABackground)
 			{
-				GLCOLOR(HoveredRGBABackground);
+				__glcolor(HoveredRGBABackground);
 				glBegin(GL_QUADS);
 				glVertex2f(Xpos - Width * 0.5f, Ypos + 0.5f * Height);
 				glVertex2f(Xpos + Width * 0.5f, Ypos + 0.5f * Height);
@@ -164,7 +164,7 @@ struct Button : HandleableUIPart
 			}
 			if ((std::uint8_t)HoveredRGBABorder)
 			{
-				GLCOLOR(HoveredRGBABorder);
+				__glcolor(HoveredRGBABorder);
 				glLineWidth(BorderWidth);
 				glBegin(GL_LINE_LOOP);
 				glVertex2f(Xpos - Width * 0.5f, Ypos + 0.5f * Height);
@@ -178,7 +178,7 @@ struct Button : HandleableUIPart
 		{
 			if ((std::uint8_t)RGBABackground)
 			{
-				GLCOLOR(RGBABackground);
+				__glcolor(RGBABackground);
 				glBegin(GL_QUADS);
 				glVertex2f(Xpos - Width * 0.5f, Ypos + 0.5f * Height);
 				glVertex2f(Xpos + Width * 0.5f, Ypos + 0.5f * Height);
@@ -188,7 +188,7 @@ struct Button : HandleableUIPart
 			}
 			if ((std::uint8_t)RGBABorder)
 			{
-				GLCOLOR(RGBABorder);
+				__glcolor(RGBABorder);
 				glLineWidth(BorderWidth);
 				glBegin(GL_LINE_LOOP);
 				glVertex2f(Xpos - Width * 0.5f, Ypos + 0.5f * Height);

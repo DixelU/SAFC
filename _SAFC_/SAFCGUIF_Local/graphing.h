@@ -55,7 +55,7 @@ struct Graphing : HandleableUIPart
 			local_fp_type prev_value = CYpos - 0.5 * TargetHeight + (ScaleCoef * Graph->begin()->second + Shift) * TargetHeight;
 			local_fp_type t_prev_value = prev_value;
 			bool IsLastLoopComplete = false;
-			GLCOLOR(Color);
+			__glcolor(Color);
 			glBegin(GL_LINE_STRIP);
 			glVertex2f(CXpos - 0.5f * Width, t_prev_value);
 			for (auto T : *Graph) 
@@ -83,7 +83,7 @@ struct Graphing : HandleableUIPart
 			glEnd();
 			if (AssignedXSelection_ByKey > 0.5f)
 			{
-				GLCOLOR(SelectionColor);
+				__glcolor(SelectionColor);
 				local_fp_type last_pos_x = ((AssignedXSelection_ByKey - begin) / (end - begin) - 0.5f + CentralPoint) * HorizontalScaling;
 				if (last_pos_x >= -0.5f) {
 					last_pos_x = ((last_pos_x < 0.5f) ? last_pos_x : 0.5f) * Width;
@@ -106,7 +106,7 @@ struct Graphing : HandleableUIPart
 			{
 				local_fp_type cur_x = (((MXpos - CXpos) / Width) / HorizontalScaling - CentralPoint + 0.5f) * (end - begin) + begin;
 				glLineWidth(1);
-				GLCOLOR(Color);
+				__glcolor(Color);
 				glBegin(GL_LINE_LOOP);
 				glVertex2f(CXpos - 0.5f * Width, CYpos + TargetHeight * 0.5f);
 				glVertex2f(CXpos + 0.5f * Width, CYpos + TargetHeight * 0.5f);
@@ -127,14 +127,14 @@ struct Graphing : HandleableUIPart
 				if (abs(last_pos_x) <= 0.5f)
 				{
 					last_pos_x = last_pos_x * Width + CXpos;
-					GLCOLOR(NearestLineColor);
+					__glcolor(NearestLineColor);
 					glLineWidth(1);
 					glBegin(GL_LINES);
 					glVertex2f(last_pos_x, CYpos - TargetHeight * 0.5f);
 					glVertex2f(last_pos_x, CYpos + TargetHeight * 0.5f);
 					glEnd();
 
-					GLCOLOR(PointColor);
+					__glcolor(PointColor);
 					glPointSize(3);
 					glBegin(GL_POINTS);
 					glVertex2f(last_pos_x, last_pos_y);

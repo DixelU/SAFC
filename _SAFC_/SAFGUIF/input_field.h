@@ -279,7 +279,7 @@ struct InputField : HandleableUIPart
 	void Draw() override
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
-		GLCOLOR(BorderRGBAColor);
+		__glcolor(BorderRGBAColor);
 		glLineWidth(1);
 		glBegin(GL_LINE_LOOP);
 		glVertex2f(Xpos + 0.5f * Width, Ypos + 0.5f * Height);

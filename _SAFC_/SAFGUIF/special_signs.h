@@ -11,7 +11,7 @@ struct SpecialSigns
 {
 	static void DrawOK(float x, float y, float SZParam, std::uint32_t RGBAColor, std::uint32_t NOARGUMENT = 0)
 	{
-		GLCOLOR(RGBAColor);
+		__glcolor(RGBAColor);
 		glLineWidth(ceil(SZParam / 2));
 		glBegin(GL_LINE_STRIP);
 		glVertex2f(x - SZParam * 0.766f, y + SZParam * 0.916f);
@@ -25,13 +25,13 @@ struct SpecialSigns
 	}
 	static void DrawExTriangle(float x, float y, float SZParam, std::uint32_t RGBAColor, std::uint32_t SecondaryRGBAColor)
 	{
-		GLCOLOR(RGBAColor);
+		__glcolor(RGBAColor);
 		glBegin(GL_TRIANGLES);
 		glVertex2f(x, y + HTSQ2 * SZParam);
 		glVertex2f(x - SZParam, y);
 		glVertex2f(x + SZParam, y);
 		glEnd();
-		GLCOLOR(SecondaryRGBAColor);
+		__glcolor(SecondaryRGBAColor);
 		glLineWidth(ceil(SZParam / 8));
 		glBegin(GL_LINE_LOOP);
 		glVertex2f(x, y + HTSQ2 * SZParam);
@@ -48,7 +48,7 @@ struct SpecialSigns
 	}
 	static void DrawFileSign(float x, float y, float SZParam, std::uint32_t RGBAColor, std::uint32_t SecondaryRGBAColor)
 	{
-		GLCOLOR(RGBAColor);
+		__glcolor(RGBAColor);
 		glLineWidth(ceil(SZParam / 5));
 		glBegin(GL_LINE_LOOP);
 		glVertex2f(x, y + SZParam);
@@ -75,12 +75,12 @@ struct SpecialSigns
 	}
 	static void DrawACircle(float x, float y, float SZParam, std::uint32_t RGBAColor, std::uint32_t SecondaryRGBAColor)
 	{
-		GLCOLOR(SecondaryRGBAColor);
+		__glcolor(SecondaryRGBAColor);
 		glBegin(GL_POLYGON);
 		for (float a = -90; a < 270; a += 5)
 			glVertex2f(SZParam * 1.25f * (cos(angle_to_radians(a))) + x, SZParam * 1.25f * (sin(angle_to_radians(a))) + y + SZParam * 0.75f);
 		glEnd();
-		GLCOLOR(RGBAColor);
+		__glcolor(RGBAColor);
 		glLineWidth(ceil(SZParam / 10));
 		glBegin(GL_LINE_LOOP);
 		for (float a = -90; a < 270; a += 5)
@@ -89,7 +89,7 @@ struct SpecialSigns
 	}
 	static void DrawNo(float x, float y, float SZParam, std::uint32_t RGBAColor, std::uint32_t NOARGUMENT = 0)
 	{
-		GLCOLOR(RGBAColor);
+		__glcolor(RGBAColor);
 		glLineWidth(ceil(SZParam / 2));
 		glBegin(GL_LINES);
 		glVertex2f(x - SZParam * 0.5f, y + SZParam * 0.25f);
