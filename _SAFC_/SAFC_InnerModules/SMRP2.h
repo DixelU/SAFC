@@ -23,6 +23,8 @@
 #include "PLC.h"
 #include "CAT.h"
 
+#include "../function_wrapper.h"
+
 struct logger_base
 {
 	virtual ~logger_base() = default;
@@ -159,7 +161,12 @@ struct single_midi_processor_2
 	using data_iterator = std::vector<base_type>::iterator;
 
 	/* returns false if event was disabled */
-	using event_transforming_filter = std::function<bool(const data_iterator&, const data_iterator&, const data_iterator&, single_track_data&)>;
+	using event_transforming_filter = dixelu::type_erased_function_container<
+		bool(const data_iterator&,
+			const data_iterator&,
+			const data_iterator&,
+			single_track_data&)>;
+	// using this instead of std::function because of profiling transparency
 	/* begin, end, cur */
 
 	struct message_buffers
@@ -443,6 +450,8 @@ struct single_midi_processor_2
 
 		for (int i = 0; i < 4 && file_input.good(); i++)
 			track_expected_size = (track_expected_size << 8) | file_input.get();
+
+		data_buffer.reserve(track_expected_size * expected_size(0x80) / 4);
 
 		if (file_input.eof())
 			return false;

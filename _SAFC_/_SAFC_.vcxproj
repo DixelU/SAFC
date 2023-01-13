@@ -287,6 +287,7 @@
     <ClInclude Include="allocator.h" />
     <ClInclude Include="bbb_ffio.h" />
     <ClInclude Include="consts.h" />
+    <ClInclude Include="function_wrapper.h" />
     <ClInclude Include="MRWF.h" />
     <ClInclude Include="resource.h" />
     <ClInclude Include="SAFCGUIF_Local\BAWC.h" />
