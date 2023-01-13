@@ -187,7 +187,7 @@ bool SAFC_Update(const std::wstring& latest_release)
 	constexpr wchar_t* const archive_name = (wchar_t* const)L"SAFC64.7z";
 #endif
 	wchar_t current_file_path[MAX_PATH];
-	bool flag = false;
+	bool updated_flag = false;
 	//GetCurrentDirectoryW(MAX_PATH, current_file_path);
 	GetModuleFileNameW(NULL, current_file_path, MAX_PATH);
 	std::wstring executablepath = current_file_path;
@@ -199,12 +199,12 @@ bool SAFC_Update(const std::wstring& latest_release)
 	HRESULT co_res = URLDownloadToFileW(NULL, link.c_str(), filename.c_str(), 0, NULL);
 	std::string error_msg;
 
-	auto executableFilename = boost::dll::program_location().filename().wstring();
+	auto executable_filename = boost::dll::program_location().filename().wstring();
 
 	if (co_res == S_OK) 
 	{
 		errno = 0;
-		_wrename((pathway + executableFilename).c_str(), (pathway + L"_s").c_str());
+		_wrename((pathway + executable_filename).c_str(), (pathway + L"_s").c_str());
 		std::cout << "Rename status " << strerror(errno) << std::endl;
 		if (!errno) try
 		{
@@ -216,8 +216,11 @@ bool SAFC_Update(const std::wstring& latest_release)
 
 			extract(data.c_str(), data.size());
 
-			if (!_waccess((pathway + L"SAFC.exe").c_str(), 0)) 
-				flag = true;
+			if (!_waccess((pathway + L"SAFC.exe").c_str(), 0))
+			{
+				_wrename((pathway + L"SAFC.exe").c_str(), (pathway + executable_filename).c_str());
+				updated_flag = true;
+			}
 			else
 			{
 				std::wcout << L"Failed: " << errno << std::endl;
@@ -246,9 +249,9 @@ bool SAFC_Update(const std::wstring& latest_release)
 		std::cout << std::move(error_msg) << std::endl;
 
 	if(error_msg.size())
-		_wrename((pathway + L"_s").c_str(), (pathway + executableFilename).c_str());
+		_wrename((pathway + L"_s").c_str(), (pathway + executable_filename).c_str());
 
-	return flag;
+	return updated_flag;
 }
 
 void SAFC_VersionCheck()
@@ -258,9 +261,7 @@ void SAFC_VersionCheck()
 		bool flag = false;
 		_wremove(L"_s");
 		constexpr wchar_t* SAFC_tags_link = (wchar_t* const)L"https://api.github.com/repos/DixelU/SAFC/tags";
-		wchar_t current_file_path[MAX_PATH];
-		GetModuleFileNameW(NULL, current_file_path, MAX_PATH);
-		std::wstring executablepath = current_file_path;
+		auto current_file_path = boost::dll::program_location().filename().wstring();
 		std::wstring filename = ExtractDirectory(current_file_path);
 		std::wstring pathway = filename;
 		filename += L"tags.json";
@@ -296,7 +297,8 @@ void SAFC_VersionCheck()
 						break;
 					index++;
 				}
-				std::wcout << L"Git latest version: v" << version_partied[0] << L"." << version_partied[1] << L"." << version_partied[2] << L"." << version_partied[3] << L"\n";
+				std::wcout << L"Git latest version: v" << 
+					version_partied[0] << L"." << version_partied[1] << L"." << version_partied[2] << L"." << version_partied[3] << L"\n";
 				std::wcout << L"Current vesion: v" << maj << L"." << min << L"." << ver << L"." << build << L"\n";
 				if (AutoUpdatesCheck &&
 					(maj < version_partied[0] ||
@@ -312,19 +314,23 @@ void SAFC_VersionCheck()
 				}
 			}
 			else if (AutoUpdatesCheck)
-				ThrowAlert_Warning("Most likely your internet connection is unstable\nSAFC cannot check for updates"),
-				std::cout << "Most likely your internet connection is unstable\nSAFC cannot check for updates";
+			{
+				auto msg = "Most likely your internet connection is unstable\nSAFC cannot check for updates";
+
+				ThrowAlert_Warning(msg);
+				std::cout << msg;
+			}
 		}
 		catch (const std::exception& e)
 		{
-			ThrowAlert_Warning("SAFC just almost crashed while checking the update...\nTell developer about that" +
+			ThrowAlert_Warning("SAFC just almost crashed while checking the update...\nTell developer about that " +
 				std::string() + e.what());
 		}
 		_wremove(filename.c_str());
 		if (flag)
 		{
 			Sleep(3000);
-			ShellExecuteW(NULL, L"open", executablepath.c_str(), NULL, NULL, SW_SHOWNORMAL);
+			ShellExecuteW(NULL, L"open", current_file_path.c_str(), NULL, NULL, SW_SHOWNORMAL);
 			//_wsystem((L"start \"" + executablepath + L"\"").c_str());
 			exit(0);
 		}
