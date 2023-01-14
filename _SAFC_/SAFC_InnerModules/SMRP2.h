@@ -1155,10 +1155,9 @@ struct single_midi_processor_2
 			constexpr base_type ending[] = { 0x0, 0xFF, 0x2F, 0x0 };
 			constexpr base_type placeholder[] = { 0x0, 0xFF, 0x01, 0x0 };
 
-			const size_t ending_size = sizeof(ending) + 
-				(fill_empty_track_with_at_least_one_event) ? 
-					sizeof(placeholder) * data.empty() : 
-					0;
+			const size_t ending_size =
+				sizeof(ending) +
+				fill_empty_track_with_at_least_one_event * sizeof(placeholder) * data.empty();
 			auto size_plus_ending = data.size() + ending_size;
 
 			base_type header[8];
