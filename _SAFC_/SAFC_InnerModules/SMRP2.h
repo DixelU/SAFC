@@ -1122,6 +1122,8 @@ struct single_midi_processor_2
 	template<>
 	struct track_data<false>
 	{
+		static constexpr bool fill_empty_track_with_at_least_one_event = false;
+
 		std::vector<uint8_t> data;
 		tick_type prev_tick;
 		inline std::vector<uint8_t>& get_vec(const uint8_t&)
@@ -1137,9 +1139,9 @@ struct single_midi_processor_2
 		{
 			return prev_tick;
 		}
-		inline tick_type count()
+		inline tick_type count(bool disallow_empty_tracks)
 		{
-			return !data.empty();
+			return !disallow_empty_tracks || !data.empty();
 		}
 		inline void reserve(const uint64_t& size)
 		{
@@ -1150,26 +1152,29 @@ struct single_midi_processor_2
 			if (disallow_empty_tracks && data.empty())
 				return;
 
-			auto size_plus_4 = data.size() + 4;
+			constexpr base_type ending[] = { 0x0, 0xFF, 0x2F, 0x0 };
+			constexpr base_type placeholder[] = { 0x0, 0xFF, 0x01, 0x0 };
+
+			const size_t ending_size = sizeof(ending) + 
+				(fill_empty_track_with_at_least_one_event) ? 
+					sizeof(placeholder) * data.empty() : 
+					0;
+			auto size_plus_ending = data.size() + ending_size;
 
 			base_type header[8];
 			header[0] = 'M';
 			header[1] = 'T';
 			header[2] = 'r';
 			header[3] = 'k';
-			header[4] = (size_plus_4 >> 24) & 0xFF;
-			header[5] = (size_plus_4 >> 16) & 0xFF;
-			header[6] = (size_plus_4 >> 8) & 0xFF;
-			header[7] = (size_plus_4) & 0xFF;
-
-			base_type ending[4];
-			ending[0] = 0;
-			ending[1] = 0xFF;
-			ending[2] = 0x2F;
-			ending[3] = 0;
+			header[4] = (size_plus_ending >> 24) & 0xFF;
+			header[5] = (size_plus_ending >> 16) & 0xFF;
+			header[6] = (size_plus_ending >> 8) & 0xFF;
+			header[7] = (size_plus_ending) & 0xFF;
 
 			out.write((const char*) &header[0], sizeof(header));
 			ostream_write(data, out);
+			if (fill_empty_track_with_at_least_one_event && data.empty())
+				out.write((const char*)&placeholder[0], sizeof(placeholder));
 			out.write((const char*)&ending[0], sizeof(ending));
 		}
 	};
@@ -1188,11 +1193,11 @@ struct single_midi_processor_2
 			for (auto& singleData : data)
 				singleData.clear();
 		}
-		inline tick_type count()
+		inline tick_type count(bool disallow_empty_tracks)
 		{
 			tick_type counter = 0;
 			for (auto& singleData : data)
-				counter += singleData.count();
+				counter += singleData.count(disallow_empty_tracks);
 			return counter;
 		}
 		inline tick_type& get_tick(const uint8_t& channel)
@@ -1463,7 +1468,7 @@ struct single_midi_processor_2
 					data,
 					write_buffer);
 
-			auto current_count = write_buffer.count();
+			auto current_count = write_buffer.count(data.settings.proc_details.remove_empty_tracks);
 			track_counter += current_count;
 			write_buffer.dump(file_output, data.settings.proc_details.remove_empty_tracks);
 			write_buffer.clear();
