@@ -42,14 +42,14 @@ struct WheelVariableChanger :HandleableUIPart
 	void Draw() override
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
-		GLCOLOR(0xFFFFFF3F + WheelFieldHovered * 0x3F);
+		__glcolor(0xFFFFFF3F + WheelFieldHovered * 0x3F);
 		glBegin(GL_QUADS);
 		glVertex2f(Xpos, Ypos + 25);
 		glVertex2f(Xpos, Ypos - 25);
 		glVertex2f(Xpos + 50, Ypos - 25);
 		glVertex2f(Xpos + 50, Ypos + 25);
 		glEnd();
-		GLCOLOR((0x007FFF3F + WheelFieldHovered * 0x3F));
+		__glcolor((0x007FFF3F + WheelFieldHovered * 0x3F));
 		glBegin(GL_LINE_LOOP);
 		glVertex2f(Xpos, Ypos + 25);
 		glVertex2f(Xpos, Ypos - 25);

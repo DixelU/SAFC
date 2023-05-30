@@ -15,11 +15,15 @@
 #include <atomic>
 #include <ostream>
 
+#include <syncstream>
+
 #include "../bbb_ffio.h"
 #include "../SAFGUIF/header_utils.h"
 
 #include "PLC.h"
 #include "CAT.h"
+
+#include "../function_wrapper.h"
 
 struct logger_base
 {
@@ -77,7 +81,7 @@ public:
 	{
 		std::lock_guard locker(mtx);
 		this->message = std::move(message);
-		std::cout << this->message << std::endl;
+		std::osyncstream(std::cout) << this->message << std::endl;
 	}
 };
 
@@ -247,19 +251,40 @@ struct single_midi_processor_2
 				bool field2_is_set = false;
 			};
 
-			std::map<std::uint16_t, base_type> key_events_at_selection_front;
-			std::map<base_type, event_data_fixed_size_2> channel_events_at_selection_front;
+			std::unordered_map<std::uint16_t, base_type> key_events_at_selection_front;
+			std::unordered_map<base_type, event_data_fixed_size_2> channel_events_at_selection_front;
 			std::uint32_t frontal_tempo = default_tempo;
 			color_event frontal_color_event;
+
+			inline void clear()
+			{
+				key_events_at_selection_front.clear();
+				channel_events_at_selection_front.clear();
+				key_events_at_selection_front.reserve(1 << 16);
+				channel_events_at_selection_front.reserve(1 << 8);
+
+				frontal_tempo = default_tempo;
+				frontal_color_event = {};
+			}
 		};
 
 		selection selection_data;
+
+		inline void clear()
+		{
+			selection_data.clear();
+		}
 	};
 
 	using data_iterator = std::vector<base_type>::iterator;
 
 	/* returns false if event was disabled */
-	using event_transforming_filter = std::function<bool(const data_iterator&, const data_iterator&, const data_iterator&, single_track_data&)>;
+	using event_transforming_filter = dixelu::type_erased_function_container<
+		bool(const data_iterator&,
+			const data_iterator&,
+			const data_iterator&,
+			single_track_data&)>;
+	// using this instead of std::function because of profiling transparency
 	/* begin, end, cur */
 
 	struct message_buffers
@@ -273,10 +298,16 @@ struct single_midi_processor_2
 
 		using logger_t = singleline_logger;
 
-		message_buffers():
-			log(std::make_shared<logger_t>()),
-			warning(std::make_shared<logger_t>()),
-			error(std::make_shared<logger_t>()),
+		message_buffers(bool is_console_oriented = false):
+			log(is_console_oriented ? 
+				std::make_shared<printing_logger>() : 
+				std::make_shared<logger_t>()),
+			warning(is_console_oriented ? 
+				std::make_shared<printing_logger>() : 
+				std::make_shared<logger_t>()),
+			error(is_console_oriented ? 
+				std::make_shared<printing_logger>() : 
+				std::make_shared<logger_t>()),
 			last_input_position(0),
 			processing(false),
 			finished(false)		
@@ -302,6 +333,7 @@ struct single_midi_processor_2
 			bool pass_pitch = true;
 			bool pass_notes = true;
 			bool pass_other = true;
+			bool pass_sysex = false;
 
 			bool piano_only = false;
 		};
@@ -311,7 +343,7 @@ struct single_midi_processor_2
 			double tempo_multiplier;
 			metasize_type tempo_override_value;
 			tempo_override():
-				tempo_override_value(0), tempo_multiplier(1)
+				tempo_override_value(single_track_data::selection::default_tempo), tempo_multiplier(1)
 			{
 			}
 			inline void set_override_value(double tempo)
@@ -320,7 +352,7 @@ struct single_midi_processor_2
 			}
 			inline metasize_type process(metasize_type a) const 
 			{
-				if (tempo_override_value)
+				if (tempo_override_value != single_track_data::selection::default_tempo)
 					return tempo_override_value;
 				return (std::min)((metasize_type)(a / tempo_multiplier), 0xFFFF7Fu);
 			}
@@ -537,10 +569,15 @@ struct single_midi_processor_2
 		for (int i = 0; i < 4 && file_input.good(); i++)
 			track_expected_size = (track_expected_size << 8) | file_input.get();
 
+		data_buffer.reserve(track_expected_size * expected_size(0x80) / 4);
+
 		if (file_input.eof())
 			return false;
 
-		const auto back_note_event_inserter = [&current_polyphony, &current_tick, &data_buffer]() {
+		const auto back_note_event_inserter =
+		[](decltype(current_polyphony)& current_polyphony, 
+			decltype(current_tick)& current_tick, 
+			decltype(data_buffer)& data_buffer) {
 			for (size_t idx = 0; idx < current_polyphony.size(); idx++)
 			{
 				auto& cur_note_stack = current_polyphony[idx];
@@ -586,7 +623,11 @@ struct single_midi_processor_2
 			{
 				if (command < 0xF0)
 					rsb = command;
-				param_buffer = file_input.get();
+
+				if (command < 0xF0 || command == 0xFF)
+					param_buffer = file_input.get();
+				else 
+					param_buffer = 0xFF;
 			}
 
 			if (command < 0x80)
@@ -672,7 +713,7 @@ struct single_midi_processor_2
 				base_type com = command;
 				base_type type = param_buffer;
 
-				is_going &= (type != 0x2F && com == 0xFF);
+				is_going &= !(type == 0x2F && com == 0xFF);
 				if (!settings.legacy.ignore_meta_rsb)
 					rsb = 0;
 
@@ -680,13 +721,14 @@ struct single_midi_processor_2
 				{
 					// ignore the end of track event;
 					data_buffer.resize(data_buffer.size() - event_type);
-					break;
+					continue;
 				}
 
 				push_back<base_type>(data_buffer, com);
-				push_back<base_type>(data_buffer, type);
+				if(com == 0xFF) // damn sysex broke it all >:C
+					push_back<base_type>(data_buffer, type);
 
-				// 8 tick  1 type  1 metatype  1 vlv size  4 size  ...<raw meta>~vlv+data
+				// 8 tick  1 type  1 metatype (except when sysex)  1 vlv size  4 size  ...<raw meta>~vlv+data
 
 				auto length = get_vlv(file_input);
 				auto encoded_length = push_vlv_s(length, meta_buffer);
@@ -711,7 +753,7 @@ struct single_midi_processor_2
 			}
 		}
 
-		back_note_event_inserter();
+		back_note_event_inserter(current_polyphony, current_tick, data_buffer);
 
 		return is_good;
 	}
@@ -740,34 +782,36 @@ struct single_midi_processor_2
 	template<bool ready_for_write = false>
 	FORCEDINLINE inline static typename std::enable_if<!ready_for_write, std::ptrdiff_t>::type expected_size(const data_iterator& cur)
 	{
-		const auto& type = cur[8];
+		const auto& type = cur[event_type];
 		auto size = expected_size<ready_for_write>(type);
 		if (size > 0)
 			return size;
 
-		// 8 tick  1 type  1 metatype  _1 vlv size_  4 size  ...<raw meta>~vlv+data	
-		const auto& meta_size = get_value<metasize_type>(cur, event_param3);
+		// 8 tick  1 type  1 metatype (when not sysex)  _1 vlv size_  4 size  ...<raw meta>~vlv+data	
+		bool is_sysex = type != 0xFF;
+		const auto& meta_size = get_value<metasize_type>(cur, event_param3 - is_sysex);
 
-		return std::ptrdiff_t(event_meta_raw) + std::ptrdiff_t(meta_size);
+		return std::ptrdiff_t(event_meta_raw) + std::ptrdiff_t(meta_size) - is_sysex;
 	}
 
 	template<bool ready_for_write = false>
 	FORCEDINLINE inline static typename std::enable_if<ready_for_write, std::array<std::ptrdiff_t, gapped_size_legnth>>::type
 		expected_size(const data_iterator& cur)
 	{
-		const auto& type = cur[8];
+		const auto& type = cur[event_type];
 		auto size = expected_size<ready_for_write>(type);
 		if (size > 0)
 			return { size, 0, 0 };
 
-		// 8 tick  1 type  1 metatype  _1 vlv size_  4 size  ...<raw meta>~vlv+data	
-		const auto& meta_size = get_value<metasize_type>(cur, event_param3);
+		// 8 tick  1 type  1 metatype (when not sysex)  _1 vlv size_  4 size  ...<raw meta>~vlv+data	
+		bool is_sysex = type != 0xFF;
+		const auto& meta_size = get_value<metasize_type>(cur, event_param3 - is_sysex);
 
 		return 
 		{ 
-			std::ptrdiff_t(event_param2), 
-			std::ptrdiff_t(event_meta_raw),
-			std::ptrdiff_t(event_meta_raw + meta_size)
+			std::ptrdiff_t(event_param2 - is_sysex),
+			std::ptrdiff_t(event_meta_raw - is_sysex),
+			std::ptrdiff_t(event_meta_raw - is_sysex + meta_size)
 		};
 	}
 
@@ -803,7 +847,7 @@ struct single_midi_processor_2
 		auto size = data_buffer.size();
 
 		if (size == 0) [[unlikely]]
-			return ((*buffers.log) << "End of processing"), false;
+			return ((*buffers.log) << "Empty buffer"), false;
 
 		std::size_t i = 0;
 
@@ -850,7 +894,7 @@ struct single_midi_processor_2
 	{
 		std::multimap<base_type, event_transforming_filter> filters;
 
-		const event_transforming_filter selection_filter = [selection_data = settings.selection_data]
+		const event_transforming_filter selection_filter = [&selection_data = settings.selection_data]
 		(const data_iterator& begin, const data_iterator& end, const data_iterator& cur, single_track_data& std_ref) -> bool
 		{
 			auto& tick = get_value<tick_type>(cur, tick_position);
@@ -1096,11 +1140,12 @@ struct single_midi_processor_2
 		(const data_iterator& begin, const data_iterator& end, const data_iterator& cur, single_track_data& std_ref) -> bool
 		{
 			auto& tick = get_value<tick_type>(cur, tick_position);
+			const auto& event_class = get_value<base_type>(cur, event_type);
 			const auto& meta_type = get_value<base_type>(cur, event_param1);
 
 			// 8 tick  1 type  1 metatype  1 vlv size  4 size  ...<raw meta>~vlv+data
 
-			if (meta_type == 0x51)
+			if (event_class == 0xFF && meta_type == 0x51)
 			{
 				if (!filtering.pass_tempo)
 				{
@@ -1128,13 +1173,19 @@ struct single_midi_processor_2
 				return true;
 			}
 
-			if (!filtering.pass_other)
+			switch (event_class)
 			{
-				tick = disable_tick;
-				return false;
+				case 0xF0:
+				case 0xF7:
+					if (!filtering.pass_sysex)
+						tick = disable_tick;
+				case 0xFF:
+				default: 
+					if (!filtering.pass_other)
+						tick = disable_tick;
 			}
 
-			return true;
+			return tick != disable_tick;
 		};
 
 		const event_transforming_filter others_transform = [ filtering = settings.filter ]
@@ -1152,7 +1203,7 @@ struct single_midi_processor_2
 		};
 
 		const event_transforming_filter tick_positive_linear_transform =
-			[selection_data = settings.selection_data, old_ppqn = settings.old_ppqn, new_ppqn = settings.new_ppqn, offset = settings.offset]
+			[old_ppqn = settings.old_ppqn, new_ppqn = settings.new_ppqn, offset = settings.offset]
 		(const data_iterator& begin, const data_iterator& end, const data_iterator& cur, single_track_data& std_ref) -> bool
 		{
 			auto& tick = get_value<tick_type>(cur, tick_position);
@@ -1182,6 +1233,105 @@ struct single_midi_processor_2
 
 		return filters;
 	}
+
+	template<bool channels_split>
+	struct track_data;
+
+	template<>
+	struct track_data<false>
+	{
+		static constexpr bool fill_empty_track_with_at_least_one_event = false;
+
+		std::vector<uint8_t> data;
+		tick_type prev_tick;
+		inline std::vector<uint8_t>& get_vec(const uint8_t&)
+		{
+			return data;
+		}
+		inline void clear()
+		{
+			data.clear();
+			prev_tick = 0;
+		}
+		inline tick_type& get_tick(const uint8_t&)
+		{
+			return prev_tick;
+		}
+		inline tick_type count(bool disallow_empty_tracks)
+		{
+			return !disallow_empty_tracks || !data.empty();
+		}
+		inline void reserve(const uint64_t& size)
+		{
+			data.reserve(size);
+		}
+		inline void dump(std::ostream& out, bool disallow_empty_tracks)
+		{
+			if (disallow_empty_tracks && data.empty())
+				return;
+
+			constexpr base_type ending[] = { 0x0, 0xFF, 0x2F, 0x0 };
+			constexpr base_type placeholder[] = { 0x0, 0xFF, 0x01, 0x0 };
+
+			const size_t ending_size =
+				sizeof(ending) +
+				fill_empty_track_with_at_least_one_event * sizeof(placeholder) * data.empty();
+			auto size_plus_ending = data.size() + ending_size;
+
+			base_type header[8];
+			header[0] = 'M';
+			header[1] = 'T';
+			header[2] = 'r';
+			header[3] = 'k';
+			header[4] = (size_plus_ending >> 24) & 0xFF;
+			header[5] = (size_plus_ending >> 16) & 0xFF;
+			header[6] = (size_plus_ending >> 8) & 0xFF;
+			header[7] = (size_plus_ending) & 0xFF;
+
+			out.write((const char*) &header[0], sizeof(header));
+			ostream_write(data, out);
+			if (fill_empty_track_with_at_least_one_event && data.empty())
+				out.write((const char*)&placeholder[0], sizeof(placeholder));
+			out.write((const char*)&ending[0], sizeof(ending));
+		}
+	};
+
+	template<>
+	struct track_data<true>
+	{
+		track_data<false> data[16];
+
+		inline std::vector<uint8_t>& get_vec(const uint8_t& channel)
+		{
+			return data[channel].get_vec(channel);
+		}
+		inline void clear()
+		{
+			for (auto& singleData : data)
+				singleData.clear();
+		}
+		inline tick_type count(bool disallow_empty_tracks)
+		{
+			tick_type counter = 0;
+			for (auto& singleData : data)
+				counter += singleData.count(disallow_empty_tracks);
+			return counter;
+		}
+		inline tick_type& get_tick(const uint8_t& channel)
+		{
+			return data[channel].get_tick(channel);
+		}
+		inline void dump(std::ostream& out, bool disallow_empty_tracks)
+		{
+			for (auto& singleData : data)
+				singleData.dump(out, disallow_empty_tracks);
+		}
+		inline void reserve(const uint64_t& size)
+		{
+			for (auto& singleData : data)
+				singleData.reserve(size);
+		}
+	};
 
 	template<bool compression, bool channels_split>
 	inline static void write_selection_front(
@@ -1401,14 +1551,25 @@ struct single_midi_processor_2
 		file_output.put(data.settings.new_ppqn & 0xFF);
 
 		tick_type track_counter = 0;
+		single_track_data track_processing_data;
+
 		while (file_input.good())
 		{
 			track_buffers.data_buffer.clear();
 
-			put_data_in_buffer(file_input, track_buffers, loggers, data.settings, polyphony_stacks);
-			single_track_data track_processing_data;
-			if (!process_buffer(track_buffers.data_buffer, filter_iters, track_processing_data, loggers))
-				break;
+			bool is_readable = put_data_in_buffer(file_input, track_buffers, loggers, data.settings, polyphony_stacks);
+
+			track_processing_data.selection_data.clear();
+			track_processing_data.selection_data.frontal_tempo =
+				data.settings.tempo.tempo_override_value;
+
+			if (track_buffers.data_buffer.size())
+			{
+				bool successful_processing =
+					process_buffer(track_buffers.data_buffer, filter_iters, track_processing_data, loggers);
+				if (!successful_processing)
+					(*loggers.error) << "Something went wrong";
+			}
 
 			if(data.settings.legacy.rsb_compression)
 				write_track<true, channels_split>(
@@ -1425,7 +1586,7 @@ struct single_midi_processor_2
 					data,
 					write_buffer);
 
-			auto current_count = write_buffer.count();
+			auto current_count = write_buffer.count(data.settings.proc_details.remove_empty_tracks);
 			track_counter += current_count;
 			write_buffer.dump(file_output, data.settings.proc_details.remove_empty_tracks);
 			write_buffer.clear();

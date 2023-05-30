@@ -378,9 +378,9 @@ struct SelectablePropertedList : HandleableUIPart
 		{
 			///TOP BAR
 			if (TopArrowHovered)
-				GLCOLOR(ButtSettings->HoveredRGBABorder);
+				__glcolor(ButtSettings->HoveredRGBABorder);
 			else 
-				GLCOLOR(ButtSettings->RGBABorder);
+				__glcolor(ButtSettings->RGBABorder);
 			glBegin(GL_QUADS);
 			glVertex2f(HeaderCXPos - 0.5f * Width, HeaderYPos);
 			glVertex2f(HeaderCXPos + 0.5f * Width, HeaderYPos);
@@ -388,9 +388,9 @@ struct SelectablePropertedList : HandleableUIPart
 			glVertex2f(HeaderCXPos - 0.5f * Width, HeaderYPos + ARROW_STICK_HEIGHT);
 			///BOTTOM BAR
 			if (BottomArrowHovered)
-				GLCOLOR(ButtSettings->HoveredRGBABorder);
+				__glcolor(ButtSettings->HoveredRGBABorder);
 			else 
-				GLCOLOR(ButtSettings->RGBABorder);
+				__glcolor(ButtSettings->RGBABorder);
 			glVertex2f(HeaderCXPos - 0.5f * Width, HeaderYPos - CalculatedHeight);
 			glVertex2f(HeaderCXPos + 0.5f * Width, HeaderYPos - CalculatedHeight);
 			glVertex2f(HeaderCXPos + 0.5f * Width, HeaderYPos - CalculatedHeight - ARROW_STICK_HEIGHT);
@@ -400,12 +400,12 @@ struct SelectablePropertedList : HandleableUIPart
 			if (TopArrowHovered)
 			{
 				if (ButtSettings->HoveredRGBAColor & 0xFF)
-					GLCOLOR(ButtSettings->HoveredRGBAColor);
+					__glcolor(ButtSettings->HoveredRGBAColor);
 				else 
-					GLCOLOR(ButtSettings->RGBAColor);
+					__glcolor(ButtSettings->RGBAColor);
 			}
 			else 
-				GLCOLOR(ButtSettings->RGBAColor);
+				__glcolor(ButtSettings->RGBAColor);
 			glBegin(GL_TRIANGLES);
 			glVertex2f(HeaderCXPos, HeaderYPos + 9 * ARROW_STICK_HEIGHT / 10);
 			glVertex2f(HeaderCXPos + ARROW_STICK_HEIGHT * 0.5f, HeaderYPos + ARROW_STICK_HEIGHT / 10);
@@ -414,12 +414,12 @@ struct SelectablePropertedList : HandleableUIPart
 			if (BottomArrowHovered)
 			{ 
 				if (ButtSettings->HoveredRGBAColor & 0xFF)
-					GLCOLOR(ButtSettings->HoveredRGBAColor);
+					__glcolor(ButtSettings->HoveredRGBAColor);
 				else 
-					GLCOLOR(ButtSettings->RGBAColor);
+					__glcolor(ButtSettings->RGBAColor);
 			}
 			else 
-				GLCOLOR(ButtSettings->RGBAColor);
+				__glcolor(ButtSettings->RGBAColor);
 			glVertex2f(HeaderCXPos, HeaderYPos - CalculatedHeight - 9 * ARROW_STICK_HEIGHT / 10);
 			glVertex2f(HeaderCXPos + ARROW_STICK_HEIGHT * 0.5f, HeaderYPos - CalculatedHeight - ARROW_STICK_HEIGHT / 10);
 			glVertex2f(HeaderCXPos - ARROW_STICK_HEIGHT * 0.5f, HeaderYPos - CalculatedHeight - ARROW_STICK_HEIGHT / 10);

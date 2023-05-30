@@ -1,4 +1,4 @@
-#define NOMINMAX
+﻿#define NOMINMAX
 #define _WIN32_WINNT 0x0A00
 #include <algorithm>
 #include <cstdlib>
@@ -31,6 +31,14 @@
 #include <WinSock2.h>
 #include <WinInet.h>
 
+//#pragma comment (lib, "Version.lib")//Urlmon.lib
+//#pragma comment (lib, "Urlmon.lib")//Urlmon.lib
+//#pragma comment (lib, "wininet.lib")//Urlmon.lib
+//#pragma comment (lib, "dwmapi.lib")
+//#pragma comment (lib, "Ws2_32.Lib")
+//#pragma comment (lib, "Wldap32.Lib")
+//#pragma comment (lib, "Crypt32.Lib")
+
 #include "allocator.h"
 #include "WinReg.h"
 #include "resource.h"
@@ -51,7 +59,10 @@
 
 #include "SAFC_InnerModules/SMRP2.h"
 
+#include <boost/dll.hpp>
 /*
+#include <archive.h>
+#include <archive_entry.h>
 std::tuple<std::uint16_t, std::uint16_t, std::uint16_t, std::uint16_t> ___GetVersion() 
 {
 	// get the filename of the executable containing the version resource
@@ -88,6 +99,87 @@ std::wstring ExtractDirectory(const std::wstring& path)
 	return path.substr(0, path.find_last_of(delim) + 1);
 }
 
+static int copy_data(struct archive* ar, struct archive* aw)
+{
+	int r;
+	const void* buff;
+	size_t size;
+	la_int64_t offset;
+
+	for (;;) 
+	{
+		r = archive_read_data_block(ar, &buff, &size, &offset);
+		if (r == ARCHIVE_EOF)
+			return (ARCHIVE_OK);
+		if (r < ARCHIVE_OK)
+			return (r);
+		r = archive_write_data_block(aw, buff, size, offset);
+		if (r < ARCHIVE_OK) 
+		{
+			fprintf(stderr, "%s\n", archive_error_string(aw));
+			return (r);
+		}
+	}
+}
+
+static void extract(const void* data, size_t data_size)
+{
+	struct archive* a;
+	struct archive* ext;
+	struct archive_entry* entry;
+	int flags;
+	int r;
+
+	/* Select which attributes we want to restore. */
+	flags = ARCHIVE_EXTRACT_TIME;
+	flags |= ARCHIVE_EXTRACT_PERM;
+	flags |= ARCHIVE_EXTRACT_ACL;
+	flags |= ARCHIVE_EXTRACT_FFLAGS;
+
+	a = archive_read_new();
+	archive_read_support_format_all(a);
+	archive_read_support_filter_all(a);
+	ext = archive_write_disk_new();
+	archive_write_disk_set_options(ext, flags);
+	archive_write_disk_set_standard_lookup(ext);
+
+	if ((r = archive_read_open_memory(a, data, data_size)))
+		throw std::runtime_error("Failed to open archive: code " + std::to_string(r) + " - " + archive_error_string(a));
+
+	for (;;)
+	{
+		r = archive_read_next_header(a, &entry);
+		if (r == ARCHIVE_EOF)
+			break;
+		if (r < ARCHIVE_OK)
+			fprintf(stderr, "%s\n", archive_error_string(a));
+		if (r < ARCHIVE_WARN)
+			throw std::runtime_error("Failed to read the archive header: code " + std::to_string(r) + " - " + archive_error_string(a));
+
+		r = archive_write_header(ext, entry);
+		if (r < ARCHIVE_OK)
+			fprintf(stderr, "%s\n", archive_error_string(ext));
+		else if (archive_entry_size(entry) > 0)
+		{
+			r = copy_data(a, ext);
+
+			if (r < ARCHIVE_OK)
+				fprintf(stderr, "%s\n", archive_error_string(ext));
+			if (r < ARCHIVE_WARN)
+				throw std::runtime_error("Failed to write the archive data: code " + std::to_string(r) + " - " + archive_error_string(ext));
+		}
+		r = archive_write_finish_entry(ext);
+		if (r < ARCHIVE_OK)
+			fprintf(stderr, "%s\n", archive_error_string(ext));
+		if (r < ARCHIVE_WARN)
+			throw std::runtime_error("Failed to intilise write of archive data: code " + std::to_string(r) + " - " + archive_error_string(ext));
+	}
+	archive_read_close(a);
+	archive_read_free(a);
+	archive_write_close(ext);
+	archive_write_free(ext);
+}
+
 bool SAFC_Update(const std::wstring& latest_release)
 {
 #ifndef __X64
@@ -96,7 +188,7 @@ bool SAFC_Update(const std::wstring& latest_release)
 	constexpr wchar_t* const archive_name = (wchar_t* const)L"SAFC64.7z";
 #endif
 	wchar_t current_file_path[MAX_PATH];
-	bool flag = false;
+	bool updated_flag = false;
 	//GetCurrentDirectoryW(MAX_PATH, current_file_path);
 	GetModuleFileNameW(NULL, current_file_path, MAX_PATH);
 	std::wstring executablepath = current_file_path;
@@ -106,78 +198,61 @@ bool SAFC_Update(const std::wstring& latest_release)
 	//wsprintfW(current_file_path, L"%S%S", filename.c_str(), L"update.7z\0");
 	std::wstring link = L"https://github.com/DixelU/SAFC/releases/download/" + latest_release + L"/" + archive_name;
 	HRESULT co_res = URLDownloadToFileW(NULL, link.c_str(), filename.c_str(), 0, NULL);
-	const std::vector<std::pair<std::wstring, std::wstring>> unpack_lines = {
-		{L"C:\\Program Files\\7-Zip\\7z.exe", (L"x -y \"" + filename + L"\"")},
-		{L"C:\\Program Files (x86)\\7-Zip\\7z.exe", (L"x -y \"" + filename + L"\"")},
-		{L"C:\\Program Files\\WinRAR\\WinRAR.exe", (L"x -y \"" + filename + L"\"")},
-		{L"C:\\Program Files (x86)\\WinRAR\\WinRAR.exe", (L"x -y \"" + filename + L"\"")}
-	};
+	std::string error_msg;
+
+	auto executable_filename = boost::dll::program_location().filename().wstring();
+
 	if (co_res == S_OK) 
 	{
 		errno = 0;
-		_wrename((pathway + L"SAFC.exe").c_str(), (pathway + L"_s").c_str());
-		std::cout << strerror(errno) << std::endl;
-		//_wrename((pathway + L"freeglut.dll").c_str(), (pathway + L"_f").c_str());
-		//std::cout << strerror(errno) << std::endl;
-		//_wrename((pathway + L"glew32.dll").c_str(), (pathway + L"_g").c_str());
-		//cout << strerror(errno) << endl;
-		//wcout << pathway << endl;
-		if (!errno)
+		_wrename((pathway + executable_filename).c_str(), (pathway + L"_s").c_str());
+		std::cout << "Rename status " << strerror(errno) << std::endl;
+		if (!errno) try
 		{
-			std::wstring dir = pathway.substr(0, pathway.length() - 1);
-			for (auto& line : unpack_lines) 
+			std::stringstream container_stringstream;
+			std::ifstream fin(filename, std::ios_base::binary);
+			container_stringstream << fin.rdbuf();
+			fin.close();
+			auto data = container_stringstream.str();
+
+			extract(data.c_str(), data.size());
+
+			if (!_waccess((pathway + L"SAFC.exe").c_str(), 0))
 			{
-				std::wstring t = (L"\"" + line.first + L"\" " + line.second);
-
-				if (_waccess(line.first.c_str(), 0))
-				{
-					std::wcout << L"Unable to find: " << line.first << std::endl;
-					continue;
-				}
-
-				SHELLEXECUTEINFO ShExecInfo = { 0 };
-				ShExecInfo.cbSize = sizeof(SHELLEXECUTEINFO);
-				ShExecInfo.fMask = SEE_MASK_NOCLOSEPROCESS;
-				ShExecInfo.hwnd = NULL;
-				ShExecInfo.lpVerb = NULL;
-				ShExecInfo.lpFile = line.first.data();
-				ShExecInfo.lpParameters = line.second.data();
-				ShExecInfo.lpDirectory = dir.data();
-				ShExecInfo.nShow = SW_SHOW;
-				ShExecInfo.hInstApp = NULL;
-				ShellExecuteExW(&ShExecInfo);
-				WaitForSingleObject(ShExecInfo.hProcess, INFINITE);
-				CloseHandle(ShExecInfo.hProcess);
-
-				if (!_waccess((pathway + L"SAFC.exe").c_str(), 0)) 
-				{
-					flag = true;
-					break;
-				}
-				std::wcout << L"Failed: " << t << std::endl;
+				_wrename((pathway + L"SAFC.exe").c_str(), (pathway + executable_filename).c_str());
+				updated_flag = true;
 			}
-			if (!flag)
+			else
 			{
-				if (AutoUpdatesCheck)
-					ThrowAlert_Error("Extraction:\nAutoupdate requres latest 7-Zip or WinRAR installed to default directory.\n");
-				_wrename((pathway + L"_s").c_str(), (pathway + L"SAFC.exe").c_str());
+				std::wcout << L"Failed: " << errno << std::endl;
+
+				error_msg = std::string("No SAFC executable found in unpacked data... Aborting...\n") + strerror(errno);
 			}
+		}
+		catch (const std::exception& e) 
+		{
+			error_msg = std::string("Autoudate error (unpack exception):\n") + e.what();
 		}
 		else 
 		{
-			auto error_msg = std::string("Autoudate error:\n") + strerror(errno);
-			if (AutoUpdatesCheck)
-				ThrowAlert_Error(std::move(error_msg));
-			else
-				std::cout << std::move(error_msg) << std::endl;
-			_wrename((pathway + L"_s").c_str(), (pathway + L"SAFC.exe").c_str());
+			error_msg = std::string("Autoudate error (unable to access self): \n") + strerror(errno);
 		}
 		_wremove(filename.c_str());
-	} else if (AutoUpdatesCheck)
-		ThrowAlert_Error("Autoupdate error: #" + std::to_string(co_res));
+	}
+	else if (check_autoupdates)
+		error_msg = ("Autoupdate error: #" + std::to_string(co_res));
 	else
 		std::cout << "Autoupdate error: #" + std::to_string(co_res) << std::endl;
-	return flag;
+
+	if (check_autoupdates)
+		ThrowAlert_Error(std::move(error_msg));
+	else
+		std::cout << std::move(error_msg) << std::endl;
+
+	if(error_msg.size())
+		_wrename((pathway + L"_s").c_str(), (pathway + executable_filename).c_str());
+
+	return updated_flag;
 }
 
 void SAFC_VersionCheck()
@@ -187,9 +262,7 @@ void SAFC_VersionCheck()
 		bool flag = false;
 		_wremove(L"_s");
 		constexpr wchar_t* SAFC_tags_link = (wchar_t* const)L"https://api.github.com/repos/DixelU/SAFC/tags";
-		wchar_t current_file_path[MAX_PATH];
-		GetModuleFileNameW(NULL, current_file_path, MAX_PATH);
-		std::wstring executablepath = current_file_path;
+		auto current_file_path = boost::dll::program_location().filename().wstring();
 		std::wstring filename = ExtractDirectory(current_file_path);
 		std::wstring pathway = filename;
 		filename += L"tags.json";
@@ -227,9 +300,10 @@ void SAFC_VersionCheck()
 						break;
 					index++;
 				}
-				std::wcout << L"Git latest version: v" << version_partied[0] << L"." << version_partied[1] << L"." << version_partied[2] << L"." << version_partied[3] << L"\n";
+				std::wcout << L"Git latest version: v" << 
+					version_partied[0] << L"." << version_partied[1] << L"." << version_partied[2] << L"." << version_partied[3] << L"\n";
 				std::wcout << L"Current vesion: v" << maj << L"." << min << L"." << ver << L"." << build << L"\n";
-				if (AutoUpdatesCheck &&
+				if (check_autoupdates &&
 					(maj < version_partied[0] ||
 						maj == version_partied[0] && min < version_partied[1] ||
 						maj == version_partied[0] && min == version_partied[1] && ver < version_partied[2] ||
@@ -242,20 +316,24 @@ void SAFC_VersionCheck()
 						ThrowAlert_Warning("SAFC will restart in 3 seconds...");
 				}
 			}
-			else if (AutoUpdatesCheck)
-				ThrowAlert_Warning("Most likely your internet connection is unstable\nSAFC cannot check for updates"),
-				std::cout << "Most likely your internet connection is unstable\nSAFC cannot check for updates";
+			else if (check_autoupdates)
+			{
+				auto msg = "Most likely your internet connection is unstable\nSAFC cannot check for updates";
+
+				ThrowAlert_Warning(msg);
+				std::cout << msg;
+			}
 		}
 		catch (const std::exception& e)
 		{
-			ThrowAlert_Warning("SAFC just almost crashed while checking the update...\nTell developer about that" +
+			ThrowAlert_Warning("SAFC just almost crashed while checking the update...\nTell developer about that " +
 				std::string() + e.what());
 		}
 		_wremove(filename.c_str());
 		if (flag)
 		{
 			Sleep(3000);
-			ShellExecuteW(NULL, L"open", executablepath.c_str(), NULL, NULL, SW_SHOWNORMAL);
+			ShellExecuteW(NULL, L"open", current_file_path.c_str(), NULL, NULL, SW_SHOWNORMAL);
 			//_wsystem((L"start \"" + executablepath + L"\"").c_str());
 			exit(0);
 		}
@@ -313,10 +391,10 @@ struct FileSettings
 	bool
 		IsMIDI,
 		InplaceMergeEnabled,
-		OffsetResetOnSelection,
 		AllowLegacyRunningStatusMetaIgnorance,
 		RSBCompression,
-		ChannelsSplit;
+		ChannelsSplit,
+		AllowSysex;
 	std::shared_ptr<CutAndTransposeKeys> KeyMap;
 	std::shared_ptr<PLC<std::uint8_t, std::uint8_t>> VolumeMap;
 	std::shared_ptr<PLC<std::uint16_t, std::uint16_t>> PitchBendMap;
@@ -337,9 +415,9 @@ struct FileSettings
 		OldPPQN = FMIC.PPQN;
 		OldTrackNumber = FMIC.ExpectedTrackNumber;
 		OffsetTicks = InplaceMergeEnabled = 0;
+		AllowSysex = false;
 		FileSize = FMIC.FileSize;
 		GroupID = NewTempo = 0;
-		OffsetResetOnSelection = false;
 		SelectionStart = 0;
 		SelectionLength = -1;
 		BoolSettings = DefaultBoolSettings;
@@ -381,11 +459,14 @@ struct FileSettings
 		settings.proc_details.channel_split = ChannelsSplit;
 		settings.legacy.ignore_meta_rsb = AllowLegacyRunningStatusMetaIgnorance;
 		settings.legacy.rsb_compression = RSBCompression;
-		settings.details.inplace_mergable = InplaceMergeEnabled && !RSBCompression;
+		settings.filter.pass_sysex = AllowSysex;
+		InplaceMergeEnabled = 
+			settings.details.inplace_mergable = InplaceMergeEnabled && !RSBCompression;
 		settings.details.group_id = GroupID;
 		settings.details.initial_filesize = FileSize;
 		settings.offset = OffsetTicks;
-		settings.tempo.set_override_value(NewTempo);
+		if(NewTempo > 3.)
+			settings.tempo.set_override_value(NewTempo);
 		if (OffsetTicks < 0 && -OffsetTicks > SelectionStart)
 			SelectionStart = -OffsetTicks;
 		if (SelectionStart && (SelectionLength < 0))
@@ -423,13 +504,15 @@ struct SAFCData
 	bool InplaceMergeFlag;
 	bool ChannelsSplit;
 	bool RSBCompression;
+	bool IsCLIMode;
 	std::uint16_t DetectedThreads;
 	SAFCData()
 	{
 		GlobalPPQN = GlobalOffset = GlobalNewTempo = 0;
-		IncrementalPPQN = 1;
 		DetectedThreads = 1;
-		InplaceMergeFlag = 0;
+		IncrementalPPQN = true;
+		InplaceMergeFlag = false;
+		IsCLIMode = false;
 		SaveDirectory = L"";
 		ChannelsSplit = RSBCompression = false;
 	}
@@ -510,7 +593,7 @@ struct SAFCData
 		std::vector<proc_data_ptr> SMRPv;
 		for (int i = 0; i < Files.size(); i++)
 			SMRPv.push_back(Files[i].BuildSMRPProcessingData());
-		return std::make_shared<MIDICollectionThreadedMerger>(SMRPv, GlobalPPQN, SaveDirectory);
+		return std::make_shared<MIDICollectionThreadedMerger>(SMRPv, GlobalPPQN, SaveDirectory, IsCLIMode);
 	}
 	FileSettings& operator[](std::int32_t ID)
 	{
@@ -648,7 +731,8 @@ std::wstring SOFD(const wchar_t* Title)
 
 void AddFiles(std::vector<std::wstring> Filenames)
 {
-	WH->DisableAllWindows();
+	if(WH)
+		WH->DisableAllWindows();
 	for (int i = 0; i < Filenames.size(); i++)
 	{
 		if (Filenames[i].empty())
@@ -656,8 +740,10 @@ void AddFiles(std::vector<std::wstring> Filenames)
 		_Data.Files.push_back(FileSettings(Filenames[i]));
 		if (_Data.Files.back().IsMIDI)
 		{
+			if (WH)
+				_WH_t("MAIN", "List", SelectablePropertedList*)->SafePushBackNewString(_Data.Files.back().AppearanceFilename);
+
 			std::uint32_t Counter = 0;
-			_WH_t("MAIN", "List", SelectablePropertedList*)->SafePushBackNewString(_Data.Files.back().AppearanceFilename);
 			_Data.Files.back().NewTempo = _Data.GlobalNewTempo;
 			_Data.Files.back().OffsetTicks = _Data.GlobalOffset;
 			_Data.Files.back().InplaceMergeEnabled = _Data.InplaceMergeFlag;
@@ -684,7 +770,6 @@ void AddFiles(std::vector<std::wstring> Filenames)
 }
 void OnAdd()
 {
-	//throw "";
 	std::vector<std::wstring> Filenames = MOFD(L"Select midi files");
 	AddFiles(Filenames);
 }
@@ -724,6 +809,7 @@ namespace PropsAndSets
 
 			((CheckBox*)((*PASWptr)["INPLACE_MERGE"]))->State = _Data[ID].InplaceMergeEnabled;
 			((CheckBox*)((*PASWptr)["LEGACY_META_RSB_BEHAVIOR"]))->State = _Data[ID].AllowLegacyRunningStatusMetaIgnorance;
+			((CheckBox*)((*PASWptr)["ALLOW_SYSEX"]))->State = _Data[ID].AllowSysex;
 
 			((TextBox*)((*PASWptr)["CONSTANT_PROPS"]))->SafeStringReplace(
 			    "File size: " + std::to_string(_Data[ID].FileSize) + "b\n" +
@@ -1161,6 +1247,7 @@ namespace PropsAndSets
 		_Data[currentID].SetBoolSetting(_BoolSettings::ignore_notes, (((CheckBox*)(*SMPASptr)["BOOL_IGN_NOTES"])->State));
 		_Data[currentID].SetBoolSetting(_BoolSettings::ignore_all_but_tempos_notes_and_pitch, (((CheckBox*)(*SMPASptr)["BOOL_IGN_ALL_EX_TPS"])->State));
 
+		_Data[currentID].AllowSysex = (((CheckBox*)(*SMPASptr)["ALLOW_SYSEX"])->State);
 		_Data[currentID].RSBCompression = ((CheckBox*)(*SMPASptr)["RSB_COMPRESS"])->State;
 		_Data[currentID].ChannelsSplit = ((CheckBox*)(*SMPASptr)["SPLIT_TRACKS"])->State;
 		auto& inplaceMergeState = ((CheckBox*)(*SMPASptr)["INPLACE_MERGE"])->State;
@@ -1473,7 +1560,7 @@ namespace Settings
 		((CheckBox*)((*pptr)["RSB_COMPRESS"]))->State = _Data.RSBCompression;
 
 		((CheckBox*)((*pptr)["INPLACE_MERGE"]))->State = _Data.InplaceMergeFlag;
-		((CheckBox*)((*pptr)["AUTOUPDATECHECK"]))->State = AutoUpdatesCheck;
+		((CheckBox*)((*pptr)["AUTOUPDATECHECK"]))->State = check_autoupdates;
 	}
 	void OnSetApply()
 	{
@@ -1523,16 +1610,16 @@ namespace Settings
 		DefaultBoolSettings = (DefaultBoolSettings & (~_BoolSettings::ignore_notes)) | (_BoolSettings::ignore_notes * (!!((CheckBox*)(*pptr)["BOOL_IGN_NOTES"])->State));
 		DefaultBoolSettings = (DefaultBoolSettings & (~_BoolSettings::ignore_all_but_tempos_notes_and_pitch)) | (_BoolSettings::ignore_all_but_tempos_notes_and_pitch * (!!((CheckBox*)(*pptr)["BOOL_IGN_ALL_EX_TPS"])->State));
 
-		AutoUpdatesCheck = ((CheckBox*)(*pptr)["AUTOUPDATECHECK"])->State;
+		check_autoupdates = ((CheckBox*)(*pptr)["AUTOUPDATECHECK"])->State;
 
 		_Data.ChannelsSplit = ((CheckBox*)((*pptr)["SPLIT_TRACKS"]))->State;
 		_Data.RSBCompression = ((CheckBox*)((*pptr)["RSB_COMPRESS"]))->State;
 
 		if (isRegestryOpened)
 		{
-			TRY_CATCH(RegestryAccess.SetDwordValue(L"AUTOUPDATECHECK", AutoUpdatesCheck);, "Failed on setting AUTOUPDATECHECK")
+			TRY_CATCH(RegestryAccess.SetDwordValue(L"AUTOUPDATECHECK", check_autoupdates);, "Failed on setting AUTOUPDATECHECK")
 			TRY_CATCH(RegestryAccess.SetDwordValue(L"SPLIT_TRACKS", _Data.ChannelsSplit);, "Failed on setting SPLIT_TRACKS")
-			//TRY_CATCH(RegestryAccess.SetDwordValue(L"RSB_COMPRESS", AutoUpdatesCheck);, "Failed on setting RSB_COMPRESS")
+			//TRY_CATCH(RegestryAccess.SetDwordValue(L"RSB_COMPRESS", check_autoupdates);, "Failed on setting RSB_COMPRESS")
 			TRY_CATCH(RegestryAccess.SetDwordValue(L"DEFAULT_BOOL_SETTINGS", DefaultBoolSettings);, "Failed on setting DEFAULT_BOOL_SETTINGS")
 			TRY_CATCH(RegestryAccess.SetDwordValue(L"FONTSIZE", lFontSymbolsInfo::Size); , "Failed on setting FONTSIZE")
 			TRY_CATCH(RegestryAccess.SetDwordValue(L"FLOAT_FONTHTW", *(std::uint32_t*)(&lFONT_HEIGHT_TO_WIDTH)); , "Failed on setting FLOAT_FONTHTW")
@@ -1737,7 +1824,7 @@ void RestoreRegSettings()
 		catch (...) { std::cout << "Exception thrown while restoring AS_BCKGID from registry\n"; }
 		try
 		{
-			//AutoUpdatesCheck = Settings::RegestryAccess.GetDwordValue(L"AUTOUPDATECHECK");
+			check_autoupdates = Settings::RegestryAccess.GetDwordValue(L"AUTOUPDATECHECK");
 		}
 		catch (...) { std::cout << "Exception thrown while restoring AUTOUPDATECHECK from registry\n"; }
 		try
@@ -1883,6 +1970,7 @@ void Init()
 	(*T)["SELECT_LENGTH"] = new InputField(" ", 37.5 - WindowHeapSize, -5 - WindowHeapSize, 10, 70, System_White, NULL, 0x007FFFFF, System_White, "Selection length", 14, _Align::center, _Align::right, InputField::Type::WholeNumbers);
 
 	(*T)["LEGACY_META_RSB_BEHAVIOR"] = new CheckBox(97.5 - WindowHeapSize, -5 - WindowHeapSize, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, false, System_White, _Align::right, "Enables legacy RSB/Meta behavior");
+	(*T)["ALLOW_SYSEX"] = new CheckBox(82.5 - WindowHeapSize, -5 - WindowHeapSize, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, 0, System_White, _Align::right, "Allow sysex events");
 
 	(*T)["CONSTANT_PROPS"] = new TextBox("_Props text example_", System_White, 0, -57.5 - WindowHeapSize, 80 - WindowHeapSize, 200 - 1.5 * WindowHeapSize, 7.5, 0, 0, 1);
 
@@ -1926,24 +2014,27 @@ void Init()
 	(*T)["AS_FONT_P"] = new WheelVariableChanger(Settings::ApplyRelWheel, -37.5, -22.5, lFONT_HEIGHT_TO_WIDTH, 0.01, System_White, "Font rel.", "Delta", WheelVariableChanger::Type::addictable);
 	(*T)["AS_FONT_NAME"] = new InputField(default_font_name, 52.5 - WindowHeapSize, 55 - WindowHeapSize, 10, 100, _STLS_WhiteSmall, &default_font_name, 0x007FFFFF, System_White, "Font name", 32, _Align::center, _Align::left, InputField::Type::Text);
 
-	(*T)["BOOL_REM_TRCKS"] = new CheckBox(-97.5 + WindowHeapSize, 95 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, System_White, _Align::left, "DV: Remove empty tracks");
-	(*T)["BOOL_REM_REM"] = new CheckBox(-82.5 + WindowHeapSize, 95 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, System_White, _Align::left, "DV: Remove merge \"remnants\"");
-	(*T)["BOOL_PIANO_ONLY"] = new CheckBox(-67.5 + WindowHeapSize, 95 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, System_White, _Align::left, "DV: All instuments to piano");
-	(*T)["BOOL_IGN_TEMPO"] = new CheckBox(-52.5 + WindowHeapSize, 95 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::left, "DV: Ignore tempo events");
-	(*T)["BOOL_IGN_PITCH"] = new CheckBox(-37.5 + WindowHeapSize, 95 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::center, "DV: Ignore pitch bending events");
-	(*T)["BOOL_IGN_NOTES"] = new CheckBox(-22.5 + WindowHeapSize, 95 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::center, "DV: Ignore note events");
-	(*T)["BOOL_IGN_ALL_EX_TPS"] = new CheckBox(-7.5 + WindowHeapSize, 95 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::center, "DV: Ignore everything except specified");
+	(*T)["BOOL_REM_TRCKS"] = new CheckBox(-97.5 + WindowHeapSize, 95 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, System_White, _Align::left, "Remove empty tracks");
+	(*T)["BOOL_REM_REM"] = new CheckBox(-82.5 + WindowHeapSize, 95 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, System_White, _Align::left, "Remove merge \"remnants\"");
+	(*T)["BOOL_PIANO_ONLY"] = new CheckBox(-67.5 + WindowHeapSize, 95 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, System_White, _Align::left, "All instuments to piano");
+	(*T)["BOOL_IGN_TEMPO"] = new CheckBox(-52.5 + WindowHeapSize, 95 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::left, "Ignore tempo events");
+	(*T)["BOOL_IGN_PITCH"] = new CheckBox(-37.5 + WindowHeapSize, 95 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::center, "Ignore pitch bending events");
+	(*T)["BOOL_IGN_NOTES"] = new CheckBox(-22.5 + WindowHeapSize, 95 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::center, "Ignore note events");
+	(*T)["BOOL_IGN_ALL_EX_TPS"] = new CheckBox(-7.5 + WindowHeapSize, 95 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::center, "Ignore everything except specified");
 	(*T)["SPLIT_TRACKS"] = new CheckBox(7.5 + WindowHeapSize, 95 - WindowHeapSize, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, 0, System_White, _Align::center, "Multichannel split");
-	(*T)["RSB_COMPRESS"] = new CheckBox(22.5 + WindowHeapSize, 95 - WindowHeapSize, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, 0, System_White, _Align::center, "Enable RSB compression");
+	(*T)["RSB_COMPRESS"] = new CheckBox(22.5 + WindowHeapSize, 95 - WindowHeapSize, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, 0, System_White, _Align::center, "Enable RSB compression");	
+
+	(*T)["ALLOW_SYSEX"] = new CheckBox(-97.5 + WindowHeapSize, 75 - WindowHeapSize, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, 0, System_White, _Align::left, "Allow sysex events");
 
 	(*T)["BOOL_APPLY_TO_ALL_MIDIS"] = Butt = new Button("A2A", System_White, Settings::ApplyToAll, 80 - WindowHeapSize, 95 - WindowHeapSize, 15, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, System_White, "The same as A2A in MIDI's props.");
 	Butt->Tip->SafeChangePosition_Argumented(_Align::right, 87.5 - WindowHeapSize, Butt->Tip->CYpos);
 
-	(*T)["INPLACE_MERGE"] = new CheckBox(97.5 - WindowHeapSize, 95 - WindowHeapSize, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, 0, System_White, _Align::right, "DV: Enable/disable inplace merge");
+	(*T)["INPLACE_MERGE"] = new CheckBox(97.5 - WindowHeapSize, 95 - WindowHeapSize, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, 0, System_White, _Align::right, "Enable/disable inplace merge");
 
 	(*T)["AS_THREADS_COUNT"] = new InputField(std::to_string(_Data.DetectedThreads), 92.5 - WindowHeapSize, 75 - WindowHeapSize, 10, 20, System_White, NULL, 0x007FFFFF, System_White, "Threads count", 2, _Align::center, _Align::right, InputField::Type::NaturalNumbers);
 
-	(*T)["AUTOUPDATECHECK"] = new CheckBox(-97.5 + WindowHeapSize, 35 - WindowHeapSize, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, AutoUpdatesCheck, System_White, _Align::left, "Check for updates automatically");
+	(*T)["AUTOUPDATECHECK"] = new CheckBox(-97.5 + WindowHeapSize, 35 - WindowHeapSize, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, check_autoupdates, System_White, _Align::left, "Check for updates automatically"); 
+
 
 	(*WH)["APP_SETTINGS"] = T;
 
@@ -2226,65 +2317,280 @@ void mExit(int a)
 	Settings::RegestryAccess.Close();
 }
 
+struct SafcRuntime
+{
+	virtual void operator()(int argc, char** argv) = 0;
+};
+
+struct SafcGuiRuntime :
+	public SafcRuntime
+{
+	virtual void operator()(int argc, char** argv) override
+	{
+		_wremove(L"_s");
+		_wremove(L"_f");
+		_wremove(L"_g");
+
+#ifdef _DEBUG 
+		ShowWindow(GetConsoleWindow(), SW_SHOW);
+#else // _DEBUG 
+		ShowWindow(GetConsoleWindow(), SW_HIDE);
+#endif
+		//ShowWindow(GetConsoleWindow(), SW_SHOW);
+
+		SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS);
+		//srand(1);
+		//srand(clock());
+		InitASCIIMap();
+		//cout << to_string((std::uint16_t)0) << endl;
+
+		srand(TIMESEED());
+		__glutInitWithExit(&argc, argv, mExit);
+		//cout << argv[0] << endl;
+		glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGBA | GLUT_ALPHA | GLUT_MULTISAMPLE);
+		glutInitWindowSize(window_base_width, window_base_height);
+		//glutInitWindowPosition(50, 0);
+		glutCreateWindow(window_title);
+
+		hWnd = FindWindowA(NULL, window_title);
+
+		glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);//_MINUS_SRC_ALPHA
+		glEnable(GL_BLEND);
+		//glutSetOption(GLUT_MULTISAMPLE, 4);
+
+		//auto vendor = glGetString(GL_VENDOR);
+		//auto renderer = glGetString(GL_RENDERER);
+		//auto version = glGetString(GL_VERSION);
+		//printf("%s - %s.\nVersion %s\n", vendor, renderer, version);
+
+		//glEnable(GL_POLYGON_SMOOTH);//laggy af
+		//glEnable(GL_LINE_SMOOTH);//GL_POLYGON_SMOOTH
+		//glEnable(GL_POINT_SMOOTH);
+
+		//glShadeModel(GL_SMOOTH); 
+		//glEnable(GLUT_MULTISAMPLE); 
+		//glutSetOption(GLUT_MULTISAMPLE, 8);
+
+		glHint(GL_LINE_SMOOTH_HINT, GL_FASTEST);//GL_FASTEST//GL_NICEST
+		glHint(GL_POINT_SMOOTH_HINT, GL_FASTEST);
+		glHint(GL_POLYGON_SMOOTH_HINT, GL_FASTEST);
+
+		glutMouseFunc(mClick);
+		glutReshapeFunc(OnResize);
+		glutSpecialFunc(mSpecialKey);
+		glutMotionFunc(mDrag);
+		glutPassiveMotionFunc(mMotion);
+		glutKeyboardFunc(mKey);
+		glutDisplayFunc(mDisplay);
+		mInit();
+		glutMainLoop();
+	}
+};
+
+
+/*
+
+{
+	"global_ppq_override": 3860,					// optional; signed long long int;
+	"global_tempo_override": 485,					// optional; double;
+	"global_offset_override": 4558,					// optional; signed long long int;
+	"save_to": "C:\\MIDIs\\merge.mid",				// optional; string (utf8)
+	"files":
+	[
+		{
+			"filename": "D:\\Download\\Downloads\\Paprika's Aua Ah Community Merge (FULL).mid", // string (utf8)
+			"ppq_override": 960, 					// optional; unisnged short;
+			"tempo_override": 3.94899, 				// optional; double;
+			"offset": 0, 							// optional; signed long long int;
+			"selection_start": 50, 					// optional; signed long long int;
+			"selection_length": 50, 				// optional; signed long long int;
+			"ignore_notes": false, 					// optional; bool;
+			"ignore_pitches": false, 				// optional; bool;
+			"ignore_tempos": false, 				// optional; bool;
+			"ignore_other": false, 					// optional; bool;
+			"piano_only": true, 					// optional; bool;
+			"remove_remnants": true, 				// optional; bool;
+			"remove_empty_tracks": true, 			// optional; bool;
+			"channel_split": false, 				// optional; bool;
+			"ignore_meta_rsb": false, 				// optional; bool;
+			"rsb_compression": false, 				// optional; bool;
+			"inplace_mergable": false, 				// optional; bool;
+		}
+	]
+}
+
+*/
+
+struct SafcCliRuntime:
+	public SafcRuntime
+{
+	virtual void operator()(int argc, char** argv) override
+	{
+		ShowWindow(GetConsoleWindow(), SW_SHOW);
+		_Data.DetectedThreads =
+			std::max(
+				std::min((std::uint16_t)(
+					(std::uint16_t)std::max(
+						std::thread::hardware_concurrency(),
+						1u
+					)
+					- 1
+					),
+					(std::uint16_t)(ceil(GetAvailableMemory() / 2048))
+				), (std::uint16_t)1
+			);
+		_Data.IsCLIMode = true;
+
+		if (argc < 2)
+			throw std::runtime_error("No config provided");
+
+		auto config_path = std::filesystem::u8path(argv[1]);
+		std::ifstream fin(config_path);
+		std::stringstream ss;
+		ss << fin.rdbuf();
+		auto config_content = ss.str();
+		auto config_object = JSON::Parse(config_content.c_str());
+		auto config = config_object->AsObject();
+
+		auto global_ppq_override = config.find(L"global_ppq_override");
+		auto global_tempo_override = config.find(L"global_tempo_override");
+		auto global_offset = config.find(L"global_offset");
+		auto files = config.find(L"files");
+
+		if (files == config.end())
+			return;
+
+		if (global_ppq_override != config.end())
+			_Data.SetGlobalPPQN(global_ppq_override->second->AsNumber());
+
+		if (global_tempo_override != config.end())
+			_Data.SetGlobalTempo(global_tempo_override->second->AsNumber());
+
+		if (global_offset != config.end())
+			_Data.SetGlobalOffset(global_offset->second->AsNumber());
+
+		auto filesArray = files->second->AsArray();
+		std::vector<std::wstring> filenames;
+
+		for (auto singleEntry : filesArray)
+		{
+			auto object = singleEntry->AsObject();
+			auto filename = object[L"filename"]->AsString();
+			filenames.push_back(std::move(filename));
+		}
+
+		AddFiles(filenames);
+
+		size_t index = 0;
+		for (auto singleEntry : filesArray)
+		{
+			auto object = singleEntry->AsObject();
+			
+			auto ppq_override = object.find(L"ppq_override");
+			if (ppq_override != object.end())
+				_Data.Files[index].NewPPQN = ppq_override->second->AsNumber();
+
+			auto tempo_override = object.find(L"tempo_override");
+			if (tempo_override != object.end())
+				_Data.Files[index].NewTempo = tempo_override->second->AsNumber();
+
+			auto offset = object.find(L"offset");
+			if (offset != object.end())
+				_Data.Files[index].OffsetTicks = offset->second->AsNumber();
+
+			auto selection_start = object.find(L"selection_start");
+			if (selection_start != object.end())
+				_Data.Files[index].SelectionStart = selection_start->second->AsNumber();
+
+			auto selection_length = object.find(L"selection_length");
+			if (selection_length != object.end())
+				_Data.Files[index].SelectionLength = selection_length->second->AsNumber();
+
+			auto ignore_notes = object.find(L"ignore_notes");
+			if (ignore_notes != object.end())
+				_Data.Files[index].SetBoolSetting(_BoolSettings::ignore_notes, ignore_notes->second->AsBool());
+
+			auto ignore_pitches = object.find(L"ignore_pitches");
+			if (ignore_pitches != object.end())
+				_Data.Files[index].SetBoolSetting(_BoolSettings::ignore_pitches, ignore_pitches->second->AsBool());
+
+			auto ignore_tempos = object.find(L"ignore_tempos");
+			if (ignore_tempos != object.end())
+				_Data.Files[index].SetBoolSetting(_BoolSettings::ignore_tempos, ignore_tempos->second->AsBool());
+
+			auto ignore_other = object.find(L"ignore_other");
+			if (ignore_other != object.end())
+				_Data.Files[index].SetBoolSetting(_BoolSettings::ignore_all_but_tempos_notes_and_pitch, ignore_other->second->AsBool());
+
+			auto piano_only = object.find(L"piano_only");
+			if (piano_only != object.end())
+				_Data.Files[index].SetBoolSetting(_BoolSettings::all_instruments_to_piano, piano_only->second->AsBool());
+
+			auto remove_remnants = object.find(L"remove_remnants");
+			if (remove_remnants != object.end())
+				_Data.Files[index].SetBoolSetting(_BoolSettings::remove_remnants, remove_remnants->second->AsBool());
+
+			auto remove_empty_tracks = object.find(L"remove_empty_tracks");
+			if (remove_empty_tracks != object.end())
+				_Data.Files[index].SetBoolSetting(_BoolSettings::all_instruments_to_piano, remove_empty_tracks->second->AsBool());
+
+			auto channel_split = object.find(L"channel_split");
+			if (channel_split != object.end())
+				_Data.Files[index].ChannelsSplit = channel_split->second->AsBool();
+
+			auto rsb_compression = object.find(L"rsb_compression");
+			if (rsb_compression != object.end())
+				_Data.Files[index].RSBCompression = rsb_compression->second->AsBool();
+
+			auto ignore_meta_rsb = object.find(L"ignore_meta_rsb");
+			if (ignore_meta_rsb != object.end())
+				_Data.Files[index].AllowLegacyRunningStatusMetaIgnorance = ignore_meta_rsb->second->AsBool();
+
+			auto inplace_mergable = object.find(L"inplace_mergable");
+			if (inplace_mergable != object.end())
+				_Data.Files[index].InplaceMergeEnabled = inplace_mergable->second->AsBool();
+
+			auto allow_sysex = object.find(L"allow_sysex");
+			if (allow_sysex != object.end())
+				_Data.Files[index].AllowSysex = allow_sysex->second->AsBool();
+
+			index++;
+		}
+
+		auto save_to = config.find(L"save_to");
+		if (save_to != config.end())
+		{
+			_Data.SaveDirectory = (save_to->second->AsString());
+			size_t Pos = _Data.SaveDirectory.rfind(L".mid");
+			if (Pos >= _Data.SaveDirectory.size() || Pos <= _Data.SaveDirectory.size() - 4)
+				_Data.SaveDirectory += L".mid";
+		}
+
+		auto LocalMCTM = _Data.MCTM_Constructor();
+		LocalMCTM->StartProcessingMIDIs();
+
+		while (LocalMCTM->CheckSMRPProcessingAndStartNextStep())
+			//that's some really dumb synchronization... TODO: MAKE BETTER
+			std::this_thread::sleep_for(std::chrono::milliseconds(5));
+		while (!LocalMCTM->CheckRIMerge())
+			std::this_thread::sleep_for(std::chrono::milliseconds(5));
+		while (!LocalMCTM->CompleteFlag)
+			std::this_thread::sleep_for(std::chrono::milliseconds(5));
+	}
+};
+
 int main(int argc, char** argv)
 {
-	_wremove(L"_s");
-	_wremove(L"_f");
-	_wremove(L"_g");
-
 	std::ios_base::sync_with_stdio(false); //why not
-#ifdef _DEBUG 
-	ShowWindow(GetConsoleWindow(), SW_SHOW);
-#else // _DEBUG 
-	ShowWindow(GetConsoleWindow(), SW_HIDE);
-#endif
-	//ShowWindow(GetConsoleWindow(), SW_SHOW);
 
-	SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS);
-	//srand(1);
-	//srand(clock());
-	InitASCIIMap();
-	//cout << to_string((std::uint16_t)0) << endl;
+	std::shared_ptr<SafcRuntime> runtime;
 
-	srand(TIMESEED());
-	__glutInitWithExit(&argc, (char**)argv, mExit);
-	//cout << argv[0] << endl;
-	glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGBA | GLUT_ALPHA | GLUT_MULTISAMPLE);
-	glutInitWindowSize(window_base_width, window_base_height);
-	//glutInitWindowPosition(50, 0);
-	glutCreateWindow(window_title);
+	if (argc > 1)
+		runtime = std::make_shared<SafcCliRuntime>();
+	else
+		runtime = std::make_shared<SafcGuiRuntime>();
 
-	hWnd = FindWindowA(NULL, window_title);
+	(*runtime)(argc, argv);
 
-	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);//_MINUS_SRC_ALPHA
-	glEnable(GL_BLEND);
-	//glutSetOption(GLUT_MULTISAMPLE, 4);
-
-	//auto vendor = glGetString(GL_VENDOR);
-	//auto renderer = glGetString(GL_RENDERER);
-	//auto version = glGetString(GL_VERSION);
-	//printf("%s - %s.\nVersion %s\n", vendor, renderer, version);
-
-	//glEnable(GL_POLYGON_SMOOTH);//laggy af
-	//glEnable(GL_LINE_SMOOTH);//GL_POLYGON_SMOOTH
-	//glEnable(GL_POINT_SMOOTH);
-
-	//glShadeModel(GL_SMOOTH); 
-	//glEnable(GLUT_MULTISAMPLE); 
-	//glutSetOption(GLUT_MULTISAMPLE, 8);
-
-	glHint(GL_LINE_SMOOTH_HINT, GL_NICEST);//GL_FASTEST//GL_NICEST
-	glHint(GL_POINT_SMOOTH_HINT, GL_NICEST);
-	glHint(GL_POLYGON_SMOOTH_HINT, GL_FASTEST);
-
-	glutMouseFunc(mClick);
-	glutReshapeFunc(OnResize);
-	glutSpecialFunc(mSpecialKey);
-	glutMotionFunc(mDrag);
-	glutPassiveMotionFunc(mMotion);
-	glutKeyboardFunc(mKey);
-	glutDisplayFunc(mDisplay);
-	mInit();
-	glutMainLoop();
 	return 0;
 }
