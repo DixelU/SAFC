@@ -130,7 +130,7 @@ static void extract(const void* data, size_t data_size)
 	int flags;
 	int r;
 
-	/* Select which attributes we want to restore. */
+	/* Select which attributes we want to restore. 
 	flags = ARCHIVE_EXTRACT_TIME;
 	flags |= ARCHIVE_EXTRACT_PERM;
 	flags |= ARCHIVE_EXTRACT_ACL;

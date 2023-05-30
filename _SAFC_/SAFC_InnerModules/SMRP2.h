@@ -15,7 +15,7 @@
 #include <atomic>
 #include <ostream>
 
-#include <syncstream>
+//#include <syncstream>
 
 #include "../bbb_ffio.h"
 #include "../SAFGUIF/header_utils.h"
@@ -81,7 +81,7 @@ public:
 	{
 		std::lock_guard locker(mtx);
 		this->message = std::move(message);
-		std::osyncstream(std::cout) << this->message << std::endl;
+		/*std::osyncstream(*/std::cout/*)*/ << this->message << std::endl;
 	}
 };
 
@@ -1234,11 +1234,11 @@ struct single_midi_processor_2
 		return filters;
 	}
 
-	template<bool channels_split>
+	template<bool channels_split, typename _=void>
 	struct track_data;
 
-	template<>
-	struct track_data<false>
+	template<typename _>
+	struct track_data<false, _>
 	{
 		static constexpr bool fill_empty_track_with_at_least_one_event = false;
 
@@ -1296,8 +1296,8 @@ struct single_midi_processor_2
 		}
 	};
 
-	template<>
-	struct track_data<true>
+	template<typename _>
+	struct track_data<true, _>
 	{
 		track_data<false> data[16];
 
@@ -1338,7 +1338,7 @@ struct single_midi_processor_2
 		tick_type selection_front_tick,
 		single_track_data& std_ref,
 		message_buffers& buffers,
-		track_data<channels_split>& out_buffer)
+		track_data<channels_split, void>& out_buffer)
 	{
 		if (std_ref.selection_data.frontal_tempo != single_track_data::selection::default_tempo)
 		{
@@ -1415,7 +1415,7 @@ struct single_midi_processor_2
 		single_track_data& std_ref,
 		message_buffers& buffers,
 		processing_data& settings_data,
-		track_data<channels_split>& out_buffer)
+		track_data<channels_split, void>& out_buffer)
 	{
 		out_buffer.clear();
 
@@ -1527,7 +1527,7 @@ struct single_midi_processor_2
 
 		std::vector<std::vector<tick_type>> polyphony_stacks(4096);
 		data_buffers track_buffers;
-		track_data<channels_split> write_buffer;
+		track_data<channels_split, void> write_buffer;
 
 		for (auto& el : polyphony_stacks)
 			el.reserve(1000);
