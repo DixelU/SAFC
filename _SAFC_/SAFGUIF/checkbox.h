@@ -89,16 +89,16 @@ struct CheckBox : HandleableUIPart
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		float CW = 0.5f * (
-			(INT32)((bool)(GLOBAL_LEFT & Arg))
-			- (INT32)((bool)(GLOBAL_RIGHT & Arg))
+			(int32_t)((bool)(GLOBAL_LEFT & Arg))
+			- (int32_t)((bool)(GLOBAL_RIGHT & Arg))
 			) * SideSize,
 			CH = 0.5f * (
-				(INT32)((bool)(GLOBAL_BOTTOM & Arg))
-				- (INT32)((bool)(GLOBAL_TOP & Arg))
+				(int32_t)((bool)(GLOBAL_BOTTOM & Arg))
+				- (int32_t)((bool)(GLOBAL_TOP & Arg))
 				) * SideSize;
 		SafeChangePosition(NewX + CW, NewY + CH);
 	}
-	void KeyboardHandler(CHAR CH) override
+	void KeyboardHandler(char CH) override
 	{
 		return;
 	}
@@ -114,7 +114,7 @@ struct CheckBox : HandleableUIPart
 		this->Focused = !this->Focused;
 		BorderRGBAColor = (((~(BorderRGBAColor >> 8)) << 8) | (BorderRGBAColor & 0xFF));
 	}
-	bool MouseHandler(float mx, float my, CHAR Button, CHAR State) override
+	bool MouseHandler(float mx, float my, char Button, char State) override
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		if (fabsf(mx - Xpos) < 0.5 * SideSize && fabsf(my - Ypos) < 0.5 * SideSize)

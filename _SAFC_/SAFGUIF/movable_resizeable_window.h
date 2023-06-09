@@ -82,7 +82,7 @@ struct MoveableResizeableWindow : MoveableWindow
 		for (auto& val : list) 
 			PinnedWindowActivities.insert({ val, side });
 	}
-	bool MouseHandler(float mx, float my, CHAR Button/*-1 left, 1 right, 0 move*/, CHAR State /*-1 down, 1 up*/) override
+	bool MouseHandler(float mx, float my, char Button/*-1 left, 1 right, 0 move*/, char State /*-1 down, 1 up*/) override
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		if (!Drawable) 
@@ -92,7 +92,11 @@ struct MoveableResizeableWindow : MoveableWindow
 
 		if (std::abs(mx - CenterDraggableX) + std::abs(my - CenterDraggableY) < 2.5)
 		{
+#ifdef WINDOWS
 			SetCursor(NWSECursor);
+#else
+			glutSetCursor(GLUT_CURSOR_INFO);
+#endif
 			ResizeCornerIsHovered = true;
 			if (Button == -1 && (State == -1 || State == 1))
 				ResizeCornerIsActive = !ResizeCornerIsActive;

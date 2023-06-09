@@ -48,11 +48,11 @@ struct DottedSymbol
 	{
 		delete RGBAColor;
 	}
-	inline static bool IsRenderwaySymb(CHAR C)
+	inline static bool IsRenderwaySymb(char C)
 	{
 		return (C <= '9' && C >= '0' || C == ' ');
 	}
-	inline static bool IsNumber(CHAR C)
+	inline static bool IsNumber(char C)
 	{
 		return (C <= '9' && C >= '0');
 	}
@@ -80,7 +80,7 @@ struct DottedSymbol
 	{
 		if (RenderWay == " ")return;
 		float VerticalFlag = 0.f;
-		CHAR BACK = 0;
+		char BACK = 0;
 		if (RenderWay.back() == '#' || RenderWay.back() == '~')
 		{
 			BACK = RenderWay.back();
@@ -154,10 +154,12 @@ namespace lFontSymbolsInfo
 {
 	bool IsInitialised = false;
 	GLuint CurrentFont = 0;
+#ifdef WINDOWS
 	HFONT SelectedFont = nullptr;
-	INT32 Size = 16;
+#endif
+	int32_t Size = 16;
 
-	INT32 PrevSize = Size;
+	int32_t PrevSize = Size;
 	float Prev_lFONT_HEIGHT_TO_WIDTH = lFONT_HEIGHT_TO_WIDTH;
 	std::string PrevFontName;
 
@@ -191,6 +193,7 @@ namespace lFontSymbolsInfo
 		auto height = Size * (base_internal_range / internal_range);
 		auto width = (Size > 0) ? Size * (base_internal_range / internal_range) / lFONT_HEIGHT_TO_WIDTH : 0;
 
+#ifdef WINDOWS
 		SelectedFont = CreateFontA(
 			height,
 			width,
@@ -199,7 +202,7 @@ namespace lFontSymbolsInfo
 			FALSE,
 			FALSE,
 			FALSE,
-			DEFAULT_CHARSET,
+			DEFAULT_charSET,
 			OUT_TT_PRECIS,
 			CLIP_DEFAULT_PRECIS,
 			NONANTIALIASED_QUALITY,
@@ -211,6 +214,7 @@ namespace lFontSymbolsInfo
 
 		if (SelectedFont)
 			SelectObject(hDc, SelectedFont);
+#endif
 
 		if (!force)
 			InitialiseFont(FontName, true);
@@ -236,13 +240,18 @@ namespace lFontSymbolsInfo
 			glPopAttrib();
 		}
 	}
-	const _MAT2 MT = { {0, 1}, {0, 0}, {0, 0}, {0, 1} };;
+
+#ifdef WINDOWS
+	const _MAT2 MT = { {0, 1}, {0, 0}, {0, 0}, {0, 1} };
+#endif
 }
 
 struct lFontSymbol : DottedSymbol
 {
 	char Symb;
+#ifdef WINDOWS
 	GLYPHMETRICS GM = { 0 };
+#endif
 	lFontSymbol(char Symb, float CXpos, float CYpos, float XUnitSize, float YUnitSize, std::uint32_t RGBA) :
 		DottedSymbol(" ", CXpos, CYpos, XUnitSize, YUnitSize, 1, RGBA >> 24, (RGBA >> 16) & 0xFF, (RGBA >> 8) & 0xFF, RGBA & 0xFF)
 	{
@@ -250,6 +259,7 @@ struct lFontSymbol : DottedSymbol
 	}
 	void Draw() override
 	{
+#ifdef WINDOWS
 		if (!lFontSymbolsInfo::SelectedFont)
 			return;
 		float PixelSize = (internal_range * 2) / window_base_width;
@@ -263,6 +273,7 @@ struct lFontSymbol : DottedSymbol
 		glColor4ub(R, G, B, A);
 		glRasterPos2f(Xpos - PixelSize * GM.gmBlackBoxX * 0.5, Ypos - _YUnitSize() * 0.5);
 		lFontSymbolsInfo::CallListOnChar(Symb);
+#endif
 	}
 };
 
@@ -378,7 +389,7 @@ struct BiColoredDottedSymbol : DottedSymbol
 		if (RenderWay == " ")
 			return;
 		float VerticalFlag = 0.;
-		CHAR BACK = 0;
+		char BACK = 0;
 		if (RenderWay.back() == '#' || RenderWay.back() == '~') 
 		{
 			BACK = RenderWay.back();

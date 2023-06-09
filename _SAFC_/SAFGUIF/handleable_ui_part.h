@@ -11,7 +11,7 @@ struct HandleableUIPart {
 	HandleableUIPart() { Enabled = true; }
 	//HandleableUIPart(HandleableUIPart&&) = delete;
 	virtual ~HandleableUIPart() {}
-	bool virtual MouseHandler(float mx, float my, CHAR Button/*-1 left, 1 right*/, CHAR State /*-1 down, 1 up*/) = 0;
+	bool virtual MouseHandler(float mx, float my, char Button/*-1 left, 1 right*/, char State /*-1 down, 1 up*/) = 0;
 	void virtual Draw() = 0;
 	void virtual SafeMove(float, float) = 0;
 	void virtual SafeChangePosition(float, float) = 0;

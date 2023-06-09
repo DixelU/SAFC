@@ -2,7 +2,7 @@
 #ifndef SAF_SMIC
 #define SAF_SMIC
 
-#include <Windows.h>
+//#include <Windows.h>
 #include <string>
 #include <array>
 
@@ -89,7 +89,7 @@ struct SingleMIDIInfoCollector
 		std::int64_t MTrk_pos;
 	};
 	bool Processing, Finished;
-	std::wstring FileName;
+	std_unicode_string FileName;
 	std::string LogLine;
 	std::string ErrorLine;
 	using tempo_graph = btree::btree_map<std::int64_t, TempoEvent>;
@@ -101,9 +101,18 @@ struct SingleMIDIInfoCollector
 	std::vector<TrackData> Tracks;
 	std::uint16_t PPQ;
 	bool AllowLegacyRunningStatusMetaIgnorance;
-	//Locker<btree::btree_map<UINT64, UINT64>> Polyphony;
+	//Locker<btree::btree_map<std::uint64_t, std::uint64_t>> Polyphony;
 	//Locker<btree::btree_map<>>
-	SingleMIDIInfoCollector(std::wstring filename, std::uint16_t PPQ, bool AllowLegacyRunningStatusMetaIgnorance = false) : FileName(filename), LogLine(" "), Processing(0), Finished(0), PPQ(PPQ), AllowLegacyRunningStatusMetaIgnorance(AllowLegacyRunningStatusMetaIgnorance) { }
+	SingleMIDIInfoCollector(std_unicode_string filename, std::uint16_t PPQ, bool AllowLegacyRunningStatusMetaIgnorance = false) :
+		FileName(filename),
+		LogLine(" "),
+		Processing(0),
+		Finished(0),
+		PPQ(PPQ),
+		AllowLegacyRunningStatusMetaIgnorance(AllowLegacyRunningStatusMetaIgnorance)
+	{
+
+	}
 	void Lookup() 
 	{
 		der_polyphony_graph PolyphonyFiniteDifference;
@@ -113,15 +122,15 @@ struct SingleMIDIInfoCollector
 		LogLine = " ";
 		//std::array<std::uint32_t, 4096> CurHolded;
 		std::uint32_t MTRK = 0, vlv = 0;
-		UINT64 LastTick = 0;
-		UINT64 CurTick = 0;
+		std::uint64_t LastTick = 0;
+		std::uint64_t CurTick = 0;
 		std::uint8_t IO = 0, RSB = 0;
 		TrackData TData;
 		TempoMap[0] = TempoEvent(0x7, 0xA1, 0x20);
 		PolyphonyFiniteDifference[-1] = NoteOnOffCounter();
 		while (file_input.good())
 		{
-			std::array<UINT64, 4096> polyphony;
+			std::array<std::uint64_t, 4096> polyphony;
 			CurTick = 0;
 			MTRK = 0;
 			while (MTRK != MTrk && file_input.good())

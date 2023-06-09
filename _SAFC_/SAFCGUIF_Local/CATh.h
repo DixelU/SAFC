@@ -155,16 +155,16 @@ struct CAT_Piano :HandleableUIPart
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		float CW = 0.5f * (
-			(INT32)((bool)(GLOBAL_LEFT & Arg))
-			- (INT32)((bool)(GLOBAL_RIGHT & Arg))
+			(int32_t)((bool)(GLOBAL_LEFT & Arg))
+			- (int32_t)((bool)(GLOBAL_RIGHT & Arg))
 			) * CalculatedWidth,
 			CH = 0.5f * (
-				(INT32)((bool)(GLOBAL_BOTTOM & Arg))
-				- (INT32)((bool)(GLOBAL_TOP & Arg))
+				(int32_t)((bool)(GLOBAL_BOTTOM & Arg))
+				- (int32_t)((bool)(GLOBAL_TOP & Arg))
 				) * CalculatedHeight;
 		SafeChangePosition(NewX + CW, NewY + CH);
 	}
-	void KeyboardHandler(CHAR CH) override
+	void KeyboardHandler(char CH) override
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		if (Focused)
@@ -228,7 +228,7 @@ struct CAT_Piano :HandleableUIPart
 	{
 		return;
 	}
-	bool MouseHandler(float mx, float my, CHAR Button, CHAR State) override
+	bool MouseHandler(float mx, float my, char Button, char State) override
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		mx -= BaseXPos;

@@ -2,22 +2,31 @@
 #ifndef SAFGUIF_L_DND
 #define SAFGUIF_L_DND
 
+#ifdef WINDOWS
 #include <dwmapi.h>
 #include <Windows.h>
+#else
+#define STDMETHODCALLTYPE
+#endif
 #include "../SAFGUIF/SAFGUIF.h"
 #include "../SAFC_InnerModules/SAFC_IM.h"
 
 
+#ifdef WINDOWS
 #pragma comment (lib, "dwmapi.lib")
 
-struct DragNDropHandler : IDropTarget
+struct DragNDropHandler
+#ifdef WINDOWS
+	: IDropTarget
+#endif
 {
-	ULONG m_refCount;
+	std::atomic_size_t m_refCount;
 	wchar_t m_data[8000];
 	DragNDropHandler()
 	{
 		m_refCount = 1;
 	}
+
 	HRESULT STDMETHODCALLTYPE QueryInterface(const IID& riid, void** ppvObject) override
 	{
 		if (riid == IID_IUnknown || riid == IID_IDropTarget)
@@ -29,11 +38,12 @@ struct DragNDropHandler : IDropTarget
 		*ppvObject = NULL;
 		return ResultFromScode(E_NOINTERFACE);
 	}
-	ULONG STDMETHODCALLTYPE AddRef() override
+
+	size_t STDMETHODCALLTYPE AddRef() override
 	{
 		return ++m_refCount;
 	}
-	ULONG STDMETHODCALLTYPE Release() override
+	size_t STDMETHODCALLTYPE Release() override
 	{
 		if (--m_refCount == 0)
 		{
@@ -42,7 +52,7 @@ struct DragNDropHandler : IDropTarget
 		}
 		return m_refCount;
 	}
-	HRESULT STDMETHODCALLTYPE DragEnter(IDataObject* dataObject, DWORD grfKeyState, POINTL mousePos, DWORD* effect) override
+	HRESULT STDMETHODCALLTYPE DragEnter(IDataObject* dataObject, DWORD grfKeyState, POINTL mousePos, DWORD* effect)	override
 	{
 		//MessageBox(hWnd, "dragenter", "Drag", MB_ICONINFORMATION);
 		//cout << "a" << endl;
@@ -105,6 +115,9 @@ struct DragNDropHandler : IDropTarget
 		return NOERROR;
 	}
 };
+#else
+struct DragNDropHandler { void* ptr; DragNDropHandler() = default; };
+#endif
 
 DragNDropHandler DNDH_Global;
 

@@ -60,7 +60,7 @@ struct SMRP_Vis : HandleableUIPart
 	{
 		return;
 	}
-	void KeyboardHandler(CHAR CH) override
+	void KeyboardHandler(char CH) override
 	{
 		return;
 	}
@@ -148,7 +148,7 @@ struct SMRP_Vis : HandleableUIPart
 			else SpecialSigns::DrawNo(_xpos, _ypos, 20, 0xFF3F00FF);
 		}
 	}
-	bool MouseHandler(float mx, float my, CHAR Button, CHAR State) override
+	bool MouseHandler(float mx, float my, char Button, char State) override
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		mx -= _xpos;

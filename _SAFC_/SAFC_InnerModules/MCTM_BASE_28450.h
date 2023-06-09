@@ -13,7 +13,7 @@ void ThrowAlert_Warning(std::string&& AlertText);
 
 struct MIDICollectionThreadedMerger
 {
-	std_unicode_string SaveTo;
+	std::wstring SaveTo;
 	std::atomic_bool FirstStageComplete;
 	std::atomic_bool IntermediateRegularFlag;
 	std::atomic_bool IntermediateInplaceFlag;
@@ -37,7 +37,7 @@ struct MIDICollectionThreadedMerger
 		std::int64_t CurPosition;
 		std::int64_t CurTick;
 		std::uint8_t* TrackData;
-		std::uint64_t TrackSize;
+		UINT64 TrackSize;
 		std::array<std::int64_t, 4096> Holded;
 		bool Processing;
 		DegeneratedTrackIterator(std::vector<std::uint8_t>& Vec) 
@@ -128,7 +128,7 @@ struct MIDICollectionThreadedMerger
 		{
 			constexpr std::uint32_t LocalDeltaTimeTrunkEdge = 0xF000000;//BC808000 in vlv
 			//bool first_nonzero_delta_output = output_noteon_wall;
-			std::uint64_t LocalTick = CurTick;
+			UINT64 LocalTick = CurTick;
 			std::uint8_t DeltaLen = 0;
 			while (output_noteon_wall && LocalTick > LocalDeltaTimeTrunkEdge) 
 			{//fillers
@@ -163,14 +163,10 @@ struct MIDICollectionThreadedMerger
 	~MIDICollectionThreadedMerger() 
 	{
 	}
-	MIDICollectionThreadedMerger(
-		std::vector<proc_data_ptr> processing_data, 
-		std::uint16_t FinalPPQN, 
-		std_unicode_string SaveTo,
-		bool is_console_oriented)
+	MIDICollectionThreadedMerger(std::vector<proc_data_ptr> processing_data, std::uint16_t FinalPPQN, std::wstring SaveTo)
 	{
 		for (auto& single_midi_data : processing_data)
-			midi_processing_data.push_back({ single_midi_data , std::make_shared<message_buffer_ptr::element_type>(is_console_oriented) });
+			midi_processing_data.push_back({ single_midi_data , std::make_shared<message_buffer_ptr::element_type>() });
 		this->SaveTo = SaveTo;
 		this->FinalPPQN = FinalPPQN;
 		IntermediateRegularFlag = IntermediateInplaceFlag = CompleteFlag = IRTrackCount = IITrackCount = 0;
@@ -248,7 +244,7 @@ struct MIDICollectionThreadedMerger
 			[](mpd_t::value_type& el) { return el.first->settings.details.inplace_mergable; });
 		
 		IITrackCount = 0;
-		std::thread([](mpd_t IMC, std::uint16_t PPQN, std_unicode_string _SaveTo,
+		std::thread([](mpd_t IMC, std::uint16_t PPQN, std::wstring _SaveTo, 
 			std::reference_wrapper<std::atomic_bool> FinishedFlag, std::reference_wrapper<std::atomic_uint64_t> TrackCount) {
 			if (IMC.empty()) 
 			{
@@ -263,12 +259,7 @@ struct MIDICollectionThreadedMerger
 #define ddt (DecayingDeltaTimes[i])
 			std::vector<std::uint8_t> Track, FrontEdge, BackEdge;
 			bbb_ffr* fi;
-			auto [file_output, fo_ptr] = open_wide_stream<std::ostream>
-#ifdef WINDOWS
-				(_SaveTo + L".I.mid", L"wb");
-#else
-				(_SaveTo + ".I.mid", "wb");
-#endif
+			auto [file_output, fo_ptr] = open_wide_stream<std::ostream>(_SaveTo + L".I.mid", L"wb");
 			(*file_output) << "MThd" << '\0' << '\0' << '\0' << (char)6 << '\0' << (char)1;
 			for (auto Y = IMC.begin(); Y != IMC.end(); Y++) 
 			{
@@ -286,7 +277,7 @@ struct MIDICollectionThreadedMerger
 			{
 				///reading tracks
 				std::uint32_t Header = 0, DIO, DeltaLen = 0;
-				std::uint64_t InTrackDelta = 0;
+				UINT64 InTrackDelta = 0;
 				bool ITD_Flag = 1 /*, NotNoteEvents_ProcessedFlag = 0*/;
 				for (int i = 0; i < fiv.size(); i++)
 				{
@@ -301,7 +292,7 @@ struct MIDICollectionThreadedMerger
 					else
 						ddt = -1;
 				}
-				for (std::uint64_t Tick = 0; ActiveTrackReading; Tick++, InTrackDelta++)
+				for (UINT64 Tick = 0; ActiveTrackReading; Tick++, InTrackDelta++)
 				{
 					std::uint8_t IO = 0, EVENTTYPE = 0;///yas
 					ActiveTrackReading = 0;
@@ -438,7 +429,7 @@ struct MIDICollectionThreadedMerger
 					}
 				}
 				ActiveTrackReading = 1;
-				constexpr uint32_t EDGE = 0x7F000000;
+				constexpr UINT32 EDGE = 0x7F000000;
 
 				if (Track.size() > 0xFFFFFFFFu)
 					std::cout << "TrackSize overflow!!!\n";
@@ -455,7 +446,7 @@ struct MIDICollectionThreadedMerger
 						TotalShift = DTI.CurPosition + EDGE;
 						BackEdge.clear();
 						DTI.PutCurrentHoldedNotes(BackEdge, false);
-						std::uint64_t TotalSize = FrontEdge.size() + (DTI.CurPosition - PrevEdgePos) + BackEdge.size() + 4;
+						UINT64 TotalSize = FrontEdge.size() + (DTI.CurPosition - PrevEdgePos) + BackEdge.size() + 4;
 						(*file_output) << "MTrk";
 						file_output->put(TotalSize >> 24);
 						file_output->put(TotalSize >> 16);
@@ -476,7 +467,7 @@ struct MIDICollectionThreadedMerger
 						DTI.PutCurrentHoldedNotes(FrontEdge, true);
 					}
 					(*file_output) << "MTrk";
-					std::uint64_t TotalSize = FrontEdge.size() + (DTI.CurPosition - PrevEdgePos);
+					UINT64 TotalSize = FrontEdge.size() + (DTI.CurPosition - PrevEdgePos);
 					//cout << "Outside:" << TotalSize << endl;
 					file_output->put(TotalSize >> 24);
 					file_output->put(TotalSize >> 16);
@@ -509,12 +500,7 @@ struct MIDICollectionThreadedMerger
 				pfiv.close();
 				auto& imc_i = IMC[i];
 				if (imc_i.first->settings.proc_details.remove_remnants)
-#ifdef WINDOWS
-					_wremove
-#else
-					remove
-#endif
-						((imc_i.first->filename + imc_i.first->postfix).c_str());
+					_wremove((imc_i.first->filename + imc_i.first->postfix).c_str());
 			}
 			file_output->seekp(10, std::ios::beg);
 			file_output->put((TrackCount.get()) >> 8);
@@ -535,7 +521,7 @@ struct MIDICollectionThreadedMerger
 		std::copy_if(midi_processing_data.begin(), midi_processing_data.end(), std::back_inserter(regular_merge_candidates),
 			[](mpd_t::value_type& el) { return !el.first->settings.details.inplace_mergable; });
 
-		std::thread([](mpd_t RMC, std::uint16_t PPQN, std_unicode_string _SaveTo,
+		std::thread([](mpd_t RMC, std::uint16_t PPQN, std::wstring _SaveTo,
 			std::reference_wrapper<std::atomic_bool> FinishedFlag, std::reference_wrapper<std::atomic_uint64_t> TrackCount)
 		{
 			if (RMC.empty()) 
@@ -546,13 +532,8 @@ struct MIDICollectionThreadedMerger
 			//bool FirstFlag = 1;
 			const size_t buffer_size = 20000000;
 			std::uint8_t* buffer = new std::uint8_t[buffer_size];
-			auto [file_output, fo_ptr] = open_wide_stream<std::ostream>
-#ifdef WINDOWS
-				(_SaveTo + L".R.mid", L"wb");
-#else
-				(_SaveTo + ".R.mid", "wb");
-#endif
-			std_unicode_string filename = RMC.front().first->filename + RMC.front().first->postfix;
+			auto [file_output, fo_ptr] = open_wide_stream<std::ostream>(_SaveTo + L".R.mid", L"wb");
+			std::wstring filename = RMC.front().first->filename + RMC.front().first->postfix;
 			bbb_ffr file_input(filename.c_str());
 			file_output->rdbuf()->pubsetbuf((char*)buffer, buffer_size);
 			*file_output << "MThd" << '\0' << '\0' << '\0' << (char)6 << '\0' << (char)1;
@@ -571,13 +552,7 @@ struct MIDICollectionThreadedMerger
 				TrackCount.get() += Y->first->tracks_count;
 				int t;
 				if (Y->first->settings.proc_details.remove_remnants)
-					t =
-#ifdef WINDOWS
-					_wremove
-#else
-					remove
-#endif
-						(filename.c_str());
+					t = _wremove(filename.c_str());
 			}
 			file_output->seekp(10, std::ios::beg);
 			file_output->put(TrackCount.get() >> 8);
@@ -597,23 +572,12 @@ struct MIDICollectionThreadedMerger
 	}
 	void FinalMerge() 
 	{
-		std::thread([this](std::reference_wrapper<std::atomic_bool> FinishedFlag, std_unicode_string _SaveTo)
+		std::thread([this](std::reference_wrapper<std::atomic_bool> FinishedFlag, std::wstring _SaveTo)
 		{
-			bbb_ffr
-#ifdef WINDOWS
+			bbb_ffr 
 				*IM = new bbb_ffr((_SaveTo + L".I.mid").c_str()),
 				*RM = new bbb_ffr((_SaveTo + L".R.mid").c_str());
-#else
-				*IM = new bbb_ffr((_SaveTo + ".I.mid").c_str()),
-				*RM = new bbb_ffr((_SaveTo + ".R.mid").c_str());
-#endif
-			auto [F, fo_ptr] = open_wide_stream<std::ostream>
-#ifdef WINDOWS
-						(_SaveTo, L"wb");
-#else
-						(_SaveTo, "wb");
-#endif
-
+			auto [F, fo_ptr] = open_wide_stream<std::ostream>(_SaveTo, L"wb");
 			bool IMgood = !IM->eof(), RMgood = !RM->eof();
 
 			auto TotalTracks = IITrackCount + IRTrackCount;
@@ -630,39 +594,14 @@ struct MIDICollectionThreadedMerger
 				//F.close();
 				fclose(fo_ptr);
 
-#ifdef WINDOWS
 				auto inplaceFilename = _SaveTo + L".I.mid";
 				auto regularFilename = _SaveTo + L".R.mid";
-#else
-				auto inplaceFilename = _SaveTo + ".I.mid";
-				auto regularFilename = _SaveTo + ".R.mid";
-#endif
 
-				auto remove_orig =
-#ifdef WINDOWS
-					_wremove
-#else
-					remove
-#endif
-				 		(_SaveTo.c_str());
+				auto remove = _wremove(_SaveTo.c_str());
+				auto remove_i = _wrename(inplaceFilename.c_str(), _SaveTo.c_str());
+				auto remove_r = _wrename(regularFilename.c_str(), _SaveTo.c_str());//one of these will not work
 
-				auto remove_i =
-#ifdef WINDOWS
-					_wrename
-#else
-					rename
-#endif
-						(inplaceFilename.c_str(), _SaveTo.c_str());
-
-				auto remove_r =
-#ifdef WINDOWS
-					_wrename
-#else
-					rename
-#endif
-						(regularFilename.c_str(), _SaveTo.c_str());//one of these will not work
-
-				printf("S2 status: %i\nI status: %i\nR status: %i\n", remove_orig, remove_i, remove_r);
+				printf("S2 status: %i\nI status: %i\nR status: %i\n", remove, remove_i, remove_r);
 
 				delete IM;
 				delete RM;
@@ -711,13 +650,8 @@ struct MIDICollectionThreadedMerger
 			FinishedFlag.get() = true;
 			if (RemnantsRemove)
 			{
-#ifdef WINDOWS
 				_wremove((_SaveTo + L".I.mid").c_str());
 				_wremove((_SaveTo + L".R.mid").c_str());
-#else
-				remove((_SaveTo + ".I.mid").c_str());
-				remove((_SaveTo + ".R.mid").c_str());
-#endif
 			}
 		}, std::ref(CompleteFlag), SaveTo).detach();
 	}

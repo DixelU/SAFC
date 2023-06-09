@@ -63,7 +63,7 @@ struct MoveableWindow : HandleableUIPart
 			}
 		}
 	}
-	bool MouseHandler(float mx, float my, CHAR Button/*-1 left, 1 right, 0 move*/, CHAR State /*-1 down, 1 up*/) override
+	bool MouseHandler(float mx, float my, char Button/*-1 left, 1 right, 0 move*/, char State /*-1 down, 1 up*/) override
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		if (!Drawable) 
@@ -170,12 +170,12 @@ struct MoveableWindow : HandleableUIPart
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		float CW = 0.5f * (
-			(INT32)(!!(GLOBAL_LEFT & Arg))
-			- (INT32)(!!(GLOBAL_RIGHT & Arg))
+			(int32_t)(!!(GLOBAL_LEFT & Arg))
+			- (int32_t)(!!(GLOBAL_RIGHT & Arg))
 			- 1) * Width,
 			CH = 0.5f * (
-				(INT32)(!!(GLOBAL_BOTTOM & Arg))
-				- (INT32)(!!(GLOBAL_TOP & Arg))
+				(int32_t)(!!(GLOBAL_BOTTOM & Arg))
+				- (int32_t)(!!(GLOBAL_TOP & Arg))
 				+ 1) * Height;
 		SafeChangePosition(NewX + CW, NewY + CH);
 	}

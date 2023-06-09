@@ -6,8 +6,11 @@
 #include "../freeglut.h"
 
 #include "consts.h"
+#include <chrono>
 
+#ifdef WINDOWS
 #include <Windows.h>
+#endif
 #include <string>
 #include <vector>
 
@@ -15,8 +18,20 @@ constexpr int base_internal_range = 200;
 
 float internal_range = base_internal_range, mouse_x_position = 0.f, mouse_y_position = 0.f;
 
+
+#ifdef WINDOWS
+using std_unicode_string = std::wstring;
+#else
+using std_unicode_string = std::string;
+#endif
+
 const char* window_title = "SAFC\0";
-std::wstring default_reg_path = L"Software\\SAFC\\";
+std_unicode_string default_reg_path =
+#ifdef WINDOWS
+	L"Software\\SAFC\\";
+#else
+	"";
+#endif
 
 std::string default_font_name = "Consolas";
 bool is_fonted = 0;
@@ -77,9 +92,11 @@ bool ANIMATION_IS_ACTIVE = 0,
 std::uint32_t TimerV = 0;
 std::int16_t YearsOld = -1;
 
+#ifdef WINDOWS
 HWND hWnd;
 HDC hDc;
 auto HandCursor = ::LoadCursor(NULL, IDC_HAND), AllDirectCursor = ::LoadCursor(NULL, IDC_CROSS), NWSECursor = ::LoadCursor(NULL, IDC_SIZENWSE);///AAAAAAAAAAA
+#endif
 
 //const float singlepixwidth = (float)RANGE / WINDXSIZE;
 
@@ -87,23 +104,41 @@ bool check_autoupdates = true;
 
 void absoluteToActualCoords(int ix, int iy, float& x, float& y);
 void inline rotate(float& x, float& y);
-
-int TIMESEED()
+size_t TimeCheckAndReturnTimeseed()
 {
-	SYSTEMTIME t;
-	GetLocalTime(&t);
-	if (t.wMonth == 4 && t.wDay == 1)
+	auto now = std::chrono::system_clock::now();
+	auto tt = std::chrono::system_clock::to_time_t(now);
+	auto utc_tm = *gmtime(&tt);
+	auto local_tm = *localtime(&tt);
+
+	if (local_tm.tm_mon == 4 && local_tm.tm_mday == 1)
 		APRIL_FOOL = 1;
-	if (t.wMonth == 8 && t.wDay == 31)
+	if (local_tm.tm_mon == 8 && local_tm.tm_mday == 31)
 	{
-		YearsOld = t.wYear - 2018;
+		YearsOld = local_tm.tm_year - 2018;
 	}
-	return t.wMilliseconds + (t.wSecond * 1000) + t.wMinute * 60000;
+	return now.time_since_epoch().count();
+}
+
+template<typename OnDestroyFunctor>
+class OnDestroyExecutor
+{
+public:
+	OnDestroyExecutor(OnDestroyFunctor&& func) : _f(std::move(func)) {}
+	virtual ~OnDestroyExecutor() { _f(); }
+private:
+	OnDestroyFunctor _f;
+};
+
+template<typename OnDestroyFunctor>
+OnDestroyExecutor<OnDestroyFunctor> makeOnDestroyExecutor(OnDestroyFunctor&& func)
+{
+	return OnDestroyExecutor<OnDestroyFunctor>(std::move(func));
 }
 
 void ThrowAlert_Error(std::string&& AlertText);
 void ThrowAlert_Warning(std::string&& AlertText);
-void AddFiles(std::vector<std::wstring> Filenames);
+void AddFiles(std::vector<std_unicode_string> Filenames);
 #pragma warning(disable : 4996)
 
 #define MD_CASE(value) case (value): case ((value|1))

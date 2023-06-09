@@ -3,11 +3,14 @@
 #define SAFGUIF_FM
 
 #include <iostream>
+#ifdef WINDOWS
 #include "../WinReg.h"
+#endif
 #include "header_utils.h"
 
 bool RestoreIsFontedVar()
 {
+#ifdef WINDOWS
 	bool RK_OP = false;
 	WinReg::RegKey RK;
 	try
@@ -29,11 +32,13 @@ bool RestoreIsFontedVar()
 	}
 	if (RK_OP)
 		RK.Close();
+#endif
 	return false;
 }
 
 void SetIsFontedVar(bool VAL)
 {
+#ifdef WINDOWS
 	bool RK_OP = false;
 	WinReg::RegKey RK;
 	try
@@ -55,6 +60,7 @@ void SetIsFontedVar(bool VAL)
 	}
 	if (RK_OP)
 		RK.Close();
+#endif
 }
 bool _______unused = RestoreIsFontedVar();
 

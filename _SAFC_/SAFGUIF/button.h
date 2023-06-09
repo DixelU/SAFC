@@ -71,7 +71,7 @@ struct Button : HandleableUIPart
 		this->OnClick = OnClick;
 		this->Enabled = true;
 	}
-	bool MouseHandler(float mx, float my, CHAR Button/*-1 left, 1 right, 0 move*/, CHAR State /*-1 down, 1 up*/) override
+	bool MouseHandler(float mx, float my, char Button/*-1 left, 1 right, 0 move*/, char State /*-1 down, 1 up*/) override
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		if (!Enabled) 
@@ -88,7 +88,11 @@ struct Button : HandleableUIPart
 			}
 			else
 			{
+#ifdef WINDOWS
 				SetCursor(HandCursor);
+#else
+				glutSetCursor(GLUT_CURSOR_INFO);
+#endif
 				if (Button && State == 1)
 				{
 					if (Button == -1 && OnClick)
@@ -136,12 +140,12 @@ struct Button : HandleableUIPart
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		float CW = 0.5f * (
-			(INT32)((bool)(GLOBAL_LEFT & Arg))
-			- (INT32)((bool)(GLOBAL_RIGHT & Arg))
+			(int32_t)((bool)(GLOBAL_LEFT & Arg))
+			- (int32_t)((bool)(GLOBAL_RIGHT & Arg))
 			) * Width,
 			CH = 0.5f * (
-				(INT32)((bool)(GLOBAL_BOTTOM & Arg))
-				- (INT32)((bool)(GLOBAL_TOP & Arg))
+				(int32_t)((bool)(GLOBAL_BOTTOM & Arg))
+				- (int32_t)((bool)(GLOBAL_TOP & Arg))
 				) * Height;
 		SafeChangePosition(NewX + CW, NewY + CH);
 	}

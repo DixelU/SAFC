@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <cstdlib>
 #include <wchar.h>
-#include <io.h>
+//#include <io.h>
 #include <tuple>
 #include <ctime>
 #include <mutex>
@@ -28,8 +28,10 @@
 #include <thread>
 #include <boost/algorithm/string.hpp>
 
+#ifdef WINDOWS
 #include <WinSock2.h>
 #include <WinInet.h>
+#endif // WINDOWS
 
 //#pragma comment (lib, "Version.lib")//Urlmon.lib
 //#pragma comment (lib, "Urlmon.lib")//Urlmon.lib
@@ -40,7 +42,9 @@
 //#pragma comment (lib, "Crypt32.Lib")
 
 #include "allocator.h"
+#ifdef WINDOWS
 #include "WinReg.h"
+#endif
 #include "resource.h"
 
 #include <stack>
@@ -59,7 +63,9 @@
 
 #include "SAFC_InnerModules/SMRP2.h"
 
+#include <nfd.hpp>
 #include <boost/dll.hpp>
+
 /*
 #include <archive.h>
 #include <archive_entry.h>
@@ -345,7 +351,7 @@ void SAFC_VersionCheck()
 size_t GetAvailableMemory() 
 {
 	size_t ret = 0;
-
+#ifdef WINDOWS
 	// because compiler static links the function...
 	BOOL(__stdcall * GMSEx)(LPMEMORYSTATUSEX) = 0;
 
@@ -366,6 +372,7 @@ size_t GetAvailableMemory()
 		GlobalMemoryStatus(&m);
 		ret = (int)(m.dwAvailPhys >> 20);
 	}
+#endif
 	return ret;
 }
 
@@ -380,13 +387,13 @@ std::uint32_t DefaultBoolSettings = _BoolSettings::remove_remnants | _BoolSettin
 
 struct FileSettings
 {////per file settings
-	std::wstring Filename;
-	std::wstring PostprocessedFile_Name, WFileNamePostfix;
+	std_unicode_string Filename;
+	std_unicode_string PostprocessedFile_Name, WFileNamePostfix;
 	std::string AppearanceFilename, AppearancePath, FileNamePostfix;
 	std::uint16_t NewPPQN, OldPPQN, OldTrackNumber, MergeMultiplier;
 	std::int16_t GroupID;
 	double NewTempo;
-	UINT64 FileSize;
+	std::uint64_t FileSize;
 	std::int64_t SelectionStart, SelectionLength;
 	bool
 		IsMIDI,
@@ -400,7 +407,7 @@ struct FileSettings
 	std::shared_ptr<PLC<std::uint16_t, std::uint16_t>> PitchBendMap;
 	std::uint32_t BoolSettings;
 	std::int64_t OffsetTicks;
-	FileSettings(const std::wstring& Filename) 
+	FileSettings(const std_unicode_string& Filename)
 	{
 		this->Filename = Filename;
 		AppearanceFilename = AppearancePath = "";
@@ -422,7 +429,12 @@ struct FileSettings
 		SelectionLength = -1;
 		BoolSettings = DefaultBoolSettings;
 		FileNamePostfix = "_.mid";//_FILENAMEWITHEXTENSIONSTRING_.mid
-		WFileNamePostfix = L"_.mid";
+		WFileNamePostfix =
+#ifdef WINDOWS
+			L"_.mid";
+#else
+			"_.mid";
+#endif
 		RSBCompression = ChannelsSplit = false;
 		AllowLegacyRunningStatusMetaIgnorance = false;
 	}
@@ -496,7 +508,7 @@ struct _SFD_RSP
 struct SAFCData 
 { ////overall settings and storing perfile settings....
 	std::vector<FileSettings> Files;
-	std::wstring SaveDirectory;
+	std_unicode_string SaveDirectory;
 	std::uint16_t GlobalPPQN;
 	std::uint32_t GlobalOffset;
 	float GlobalNewTempo;
@@ -513,7 +525,7 @@ struct SAFCData
 		IncrementalPPQN = true;
 		InplaceMergeFlag = false;
 		IsCLIMode = false;
-		SaveDirectory = L"";
+		SaveDirectory.clear();
 		ChannelsSplit = RSBCompression = false;
 	}
 	void ResolveSubdivisionProblem_GroupIDAssign(std::uint16_t ThreadsCount = 0)
@@ -522,11 +534,16 @@ struct SAFCData
 			ThreadsCount = DetectedThreads;
 		if (Files.empty())
 		{
-			SaveDirectory = L"";
+			SaveDirectory.clear();
 			return;
 		}
 		else if (Files.size())
-			SaveDirectory = Files[0].Filename + L".AfterSAFC.mid";
+			SaveDirectory = Files[0].Filename +
+#ifdef WINDOWS
+				L".AfterSAFC.mid";
+#else
+				".AfterSAFC.mid";
+#endif
 
 		if (Files.size() == 1)
 		{
@@ -616,8 +633,11 @@ void ThrowAlert_Warning(std::string&& AlertText)
 		WH->ThrowAlert(AlertText, "Warning!", SpecialSigns::DrawExTriangle, 1, 0x7F7F7FFF, 0xFFFFFFAF);
 }
 
-std::vector<std::wstring> MOFD(const wchar_t* Title)
+
+
+std::vector<std_unicode_string> MOFD(std_unicode_string::pointer Title)
 {
+#ifdef WINDOWS
 	OPENFILENAMEW ofn;       // common dialog box structure
 	wchar_t szFile[50000];       // buffer for file name
 	std::vector<std::wstring> InpLinks;
@@ -681,9 +701,37 @@ std::vector<std::wstring> MOFD(const wchar_t* Title)
 		}
 		return std::vector<std::wstring> {L""};
 	}
+#else
+	auto onReturnNFDQuitter = makeOnDestroyExecutor([](){NFD::Quit();});
+	std::vector<std_unicode_string> paths;
+	NFD::Init();
+	NFD::UniquePathSet pathsSet;
+	nfdfilteritem_t filterItem[1] = { { "MIDI File", "mid,midi,MID,MIDI" } };
+	auto status = NFD::OpenDialogMultiple(pathsSet, filterItem, 1);
+	switch(status)
+	{
+		case NFD_OKAY:
+			nfdpathsetsize_t size;
+			NFD::PathSet::Count(pathsSet, size);
+			for(size_t i = 0; i < size; ++i)
+			{
+				NFD::UniquePathSetPathN singlePath;
+				NFD::PathSet::GetPath(pathsSet, i, singlePath);
+				paths.push_back(singlePath.get());
+			}
+			break;
+		case NFD_ERROR:
+			ThrowAlert_Error(std::string("NFD ERROR:\n") + NFD_GetError());
+		case NFD_CANCEL:
+			break;
+	}
+	return paths;
+#endif
 }
-std::wstring SOFD(const wchar_t* Title)
+
+std_unicode_string SOFD(std_unicode_string::pointer Title)
 {
+#ifdef WINDOWS
 	wchar_t filename[MAX_PATH];
 	OPENFILENAMEW ofn;
 	ZeroMemory(&filename, sizeof(filename));
@@ -722,6 +770,25 @@ std::wstring SOFD(const wchar_t* Title)
 		}
 		return L"";
 	}
+#else
+	auto onReturnNFDQuitter = makeOnDestroyExecutor([](){NFD::Quit();});
+	std_unicode_string path;
+	NFD::Init();
+	NFD::UniquePathN outputPath;
+	nfdfilteritem_t filterItem[1] = { { "MIDI File", "mid,midi,MID,MIDI" } };
+	auto status = NFD::SaveDialog(outputPath, filterItem, 1);
+	switch(status)
+	{
+		case NFD_OKAY:
+			path = outputPath.get();
+			break;
+		case NFD_ERROR:
+			ThrowAlert_Error(std::string("NFD ERROR:\n") + NFD_GetError());
+		case NFD_CANCEL:
+			break;
+	}
+	return path;
+#endif
 }
 
 //////////IMPORTANT STUFFS ABOVE///////////
@@ -729,7 +796,7 @@ std::wstring SOFD(const wchar_t* Title)
 #define _WH(Window,Element) ((*(*WH)[Window])[Element])//...uh
 #define _WH_t(Window,Element,Type) ((Type)_WH(Window,Element))
 
-void AddFiles(std::vector<std::wstring> Filenames)
+void AddFiles(std::vector<std_unicode_string> Filenames)
 {
 	if(WH)
 		WH->DisableAllWindows();
@@ -755,7 +822,11 @@ void AddFiles(std::vector<std::wstring> Filenames)
 				if (_Data[q].Filename == _Data.Files.back().Filename)
 				{
 					_Data[q].FileNamePostfix = std::to_string(Counter) + "_.mid";
+#ifdef WINDOWS
 					_Data[q].WFileNamePostfix = std::to_wstring(Counter) + L"_.mid";
+#else
+					_Data[q].WFileNamePostfix = std::to_string(Counter) + "_.mid";
+#endif
 					Counter++;
 				}
 			}
@@ -770,8 +841,12 @@ void AddFiles(std::vector<std::wstring> Filenames)
 }
 void OnAdd()
 {
-	std::vector<std::wstring> Filenames = MOFD(L"Select midi files");
-	AddFiles(Filenames);
+#ifdef WINDOWS
+	auto filenames = MOFD(L"Select midi files");
+#else
+	auto filenames = MOFD("Select midi files");
+#endif
+	AddFiles(filenames);
 }
 
 namespace PropsAndSets
@@ -884,7 +959,7 @@ namespace PropsAndSets
 						ErrorLine->SafeStringReplace(SMICptr->ErrorLine);
 					if (InfoLine->Text != SMICptr->LogLine)
 						InfoLine->SafeStringReplace(SMICptr->LogLine);
-					Sleep(10);
+					std::this_thread::sleep_for(std::chrono::milliseconds(10));
 				}
 				InfoLine->SafeStringReplace("Finished");
 				All_Exp->Enable();
@@ -961,7 +1036,12 @@ namespace PropsAndSets
 				WH->DisableAllWindows();
 				auto InfoLine = (TextBox*)(*(*WH)["SMIC"])["FLL"];
 				InfoLine->SafeStringReplace("Graph A is exporting...");
-				auto [out, fo_ptr] = open_wide_stream<std::ostream>(SMICptr->FileName+L".tg.csv", L"wb");
+				auto [out, fo_ptr] = open_wide_stream<std::ostream>
+#ifdef WINDOWS
+				    (SMICptr->FileName + L".tg.csv", L"wb");
+#else
+					(SMICptr->FileName + ".tg.csv", "wb");
+#endif
 				(*out) << "tick" << CSV_DELIM << "tempo" << '\n';
 				for (auto cur_pair : SMICptr->TempoMap)
 					(*out) << cur_pair.first << CSV_DELIM << cur_pair.second << '\n';
@@ -1046,9 +1126,14 @@ namespace PropsAndSets
 					it_ptree++;
 				}
 				auto [out, fo_ptr] = open_wide_stream<std::ostream>(SMICptr->FileName +
+#ifdef WINDOWS
 				                     ((ForPersonalUse)?L".a.csv":L".a.atraw"),
-				                     ((ForPersonalUse)?L"w":L"wb")
-				                                                   );
+				                     ((ForPersonalUse)?L"w":L"wb"));
+#else
+									((ForPersonalUse) ? ".a.csv" : ".a.atraw"),
+									((ForPersonalUse) ? "w" : "wb"));
+#endif
+
 				if (ForPersonalUse) {
 					(*out) << header;
 					for (auto cur_pair : info) {
@@ -1058,7 +1143,7 @@ namespace PropsAndSets
 							<< cur_pair.second.Seconds << CSV_DELIM
 							<< cur_pair.second.Tempo << std::endl;
 					}
-				} 
+				}
 				else
 				{
 					for (auto cur_pair : info)
@@ -1537,8 +1622,10 @@ void OnRemAllModules()
 
 namespace Settings
 {
-	INT ShaderMode = 0;
+	int ShaderMode = 0;
+#ifdef WINDOWS
 	WinReg::RegKey RegestryAccess;
+#endif
 	void OnSettings()
 	{
 		WH->EnableWindow("APP_SETTINGS");//_Data.DetectedThreads
@@ -1567,7 +1654,9 @@ namespace Settings
 		bool isRegestryOpened = false;
 		try
 		{
+#ifdef WINDOWS
 			Settings::RegestryAccess.Open(HKEY_CURRENT_USER, default_reg_path);
+#endif
 			isRegestryOpened = true;
 		}
 		catch (...)
@@ -1582,7 +1671,9 @@ namespace Settings
 		if (T.size())
 		{
 			ShaderMode = std::stoi(T);
+#ifdef WINDOWS
 			if (isRegestryOpened)TRY_CATCH(RegestryAccess.SetDwordValue(L"AS_BCKGID", ShaderMode); , "Failed on setting AS_BCKGID")
+#endif
 		}
 		std::cout << ShaderMode << std::endl;
 
@@ -1598,7 +1689,9 @@ namespace Settings
 		{
 			_Data.DetectedThreads = stoi(T);
 			_Data.ResolveSubdivisionProblem_GroupIDAssign();
+#ifdef WINDOWS
 			if (isRegestryOpened)TRY_CATCH(RegestryAccess.SetDwordValue(L"AS_THREADS_COUNT", _Data.DetectedThreads); , "Failed on setting AS_THREADS_COUNT")
+#endif
 		}
 		std::cout << _Data.DetectedThreads << std::endl;
 
@@ -1617,24 +1710,32 @@ namespace Settings
 
 		if (isRegestryOpened)
 		{
-			TRY_CATCH(RegestryAccess.SetDwordValue(L"AUTOUPDATECHECK", check_autoupdates);, "Failed on setting AUTOUPDATECHECK")
+#ifdef WINDOWS
+			TRY_CATCH(RegestryAccess.SetDwordValue(L"AUTOUPDATECHECK", AutoUpdatesCheck);, "Failed on setting AUTOUPDATECHECK")
 			TRY_CATCH(RegestryAccess.SetDwordValue(L"SPLIT_TRACKS", _Data.ChannelsSplit);, "Failed on setting SPLIT_TRACKS")
 			//TRY_CATCH(RegestryAccess.SetDwordValue(L"RSB_COMPRESS", check_autoupdates);, "Failed on setting RSB_COMPRESS")
 			TRY_CATCH(RegestryAccess.SetDwordValue(L"DEFAULT_BOOL_SETTINGS", DefaultBoolSettings);, "Failed on setting DEFAULT_BOOL_SETTINGS")
 			TRY_CATCH(RegestryAccess.SetDwordValue(L"FONTSIZE", lFontSymbolsInfo::Size); , "Failed on setting FONTSIZE")
 			TRY_CATCH(RegestryAccess.SetDwordValue(L"FLOAT_FONTHTW", *(std::uint32_t*)(&lFONT_HEIGHT_TO_WIDTH)); , "Failed on setting FLOAT_FONTHTW")
+#endif
 		}
 
 		_Data.InplaceMergeFlag = (((CheckBox*)(*pptr)["INPLACE_MERGE"])->State);
+
+#ifdef WINDOWS
 		if (isRegestryOpened)
 			TRY_CATCH(RegestryAccess.SetDwordValue(L"AS_INPLACE_FLAG", _Data.InplaceMergeFlag);, "Failed on setting AS_INPLACE_FLAG")
+#endif
 
 		((InputField*)(*pptr)["AS_FONT_NAME"])->PutIntoSource();
-		std::wstring ws(default_font_name.begin(), default_font_name.end());
+		std_unicode_string ws(default_font_name.begin(), default_font_name.end());
+
+#ifdef WINDOWS
 		if (isRegestryOpened)
 			TRY_CATCH(RegestryAccess.SetStringValue(L"COLLAPSEDFONTNAME", ws.c_str()); , "Failed on setting AS_BCKGID")
 			if (isRegestryOpened)
 				Settings::RegestryAccess.Close();
+#endif
 	}
 	void ChangeIsFontedVar()
 	{
@@ -1795,14 +1896,22 @@ void OnStart()
 
 void OnSaveTo()
 {
+#ifdef WINDOWS
 	_Data.SaveDirectory = SOFD(L"Save final midi to...");
 	size_t Pos = _Data.SaveDirectory.rfind(L".mid");
 	if (Pos >= _Data.SaveDirectory.size() || Pos <= _Data.SaveDirectory.size() - 4)
 		_Data.SaveDirectory += L".mid";
+#else
+	_Data.SaveDirectory = SOFD("Save final midi to...");
+	size_t Pos = _Data.SaveDirectory.rfind(".mid");
+	if (Pos >= _Data.SaveDirectory.size() || Pos <= _Data.SaveDirectory.size() - 4)
+		_Data.SaveDirectory += ".mid";
+#endif
 }
 
 void RestoreRegSettings()
 {
+#ifdef WINDOWS
 	bool Opened = false;
 	try
 	{
@@ -1849,7 +1958,7 @@ void RestoreRegSettings()
 		catch (...) { std::cout << "Exception thrown while restoring INPLACE_MERGE from registry\n"; }
 		try
 		{
-			std::wstring ws = Settings::RegestryAccess.GetStringValue(L"COLLAPSEDFONTNAME");//COLLAPSEDFONTNAME
+			std_unicode_string ws = Settings::RegestryAccess.GetStringValue(L"COLLAPSEDFONTNAME");//COLLAPSEDFONTNAME
 			default_font_name = std::string(ws.begin(), ws.end());
 		}
 		catch (...) { std::cout << "Exception thrown while restoring COLLAPSEDFONTNAME from registry\n"; }
@@ -1865,13 +1974,16 @@ void RestoreRegSettings()
 		} catch (...) {	std::cout << "Exception thrown while restoring FLOAT_FONTHTW from registry\n"; }
 		Settings::RegestryAccess.Close();
 	}
+#endif
 }
 
 ///SetIsFontedVar
 void Init()
 {
 	RestoreRegSettings();
+#ifdef WINDOWS
 	hDc = GetDC(hWnd);
+#endif
 	_Data.DetectedThreads =
 		std::max(
 			std::min((std::uint16_t)(
@@ -2097,10 +2209,11 @@ void Init()
 	//WH->EnableWindow("CAT");
 	//WH->EnableWindow("SMPAS");//Debug line
 	//WH->EnableWindow("PROMPT");////DEBUUUUG
-
+#ifdef WINDOWS
 	DragAcceptFiles(hWnd, TRUE);
 	OleInitialize(NULL);
 	std::cout << "Registering Drag&Drop: " << (RegisterDragDrop(hWnd, &DNDH_Global)) << std::endl;
+#endif
 
 	//SAFC_VersionCheck();
 }
@@ -2261,7 +2374,7 @@ void mKey(std::uint8_t k, int x, int y)
 void mClick(int butt, int state, int x, int y)
 {
 	float fx, fy;
-	CHAR Button, State = state;
+	char Button, State = state;
 	absoluteToActualCoords(x, y, fx, fy);
 	Button = butt - 1;
 
@@ -2314,7 +2427,9 @@ void mSpecialKey(int Key, int x, int y)
 
 void mExit(int a)
 {
+#ifdef WINDOWS
 	Settings::RegestryAccess.Close();
+#endif
 }
 
 struct SafcRuntime
@@ -2327,32 +2442,44 @@ struct SafcGuiRuntime :
 {
 	virtual void operator()(int argc, char** argv) override
 	{
+#ifdef WINDOWS
 		_wremove(L"_s");
 		_wremove(L"_f");
 		_wremove(L"_g");
+#endif
 
+#ifdef WINDOWS
 #ifdef _DEBUG 
 		ShowWindow(GetConsoleWindow(), SW_SHOW);
 #else // _DEBUG 
 		ShowWindow(GetConsoleWindow(), SW_HIDE);
 #endif
+#endif
 		//ShowWindow(GetConsoleWindow(), SW_SHOW);
 
+#ifdef WINDOWS
 		SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS);
+#endif
 		//srand(1);
 		//srand(clock());
 		InitASCIIMap();
 		//cout << to_string((std::uint16_t)0) << endl;
 
-		srand(TIMESEED());
+		srand(TimeCheckAndReturnTimeseed());
+#ifdef WINDOWS
 		__glutInitWithExit(&argc, argv, mExit);
+#else
+		glutInit(&argc, argv);
+#endif
 		//cout << argv[0] << endl;
 		glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGBA | GLUT_ALPHA | GLUT_MULTISAMPLE);
 		glutInitWindowSize(window_base_width, window_base_height);
 		//glutInitWindowPosition(50, 0);
 		glutCreateWindow(window_title);
 
+#ifdef WINDOWS
 		hWnd = FindWindowA(NULL, window_title);
+#endif
 
 		glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);//_MINUS_SRC_ALPHA
 		glEnable(GL_BLEND);
@@ -2426,7 +2553,9 @@ struct SafcCliRuntime:
 {
 	virtual void operator()(int argc, char** argv) override
 	{
+#ifdef WINDOWS
 		ShowWindow(GetConsoleWindow(), SW_SHOW);
+#endif
 		_Data.DetectedThreads =
 			std::max(
 				std::min((std::uint16_t)(
@@ -2470,13 +2599,13 @@ struct SafcCliRuntime:
 			_Data.SetGlobalOffset(global_offset->second->AsNumber());
 
 		auto filesArray = files->second->AsArray();
-		std::vector<std::wstring> filenames;
+		std::vector<std_unicode_string> filenames;
 
 		for (auto singleEntry : filesArray)
 		{
 			auto object = singleEntry->AsObject();
 			auto filename = object[L"filename"]->AsString();
-			filenames.push_back(std::move(filename));
+			filenames.push_back(std::string(filename.begin(), filename.end()));
 		}
 
 		AddFiles(filenames);
@@ -2560,10 +2689,18 @@ struct SafcCliRuntime:
 		auto save_to = config.find(L"save_to");
 		if (save_to != config.end())
 		{
+#ifdef WINDOWS
 			_Data.SaveDirectory = (save_to->second->AsString());
 			size_t Pos = _Data.SaveDirectory.rfind(L".mid");
 			if (Pos >= _Data.SaveDirectory.size() || Pos <= _Data.SaveDirectory.size() - 4)
 				_Data.SaveDirectory += L".mid";
+#else
+			auto wideSaveDirectory = save_to->second->AsString();
+			_Data.SaveDirectory = std::string(wideSaveDirectory.begin(), wideSaveDirectory.end());
+			size_t Pos = _Data.SaveDirectory.rfind(".mid");
+			if (Pos >= _Data.SaveDirectory.size() || Pos <= _Data.SaveDirectory.size() - 4)
+				_Data.SaveDirectory += ".mid";
+#endif
 		}
 
 		auto LocalMCTM = _Data.MCTM_Constructor();

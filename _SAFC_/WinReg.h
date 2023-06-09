@@ -2,67 +2,16 @@
 #ifndef INCLUDE_GIOVANNI_DICANIO_WINREG_HPP
 #define INCLUDE_GIOVANNI_DICANIO_WINREG_HPP
 
-
-////////////////////////////////////////////////////////////////////////////////
-//
-//      *** Modern C++ Wrappers Around Windows Registry C API ***
-// 
-//               Copyright (C) by Giovanni Dicanio 
-//  
-// First version: 2017, January 22nd
-// Last update: 2019, September 9th
-// 
-// E-mail: <giovanni.dicanio AT gmail.com>
-// 
-// Registry key handles are safely and conveniently wrapped 
-// in the RegKey resource manager C++ class.
-// 
-// Errors are signaled throwing exceptions of class RegException.
-// 
-// Unicode UTF-16 strings are represented using the std::wstring class; 
-// ATL's CString is not used, to avoid dependencies from ATL or MFC.
-// 
-// This is a header-only self-contained reusable module.
-//
-// Compiler: Visual Studio 2015
-// Code compiles cleanly at /W4 on both 32-bit and 64-bit builds.
-// 
-// ===========================================================================
-//
-// The MIT License(MIT)
-//
-// Copyright(c) 2017 by Giovanni Dicanio
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files(the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and / or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions :
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
-//
-////////////////////////////////////////////////////////////////////////////////
-
+#include <memory>
+#include <stdexcept>
+#include <string>
+#include <utility>
+#include <vector>
 
 #include <Windows.h>        // Windows Platform SDK
 #include <winreg.h>
 #include <crtdbg.h>         // _ASSERTE
 
-#include <memory>           // std::unique_ptr
-#include <stdexcept>        // std::runtime_error
-#include <string>           // std::wstring
-#include <utility>          // std::swap, std::pair
-#include <vector>           // std::vector
 
 
 namespace WinReg {
@@ -444,7 +393,6 @@ namespace WinReg {
 			|| (m_hKey == HKEY_LOCAL_MACHINE)
 			|| (m_hKey == HKEY_CLASSES_ROOT)
 			|| (m_hKey == HKEY_CURRENT_CONFIG)
-		//	|| (m_hKey == HKEY_CURRENT_USER_LOCAL_SETTINGS)
 			|| (m_hKey == HKEY_PERFORMANCE_DATA)
 			|| (m_hKey == HKEY_PERFORMANCE_NLSTEXT)
 			|| (m_hKey == HKEY_PERFORMANCE_TEXT)

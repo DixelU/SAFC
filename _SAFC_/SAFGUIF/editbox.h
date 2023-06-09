@@ -212,7 +212,7 @@ public:
 		for (auto& line : Words)
 			if(line)delete line;
 	}
-	bool MouseHandler(float mx, float my, CHAR Button/*-1 left, 1 right, 0 move*/, CHAR State /*-1 down, 1 up*/) override 
+	bool MouseHandler(float mx, float my, char Button/*-1 left, 1 right, 0 move*/, char State /*-1 down, 1 up*/) override
 	{
 		return 0;
 	}
@@ -335,12 +335,12 @@ public:
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		float CW = 0.5f * (
-			(INT32)((bool)(GLOBAL_LEFT & Arg))
-			- (INT32)((bool)(GLOBAL_RIGHT & Arg))
+			(int32_t)((bool)(GLOBAL_LEFT & Arg))
+			- (int32_t)((bool)(GLOBAL_RIGHT & Arg))
 			) * Width,
 		CH = 0.5f * (
-			(INT32)((bool)(GLOBAL_BOTTOM & Arg))
-			- (INT32)((bool)(GLOBAL_TOP & Arg))
+			(int32_t)((bool)(GLOBAL_BOTTOM & Arg))
+			- (int32_t)((bool)(GLOBAL_TOP & Arg))
 			) * Height;
 		SafeChangePosition(NewX + CW, NewY + CH);
 	}

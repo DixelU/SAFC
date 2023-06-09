@@ -181,16 +181,16 @@ struct PLC_VolumeWorker : HandleableUIPart
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		float CW = 0.5f * (
-			(INT32)((bool)(GLOBAL_LEFT & Arg))
-			- (INT32)((bool)(GLOBAL_RIGHT & Arg))
+			(int32_t)((bool)(GLOBAL_LEFT & Arg))
+			- (int32_t)((bool)(GLOBAL_RIGHT & Arg))
 			) * HorizontalSidesSize,
 			CH = 0.5f * (
-				(INT32)((bool)(GLOBAL_BOTTOM & Arg))
-				- (INT32)((bool)(GLOBAL_TOP & Arg))
+				(int32_t)((bool)(GLOBAL_BOTTOM & Arg))
+				- (int32_t)((bool)(GLOBAL_TOP & Arg))
 				) * VerticalSidesSize;
 		SafeChangePosition(NewX + CW, NewY + CH);
 	}
-	void KeyboardHandler(CHAR CH) override
+	void KeyboardHandler(char CH) override
 	{
 	}
 	void SafeStringReplace(std::string Meaningless) override
@@ -220,7 +220,7 @@ struct PLC_VolumeWorker : HandleableUIPart
 		if (PLC_bb)
 			PLC_bb->InsertNewPoint(A, ValA);
 	}
-	bool MouseHandler(float mx, float my, CHAR Button, CHAR State) override
+	bool MouseHandler(float mx, float my, char Button, char State) override
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		this->MouseX = mx;

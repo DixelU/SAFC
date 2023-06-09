@@ -45,7 +45,7 @@ struct BoolAndWORDChecker : HandleableUIPart
 	{
 		return;
 	}
-	void KeyboardHandler(CHAR CH) override
+	void KeyboardHandler(char CH) override
 	{
 		return;
 	}
@@ -80,7 +80,7 @@ struct BoolAndWORDChecker : HandleableUIPart
 		else SpecialSigns::DrawNo(XPos, YPos, 15, 0xFF0000FF);
 		STL_Info->Draw();
 	}
-	bool MouseHandler(float mx, float my, CHAR Button, CHAR State) override
+	bool MouseHandler(float mx, float my, char Button, char State) override
 	{
 		return 0;
 	}

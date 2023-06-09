@@ -3,7 +3,7 @@
 #define SAF_CAT 
 
 #include <optional>
-#include <Windows.h>
+//#include <Windows.h>
 
 struct CutAndTransposeKeys
 {

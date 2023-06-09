@@ -398,8 +398,8 @@ struct single_midi_processor_2
 	struct processing_data
 	{
 		settings_obj settings;
-		std::wstring filename;
-		std::wstring postfix;
+		std_unicode_string filename;
+		std_unicode_string postfix;
 
 		std::string appearance_filename;
 		std::atomic_uint64_t tracks_count;
@@ -1539,7 +1539,12 @@ struct single_midi_processor_2
 		auto filter_iters = make_filter_bounding_iters(filters);
 
 		bbb_ffr file_input(data.filename.c_str());
-		auto [file_output_ptr, fo_ptr] = open_wide_stream<std::ostream>(data.filename + data.postfix, L"wb");
+		auto [file_output_ptr, fo_ptr] = open_wide_stream<std::ostream>(data.filename + data.postfix,
+#ifdef WINDOWS
+			L"wb");
+#else
+			"wb");
+#endif
 		auto& file_output = *file_output_ptr;
 		
 		for (int i = 0; i < 12 && file_input.good(); i++)

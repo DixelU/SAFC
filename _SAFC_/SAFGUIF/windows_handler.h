@@ -42,7 +42,7 @@ struct WindowsHandler
 			ptr = nullptr;
 		}
 	}
-	void MouseHandler(float mx, float my, CHAR Button, CHAR State)
+	void MouseHandler(float mx, float my, char Button, char State)
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		//printf("%X\n", Button);
@@ -184,6 +184,7 @@ struct WindowsHandler
 	}
 	void Draw()
 	{
+		glutSetCursor(GLUT_CURSOR_INHERIT);
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		bool MetMain = 0;
 		if (!ActiveWindows.empty())

@@ -161,7 +161,7 @@ struct SpecialSignHandler : HandleableUIPart
 	{
 
 	}
-	void KeyboardHandler(CHAR CH) override
+	void KeyboardHandler(char CH) override
 	{
 		return;
 	}
@@ -169,7 +169,7 @@ struct SpecialSignHandler : HandleableUIPart
 	{
 		return;
 	}
-	bool MouseHandler(float mx, float my, CHAR Button, CHAR State) override
+	bool MouseHandler(float mx, float my, char Button, char State) override
 	{
 		return 0;
 	}

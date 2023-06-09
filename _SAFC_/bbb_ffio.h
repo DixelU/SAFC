@@ -3,16 +3,42 @@
 #define BBB_FFIO
 
 #include <stdio.h>
+#ifdef WINDOWS
 #include <fileapi.h>
+#endif
 
 #include <istream>
 #include <ostream>
 
 #include <ext/stdio_filebuf.h>
 
+inline decltype(errno) fopen_wrap(FILE* &file,
+#ifdef WINDOWS
+									const wchar_t* filename, const wchar_t parameter)
+#else
+								  	const char* filename, const char* parameter)
+#endif
+{
+#ifdef WINDOWS
+	return _wfopen_s(&file, filename, parameter);
+#else
+	file = fopen(filename, parameter);
+	return errno;
+#endif
+}
+
 template<typename __inner_stream_type, decltype(std::ios_base::out) stream_io_type = std::ios_base::out>
-std::pair<__inner_stream_type*, FILE*> open_wide_stream(std::wstring file, const wchar_t* parameter){
-	FILE* c_file = _wfopen(file.c_str(), parameter);
+std::pair<__inner_stream_type*, FILE*> open_wide_stream(
+
+#ifdef WINDOWS
+	std::wstring file, const wchar_t* parameter)
+#else
+	std::string file, const char* parameter)
+#endif
+{
+	FILE* c_file;
+	fopen_wrap(c_file, file.c_str(), parameter);
+
 	auto buffer = new __gnu_cxx::stdio_filebuf<char>(c_file, stream_io_type, 100000);
 	
 	return {new __inner_stream_type(buffer), c_file};
@@ -62,9 +88,22 @@ private:
 		}
 	}
 public:
-	byte_by_byte_fast_file_reader(const wchar_t* filename, int default_buffer_size = 20000000) :true_buffer_size(default_buffer_size)
+	byte_by_byte_fast_file_reader(
+#ifdef WINDOWS
+		const wchar_t* filename,
+#else
+		const char* filename,
+#endif
+		int default_buffer_size = 20000000) :
+			true_buffer_size(default_buffer_size)
 	{
-		auto err_no = _wfopen_s(&file, filename, L"rb");
+		auto err_no =
+#ifdef WINDOWS
+			fopen_wrap(file, filename, L"rb");
+#else
+			fopen_wrap(file, filename, "rb");
+#endif
+
 		is_open = !(err_no);
 		next_chunk_is_unavailable = (is_eof = (file) ? feof(file) : true);
 		if (err_no || is_eof)
@@ -90,10 +129,21 @@ public:
 		delete[] buffer;
 		buffer = nullptr;
 	}
-	inline void reopen_next_file(const wchar_t* filename)
+	inline void reopen_next_file(
+#ifdef WINDOWS
+		const wchar_t* filename)
+#else
+		const char* filename)
+#endif
 	{
 		close();
-		auto err_no = _wfopen_s(&file, filename, L"rb");
+		auto err_no =
+#ifdef WINDOWS
+			fopen_wrap(file, filename, L"rb");
+#else
+			fopen_wrap(file, filename, "rb");
+#endif
+
 		is_open = !(err_no);
 		next_chunk_is_unavailable = (is_eof = (file) ? feof(file) : true);
 		if ((err_no || is_eof) && buffer_size)
@@ -133,7 +183,13 @@ public:
 		}
 		else
 		{
-			_fseeki64_nolock(file, file_pos = abs_pos, SEEK_SET);
+#ifdef WINDOWS
+			_fseeki64_nolock
+#else
+			fseeko64
+#endif
+				(file, file_pos = abs_pos, SEEK_SET);
+
 			__read_next_chunk();
 		}
 	}

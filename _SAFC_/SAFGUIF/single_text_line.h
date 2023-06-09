@@ -133,12 +133,12 @@ struct SingleTextLine
 	{
 		///STL_CHANGE_POSITION_ARGUMENT_LEFT
 		float CW = 0.5f * (
-			(INT32)((bool)(GLOBAL_LEFT & Arg))
-			- (INT32)((bool)(GLOBAL_RIGHT & Arg))
+			(int32_t)((bool)(GLOBAL_LEFT & Arg))
+			- (int32_t)((bool)(GLOBAL_RIGHT & Arg))
 			) * CalculatedWidth,
 			CH = 0.5f * (
-				(INT32)((bool)(GLOBAL_BOTTOM & Arg))
-				- (INT32)((bool)(GLOBAL_TOP & Arg))
+				(int32_t)((bool)(GLOBAL_BOTTOM & Arg))
+				- (int32_t)((bool)(GLOBAL_TOP & Arg))
 				) * CalculatedHeight;
 		SafeChangePosition(newX + CW, newY + CH);
 	}

@@ -50,7 +50,7 @@ struct SelectablePropertedList : HandleableUIPart
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		CalculatedHeight = SpaceBetween * Selectors.size();
 	}
-	bool MouseHandler(float mx, float my, CHAR Button/*-1 left, 1 right, 0 move*/, CHAR State /*-1 down, 1 up*/) override
+	bool MouseHandler(float mx, float my, char Button/*-1 left, 1 right, 0 move*/, char State /*-1 down, 1 up*/) override
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		TopArrowHovered = BottomArrowHovered = 0;
@@ -235,7 +235,7 @@ struct SelectablePropertedList : HandleableUIPart
 		SafeUpdateLines();
 		RecalculateCurrentHeight();
 	}
-	void SafeRotateList(INT32 Delta)
+	void SafeRotateList(int32_t Delta)
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		if (!MaxVisibleLines)
@@ -343,16 +343,16 @@ struct SelectablePropertedList : HandleableUIPart
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		float CW = 0.5f * (
-			(INT32)((bool)(GLOBAL_LEFT & Arg))
-			- (INT32)((bool)(GLOBAL_RIGHT & Arg))
+			(int32_t)((bool)(GLOBAL_LEFT & Arg))
+			- (int32_t)((bool)(GLOBAL_RIGHT & Arg))
 			) * Width,
 			CH = 0.5f * (
-				(INT32)((bool)(GLOBAL_BOTTOM & Arg))
-				- (INT32)((bool)(GLOBAL_TOP & Arg))
+				(int32_t)((bool)(GLOBAL_BOTTOM & Arg))
+				- (int32_t)((bool)(GLOBAL_TOP & Arg))
 				) * CalculatedHeight;
 		SafeChangePosition(NewX + CW, NewY - 0.5f * CalculatedHeight + CH);
 	}
-	void KeyboardHandler(CHAR CH) override
+	void KeyboardHandler(char CH) override
 	{
 		return;
 	}

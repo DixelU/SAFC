@@ -163,11 +163,15 @@ struct MIDICollectionThreadedMerger
 	~MIDICollectionThreadedMerger() 
 	{
 	}
+<<<<<<< HEAD
+	MIDICollectionThreadedMerger(std::vector<proc_data_ptr> processing_data, std::uint16_t FinalPPQN, std_unicode_string SaveTo)
+=======
 	MIDICollectionThreadedMerger(
 		std::vector<proc_data_ptr> processing_data, 
 		std::uint16_t FinalPPQN, 
-		std_unicode_string SaveTo,
+		std::wstring SaveTo,
 		bool is_console_oriented)
+>>>>>>> mingw-9.2.0-forward-port-1.3
 	{
 		for (auto& single_midi_data : processing_data)
 			midi_processing_data.push_back({ single_midi_data , std::make_shared<message_buffer_ptr::element_type>(is_console_oriented) });

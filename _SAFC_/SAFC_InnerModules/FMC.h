@@ -5,21 +5,26 @@
 #include <fstream>
 #include <string>
 #include <filesystem>
-#include <Windows.h>
+//#include <Windows.h>
 
 #include "BS.h"
 #include "MCTM.h"
 
 struct FastMIDIChecker
 {
-	std::wstring File;
+	std_unicode_string File;
 	bool IsAcssessable, IsMIDI;
 	std::uint16_t PPQN, ExpectedTrackNumber;
-	UINT64 FileSize;
-	FastMIDIChecker(std::wstring File)
+	std::uint64_t FileSize;
+	FastMIDIChecker(std_unicode_string File)
 	{
 		this->File = File;
-		auto [f, fo_ptr] = open_wide_stream<std::istream, std::ios::in>(File, L"rb");
+		auto [f, fo_ptr] = open_wide_stream<std::istream, std::ios::in>(File,
+#ifdef WINDOWS
+			L"rb");
+#else
+			"rb");
+#endif
 		if (*f)IsAcssessable = 1;
 		else IsAcssessable = 0;
 		FileSize = PPQN = ExpectedTrackNumber = IsMIDI = 0;
@@ -29,7 +34,12 @@ struct FastMIDIChecker
 	}
 
 	void Collect() {
-		auto [f, fo_ptr] = open_wide_stream<std::istream, std::ios::in>(File, L"rb");
+		auto [f, fo_ptr] = open_wide_stream<std::istream, std::ios::in>(File,
+#ifdef WINDOWS
+			L"rb");
+#else
+			"rb");
+#endif
 		std::uint32_t MTHD = 0;
 		MTHD = (MTHD << 8) | (f->get());
 		MTHD = (MTHD << 8) | (f->get());
