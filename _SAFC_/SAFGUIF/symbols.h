@@ -162,13 +162,12 @@ namespace lFontSymbolsInfo
 
 	struct lFontSymbInfosListDestructor
 	{
-		bool abc;
 		~lFontSymbInfosListDestructor()
 		{
 			glDeleteLists(CurrentFont, 256);
 		}
 	};
-	lFontSymbInfosListDestructor __wFSILD = { 0 };
+	lFontSymbInfosListDestructor __wFSILD{};
 	void InitialiseFont(std::string FontName, bool force = false)
 	{
 		if (!force && FontName == PrevFontName && PrevSize == Size &&
@@ -187,6 +186,9 @@ namespace lFontSymbolsInfo
 			IsInitialised = true;
 		}
 
+		hDc = GetDC(hWnd);
+		SetMapMode(hDc, MM_TEXT);
+
 		auto height = Size * (base_internal_range / internal_range);
 		auto width = (Size > 0) ? Size * (base_internal_range / internal_range) / lFONT_HEIGHT_TO_WIDTH : 0;
 
@@ -202,17 +204,19 @@ namespace lFontSymbolsInfo
 			OUT_TT_PRECIS,
 			CLIP_DEFAULT_PRECIS,
 			NONANTIALIASED_QUALITY,
-			FF_MODERN | DEFAULT_PITCH,
+			FF_DONTCARE,
 			FontName.c_str()
 		);
 
-		wglUseFontBitmaps(hDc, 0, 255, CurrentFont);
+		auto status = wglUseFontBitmaps(hDc, 0, 255, CurrentFont);
+
+		HGDIOBJ hdiobj = NULL;
 
 		if (SelectedFont)
-			SelectObject(hDc, SelectedFont);
+			hdiobj = SelectObject(hDc, SelectedFont);
 
-		if (!force)
-			InitialiseFont(FontName, true);
+		//if (!force)
+		//	InitialiseFont(FontName, true);
 	}
 	inline void CallListOnChar(char C)
 	{
@@ -241,26 +245,32 @@ namespace lFontSymbolsInfo
 struct lFontSymbol : DottedSymbol
 {
 	char Symb;
-	GLYPHMETRICS GM = { 0 };
+	GLYPHMETRICS GM;
 	lFontSymbol(char Symb, float CXpos, float CYpos, float XUnitSize, float YUnitSize, std::uint32_t RGBA) :
 		DottedSymbol(" ", CXpos, CYpos, XUnitSize, YUnitSize, 1, RGBA >> 24, (RGBA >> 16) & 0xFF, (RGBA >> 8) & 0xFF, RGBA & 0xFF)
 	{
+		if (lFontSymbolsInfo::SelectedFont && hDc)
+			ReinitGlyphMetrics();
 		this->Symb = Symb;
+	}
+	void ReinitGlyphMetrics()
+	{
+		SelectObject(hDc, lFontSymbolsInfo::SelectedFont);
+		GetGlyphOutline(hDc, Symb, GGO_METRICS, &GM, 0, NULL, &lFontSymbolsInfo::MT);
 	}
 	void Draw() override
 	{
-		if (!lFontSymbolsInfo::SelectedFont)
+		if (!lFontSymbolsInfo::SelectedFont || !hDc)
 			return;
+
 		float PixelSize = (internal_range * 2) / window_base_width;
-		float rotX = Xpos, rotY = Ypos;
-		//rotate(rotX, rotY);
-		if (fabsf(rotX) + lFONT_HEIGHT_TO_WIDTH > PixelSize * WindX / 2 || 
-			fabsf(rotY) + lFONT_HEIGHT_TO_WIDTH > PixelSize * WindY / 2)
+
+		if (fabsf(Xpos) + lFONT_HEIGHT_TO_WIDTH > PixelSize * WindX / 2 ||
+			fabsf(Ypos) + lFONT_HEIGHT_TO_WIDTH > PixelSize * WindY / 2)
 			return;
-		SelectObject(hDc, lFontSymbolsInfo::SelectedFont);
-		GetGlyphOutline(hDc, Symb, GGO_METRICS, &GM, 0, NULL, &lFontSymbolsInfo::MT);
+
 		glColor4ub(R, G, B, A);
-		glRasterPos2f(Xpos - PixelSize * GM.gmBlackBoxX * 0.5, Ypos - _YUnitSize() * 0.5);
+		glRasterPos2f(Xpos + GM.gmptGlyphOrigin.x * PixelSize, Ypos - _YUnitSize() * 0.5);
 		lFontSymbolsInfo::CallListOnChar(Symb);
 	}
 };

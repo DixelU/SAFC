@@ -44,6 +44,7 @@
     <SpectreMitigation>false</SpectreMitigation>
     <EnableUnitySupport>true</EnableUnitySupport>
     <EnableASAN>false</EnableASAN>
+    <EnableFuzzer>false</EnableFuzzer>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
@@ -61,6 +62,7 @@
     <EnableUnitySupport>true</EnableUnitySupport>
     <SpectreMitigation>false</SpectreMitigation>
     <EnableASAN>false</EnableASAN>
+    <EnableFuzzer>false</EnableFuzzer>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <ImportGroup Label="ExtensionSettings">

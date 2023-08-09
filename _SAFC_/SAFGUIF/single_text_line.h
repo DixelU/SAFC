@@ -5,6 +5,7 @@
 #include "header_utils.h"
 #include "symbols.h"
 
+
 struct SingleTextLine 
 {
 	std::string _CurrentText;
@@ -15,12 +16,14 @@ struct SingleTextLine
 	bool isBicolored, isListedFont;
 	float _XUnitSize, _YUnitSize;
 	std::vector<DottedSymbol*> Chars;
+
 	~SingleTextLine() 
 	{
 		for (auto i = Chars.begin(); i != Chars.end(); i++)
 			if (*i)delete* i;
 		Chars.clear();
 	}
+	SingleTextLine(const SingleTextLine&) = delete;
 	SingleTextLine(std::string Text, float CXpos, float CYpos, float XUnitSize, float YUnitSize, float SpaceWidth, std::uint8_t LineWidth = 2, std::uint32_t RGBAColor = 0xFFFFFFFF, std::uint32_t* RGBAGradColor = NULL, std::uint8_t OrigNGradPoints = ((5 << 4) | 5), bool isListedFont = false) 
 	{
 		if (!Text.size())Text = " ";
@@ -56,6 +59,8 @@ struct SingleTextLine
 		}
 		else
 			this->isBicolored = false;
+
+		RecalculateWidth();
 	}
 	void SafeColorChange(std::uint32_t NewRGBAColor)
 	{
@@ -102,7 +107,9 @@ struct SingleTextLine
 		if (i >= Chars.size()) return 0;
 		if (isListedFont)
 		{
-			((lFontSymbol*)Chars[i])->Symb = CH;
+			auto ch = dynamic_cast<lFontSymbol*>(Chars[i]);
+			ch->Symb = CH;
+			ch->ReinitGlyphMetrics();
 		}
 		else
 		{
@@ -121,13 +128,9 @@ struct SingleTextLine
 	}
 	void RecalculateWidth()
 	{
-		CalculatedWidth = Chars.size() * (2.f * _XUnitSize) + (Chars.size() - 1) * SpaceWidth;
-		float CharXPosition = CXpos - (CalculatedWidth * 0.5f) + _XUnitSize, CharXPosIncrement = 2.f * _XUnitSize + SpaceWidth;
-		for (int i = 0; i < Chars.size(); i++)
-		{
-			Chars[i]->Xpos = CharXPosition;
-			CharXPosition += CharXPosIncrement;
-		}
+		CalculatedWidth = (isListedFont) ? 
+			HorizontallyRepositionFontedSymbols() :
+			LegacyCalculateWidthAndRepositionNonfonteds();
 	}
 	void SafeChangePosition_Argumented(std::uint8_t Arg, float newX, float newY)
 	{
@@ -164,11 +167,71 @@ struct SingleTextLine
 			SafeReplaceChar(i, NewString[i]);
 		RecalculateWidth();
 	}
-	void Draw() {
-		for (int i = 0; i < Chars.size(); i++) 
+
+	inline float DefaultWidthFormulae()
+	{
+		return Chars.size() * (2.f * _XUnitSize) + (Chars.size() - 1) * SpaceWidth;
+	}
+
+	float LegacyCalculateWidthAndRepositionNonfonteds()
+	{
+		auto width = DefaultWidthFormulae();
+		float CharXPosition = CXpos - (width * 0.5f) + _XUnitSize, CharXPosIncrement = 2.f * _XUnitSize + SpaceWidth;
+
+		for (auto& ch : Chars)
 		{
-			Chars[i]->Draw();
+			ch->Xpos = CharXPosition;
+			CharXPosition += CharXPosIncrement;
 		}
+		return width;
+	}
+
+	float HorizontallyRepositionFontedSymbols()
+	{
+		float PixelSize = (internal_range * 2) / window_base_width;
+		float TotalWidth = 0;
+		size_t TotalPixelWidth = 0;
+
+		for (auto& ch : Chars)
+		{
+			auto& fontedSymb = dynamic_cast<lFontSymbol&>(*ch);
+			TotalPixelWidth += fontedSymb.GM.gmCellIncX;
+		}
+
+		if (Chars.size())
+		{
+			auto lastChar = dynamic_cast<lFontSymbol*>(Chars.back());
+			TotalPixelWidth -= lastChar->GM.gmCellIncX - lastChar->GM.gmBlackBoxX;
+		}
+
+		TotalWidth = TotalPixelWidth * PixelSize;
+		size_t LinearPixelHorizontalPosition = 0;
+		float LinearHorizontalPosition = CXpos - (TotalWidth * 0.5f);
+
+		for (auto& ch : Chars)
+		{
+			auto& fontedSymb = dynamic_cast<lFontSymbol&>(*ch);
+			fontedSymb.SafePositionChange(LinearHorizontalPosition + (LinearPixelHorizontalPosition * PixelSize), fontedSymb.Ypos);
+			LinearPixelHorizontalPosition += fontedSymb.GM.gmCellIncX;
+			std::cout << fontedSymb.Symb << "(" << std::hex << std::setw(2) << (int)fontedSymb.Symb << ")" << std::dec << std::setw(0)
+				<< " gmCellIncX: " << fontedSymb.GM.gmCellIncX
+				<< " gmBlackBoxX: " << fontedSymb.GM.gmBlackBoxX
+				<< "\t gmptGlyphOrigin.x: " << fontedSymb.GM.gmptGlyphOrigin.x
+				<< "\t LPHP: " << LinearPixelHorizontalPosition << std::endl;
+		}
+		std::cout << "Width: " << TotalPixelWidth << std::endl;
+		std::cout << "====" << std::endl;
+
+		return TotalWidth;
+	}
+
+	void Draw()
+	{
+		if (CalculatedWidth == 0)
+			RecalculateWidth();
+
+		for (auto& ch: Chars)
+			ch->Draw();
 	}
 };
 

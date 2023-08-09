@@ -11,6 +11,7 @@
 constexpr int eb_cursor_flash_fraction = 30;
 constexpr int eb_cursor_flash_subcycle = eb_cursor_flash_fraction / 2;
 
+// doesn't work with fonted mode anymore!
 struct EditBox : HandleableUIPart
 {
 private:
@@ -32,7 +33,7 @@ public:
 
 	EditBox(std::string Text, SingleTextLineSettings* STLS, float Xpos, float Ypos, float Height, float Width, float VerticalOffset, std::uint32_t RGBABackground, std::uint32_t RGBABorder, std::uint8_t BorderWidth): STLS(STLS),Xpos(Xpos),Ypos(Ypos),Height(Height), Width(Width), VerticalOffset(VerticalOffset), RGBABackground(RGBABackground), RGBABorder(RGBABorder), BorderWidth(BorderWidth), BufferedCurText(Text), VisibilityCountDown(0)
 	{
-		Words.push_back(STLS->CreateOne("\r"));
+		Words.push_back(STLS->CreateOne(" "));
 		CursorPosition = { Words.begin(), 0 };
 		RearrangePositions();
 		for (auto& ch : Text)

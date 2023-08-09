@@ -1634,7 +1634,7 @@ namespace Settings
 	{
 		is_fonted = !is_fonted;
 		SetIsFontedVar(is_fonted);
-		exit(1);
+		exit(0);
 	}
 	void ApplyToAll()
 	{
@@ -1650,10 +1650,12 @@ namespace Settings
 	void ApplyFSWheel(double new_val)
 	{
 		lFontSymbolsInfo::Size = new_val;
+		lFontSymbolsInfo::InitialiseFont(default_font_name);
 	}
 	void ApplyRelWheel(double new_val)
 	{
 		lFONT_HEIGHT_TO_WIDTH = new_val;
+		lFontSymbolsInfo::InitialiseFont(default_font_name);
 	}
 }
 
@@ -1849,12 +1851,12 @@ void RestoreRegSettings()
 		catch (...) { std::cout << "Exception thrown while restoring COLLAPSEDFONTNAME from registry\n"; }
 		try
 		{
-			lFontSymbolsInfo::Size = Settings::RegestryAccess.GetDwordValue(L"FONTSIZE");//COLLAPSEDFONTNAME
+			lFontSymbolsInfo::Size = Settings::RegestryAccess.GetDwordValue(L"FONTSIZE");
 		}
 		catch (...) { std::cout << "Exception thrown while restoring FONTSIZE from registry\n"; }
 		try
 		{
-			std::uint32_t B = Settings::RegestryAccess.GetDwordValue(L"FLOAT_FONTHTW");//COLLAPSEDFONTNAME
+			std::uint32_t B = Settings::RegestryAccess.GetDwordValue(L"FLOAT_FONTHTW");
 			lFONT_HEIGHT_TO_WIDTH = *(float*)&B;
 		}
 		catch (...) { std::cout << "Exception thrown while restoring FLOAT_FONTHTW from registry\n"; }
@@ -1862,11 +1864,10 @@ void RestoreRegSettings()
 	}
 }
 
-///SetIsFontedVar
 void Init()
 {
-	RestoreRegSettings();
-	hDc = GetDC(hWnd);
+	lFontSymbolsInfo::InitialiseFont(default_font_name, true);
+
 	_Data.DetectedThreads =
 		std::max(
 			std::min((std::uint16_t)(
@@ -1879,6 +1880,8 @@ void Init()
 				(std::uint16_t)(ceil(GetAvailableMemory() / 2048))
 			), (std::uint16_t)1
 		);
+
+	WH = std::make_shared<WindowsHandler>();
 
 	SelectablePropertedList* SPL = new SelectablePropertedList(BS_List_Black_Small, NULL, PropsAndSets::OGPInMIDIList, -50, 172, 300, 12, 65, 30);
 	MoveableWindow* T = new MoveableResizeableWindow("Main window", System_White, -200, 200, 400, 400, 0x3F3F3FAF, 0x7F7F7F7F, 0, [SPL](float dH, float dW, float NewHeight, float NewWidth) {
@@ -2083,7 +2086,7 @@ void Init()
 	(*WH)["COMPILEW"] = T;
 
 	WH->EnableWindow("MAIN");
-	//WH->EnableWindow("COMPILEW");
+	WH->EnableWindow("COMPILEW");
 	//WH->EnableWindow("SMIC");
 	//WH->EnableWindow("OR");
 	//WH->EnableWindow("SMRP_CONTAINER");
@@ -2107,14 +2110,12 @@ void Init()
 void onTimer(int v);
 void mDisplay()
 {
-	lFontSymbolsInfo::InitialiseFont(default_font_name);
 	glClear(GL_COLOR_BUFFER_BIT | GL_ACCUM_BUFFER_BIT);
 	glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 	if (FIRSTBOOT)
 	{
 		FIRSTBOOT = 0;
 
-		WH = std::make_shared<WindowsHandler>();
 		Init();
 		if (APRIL_FOOL)
 		{
@@ -2247,10 +2248,14 @@ void mMotion(int ix, int iy)
 
 void mKey(std::uint8_t k, int x, int y)
 {
-	if (WH)WH->KeyboardHandler(k);
+	if (WH)
+		WH->KeyboardHandler(k);
+
+	if (k == '*')
+		Init();
 
 	if (k == 27)
-		exit(1);
+		exit(0);
 }
 
 void mClick(int butt, int state, int x, int y)
@@ -2327,7 +2332,7 @@ struct SafcGuiRuntime :
 #else // _DEBUG 
 		ShowWindow(GetConsoleWindow(), SW_HIDE);
 #endif
-		//ShowWindow(GetConsoleWindow(), SW_SHOW);
+		ShowWindow(GetConsoleWindow(), SW_SHOW);
 
 		SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS);
 		//srand(1);
@@ -2575,6 +2580,8 @@ int main(int argc, char** argv)
 	std::ios_base::sync_with_stdio(false); //why not
 
 	std::shared_ptr<SafcRuntime> runtime;
+
+	RestoreRegSettings();
 
 	if (argc > 1)
 		runtime = std::make_shared<SafcCliRuntime>();
