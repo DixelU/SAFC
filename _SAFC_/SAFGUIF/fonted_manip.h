@@ -23,7 +23,7 @@ bool RestoreIsFontedVar()
 	{
 		try
 		{
-			is_fonted = RK.GetDwordValue(L"FONTS_ENABLED");
+			is_fonted = RK.GetDwordValue(L"FONTS_ENABLED_POST1P4");
 		}
 		catch (...) { std::cout << "Exception thrown while restoring FONTS_ENABLED from registry\n"; }
 	}
@@ -49,7 +49,7 @@ void SetIsFontedVar(bool VAL)
 	{
 		try
 		{
-			RK.SetDwordValue(L"FONTS_ENABLED", VAL);
+			RK.SetDwordValue(L"FONTS_ENABLED_POST1P4", VAL);
 		}
 		catch (...) { std::cout << "Exception thrown while saving FONTS_ENABLED from registry\n"; }
 	}

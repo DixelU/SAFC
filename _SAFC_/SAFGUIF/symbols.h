@@ -47,6 +47,7 @@ struct DottedSymbol
 	{
 		delete RGBAColor;
 	}
+	virtual ~DottedSymbol() {}
 	inline static bool IsRenderwaySymb(CHAR C)
 	{
 		return (C <= '9' && C >= '0' || C == ' ');
@@ -154,7 +155,7 @@ namespace lFontSymbolsInfo
 	bool IsInitialised = false;
 	GLuint CurrentFont = 0;
 	HFONT SelectedFont = nullptr;
-	INT32 Size = 16;
+	INT32 Size = 15;
 
 	INT32 PrevSize = Size;
 	float Prev_lFONT_HEIGHT_TO_WIDTH = lFONT_HEIGHT_TO_WIDTH;
@@ -186,9 +187,6 @@ namespace lFontSymbolsInfo
 			IsInitialised = true;
 		}
 
-		hDc = GetDC(hWnd);
-		SetMapMode(hDc, MM_TEXT);
-
 		auto height = Size * (base_internal_range / internal_range);
 		auto width = (Size > 0) ? Size * (base_internal_range / internal_range) / lFONT_HEIGHT_TO_WIDTH : 0;
 
@@ -208,12 +206,14 @@ namespace lFontSymbolsInfo
 			FontName.c_str()
 		);
 
-		auto status = wglUseFontBitmaps(hDc, 0, 255, CurrentFont);
-
-		HGDIOBJ hdiobj = NULL;
-
 		if (SelectedFont)
-			hdiobj = SelectObject(hDc, SelectedFont);
+		{
+			auto hdiobj = SelectObject(hDc, SelectedFont);
+			auto status = wglUseFontBitmaps(hDc, 0, 255, CurrentFont);
+
+			SetMapMode(hDc, MM_TEXT);
+
+		}
 
 		//if (!force)
 		//	InitialiseFont(FontName, true);
@@ -249,14 +249,38 @@ struct lFontSymbol : DottedSymbol
 	lFontSymbol(char Symb, float CXpos, float CYpos, float XUnitSize, float YUnitSize, std::uint32_t RGBA) :
 		DottedSymbol(" ", CXpos, CYpos, XUnitSize, YUnitSize, 1, RGBA >> 24, (RGBA >> 16) & 0xFF, (RGBA >> 8) & 0xFF, RGBA & 0xFF)
 	{
-		if (lFontSymbolsInfo::SelectedFont && hDc)
-			ReinitGlyphMetrics();
+		GM.gmBlackBoxX = 0;
+		GM.gmBlackBoxY = 0;
+		GM.gmCellIncX = 0;
+		GM.gmCellIncY = 0;
+		GM.gmptGlyphOrigin.x = 0;
+		GM.gmptGlyphOrigin.y = 0;
+
 		this->Symb = Symb;
+		ReinitGlyphMetrics();
 	}
+	~lFontSymbol() override = default;
 	void ReinitGlyphMetrics()
 	{
-		SelectObject(hDc, lFontSymbolsInfo::SelectedFont);
-		GetGlyphOutline(hDc, Symb, GGO_METRICS, &GM, 0, NULL, &lFontSymbolsInfo::MT);
+		//SelectObject(hDc, lFontSymbolsInfo::SelectedFont);
+
+		/*auto gmdata = reinterpret_cast<std::uint8_t*>(&GM);
+		std::cout << "Symb: " << Symb << std::endl;
+		std::cout << "ReinitGlyphMetrics b4: ";
+		for (size_t i = 0; i < sizeof(GM); ++i)
+			std::cout << std::hex << std::setw(2) << std::setfill('0') << (int)gmdata[i];
+		std::cout << std::endl;*/
+
+		auto result = GetGlyphOutline(hDc, Symb, GGO_GRAY8_BITMAP, &GM, 0, NULL, &lFontSymbolsInfo::MT);
+
+		/*std::cout << "ReinitGlyphMetrics ar: ";
+		for (size_t i = 0; i < sizeof(GM); ++i)
+			std::cout << std::hex << std::setw(2) << std::setfill('0') << (int)gmdata[i];
+		std::cout << std::dec << std::setw(0) << std::setfill(' ') << std::endl;
+		std::cout << "res: " << result << std::endl;
+
+		if (result == GDI_ERROR)
+			throw "idkman";*/
 	}
 	void Draw() override
 	{
@@ -270,7 +294,7 @@ struct lFontSymbol : DottedSymbol
 			return;
 
 		glColor4ub(R, G, B, A);
-		glRasterPos2f(Xpos + GM.gmptGlyphOrigin.x * PixelSize, Ypos - _YUnitSize() * 0.5);
+		glRasterPos2f(Xpos, Ypos - _YUnitSize() * 0.5);
 		lFontSymbolsInfo::CallListOnChar(Symb);
 	}
 };
@@ -319,6 +343,7 @@ struct BiColoredDottedSymbol : DottedSymbol
 		delete RGBAColor;
 		delete gRGBAColor;
 	}
+	~BiColoredDottedSymbol() override = default;
 	void RefillGradient(std::uint8_t Red = 255, std::uint8_t Green = 255, std::uint8_t Blue = 255, std::uint8_t Alpha = 255,
 		std::uint8_t gRed = 255, std::uint8_t gGreen = 255, std::uint8_t gBlue = 255, std::uint8_t gAlpha = 255,
 		std::uint8_t BaseColorPoint = 5, std::uint8_t GradColorPoint = 8) override

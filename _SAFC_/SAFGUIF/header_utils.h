@@ -18,8 +18,8 @@ float internal_range = base_internal_range, mouse_x_position = 0.f, mouse_y_posi
 const char* window_title = "SAFC\0";
 std::wstring default_reg_path = L"Software\\SAFC\\";
 
-std::string default_font_name = "Consolas";
-bool is_fonted = 0;
+std::string default_font_name = "Arial";
+bool is_fonted = true;
 
 //#define ROT_ANGLE 0.7
 #define TRY_CATCH(code,msg) try{code}catch(...){std::cout<<msg<<std::endl;}

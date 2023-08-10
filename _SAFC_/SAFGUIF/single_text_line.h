@@ -190,37 +190,39 @@ struct SingleTextLine
 	{
 		float PixelSize = (internal_range * 2) / window_base_width;
 		float TotalWidth = 0;
-		size_t TotalPixelWidth = 0;
+		ptrdiff_t TotalPixelWidth = 0;
 
 		for (auto& ch : Chars)
 		{
-			auto& fontedSymb = dynamic_cast<lFontSymbol&>(*ch);
-			TotalPixelWidth += fontedSymb.GM.gmCellIncX;
+			auto fontedSymb = dynamic_cast<lFontSymbol*>(ch);
+			TotalPixelWidth += fontedSymb->GM.gmCellIncX;
 		}
 
 		if (Chars.size())
 		{
 			auto lastChar = dynamic_cast<lFontSymbol*>(Chars.back());
-			TotalPixelWidth -= lastChar->GM.gmCellIncX - lastChar->GM.gmBlackBoxX;
+			TotalPixelWidth -= ((ptrdiff_t)lastChar->GM.gmCellIncX - (ptrdiff_t)lastChar->GM.gmBlackBoxX);
 		}
 
 		TotalWidth = TotalPixelWidth * PixelSize;
-		size_t LinearPixelHorizontalPosition = 0;
+		ptrdiff_t LinearPixelHorizontalPosition = 0;
 		float LinearHorizontalPosition = CXpos - (TotalWidth * 0.5f);
 
 		for (auto& ch : Chars)
 		{
-			auto& fontedSymb = dynamic_cast<lFontSymbol&>(*ch);
-			fontedSymb.SafePositionChange(LinearHorizontalPosition + (LinearPixelHorizontalPosition * PixelSize), fontedSymb.Ypos);
-			LinearPixelHorizontalPosition += fontedSymb.GM.gmCellIncX;
-			std::cout << fontedSymb.Symb << "(" << std::hex << std::setw(2) << (int)fontedSymb.Symb << ")" << std::dec << std::setw(0)
-				<< " gmCellIncX: " << fontedSymb.GM.gmCellIncX
-				<< " gmBlackBoxX: " << fontedSymb.GM.gmBlackBoxX
-				<< "\t gmptGlyphOrigin.x: " << fontedSymb.GM.gmptGlyphOrigin.x
-				<< "\t LPHP: " << LinearPixelHorizontalPosition << std::endl;
+			auto fontedSymb = dynamic_cast<lFontSymbol*>(ch);
+			fontedSymb->SafePositionChange(
+				LinearHorizontalPosition + (LinearPixelHorizontalPosition * PixelSize),
+				fontedSymb->Ypos);
+			LinearPixelHorizontalPosition += fontedSymb->GM.gmCellIncX;
+			/*std::cout << fontedSymb->Symb << "(" << std::hex << std::setw(2) << (int)fontedSymb->Symb << ")" << std::dec << std::setw(0)
+				<< " gmCellIncX: " << fontedSymb->GM.gmCellIncX
+				<< " gmBlackBoxX: " << fontedSymb->GM.gmBlackBoxX
+				<< "\t gmptGlyphOrigin.x: " << fontedSymb->GM.gmptGlyphOrigin.x
+				<< "\t LPHP: " << LinearPixelHorizontalPosition << std::endl;*/
 		}
-		std::cout << "Width: " << TotalPixelWidth << std::endl;
-		std::cout << "====" << std::endl;
+		/*std::cout << "Width: " << TotalPixelWidth << std::endl;
+		std::cout << "====" << std::endl;*/
 
 		return TotalWidth;
 	}

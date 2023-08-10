@@ -198,7 +198,7 @@ bool SAFC_Update(const std::wstring& latest_release)
 	std::wstring link = L"https://github.com/DixelU/SAFC/releases/download/" + latest_release + L"/" + archive_name;
 	HRESULT co_res = URLDownloadToFileW(NULL, link.c_str(), filename.c_str(), 0, NULL);
 	std::string error_msg;
-
+	
 	auto executable_filename = boost::dll::program_location().filename().wstring();
 
 	if (co_res == S_OK) 
@@ -1479,7 +1479,7 @@ void OnSubmitGlobalOffset()
 }
 void OnGlobalOffset()
 {
-	WH->ThrowPrompt("Sets new global Offset", "Global Offset", OnSubmitGlobalOffset, _Align::center, InputField::Type::NaturalNumbers, std::to_string(_Data.GlobalOffset), 10);
+	WH->ThrowPrompt("Sets new global offset", "Global Offset", OnSubmitGlobalOffset, _Align::center, InputField::Type::NaturalNumbers, std::to_string(_Data.GlobalOffset), 10);
 	std::cout << _Data.GlobalOffset << std::to_string(_Data.GlobalOffset) << std::endl;
 }
 
@@ -1845,18 +1845,18 @@ void RestoreRegSettings()
 		catch (...) { std::cout << "Exception thrown while restoring INPLACE_MERGE from registry\n"; }
 		try
 		{
-			std::wstring ws = Settings::RegestryAccess.GetStringValue(L"COLLAPSEDFONTNAME");//COLLAPSEDFONTNAME
+			std::wstring ws = Settings::RegestryAccess.GetStringValue(L"COLLAPSEDFONTNAME_POST1P4");//COLLAPSEDFONTNAME
 			default_font_name = std::string(ws.begin(), ws.end());
 		}
-		catch (...) { std::cout << "Exception thrown while restoring COLLAPSEDFONTNAME from registry\n"; }
+		catch (...) { std::cout << "Exception thrown while restoring COLLAPSEDFONTNAME_POST1P4 from registry\n"; }
 		try
 		{
-			lFontSymbolsInfo::Size = Settings::RegestryAccess.GetDwordValue(L"FONTSIZE");
+			lFontSymbolsInfo::Size = Settings::RegestryAccess.GetDwordValue(L"FONTSIZE_POST1P4");
 		}
 		catch (...) { std::cout << "Exception thrown while restoring FONTSIZE from registry\n"; }
 		try
 		{
-			std::uint32_t B = Settings::RegestryAccess.GetDwordValue(L"FLOAT_FONTHTW");
+			std::uint32_t B = Settings::RegestryAccess.GetDwordValue(L"FLOAT_FONTHTW_POST1P4");
 			lFONT_HEIGHT_TO_WIDTH = *(float*)&B;
 		}
 		catch (...) { std::cout << "Exception thrown while restoring FLOAT_FONTHTW from registry\n"; }
@@ -2086,7 +2086,7 @@ void Init()
 	(*WH)["COMPILEW"] = T;
 
 	WH->EnableWindow("MAIN");
-	WH->EnableWindow("COMPILEW");
+	//WH->EnableWindow("COMPILEW");
 	//WH->EnableWindow("SMIC");
 	//WH->EnableWindow("OR");
 	//WH->EnableWindow("SMRP_CONTAINER");
@@ -2110,6 +2110,8 @@ void Init()
 void onTimer(int v);
 void mDisplay()
 {
+	lFontSymbolsInfo::InitialiseFont(default_font_name);
+
 	glClear(GL_COLOR_BUFFER_BIT | GL_ACCUM_BUFFER_BIT);
 	glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 	if (FIRSTBOOT)
@@ -2251,9 +2253,6 @@ void mKey(std::uint8_t k, int x, int y)
 	if (WH)
 		WH->KeyboardHandler(k);
 
-	if (k == '*')
-		Init();
-
 	if (k == 27)
 		exit(0);
 }
@@ -2293,6 +2292,8 @@ void mSpecialKey(int Key, int x, int y)
 		case GLUT_KEY_LEFT:		if (WH)WH->KeyboardHandler(3);
 			break;
 		case GLUT_KEY_RIGHT:	if (WH)WH->KeyboardHandler(4);
+			break;
+		case GLUT_KEY_F5:		if (WH) Init();
 			break;
 		}
 	}
@@ -2349,6 +2350,7 @@ struct SafcGuiRuntime :
 		glutCreateWindow(window_title);
 
 		hWnd = FindWindowA(NULL, window_title);
+		hDc = GetDC(hWnd);
 
 		glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);//_MINUS_SRC_ALPHA
 		glEnable(GL_BLEND);
