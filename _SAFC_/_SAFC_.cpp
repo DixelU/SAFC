@@ -383,7 +383,7 @@ struct FileSettings
 	std::uint16_t NewPPQN, OldPPQN, OldTrackNumber, MergeMultiplier;
 	std::int16_t GroupID;
 	double NewTempo;
-	UINT64 FileSize;
+	std::uint64_t FileSize;
 	std::int64_t SelectionStart, SelectionLength;
 	bool
 		IsMIDI,

@@ -155,9 +155,9 @@ namespace lFontSymbolsInfo
 	bool IsInitialised = false;
 	GLuint CurrentFont = 0;
 	HFONT SelectedFont = nullptr;
-	INT32 Size = 15;
+	std::int32_t Size = 15;
 
-	INT32 PrevSize = Size;
+	std::int32_t PrevSize = Size;
 	float Prev_lFONT_HEIGHT_TO_WIDTH = lFONT_HEIGHT_TO_WIDTH;
 	std::string PrevFontName;
 

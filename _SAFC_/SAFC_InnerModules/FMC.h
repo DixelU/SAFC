@@ -15,7 +15,7 @@ struct FastMIDIChecker
 	std::wstring File;
 	bool IsAcssessable, IsMIDI;
 	std::uint16_t PPQN, ExpectedTrackNumber;
-	UINT64 FileSize;
+	std::uint64_t FileSize;
 	FastMIDIChecker(std::wstring File)
 	{
 		this->File = File;

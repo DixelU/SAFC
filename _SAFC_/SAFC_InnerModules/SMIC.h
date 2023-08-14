@@ -101,7 +101,7 @@ struct SingleMIDIInfoCollector
 	std::vector<TrackData> Tracks;
 	std::uint16_t PPQ;
 	bool AllowLegacyRunningStatusMetaIgnorance;
-	//Locker<btree::btree_map<UINT64, UINT64>> Polyphony;
+	//Locker<btree::btree_map<std::uint64_t, std::uint64_t>> Polyphony;
 	//Locker<btree::btree_map<>>
 	SingleMIDIInfoCollector(std::wstring filename, std::uint16_t PPQ, bool AllowLegacyRunningStatusMetaIgnorance = false) : FileName(filename), LogLine(" "), Processing(0), Finished(0), PPQ(PPQ), AllowLegacyRunningStatusMetaIgnorance(AllowLegacyRunningStatusMetaIgnorance) { }
 	void Lookup() 
@@ -113,15 +113,15 @@ struct SingleMIDIInfoCollector
 		LogLine = " ";
 		//std::array<std::uint32_t, 4096> CurHolded;
 		std::uint32_t MTRK = 0, vlv = 0;
-		UINT64 LastTick = 0;
-		UINT64 CurTick = 0;
+		std::uint64_t LastTick = 0;
+		std::uint64_t CurTick = 0;
 		std::uint8_t IO = 0, RSB = 0;
 		TrackData TData;
 		TempoMap[0] = TempoEvent(0x7, 0xA1, 0x20);
 		PolyphonyFiniteDifference[-1] = NoteOnOffCounter();
 		while (file_input.good())
 		{
-			std::array<UINT64, 4096> polyphony;
+			std::array<std::uint64_t, 4096> polyphony;
 			CurTick = 0;
 			MTRK = 0;
 			while (MTRK != MTrk && file_input.good())

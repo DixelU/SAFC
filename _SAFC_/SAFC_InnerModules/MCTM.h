@@ -37,7 +37,7 @@ struct MIDICollectionThreadedMerger
 		std::int64_t CurPosition;
 		std::int64_t CurTick;
 		std::uint8_t* TrackData;
-		UINT64 TrackSize;
+		std::uint64_t TrackSize;
 		std::array<std::int64_t, 4096> Holded;
 		bool Processing;
 		DegeneratedTrackIterator(std::vector<std::uint8_t>& Vec) 
@@ -128,7 +128,7 @@ struct MIDICollectionThreadedMerger
 		{
 			constexpr std::uint32_t LocalDeltaTimeTrunkEdge = 0xF000000;//BC808000 in vlv
 			//bool first_nonzero_delta_output = output_noteon_wall;
-			UINT64 LocalTick = CurTick;
+			std::uint64_t LocalTick = CurTick;
 			std::uint8_t DeltaLen = 0;
 			while (output_noteon_wall && LocalTick > LocalDeltaTimeTrunkEdge) 
 			{//fillers
@@ -281,7 +281,7 @@ struct MIDICollectionThreadedMerger
 			{
 				///reading tracks
 				std::uint32_t Header = 0, DIO, DeltaLen = 0;
-				UINT64 InTrackDelta = 0;
+				std::uint64_t InTrackDelta = 0;
 				bool ITD_Flag = 1 /*, NotNoteEvents_ProcessedFlag = 0*/;
 				for (int i = 0; i < fiv.size(); i++)
 				{
@@ -296,7 +296,7 @@ struct MIDICollectionThreadedMerger
 					else
 						ddt = -1;
 				}
-				for (UINT64 Tick = 0; ActiveTrackReading; Tick++, InTrackDelta++)
+				for (std::uint64_t Tick = 0; ActiveTrackReading; Tick++, InTrackDelta++)
 				{
 					std::uint8_t IO = 0, EVENTTYPE = 0;///yas
 					ActiveTrackReading = 0;
@@ -382,7 +382,7 @@ struct MIDICollectionThreadedMerger
 							else 
 							{   ///RSB CANNOT APPEAR IN THIS STAGE
 								auto pos = pfiv.tellg();
-								printf("Inplace error @%X\n", pos);
+								std::cout << "Inplace error @" << std::hex << pos << std::dec << std::endl;
 
 								ThrowAlert_Error("DTI Failure at " + std::to_string(pos) + ". Type: " +
 									std::to_string(EVENTTYPE) + ". Tell developer about it and give him source midi.\n");
@@ -450,7 +450,7 @@ struct MIDICollectionThreadedMerger
 						TotalShift = DTI.CurPosition + EDGE;
 						BackEdge.clear();
 						DTI.PutCurrentHoldedNotes(BackEdge, false);
-						UINT64 TotalSize = FrontEdge.size() + (DTI.CurPosition - PrevEdgePos) + BackEdge.size() + 4;
+						std::uint64_t TotalSize = FrontEdge.size() + (DTI.CurPosition - PrevEdgePos) + BackEdge.size() + 4;
 						file_output << "MTrk";
 						file_output.put(TotalSize >> 24);
 						file_output.put(TotalSize >> 16);
@@ -471,7 +471,7 @@ struct MIDICollectionThreadedMerger
 						DTI.PutCurrentHoldedNotes(FrontEdge, true);
 					}
 					file_output << "MTrk";
-					UINT64 TotalSize = FrontEdge.size() + (DTI.CurPosition - PrevEdgePos);
+					std::uint64_t TotalSize = FrontEdge.size() + (DTI.CurPosition - PrevEdgePos);
 					//cout << "Outside:" << TotalSize << endl;
 					file_output.put(TotalSize >> 24);
 					file_output.put(TotalSize >> 16);

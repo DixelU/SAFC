@@ -530,7 +530,7 @@ struct single_midi_processor_2
 				base_type vel = file_input.get();
 				tick_type reference = disable_tick;
 
-				com ^= ((!vel && bool(com & 0x10)) << 4);
+				com ^= ((!bool(vel) & bool(com & 0x10)) << 4);
 
 				std::uint16_t key_polyindex = (com & 0xF) | (((std::uint16_t)key) << 4);
 				bool polyphony_error = false;

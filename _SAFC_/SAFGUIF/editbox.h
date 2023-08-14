@@ -336,12 +336,12 @@ public:
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		float CW = 0.5f * (
-			(INT32)((bool)(GLOBAL_LEFT & Arg))
-			- (INT32)((bool)(GLOBAL_RIGHT & Arg))
+			(std::int32_t)((bool)(GLOBAL_LEFT & Arg))
+			- (std::int32_t)((bool)(GLOBAL_RIGHT & Arg))
 			) * Width,
 		CH = 0.5f * (
-			(INT32)((bool)(GLOBAL_BOTTOM & Arg))
-			- (INT32)((bool)(GLOBAL_TOP & Arg))
+			(std::int32_t)((bool)(GLOBAL_BOTTOM & Arg))
+			- (std::int32_t)((bool)(GLOBAL_TOP & Arg))
 			) * Height;
 		SafeChangePosition(NewX + CW, NewY + CH);
 	}
