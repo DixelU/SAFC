@@ -202,9 +202,10 @@ struct MIDICollectionThreadedMerger
 		//cout << "Final_Finished\n";
 		return 1;
 	}
-	void StartProcessingMIDIs() 
-	{//
+	std::deque<std::jthread> StartProcessingMIDIs()
+	{
 		std::set<std::uint32_t> IDs;
+		std::deque<std::jthread> threads;
 
 		for (auto& el: midi_processing_data) 
 			IDs.insert(el.first->settings.details.group_id);
@@ -217,7 +218,7 @@ struct MIDICollectionThreadedMerger
 		
 		for (auto Y = IDs.begin(); Y != IDs.end(); Y++)
 		{
-			std::thread([this](
+			threads.emplace_back([this](
 				std::vector<std::pair<proc_data_ptr, message_buffer_ptr>> processing_data,
 				std::uint32_t ID,
 				std::uint32_t thread_counter) 
@@ -236,9 +237,11 @@ struct MIDICollectionThreadedMerger
 					else
 						single_midi_processor_2::sync_processing<false>(*el.first, *el.second);
 				}
-			}, midi_processing_data, *Y, thread_counter).detach();
+			}, midi_processing_data, *Y, thread_counter);
 			thread_counter++;
 		}
+
+		return threads;
 	}
 	void InplaceMerge()
 	{

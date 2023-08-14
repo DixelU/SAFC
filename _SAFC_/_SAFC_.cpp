@@ -20,6 +20,7 @@
 #include <fstream>
 #include <set>
 #include <string>
+#include <future>
 #include <iterator>
 #include <map>
 #include <deque>
@@ -1681,7 +1682,7 @@ void OnStart()
 
 	auto start_timepoint = std::chrono::high_resolution_clock::now();
 
-	GlobalMCTM->StartProcessingMIDIs();
+	auto threads = GlobalMCTM->StartProcessingMIDIs();
 
 	MoveableWindow* MW;
 	std::uint32_t ID = 0;
@@ -1698,47 +1699,54 @@ void OnStart()
 	auto difference = std::chrono::duration_cast<std::chrono::milliseconds>(now - start_timepoint);
 	timer_ptr->SafeStringReplace(std::to_string(difference.count() * 0.001) + " s");
 
-	std::this_thread::sleep_for(std::chrono::milliseconds(100));
+	std::deque<std::future<void>> processingFinishedFutures;
 
-	decltype(GlobalMCTM->currently_processed) currently_processed_copy;
-
+	for (ID = 0; ID < threads.size(); ID++)
 	{
-		GlobalMCTM->currently_processed_locker.lock();
-		currently_processed_copy = GlobalMCTM->currently_processed;
-		GlobalMCTM->currently_processed_locker.unlock();
-	}
-
-	for (ID = 0; ID < currently_processed_copy.size(); ID++)
-	{
-		auto Q = GetPositionForOneOf(ID, currently_processed_copy.size(), 140, 0.7);
+		auto Q = GetPositionForOneOf(ID, threads.size(), 140, 0.7);
 		auto Vis = new SMRP_Vis(Q.first, Q.second, System_White);
 		std::string temp = "";
 		MW->AddUIElement(temp = "SMRP_C" + std::to_string(ID), Vis);
+		std::promise<void> finishedPromise;
+		processingFinishedFutures.emplace_back(finishedPromise.get_future());
 
-
-		std::thread([](std::shared_ptr<MIDICollectionThreadedMerger> pMCTM, SMRP_Vis* pVIS, std::uint32_t ID)
+		std::thread([](
+			std::shared_ptr<MIDICollectionThreadedMerger> pMCTM, 
+			SMRP_Vis* pVIS,
+			std::uint32_t ID,
+			std::promise<void>&& finished_promise,
+			std::jthread&& thread)
 		{
 			std::string SID = "SMRP_C" + std::to_string(ID);
 			std::cout << SID << " Processing started" << std::endl;
-			bool finished = false;
-			while (GlobalMCTM->CheckSMRPProcessing()) 
+
+			while (GlobalMCTM->CheckSMRPProcessing())
 			{
 				GlobalMCTM->currently_processed_locker.lock();
-				finished = GlobalMCTM->currently_processed[ID].second->finished;
 				pVIS->SetSMRP(GlobalMCTM->currently_processed[ID]);
 				GlobalMCTM->currently_processed_locker.unlock();
 
 				std::this_thread::sleep_for(std::chrono::milliseconds(66));
 			}
 			std::cout << SID << " Processing stopped" << std::endl;
-		}, GlobalMCTM, Vis, ID).detach();
+			
+			finished_promise.set_value();
+			if(thread.joinable())
+				thread.join();
+
+		}, GlobalMCTM, Vis, ID, std::move(finishedPromise), std::move(threads[ID])).detach();
 	}
 
-	std::thread([](std::shared_ptr<MIDICollectionThreadedMerger> pMCTM, SAFCData* SD, MoveableWindow* MW)
+	std::thread([](
+		std::shared_ptr<MIDICollectionThreadedMerger> pMCTM,
+		SAFCData* SD,
+		MoveableWindow* MW,
+		std::deque<std::future<void>>&& processingFinishedFutures)
 	{
-		while (pMCTM->CheckSMRPProcessingAndStartNextStep())
-			//that's some really dumb synchronization... TODO: MAKE BETTER
-			std::this_thread::sleep_for(std::chrono::milliseconds(100));
+		for (auto& singleFuture : processingFinishedFutures)
+			singleFuture.get();
+
+		pMCTM->Start_RI_Merge();
 
 		std::cout << "SMRP: Out from sleep\n" << std::flush;
 		for (int i = 0; i <= pMCTM->currently_processed.size(); i++)
@@ -1753,7 +1761,7 @@ void OnStart()
 		{
 			while (!pMCTM->CheckRIMerge()) 
 			{
-				std::this_thread::sleep_for(std::chrono::milliseconds(66));
+				std::this_thread::sleep_for(std::chrono::milliseconds(20));
 			}
 
 			std::cout << "RI: Out from sleep!\n";
@@ -1764,7 +1772,7 @@ void OnStart()
 				(0., 0., System_White, &(pMCTM->CompleteFlag), NULL);
 		}, pMCTM, SD, MW);
 		ILO.detach();
-	}, GlobalMCTM, &_Data, MW).detach();
+	}, GlobalMCTM, &_Data, MW, std::move(processingFinishedFutures)).detach();
 
 	std::thread([](std::shared_ptr<MIDICollectionThreadedMerger> pMCTM, MoveableWindow* MW, std::chrono::steady_clock::time_point start_timepoint)
 	{
@@ -1774,7 +1782,7 @@ void OnStart()
 			auto now = std::chrono::high_resolution_clock::now();
 			auto difference = std::chrono::duration_cast<std::chrono::duration<double>>(now - start_timepoint);
 			timer_ptr->SafeStringReplace(std::to_string(difference.count()) + " s");
-			std::this_thread::sleep_for(std::chrono::milliseconds(50));
+			std::this_thread::sleep_for(std::chrono::milliseconds(20));
 		}
 		std::cout << "F: Out from sleep!!!\n";
 		MW->DeleteUIElementByName("FM");
