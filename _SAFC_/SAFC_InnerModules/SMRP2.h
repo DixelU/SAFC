@@ -703,7 +703,7 @@ struct single_midi_processor_2
 		auto hi = value >> 32;
 		auto lo = value & (~0u);
 
-		return value * (hi * to / from) * radix + (lo * to / from);
+		return (hi * to / from) * radix + (lo * to / from);
 	}
 
 	using filters_multimap = std::multimap<base_type, event_transforming_filter>;
@@ -1090,16 +1090,14 @@ struct single_midi_processor_2
 		{
 			auto& tick = get_value<tick_type>(cur, tick_position);
 
-			if (offset < 0 && tick < -offset)
-				return (tick = disable_tick), false;
-			else
-				tick += offset;
-
 			if (old_ppqn == new_ppqn)
 				return true;
 
-			tick = convert_ppq(tick, old_ppqn, new_ppqn);
-			return true;
+			auto new_tick = convert_ppq(tick, old_ppqn, new_ppqn) + offset;
+
+			if(offset < 0 && new_tick > tick)
+				return (tick = disable_tick), false;
+			return (tick = new_tick),true;
 		};
 
 		filters.insert({ 0, selection_filter });
