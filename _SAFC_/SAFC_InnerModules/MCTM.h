@@ -532,9 +532,6 @@ struct MIDICollectionThreadedMerger
 			_wremove(save_to_with_postfix.c_str());
 			auto result = _wrename(filename.c_str(), save_to_with_postfix.c_str());
 
-			if (!regular_merge_candidates.front().first->settings.proc_details.remove_empty_tracks)
-				CreateSymbolicLink(filename.c_str(), save_to_with_postfix.c_str(), 0);
-
 			IntermediateRegularFlag = true; /// Will this work?
 		}
 		else
