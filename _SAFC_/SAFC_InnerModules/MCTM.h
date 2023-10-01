@@ -523,47 +523,65 @@ struct MIDICollectionThreadedMerger
 		std::copy_if(midi_processing_data.begin(), midi_processing_data.end(), std::back_inserter(regular_merge_candidates),
 			[](mpd_t::value_type& el) { return !el.first->settings.details.inplace_mergable; });
 
-		std::thread([](mpd_t RMC, std::uint16_t PPQN, std::wstring _SaveTo,
-			std::reference_wrapper<std::atomic_bool> FinishedFlag, std::reference_wrapper<std::atomic_uint64_t> TrackCount)
+		if (regular_merge_candidates.size() == 1)
 		{
-			if (RMC.empty()) 
-			{
-				FinishedFlag.get() = true;
-				return;
-			}
-			//bool FirstFlag = 1;
-			const size_t buffer_size = 20000000;
-			std::uint8_t* buffer = new std::uint8_t[buffer_size];
-			std::ofstream file_output(_SaveTo + L".R.mid", std::ios::binary | std::ios::out);
-			std::wstring filename = RMC.front().first->filename + RMC.front().first->postfix;
-			bbb_ffr file_input(filename.c_str());
-			file_output.rdbuf()->pubsetbuf((char*)buffer, buffer_size);
-			file_output << "MThd" << '\0' << '\0' << '\0' << (char)6 << '\0' << (char)1;
-			file_output.put(0);
-			file_output.put(0);
-			file_output.put(PPQN >> 8);
-			file_output.put(PPQN);
-			for (auto Y = RMC.begin(); Y != RMC.end(); Y++) 
-			{
-				filename = Y->first->filename + Y->first->postfix;
-				if (Y != RMC.begin())
-					file_input.reopen_next_file(filename.c_str());
-				for (int i = 0; i < 14; i++)
-					file_input.get();
-				file_input.put_into_ostream(file_output);
-				TrackCount.get() += Y->first->tracks_count;
-				int t;
-				if (Y->first->settings.proc_details.remove_remnants)
-					t = _wremove(filename.c_str());
-			}
-			file_output.seekp(10, std::ios::beg);
-			file_output.put(TrackCount.get() >> 8);
-			file_output.put(TrackCount.get());
-			FinishedFlag.get() = true; /// Will this work?
-			file_output.flush();
-			file_output.close();
-			delete[] buffer;
-			}, regular_merge_candidates, FinalPPQN, SaveTo, std::ref(IntermediateRegularFlag), std::ref(IRTrackCount)).detach();
+			std::wstring filename = 
+				regular_merge_candidates.front().first->filename + 
+				regular_merge_candidates.front().first->postfix;
+			auto save_to_with_postfix = SaveTo + L".R.mid";
+			_wremove(save_to_with_postfix.c_str());
+			auto result = _wrename(filename.c_str(), save_to_with_postfix.c_str());
+
+			if (!regular_merge_candidates.front().first->settings.proc_details.remove_empty_tracks)
+				CreateSymbolicLink(filename.c_str(), save_to_with_postfix.c_str(), 0);
+
+			IntermediateRegularFlag = true; /// Will this work?
+		}
+		else
+		{
+			std::thread([](mpd_t RMC, std::uint16_t PPQN, std::wstring _SaveTo,
+				std::reference_wrapper<std::atomic_bool> FinishedFlag, std::reference_wrapper<std::atomic_uint64_t> TrackCount)
+				{
+					if (RMC.empty())
+					{
+						FinishedFlag.get() = true;
+						return;
+					}
+					//bool FirstFlag = 1;
+					const size_t buffer_size = 20000000;
+					std::uint8_t* buffer = new std::uint8_t[buffer_size];
+					std::ofstream file_output(_SaveTo + L".R.mid", std::ios::binary | std::ios::out);
+					std::wstring filename = RMC.front().first->filename + RMC.front().first->postfix;
+					bbb_ffr file_input(filename.c_str());
+					file_output.rdbuf()->pubsetbuf((char*)buffer, buffer_size);
+					file_output << "MThd" << '\0' << '\0' << '\0' << (char)6 << '\0' << (char)1;
+					file_output.put(0);
+					file_output.put(0);
+					file_output.put(PPQN >> 8);
+					file_output.put(PPQN);
+					for (auto Y = RMC.begin(); Y != RMC.end(); Y++)
+					{
+						filename = Y->first->filename + Y->first->postfix;
+						if (Y != RMC.begin())
+							file_input.reopen_next_file(filename.c_str());
+						for (int i = 0; i < 14; i++)
+							file_input.get();
+						file_input.put_into_ostream(file_output);
+						TrackCount.get() += Y->first->tracks_count;
+						int t;
+						if (Y->first->settings.proc_details.remove_remnants)
+							t = _wremove(filename.c_str());
+					}
+					file_output.seekp(10, std::ios::beg);
+					file_output.put(TrackCount.get() >> 8);
+					file_output.put(TrackCount.get());
+					FinishedFlag.get() = true; /// Will this work?
+					file_output.flush();
+					file_output.close();
+					delete[] buffer;
+				}, regular_merge_candidates, FinalPPQN, SaveTo, std::ref(IntermediateRegularFlag), std::ref(IRTrackCount)).detach();
+		}
+
 	}
 	void Start_RI_Merge() 
 	{

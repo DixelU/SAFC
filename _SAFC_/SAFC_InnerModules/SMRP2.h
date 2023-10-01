@@ -1124,16 +1124,21 @@ struct single_midi_processor_2
 
 		std::vector<uint8_t> data;
 		tick_type prev_tick;
-		inline std::vector<uint8_t>& get_vec(const uint8_t&)
+		inline std::vector<uint8_t>& get_vec(uint8_t)
 		{
 			return data;
+		}
+		inline void swap(track_data<false>& track)
+		{
+			data.swap(track.data);
+			std::swap(prev_tick, track.prev_tick);
 		}
 		inline void clear()
 		{
 			data.clear();
 			prev_tick = 0;
 		}
-		inline tick_type& get_tick(const uint8_t&)
+		inline tick_type& get_tick(uint8_t)
 		{
 			return prev_tick;
 		}
@@ -1141,7 +1146,7 @@ struct single_midi_processor_2
 		{
 			return !disallow_empty_tracks || !data.empty();
 		}
-		inline void reserve(const uint64_t& size)
+		inline void reserve(uint64_t size)
 		{
 			data.reserve(size);
 		}
@@ -1174,19 +1179,28 @@ struct single_midi_processor_2
 				out.write((const char*)&placeholder[0], sizeof(placeholder));
 			out.write((const char*)&ending[0], sizeof(ending));
 		}
+		inline void swap_zero_and_channel(const uint8_t&) { return; }
 	};
 
 	template<>
 	struct track_data<true>
 	{
 		track_data<false> data[16];
+		uint8_t last_channel{0};
 
-		inline std::vector<uint8_t>& get_vec(const uint8_t& channel)
+		inline std::vector<uint8_t>& get_vec(uint8_t channel)
 		{
+			if (channel == 0xFF)
+				channel = last_channel;
 			return data[channel].get_vec(channel);
+		}
+		inline void swap_zero_and_channel(const uint8_t& channel)
+		{
+			data[0].swap(data[channel]);
 		}
 		inline void clear()
 		{
+			last_channel = 0;
 			for (auto& singleData : data)
 				singleData.clear();
 		}
@@ -1197,8 +1211,10 @@ struct single_midi_processor_2
 				counter += singleData.count(disallow_empty_tracks);
 			return counter;
 		}
-		inline tick_type& get_tick(const uint8_t& channel)
+		inline tick_type& get_tick(uint8_t channel)
 		{
+			if (channel == 0xFF)
+				channel = last_channel;
 			return data[channel].get_tick(channel);
 		}
 		inline void dump(std::ostream& out, bool disallow_empty_tracks)
@@ -1206,7 +1222,7 @@ struct single_midi_processor_2
 			for (auto& singleData : data)
 				singleData.dump(out, disallow_empty_tracks);
 		}
-		inline void reserve(const uint64_t& size)
+		inline void reserve(uint64_t size)
 		{
 			for (auto& singleData : data)
 				singleData.reserve(size);
@@ -1218,12 +1234,13 @@ struct single_midi_processor_2
 		tick_type selection_front_tick,
 		single_track_data& std_ref,
 		message_buffers& buffers,
-		track_data<channels_split>& out_buffer)
+		track_data<channels_split>& out_buffer, 
+		bool& had_non_meta_events)
 	{
 		if (std_ref.selection_data.frontal_tempo != single_track_data::selection::default_tempo)
 		{
-			auto& prev_tick = out_buffer.get_tick(0);
-			auto& track_data = out_buffer.get_vec(0);
+			auto& prev_tick = out_buffer.get_tick(0xFF);
+			auto& track_data = out_buffer.get_vec(0xFF);
 			auto delta = selection_front_tick - prev_tick;
 			prev_tick = selection_front_tick;
 			push_vlv_s(delta, track_data);
@@ -1239,8 +1256,8 @@ struct single_midi_processor_2
 
 		if (!std_ref.selection_data.frontal_color_event.is_empty)
 		{
-			auto& prev_tick = out_buffer.get_tick(0);
-			auto& track_data = out_buffer.get_vec(0);
+			auto& prev_tick = out_buffer.get_tick(0xFF);
+			auto& track_data = out_buffer.get_vec(0xFF);
 			auto delta = selection_front_tick - prev_tick;
 			prev_tick = selection_front_tick;
 			push_vlv_s(delta, track_data);
@@ -1259,6 +1276,12 @@ struct single_midi_processor_2
 			auto param_1 = key_param1 & 0xFF;
 			auto channel = event_kind & 0xF;
 
+			if (!had_non_meta_events)
+			{
+				had_non_meta_events = true;
+				out_buffer.swap_zero_and_channel(channel);
+			}
+
 			auto& prev_tick = out_buffer.get_tick(channel);
 			auto& track_data = out_buffer.get_vec(channel);
 			auto delta = selection_front_tick - prev_tick;
@@ -1274,6 +1297,12 @@ struct single_midi_processor_2
 		for (auto& [event_kind, data] : std_ref.selection_data.channel_events_at_selection_front)
 		{
 			auto channel = event_kind & 0xF;
+
+			if (!had_non_meta_events)
+			{
+				had_non_meta_events = true;
+				out_buffer.swap_zero_and_channel(channel);
+			}
 
 			auto& prev_tick = out_buffer.get_tick(channel);
 			auto& track_data = out_buffer.get_vec(channel);
@@ -1302,6 +1331,7 @@ struct single_midi_processor_2
 		auto db_begin = data_buffer.begin();
 		auto db_end = data_buffer.end();
 		auto db_current = data_buffer.begin();
+		bool had_non_meta_events = false;
 
 		auto size = data_buffer.size();
 		std::size_t i = 0;
@@ -1326,7 +1356,8 @@ struct single_midi_processor_2
 					selection_front_tick,
 					std_ref,
 					buffers,
-					out_buffer);
+					out_buffer, 
+					had_non_meta_events);
 				first_tick = false;
 			}
 		};
@@ -1348,7 +1379,18 @@ struct single_midi_processor_2
 				write_selection_front_wrap();
 
 				const auto& event_kind = get_value<base_type>(data_buffer, i + event_type);
-				const auto channel = event_kind & 0xF;
+				auto channel = event_kind & 0xF;
+
+				const bool is_non_meta_event = (event_kind & 0xF0) != 0xF0;
+				if (is_non_meta_event && !had_non_meta_events)
+				{
+					had_non_meta_events = is_non_meta_event;
+					out_buffer.swap_zero_and_channel(channel);
+				}
+
+				if (!is_non_meta_event)
+					channel = 0xFF;
+
 				auto& prev_tick = out_buffer.get_tick(channel);
 				auto& track_data = out_buffer.get_vec(channel);
 				auto delta = tick - prev_tick;
