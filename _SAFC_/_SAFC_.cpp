@@ -340,12 +340,15 @@ void SAFC_VersionCheck()
 
 size_t GetAvailableMemory() 
 {
+	static std::mutex mutex; 
+	std::lock_guard<std::mutex> locker(mutex);
+
 	size_t ret = 0;
 
 	// because compiler static links the function...
 	BOOL(__stdcall * GMSEx)(LPMEMORYSTATUSEX) = 0;
 
-	HINSTANCE hIL = LoadLibrary(L"kernel32.dll");
+	static HINSTANCE hIL = LoadLibrary(L"kernel32.dll");
 	GMSEx = (BOOL(__stdcall*)(LPMEMORYSTATUSEX))GetProcAddress(hIL, "GlobalMemoryStatusEx");
 	if (GMSEx) 
 	{
@@ -363,6 +366,7 @@ size_t GetAvailableMemory()
 		GlobalMemoryStatus(&m);
 		ret = (int)(m.dwAvailPhys >> 20);
 	}
+
 	return ret;
 }
 
@@ -1789,6 +1793,19 @@ void OnStart()
 			auto difference = std::chrono::duration_cast<std::chrono::duration<double>>(now - start_timepoint);
 			timer_ptr->SafeStringReplace(std::to_string(difference.count()) + " s");
 			std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+			auto freeMemory = GetAvailableMemory();
+			if (freeMemory < 512)
+			{
+				auto message = 
+					"There is less than " + 
+					std::to_string(freeMemory) + 
+					"MB of available RAM!\n"
+					"SAFC may corrupt MIDI data or fail to finish the processing!";
+
+				std::cout << message << std::endl;
+				ThrowAlert_Warning(std::move(message));
+			}
 		}
 		std::cout << "F: Out from sleep!!!\n";
 		MW->DeleteUIElementByName("FM");
