@@ -391,6 +391,7 @@ struct FileSettings
 		AllowLegacyRunningStatusMetaIgnorance,
 		RSBCompression,
 		ChannelsSplit,
+		CollapseMIDI,
 		AllowSysex;
 	std::shared_ptr<CutAndTransposeKeys> KeyMap;
 	std::shared_ptr<PLC<std::uint8_t, std::uint8_t>> VolumeMap;
@@ -418,9 +419,10 @@ struct FileSettings
 		SelectionStart = 0;
 		SelectionLength = -1;
 		BoolSettings = DefaultBoolSettings;
-		FileNamePostfix = "_.mid";//_FILENAMEWITHEXTENSIONSTRING_.mid
+		FileNamePostfix = "_.mid"; //_FILENAMEWITHEXTENSIONSTRING_.mid
 		WFileNamePostfix = L"_.mid";
 		RSBCompression = ChannelsSplit = false;
+		CollapseMIDI = true;
 		AllowLegacyRunningStatusMetaIgnorance = false;
 	}
 	inline void SwitchBoolSetting(std::uint32_t SMP_BoolSetting) 
@@ -454,6 +456,7 @@ struct FileSettings
 		settings.proc_details.remove_remnants = BoolSettings & _BoolSettings::remove_remnants;
 		settings.proc_details.remove_empty_tracks = BoolSettings & _BoolSettings::remove_empty_tracks;
 		settings.proc_details.channel_split = ChannelsSplit;
+		settings.proc_details.whole_midi_collapse = CollapseMIDI;
 		settings.legacy.ignore_meta_rsb = AllowLegacyRunningStatusMetaIgnorance;
 		settings.legacy.rsb_compression = RSBCompression;
 		settings.filter.pass_sysex = AllowSysex;
@@ -501,6 +504,7 @@ struct SAFCData
 	bool InplaceMergeFlag;
 	bool ChannelsSplit;
 	bool RSBCompression;
+	bool CollapseMIDI;
 	bool IsCLIMode;
 	std::uint16_t DetectedThreads;
 	SAFCData()
@@ -510,6 +514,7 @@ struct SAFCData
 		IncrementalPPQN = true;
 		InplaceMergeFlag = false;
 		IsCLIMode = false;
+		CollapseMIDI = false;
 		SaveDirectory = L"";
 		ChannelsSplit = RSBCompression = false;
 	}
@@ -746,6 +751,7 @@ void AddFiles(std::vector<std::wstring> Filenames)
 			_Data.Files.back().InplaceMergeEnabled = _Data.InplaceMergeFlag;
 			_Data.Files.back().ChannelsSplit = _Data.ChannelsSplit;
 			_Data.Files.back().RSBCompression = _Data.RSBCompression;
+			_Data.Files.back().CollapseMIDI = _Data.CollapseMIDI;
 
 			for (int q = 0; q < _Data.Files.size(); q++)
 			{
@@ -807,6 +813,8 @@ namespace PropsAndSets
 			((CheckBox*)((*PASWptr)["INPLACE_MERGE"]))->State = _Data[ID].InplaceMergeEnabled;
 			((CheckBox*)((*PASWptr)["LEGACY_META_RSB_BEHAVIOR"]))->State = _Data[ID].AllowLegacyRunningStatusMetaIgnorance;
 			((CheckBox*)((*PASWptr)["ALLOW_SYSEX"]))->State = _Data[ID].AllowSysex;
+
+			((CheckBox*)((*PASWptr)["COLLAPSE_MIDI"]))->State = _Data[ID].CollapseMIDI;
 
 			((TextBox*)((*PASWptr)["CONSTANT_PROPS"]))->SafeStringReplace(
 				"File size: " + std::to_string(_Data[ID].FileSize) + "b\n" +
@@ -1243,6 +1251,7 @@ namespace PropsAndSets
 		_Data[currentID].AllowSysex = (((CheckBox*)(*SMPASptr)["ALLOW_SYSEX"])->State);
 		_Data[currentID].RSBCompression = ((CheckBox*)(*SMPASptr)["RSB_COMPRESS"])->State;
 		_Data[currentID].ChannelsSplit = ((CheckBox*)(*SMPASptr)["SPLIT_TRACKS"])->State;
+		_Data[currentID].CollapseMIDI = ((CheckBox*)(*SMPASptr)["COLLAPSE_MIDI"])->State;
 		auto& inplaceMergeState = ((CheckBox*)(*SMPASptr)["INPLACE_MERGE"])->State;
 
 		inplaceMergeState &= !_Data[currentID].RSBCompression;
@@ -1552,9 +1561,11 @@ namespace Settings
 
 		((CheckBox*)((*pptr)["SPLIT_TRACKS"]))->State = _Data.ChannelsSplit;
 		((CheckBox*)((*pptr)["RSB_COMPRESS"]))->State = _Data.RSBCompression;
-
+		((CheckBox*)((*pptr)["COLLAPSE_MIDI"]))->State = _Data.CollapseMIDI;
+		
 		((CheckBox*)((*pptr)["INPLACE_MERGE"]))->State = _Data.InplaceMergeFlag;
 		((CheckBox*)((*pptr)["AUTOUPDATECHECK"]))->State = check_autoupdates;
+
 	}
 	void OnSetApply()
 	{
@@ -1609,10 +1620,13 @@ namespace Settings
 		_Data.ChannelsSplit = ((CheckBox*)((*pptr)["SPLIT_TRACKS"]))->State;
 		_Data.RSBCompression = ((CheckBox*)((*pptr)["RSB_COMPRESS"]))->State;
 
+		_Data.CollapseMIDI = ((CheckBox*)((*pptr)["COLLAPSE_MIDI"]))->State;
+
 		if (isRegestryOpened)
 		{
 			TRY_CATCH(RegestryAccess.SetDwordValue(L"AUTOUPDATECHECK", check_autoupdates);, "Failed on setting AUTOUPDATECHECK")
-			TRY_CATCH(RegestryAccess.SetDwordValue(L"SPLIT_TRACKS", _Data.ChannelsSplit);, "Failed on setting SPLIT_TRACKS")
+			TRY_CATCH(RegestryAccess.SetDwordValue(L"SPLIT_TRACKS", _Data.ChannelsSplit); , "Failed on setting SPLIT_TRACKS")
+			TRY_CATCH(RegestryAccess.SetDwordValue(L"COLLAPSE_MIDI", _Data.ChannelsSplit); , "Failed on setting COLLAPSE_MIDI")
 			//TRY_CATCH(RegestryAccess.SetDwordValue(L"RSB_COMPRESS", check_autoupdates);, "Failed on setting RSB_COMPRESS")
 			TRY_CATCH(RegestryAccess.SetDwordValue(L"DEFAULT_BOOL_SETTINGS", DefaultBoolSettings);, "Failed on setting DEFAULT_BOOL_SETTINGS")
 			TRY_CATCH(RegestryAccess.SetDwordValue(L"FONTSIZE", lFontSymbolsInfo::Size); , "Failed on setting FONTSIZE")
@@ -1830,6 +1844,11 @@ void RestoreRegSettings()
 		catch (...) { std::cout << "Exception thrown while restoring SPLIT_TRACKS from registry\n"; }
 		try
 		{
+			_Data.CollapseMIDI = Settings::RegestryAccess.GetDwordValue(L"COLLAPSE_MIDI");
+		}
+		catch (...) { std::cout << "Exception thrown while restoring COLLAPSE_MIDI from registry\n"; }
+		try
+		{
 			_Data.DetectedThreads = Settings::RegestryAccess.GetDwordValue(L"AS_THREADS_COUNT");
 		}
 		catch (...) { std::cout << "Exception thrown while restoring AS_THREADS_COUNT from registry\n"; }
@@ -1957,7 +1976,7 @@ void Init()
 
 	(*T)["APPLY"] = new Button("Apply", System_White, PropsAndSets::OnApplySettings, 87.5 - WindowHeapSize, 15 - WindowHeapSize, 30, 10, 1, 0x7FAFFF3F, 0xFFFFFFFF, 0xFFAF7FFF, 0xFFAF7F3F, 0xFFAF7FFF, NULL, " ");
 
-	(*T)["CUT_AND_TRANSPOSE"] = (Butt = new Button("Cut & Transpose...", System_White, PropsAndSets::CutAndTranspose::OnCaT, 52.5 - WindowHeapSize, 35 - WindowHeapSize, 100, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, System_White, "Cut and Transpose tool"));
+	(*T)["CUT_AND_TRANSPOSE"] = (Butt = new Button("Cut & Transpose...", System_White, PropsAndSets::CutAndTranspose::OnCaT, 45 - WindowHeapSize, 35 - WindowHeapSize, 85, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, System_White, "Cut and Transpose tool"));
 	Butt->Tip->SafeChangePosition_Argumented(_Align::right, 100 - WindowHeapSize, Butt->Tip->CYpos);
 	(*T)["PITCH_MAP"] = (Butt = new Button("Pitch map ...", System_White, PropsAndSets::OnPitchMap, -37.5 - WindowHeapSize, 15 - WindowHeapSize, 70, 10, 1, 0x7F7F7F3F, 0x7F7F7FFF, 0xFFFFFFFF, 0xFFFFFF3F, 0xFFFFFFFF, System_White, "Allows to transform pitches"));
 	Butt->Tip->SafeChangePosition_Argumented(_Align::right, 100 - WindowHeapSize, Butt->Tip->CYpos);
@@ -1968,7 +1987,9 @@ void Init()
 	(*T)["SELECT_LENGTH"] = new InputField(" ", 37.5 - WindowHeapSize, -5 - WindowHeapSize, 10, 70, System_White, NULL, 0x007FFFFF, System_White, "Selection length", 14, _Align::center, _Align::right, InputField::Type::WholeNumbers);
 
 	(*T)["LEGACY_META_RSB_BEHAVIOR"] = new CheckBox(97.5 - WindowHeapSize, -5 - WindowHeapSize, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, false, System_White, _Align::right, "Enables legacy RSB/Meta behavior");
-	(*T)["ALLOW_SYSEX"] = new CheckBox(82.5 - WindowHeapSize, -5 - WindowHeapSize, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, 0, System_White, _Align::right, "Allow sysex events");
+	(*T)["ALLOW_SYSEX"] = new CheckBox(82.5 - WindowHeapSize, -5 - WindowHeapSize, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, 0, System_White, _Align::right, "Allow sysex events");	
+
+	(*T)["COLLAPSE_MIDI"] = new CheckBox(97.5 - WindowHeapSize, 35 - WindowHeapSize, 10, 0x007FFFFF, 0xFF7F00AF, 0x7FFF00AF, 1, 0, System_White, _Align::right, "Collapse all tracks of a MIDI into one");
 
 	(*T)["CONSTANT_PROPS"] = new TextBox("_Props text example_", System_White, 0, -57.5 - WindowHeapSize, 80 - WindowHeapSize, 200 - 1.5 * WindowHeapSize, 7.5, 0, 0, 1);
 
@@ -2028,6 +2049,8 @@ void Init()
 	Butt->Tip->SafeChangePosition_Argumented(_Align::right, 87.5 - WindowHeapSize, Butt->Tip->CYpos);
 
 	(*T)["INPLACE_MERGE"] = new CheckBox(97.5 - WindowHeapSize, 95 - WindowHeapSize, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, 0, System_White, _Align::right, "Enable/disable inplace merge");
+
+	(*T)["COLLAPSE_MIDI"] = new CheckBox(72.5 - WindowHeapSize, 75 - WindowHeapSize, 10, 0x007FFFFF, 0xFF7F00AF, 0x7FFF00AF, 1, 0, System_White, _Align::right, "Collapse tracks of a MIDI into one");
 
 	(*T)["AS_THREADS_COUNT"] = new InputField(std::to_string(_Data.DetectedThreads), 92.5 - WindowHeapSize, 75 - WindowHeapSize, 10, 20, System_White, NULL, 0x007FFFFF, System_White, "Threads count", 2, _Align::center, _Align::right, InputField::Type::NaturalNumbers);
 

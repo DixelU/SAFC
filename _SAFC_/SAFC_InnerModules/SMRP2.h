@@ -258,6 +258,7 @@ struct single_midi_processor_2
 			bool remove_remnants;
 			bool remove_empty_tracks;
 			bool channel_split;
+			bool whole_midi_collapse;
 		};
 
 		sgtick_type offset;
@@ -768,6 +769,75 @@ struct single_midi_processor_2
 			db_current += di;
 			i += di;
 		}
+		return true;
+	}
+
+	inline static bool sort_buffer(
+		std::vector<base_type>& data_buffer,
+		single_track_data& std_ref,
+		message_buffers& buffers)
+	{
+		auto db_begin = data_buffer.begin();
+		auto db_end = data_buffer.end();
+		auto db_current = data_buffer.begin();
+
+		struct data
+		{
+			tick_type tick;
+			tick_type pointer;
+			metasize_type length;
+
+			bool operator<(const data& op) const
+			{
+				return tick < op.tick;
+			}
+		};
+
+		auto size = data_buffer.size();
+
+		if (size == 0) // [[unlikely]]
+			return ((*buffers.log) << "Empty buffer"), false;
+
+		std::vector<data> data_pointers;
+		data_pointers.reserve(2500000);
+
+		std::size_t i = 0;
+
+		while (i < size)
+		{
+			std::size_t di = 0;
+
+			if (i + 8 >= size) // [[unlikely]]
+			{
+				(*buffers.error) << ("B*" + std::to_string(i) + ": unexpected end of buffer");
+				break;
+			}
+
+			auto& tick = get_value<tick_type>(db_current, tick_position);
+
+			di = expected_size(db_current);
+
+			data_pointers.emplace_back(tick, i, di);
+
+			db_current += di;
+			i += di;
+		}
+
+		std::sort(data_pointers.begin(), data_pointers.end());
+
+		std::vector<base_type> sorted_data_buffer;
+		sorted_data_buffer.reserve(data_buffer.size());
+		for (auto& el : data_pointers)
+		{
+			copy_back(
+				sorted_data_buffer,
+				data_buffer.begin() + el.pointer,
+				data_buffer.begin() + el.pointer + el.length,
+				el.length);
+		}
+
+		sorted_data_buffer.swap(data_buffer);
+
 		return true;
 	}
 
@@ -1476,7 +1546,8 @@ struct single_midi_processor_2
 
 		while (file_input.good())
 		{
-			track_buffers.data_buffer.clear();
+			if(!data.settings.proc_details.whole_midi_collapse)
+				track_buffers.data_buffer.clear();
 
 			bool is_readable = put_data_in_buffer(file_input, track_buffers, loggers, data.settings, polyphony_stacks);
 
@@ -1484,33 +1555,58 @@ struct single_midi_processor_2
 			track_processing_data.selection_data.frontal_tempo =
 				data.settings.tempo.tempo_override_value;
 
-			if (track_buffers.data_buffer.size())
+			bool buffer_should_be_processed =
+				(!data.settings.proc_details.whole_midi_collapse || !file_input.good()) &&
+				track_buffers.data_buffer.size();
+
+			bool sort_data_buffer_flag =
+				data.settings.proc_details.whole_midi_collapse && !file_input.good();
+			bool data_buffer_is_dumpable =
+				!data.settings.proc_details.whole_midi_collapse || !file_input.good();
+
+			if (buffer_should_be_processed)
 			{
 				bool successful_processing =
 					process_buffer(track_buffers.data_buffer, filter_iters, track_processing_data, loggers);
 				if (!successful_processing)
-					(*loggers.error) << "Something went wrong";
+					(*loggers.error) << "Something went wrong during processing";
 			}
 
-			if(data.settings.legacy.rsb_compression)
-				write_track<true, channels_split>(
-					track_buffers.data_buffer,
-					track_processing_data, 
-					loggers, 
-					data,
-					write_buffer);
-			else 
-				write_track<false, channels_split>(
-					track_buffers.data_buffer,
-					track_processing_data, 
-					loggers, 
-					data,
-					write_buffer);
+			if (sort_data_buffer_flag)
+			{
+				bool successful_processing =
+					sort_buffer(track_buffers.data_buffer, track_processing_data, loggers);
+				if (!successful_processing)
+					(*loggers.error) << "Something went wrong during sorting";
+			}
+
+			if (data_buffer_is_dumpable)
+			{
+				if (data.settings.legacy.rsb_compression)
+					write_track<true, channels_split>(
+						track_buffers.data_buffer,
+						track_processing_data,
+						loggers,
+						data,
+						write_buffer);
+				else
+					write_track<false, channels_split>(
+						track_buffers.data_buffer,
+						track_processing_data,
+						loggers,
+						data,
+						write_buffer);
+			}
 
 			auto current_count = write_buffer.count(data.settings.proc_details.remove_empty_tracks);
 			track_counter += current_count;
-			write_buffer.dump(file_output, data.settings.proc_details.remove_empty_tracks);
-			write_buffer.clear();
+
+			if (data_buffer_is_dumpable)
+			{
+				write_buffer.dump(file_output, data.settings.proc_details.remove_empty_tracks);
+				write_buffer.clear();
+			}
+
 			loggers.last_input_position = file_input.tellg();
 			(*loggers.log) << (std::to_string(track_counter) + " tracks processed. (" + std::to_string(current_count) + ") new.");
 		}
