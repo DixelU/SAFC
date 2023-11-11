@@ -1160,14 +1160,14 @@ struct single_midi_processor_2
 		{
 			auto& tick = get_value<tick_type>(cur, tick_position);
 
-			if (old_ppqn == new_ppqn)
+			if (old_ppqn == new_ppqn && offset == 0)
 				return true;
 
-			auto new_tick = convert_ppq(tick, old_ppqn, new_ppqn) + offset;
+			auto new_tick = sgtick_type(convert_ppq(tick, old_ppqn, new_ppqn)) + offset;
 
-			if(offset < 0 && new_tick > tick)
+			if(new_tick < 0)
 				return (tick = disable_tick), false;
-			return (tick = new_tick),true;
+			return (tick = new_tick), true;
 		};
 
 		filters.insert({ 0, selection_filter });
