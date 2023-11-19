@@ -287,7 +287,7 @@ struct single_midi_processor_2
 		std::atomic_uint64_t tracks_count;
 	};
 
-	FORCEDINLINE inline static void ostream_write(
+	FORCEDINLINE static void ostream_write(
 		std::vector<base_type>& vec,
 		const std::vector<base_type>::iterator& beg, 
 		const std::vector<base_type>::iterator& end, 
@@ -295,22 +295,22 @@ struct single_midi_processor_2
 		out.write(((char*)vec.data()) + (beg - vec.begin()), end - beg);
 	}
 
-	FORCEDINLINE inline static void ostream_write(std::vector<base_type>& vec, std::ostream& out)
+	FORCEDINLINE static void ostream_write(std::vector<base_type>& vec, std::ostream& out)
 	{
 		out.write(((char*)vec.data()), vec.size());;
 	}
 
-	FORCEDINLINE inline static uint8_t push_vlv(const uint32_t& value, std::vector<base_type>& vec)
+	FORCEDINLINE static uint8_t push_vlv(const uint32_t& value, std::vector<base_type>& vec)
 	{
 		return push_vlv_s(value, vec);
 	};
 
-	FORCEDINLINE inline static uint8_t push_vlv_s(const tick_type& s_value, std::vector<base_type>& vec)
+	FORCEDINLINE static uint8_t push_vlv_s(const tick_type& s_value, std::vector<base_type>& vec)
 	{
 		constexpr uint8_t $7byte_mask = 0x7F, max_size = 10, $7byte_mask_size = 7;
 		constexpr uint8_t $adjacent7byte_mask = ~$7byte_mask;
 		uint64_t value = s_value;
-		uint8_t stack[max_size];
+		uint8_t stack[max_size]{};
 		uint8_t size = 0;
 		uint8_t r_size = 0;
 		do
@@ -327,7 +327,7 @@ struct single_midi_processor_2
 		return r_size;
 	}
 
-	FORCEDINLINE inline static uint64_t get_vlv(bbb_ffr& file_input)
+	FORCEDINLINE static uint64_t get_vlv(bbb_ffr& file_input)
 	{
 		uint64_t value = 0;
 		base_type single_byte;
@@ -340,7 +340,7 @@ struct single_midi_processor_2
 	}
 
 	template<typename V>
-	FORCEDINLINE inline static void __hack_resize(V& v, size_t newSize)
+	FORCEDINLINE static void __hack_resize(V& v, size_t newSize)
 	{
 		//hack beyond hacks
 		struct vt { typename V::value_type v; vt() {} };
@@ -352,10 +352,10 @@ struct single_midi_processor_2
 #define SAFC_S2B_PUSH_BACK
 #define SAFC_S2B_HACK_RESIZE
 	template<typename T>
-	FORCEDINLINE inline static size_t push_back(std::vector<base_type>& vec, const T& value)
+	FORCEDINLINE static size_t push_back(std::vector<base_type>& vec, const T& value)
 	{
 		constexpr auto type_size = sizeof(T);
-		auto current_index = vec.size();		
+		auto current_index = vec.size();
 #ifdef SAFC_S2B_PUSH_BACK
 #ifdef SAFC_S2B_HACK_RESIZE
 		__hack_resize(vec, current_index + type_size);
@@ -371,7 +371,91 @@ struct single_midi_processor_2
 		return type_size;
 	}
 
-	FORCEDINLINE inline static void copy_back(
+	struct copy_back_traits
+	{
+		struct raw_storage
+		{
+			void* ptr;
+			size_t size;
+		};
+
+		template<typename T>
+		static void __copy_T_to_array(
+			base_type* storage, 
+			const typename std::enable_if<std::is_same<T, raw_storage>::value, T>::type& value)
+		{
+			/*for (size_t i = 0; i < value.size; i++)
+				std::cout << std::hex << (int)((unsigned char*)value.ptr)[i] << ' ';
+			std::cout << std::endl;*/
+			std::memcpy(storage, value.ptr, value.size);
+		}
+
+		template<typename T>
+		static void __copy_T_to_array(
+			base_type* storage, 
+			const typename std::enable_if<(!std::is_same<T, raw_storage>::value), T>::type& value)
+		{
+			//std::cout << std::hex << (tick_type)value << std::endl;
+			*(T*)(storage) = value;
+		}
+
+		template<typename T>
+		constexpr static typename std::enable_if<(!std::is_same<T, raw_storage>::value), size_t>::type
+			size_of_contained_data(const T& /*data*/)
+		{
+			return sizeof(T);
+		}
+
+		template<typename T>
+		constexpr static typename std::enable_if<std::is_same<T, raw_storage>::value, size_t>::type
+			size_of_contained_data(const T& data)
+		{
+			return data.size;
+		}
+
+		template<typename _head>
+		static size_t __total_size(const _head& head)
+		{
+			return size_of_contained_data(head);
+		}
+
+		template<typename _head, typename... _tail>
+		static size_t __total_size(const _head& head, const _tail&... tail)
+		{
+			return
+				size_of_contained_data(head) +
+				__total_size(tail...);
+		}
+
+		template<typename _head, typename... _tail>
+		FORCEDINLINE void static __copy_to_array(base_type* storage, _head head_value, _tail... tail_values)
+		{
+			__copy_T_to_array<_head>(storage, head_value);
+
+			__copy_to_array(storage + sizeof(_head), tail_values...);
+		}
+
+		template<typename _head>
+		FORCEDINLINE void static __copy_to_array(base_type* storage, _head head_value)
+		{
+			__copy_T_to_array<_head>(storage, head_value);
+		}
+
+		template<typename... _variadic_types>
+		FORCEDINLINE void static copy_back(
+			std::vector<base_type>& vec,
+			_variadic_types... types)
+		{
+			auto total_size = __total_size(types...);
+			auto current_index = vec.size();
+			__hack_resize(vec, current_index + total_size);
+			base_type* new_storage = &vec[current_index];
+			__copy_to_array(new_storage, types...);
+			//std::cout << "##SCE##" << std::endl;
+		}
+	};
+
+	FORCEDINLINE static void copy_back(
 		std::vector<base_type>& vec,
 		const std::vector<base_type>::iterator& begin,
 		const std::vector<base_type>::iterator& end, 
@@ -381,14 +465,23 @@ struct single_midi_processor_2
 		//damn slow memcpy
 		switch (expected_size)
 		{
-			case 1: { push_back(vec, get_value<uint8_t>(begin, 0)); break; }
-			case 2: { push_back(vec, get_value<uint16_t>(begin, 0)); break; }
-			case 3: { push_back(vec, get_value<uint16_t>(begin, 0)); push_back(vec, get_value<uint8_t>(begin, 2)); break; }
-			case 4: { push_back(vec, get_value<uint32_t>(begin, 0)); break; }
-			case 5: { push_back(vec, get_value<uint32_t>(begin, 0)); push_back(vec, get_value<uint8_t>(begin, 4)); break; }
-			case 6: { push_back(vec, get_value<uint32_t>(begin, 0)); push_back(vec, get_value<uint16_t>(begin, 2)); break; }
-			case 7: { push_back(vec, get_value<uint32_t>(begin, 0)); push_back(vec, get_value<uint16_t>(begin, 2)); push_back(vec, get_value<uint8_t>(begin, 6)); break; }
-			case 8: { push_back(vec, get_value<uint64_t>(begin, 0)); break; }
+			case 1: { copy_back_traits::copy_back(vec, get_value<uint8_t>(begin, 0)); break; }
+			case 2: { copy_back_traits::copy_back(vec, get_value<uint16_t>(begin, 0)); break; }
+			case 3: { copy_back_traits::copy_back(vec, get_value<uint16_t>(begin, 0), get_value<uint8_t>(begin, 2)); break; }
+			case 4: { copy_back_traits::copy_back(vec, get_value<uint32_t>(begin, 0)); break; }
+			case 5: { copy_back_traits::copy_back(vec, get_value<uint32_t>(begin, 0), get_value<uint8_t>(begin, 4)); break; }
+			case 6: { copy_back_traits::copy_back(vec, get_value<uint32_t>(begin, 0), get_value<uint16_t>(begin, 2)); break; }
+			case 7: { copy_back_traits::copy_back(vec, get_value<uint32_t>(begin, 0), get_value<uint16_t>(begin, 2), get_value<uint8_t>(begin, 6)); break; }
+			case 8: { copy_back_traits::copy_back(vec, get_value<uint64_t>(begin, 0)); break; }
+
+			//case 9: { copy_back_traits::copy_back(vec, get_value<uint64_t>(begin, 0), get_value<uint8_t>(begin, 0 + 8)); break; }
+			//case 10: { copy_back_traits::copy_back(vec, get_value<uint64_t>(begin, 0), get_value<uint16_t>(begin, 0 + 8)); break; }
+			//case 11: { copy_back_traits::copy_back(vec, get_value<uint64_t>(begin, 0), get_value<uint16_t>(begin, 0 + 8), get_value<uint8_t>(begin, 2 + 8)); break; }
+			//case 12: { copy_back_traits::copy_back(vec, get_value<uint64_t>(begin, 0), get_value<uint32_t>(begin, 0 + 8)); break; }
+			//case 13: { copy_back_traits::copy_back(vec, get_value<uint64_t>(begin, 0), get_value<uint32_t>(begin, 0 + 8), get_value<uint8_t>(begin, 4 + 8)); break; }
+			//case 14: { copy_back_traits::copy_back(vec, get_value<uint64_t>(begin, 0), get_value<uint32_t>(begin, 0 + 8), get_value<uint16_t>(begin, 2 + 8)); break; }
+			//case 15: { copy_back_traits::copy_back(vec, get_value<uint64_t>(begin, 0), get_value<uint32_t>(begin, 0 + 8), get_value<uint16_t>(begin, 2 + 8), get_value<uint8_t>(begin, 6 + 8)); break; }
+			//case 16: { copy_back_traits::copy_back(vec, get_value<uint64_t>(begin, 0), get_value<uint64_t>(begin, 0 + 8)); break; }
 			default:
 			{
 				vec.insert(vec.end(), begin, end);
@@ -463,24 +556,26 @@ struct single_midi_processor_2
 			for (size_t idx = 0; idx < current_polyphony.size(); idx++)
 			{
 				auto& cur_note_stack = current_polyphony[idx];
-				const auto note = idx & 0xF;
-				const auto key = (idx >> 4)&0xFF;
+				const base_type note = idx & 0xF;
+				const base_type key = (idx >> 4)&0xFF;
 
 				while (cur_note_stack.size())
 				{
 					auto note_ref_idx = cur_note_stack.back();
 
 					const auto current_index = data_buffer.size();
-					const auto tick_size = push_back<tick_type>(data_buffer, current_tick);
 
 					auto other_note_reference = note_ref_idx + event_param3;
 
 					get_value<tick_type>(data_buffer, other_note_reference) = current_index;
 
-					push_back<base_type>(data_buffer, 0x80 | note);
-					push_back<base_type>(data_buffer, key);
-					push_back<base_type>(data_buffer, 0x40);
-					push_back<tick_type>(data_buffer, note_ref_idx);
+					copy_back_traits::copy_back(
+						data_buffer,
+						current_tick,
+						base_type(0x80 | note),
+						key,
+						base_type(0x40),
+						note_ref_idx);
 
 					cur_note_stack.pop_back();
 				}
@@ -520,7 +615,6 @@ struct single_midi_processor_2
 			}
 
 			const auto current_index = data_buffer.size();
-			const auto tick_size = push_back<tick_type>(data_buffer, current_tick);
 
 			switch (command >> 4)
 			{
@@ -564,10 +658,7 @@ struct single_midi_processor_2
 					continue;
 				}
 
-				push_back<base_type>(data_buffer, com);
-				push_back<base_type>(data_buffer, key);
-				push_back<base_type>(data_buffer, vel);
-				push_back<tick_type>(data_buffer, reference);
+				copy_back_traits::copy_back(data_buffer, current_tick, com, key, vel, reference);
 
 				break;
 			}
@@ -576,9 +667,7 @@ struct single_midi_processor_2
 				base_type p1 = param_buffer;
 				base_type p2 = file_input.get();
 
-				push_back<base_type>(data_buffer, com);
-				push_back<base_type>(data_buffer, p1);
-				push_back<base_type>(data_buffer, p2);
+				copy_back_traits::copy_back(data_buffer, current_tick, com, p1, p2);
 
 				break;
 			}
@@ -586,8 +675,7 @@ struct single_midi_processor_2
 				base_type com = command;
 				base_type p1 = param_buffer;
 
-				push_back<base_type>(data_buffer, com);
-				push_back<base_type>(data_buffer, p1);
+				copy_back_traits::copy_back(data_buffer, current_tick, com, p1);
 
 				break;
 			}
@@ -602,27 +690,44 @@ struct single_midi_processor_2
 				if (!is_going)
 				{
 					// ignore the end of track event;
-					data_buffer.resize(data_buffer.size() - event_type);
 					continue;
 				}
 
-				push_back<base_type>(data_buffer, com);
-				if(com == 0xFF) // damn sysex broke it all >:C
-					push_back<base_type>(data_buffer, type);
+				//if(com == 0xFF) // damn sysex broke it all >:C
+					//push_back<base_type>(data_buffer, type);
 
 				// 8 tick  1 type  1 metatype (except when sysex)  1 vlv size  4 size  ...<raw meta>~vlv+data
 
-				auto length = get_vlv(file_input);
+				metasize_type length = get_vlv(file_input);
 				auto encoded_length = push_vlv_s(length, meta_buffer);
 
-				push_back<base_type>(data_buffer, encoded_length);
-
 				for (std::size_t i = 0; i < length; ++i)
-					push_back<base_type>(meta_buffer, file_input.get());
+					meta_buffer.push_back(file_input.get());
 				length += encoded_length;
-
-				push_back<metasize_type>(data_buffer, length);
-				data_buffer.insert(data_buffer.end(), meta_buffer.begin(), meta_buffer.end());
+				
+				if (com == 0xFF) [[likely]]
+				{
+					copy_back_traits::copy_back(
+						data_buffer,
+						current_tick,
+						com,
+						type,
+						encoded_length,
+						length,
+						copy_back_traits::raw_storage{
+							meta_buffer.data(), meta_buffer.size() });
+				}
+				else
+				{
+					copy_back_traits::copy_back(
+						data_buffer,
+						current_tick,
+						com,
+						encoded_length,
+						length,
+						copy_back_traits::raw_storage{
+							meta_buffer.data(), meta_buffer.size() });
+				}
 
 				meta_buffer.clear();
 
@@ -641,7 +746,7 @@ struct single_midi_processor_2
 	}
 
 	template<bool ready_for_write = false>
-	FORCEDINLINE inline constexpr static std::ptrdiff_t expected_size(const base_type& v)
+	FORCEDINLINE constexpr static std::ptrdiff_t expected_size(const base_type& v)
 	{
 		switch (v >> 4)
 		{
@@ -662,7 +767,7 @@ struct single_midi_processor_2
 	inline static constexpr int gapped_size_legnth = 2 * (1) + 1;
 
 	template<bool ready_for_write = false>
-	FORCEDINLINE inline static std::enable_if<!ready_for_write, std::ptrdiff_t>::type expected_size(const data_iterator& cur)
+	FORCEDINLINE static std::enable_if<!ready_for_write, std::ptrdiff_t>::type expected_size(const data_iterator& cur)
 	{
 		const auto& type = cur[event_type];
 		auto size = expected_size<ready_for_write>(type);
@@ -677,7 +782,7 @@ struct single_midi_processor_2
 	}
 
 	template<bool ready_for_write = false>
-	FORCEDINLINE inline static std::enable_if<ready_for_write, std::array<std::ptrdiff_t, gapped_size_legnth>>::type
+	FORCEDINLINE static std::enable_if<ready_for_write, std::array<std::ptrdiff_t, gapped_size_legnth>>::type
 		expected_size(const data_iterator& cur)
 	{
 		const auto& type = cur[event_type];
@@ -697,7 +802,7 @@ struct single_midi_processor_2
 		};
 	}
 
-	FORCEDINLINE inline static tick_type convert_ppq(const tick_type& value, const ppq_type& from, const ppq_type& to)
+	FORCEDINLINE static tick_type convert_ppq(const tick_type& value, const ppq_type& from, const ppq_type& to)
 	{
 		constexpr auto radix = 1ull << 32;
 		auto hi = value >> 32;
@@ -768,6 +873,75 @@ struct single_midi_processor_2
 			db_current += di;
 			i += di;
 		}
+		return true;
+	}
+
+	inline static bool sort_buffer(
+		std::vector<base_type>& data_buffer,
+		single_track_data& std_ref,
+		message_buffers& buffers)
+	{
+		auto db_begin = data_buffer.begin();
+		auto db_end = data_buffer.end();
+		auto db_current = data_buffer.begin();
+
+		struct data
+		{
+			tick_type tick;
+			tick_type pointer;
+			metasize_type length;
+
+			bool operator<(const data& op) const
+			{
+				return tick < op.tick;
+			}
+		};
+
+		auto size = data_buffer.size();
+
+		if (size == 0) // [[unlikely]]
+			return ((*buffers.log) << "Empty buffer"), false;
+
+		std::vector<data> data_pointers;
+		data_pointers.reserve(2500000);
+
+		tick_type i = 0;
+
+		while (i < size)
+		{
+			metasize_type di = 0;
+
+			if (i + 8 >= size) // [[unlikely]]
+			{
+				(*buffers.error) << ("B*" + std::to_string(i) + ": unexpected end of buffer");
+				break;
+			}
+
+			auto& tick = get_value<tick_type>(db_current, tick_position);
+
+			di = expected_size(db_current);
+
+			data_pointers.emplace_back(tick, i, di);
+
+			db_current += di;
+			i += di;
+		}
+
+		std::sort(data_pointers.begin(), data_pointers.end());
+
+		std::vector<base_type> sorted_data_buffer;
+		sorted_data_buffer.reserve(data_buffer.size());
+		for (auto& el : data_pointers)
+		{
+			copy_back(
+				sorted_data_buffer,
+				data_buffer.begin() + el.pointer,
+				data_buffer.begin() + el.pointer + el.length,
+				el.length);
+		}
+
+		sorted_data_buffer.swap(data_buffer);
+
 		return true;
 	}
 

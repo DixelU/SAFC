@@ -277,7 +277,7 @@ void SAFC_VersionCheck()
 				std::getline(input, temp_buffer);
 				input.close();
 				auto JSON_Value = JSON::Parse(temp_buffer.c_str());
-				auto git_latest_version = ((JSON_Value)->AsArray()[0])->AsObject().find(L"name")->second->AsString();
+				auto& git_latest_version = ((JSON_Value)->AsArray()[0])->AsObject().find(L"name")->second->AsString();
 				std::uint16_t version_partied[4] = { 0,0,0,0 };
 				std::vector<std::string> ans;
 				std::wstring git_version_numbers_only = git_latest_version.substr(1);//v?.?.?.?
@@ -960,7 +960,7 @@ namespace PropsAndSets
 				InfoLine->SafeStringReplace("Graph A is exporting...");
 				std::ofstream out(SMICptr->FileName + L".tg.csv");
 				out << "tick" << CSV_DELIM << "tempo" << '\n';
-				for (auto cur_pair : SMICptr->TempoMap)
+				for (auto& cur_pair : SMICptr->TempoMap)
 					out << cur_pair.first << CSV_DELIM << cur_pair.second << '\n';
 				out.close();
 				WH->MainWindow_ID = "MAIN";
@@ -1000,7 +1000,7 @@ namespace PropsAndSets
 					+ "Tempo"
 					+ "\n");
 				btree::btree_map<std::int64_t, line_data> info;
-				for (auto cur_pair : SMICptr->Polyphony)
+				for (auto& cur_pair : SMICptr->Polyphony)
 					info[cur_pair.first] = line_data({
 						cur_pair.second, 0., 0.
 						});
@@ -1046,7 +1046,7 @@ namespace PropsAndSets
 				if (ForPersonalUse)
 				{
 					out << header;
-					for (auto cur_pair : info)
+					for (auto& cur_pair : info)
 					{
 						out << cur_pair.first << CSV_DELIM
 							<< cur_pair.second.Polyphony << CSV_DELIM
@@ -1056,7 +1056,7 @@ namespace PropsAndSets
 				}
 				else
 				{
-					for (auto cur_pair : info)
+					for (auto& cur_pair : info)
 					{
 						out.write((const char*)(&cur_pair.first), 8);
 						out.write((const char*)(&cur_pair.second.Polyphony), 8);
@@ -1092,7 +1092,7 @@ namespace PropsAndSets
 				double PPQ = SMICptr->PPQ;
 				double prev_tempo = 120;
 				std::int64_t last_tick = (*SMICptr->TempoMap.rbegin()).first;
-				for (auto cur_pair : SMICptr->TempoMap/*; cur_pair != SMICptr->TempoMap.end(); cur_pair++*/)
+				for (auto& cur_pair : SMICptr->TempoMap/*; cur_pair != SMICptr->TempoMap.end(); cur_pair++*/)
 				{
 					cur_tick = cur_pair.first;
 					cur_seconds += (cur_tick - prev_tick) * (60 / (prev_tempo * PPQ));
@@ -1146,7 +1146,7 @@ namespace PropsAndSets
 			double PPQ = SMICptr->PPQ;
 			double prev_tempo = 120;
 			std::int64_t last_tick = (*SMICptr->TempoMap.rbegin()).first;
-			for (auto cur_pair : SMICptr->TempoMap/*; cur_pair != SMICptr->TempoMap.end(); cur_pair++*/)
+			for (auto& cur_pair : SMICptr->TempoMap/*; cur_pair != SMICptr->TempoMap.end(); cur_pair++*/)
 			{
 				cur_tick = cur_pair.first;
 				cur_seconds += (cur_tick - prev_tick) * (60 / (prev_tempo * PPQ));
@@ -1383,7 +1383,7 @@ namespace PropsAndSets
 			if (VM->PLC_bb)
 			{
 				if (VM->PLC_bb->ConversionMap.empty())return;
-				std::uint8_t C[256];
+				std::uint8_t C[256]{};
 				for (int i = 0; i < 255; i++)
 					C[i] = VM->PLC_bb->AskForValue(i);
 				for (int i = 0; i < 255; i++)
@@ -1661,7 +1661,7 @@ namespace Settings
 
 std::pair<float, float> GetPositionForOneOf(std::int32_t Position, std::int32_t Amount, float UnitSize, float HeightRel)
 {
-	std::pair<float, float> T{ 0, 0 };
+	std::pair<float, float> T{ 0.f, 0.f };
 	std::int32_t SideAmount = ceil(sqrt(Amount));
 	T.first = (0 - (Position % SideAmount) + ((SideAmount - 1) / 2.f)) * UnitSize;
 	T.second = (0 - (Position / SideAmount) + ((SideAmount - 1) / 2.f)) * UnitSize * HeightRel;
@@ -1687,11 +1687,17 @@ void OnStart()
 	std::uint32_t ID = 0;
 
 	MW = (*WH)["SMRP_CONTAINER"];
-	for (auto El : MW->WindowActivities) 
+	std::list<std::string> undesired_window_activities;
+
+	for (auto& single_activity_pair : MW->WindowActivities) 
 	{
-		if (El.first.substr(0, 6) == "SMRP_C")
-			MW->DeleteUIElementByName(El.first);
+		if (single_activity_pair.first.substr(0, 6) == "SMRP_C")
+			undesired_window_activities.push_back(single_activity_pair.first);
+		//MW->DeleteUIElementByName(singleActivity.first);
 	}
+
+	for(auto& singleActivityName: undesired_window_activities)
+		MW->DeleteUIElementByName(singleActivityName);
 
 	auto timer_ptr = (InputField*)(*MW)["TIMER"];
 	auto now = std::chrono::high_resolution_clock::now();
@@ -2467,22 +2473,22 @@ struct SafcCliRuntime:
 		if (global_offset != config.end())
 			_Data.SetGlobalOffset(global_offset->second->AsNumber());
 
-		auto filesArray = files->second->AsArray();
+		auto& filesArray = files->second->AsArray();
 		std::vector<std::wstring> filenames;
 
-		for (auto singleEntry : filesArray)
+		for (auto& singleEntry : filesArray)
 		{
-			auto object = singleEntry->AsObject();
-			auto filename = object[L"filename"]->AsString();
+			auto& object = singleEntry->AsObject();
+			auto& filename = object.at(L"filename")->AsString();
 			filenames.push_back(std::move(filename));
 		}
 
 		AddFiles(filenames);
 
 		size_t index = 0;
-		for (auto singleEntry : filesArray)
+		for (auto& singleEntry : filesArray)
 		{
-			auto object = singleEntry->AsObject();
+			auto& object = singleEntry->AsObject();
 			
 			auto ppq_override = object.find(L"ppq_override");
 			if (ppq_override != object.end())

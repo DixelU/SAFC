@@ -149,11 +149,11 @@ public:
 	{
 		return file_pos;
 	}
-	inline bool good()
+	inline bool good() const
 	{
 		return is_open && !is_eof;
 	}
-	inline bool eof()
+	inline bool eof() const
 	{
 		return is_eof;
 	}

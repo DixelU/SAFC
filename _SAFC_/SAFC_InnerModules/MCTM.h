@@ -249,19 +249,27 @@ struct MIDICollectionThreadedMerger
 		
 		IITrackCount = 0;
 		std::thread([](mpd_t IMC, std::uint16_t PPQN, std::wstring _SaveTo, 
-			std::reference_wrapper<std::atomic_bool> FinishedFlag, std::reference_wrapper<std::atomic_uint64_t> TrackCount) {
+				std::reference_wrapper<std::atomic_bool> FinishedFlag,
+				std::reference_wrapper<std::atomic_uint64_t> TrackCount)
+		{
 			if (IMC.empty()) 
 			{
 				FinishedFlag.get() = true; /// Will this work?
 				return;
 			}
-			bool ActiveStreamFlag = 1;
-			bool ActiveTrackReading = 1;
+
+			bool ActiveStreamFlag = true;
+			bool ActiveTrackReading = true;
 			std::vector<bbb_ffr*> fiv;
+
 #define pfiv (*fiv[i])
+
 			std::vector<std::int64_t> DecayingDeltaTimes;
 #define ddt (DecayingDeltaTimes[i])
+
 			std::vector<std::uint8_t> Track, FrontEdge, BackEdge;
+			Track.reserve(1000000);
+
 			bbb_ffr* fi;
 			std::ofstream file_output(_SaveTo + L".I.mid", std::ios::binary | std::ios::out);
 			file_output << "MThd" << '\0' << '\0' << '\0' << (char)6 << '\0' << (char)1;
@@ -273,10 +281,12 @@ struct MIDICollectionThreadedMerger
 				DecayingDeltaTimes.push_back(0);
 				fiv.push_back(fi);
 			}
+
 			file_output.put(TrackCount.get() >> 8);
 			file_output.put(TrackCount.get());
 			file_output.put(PPQN >> 8);
 			file_output.put(PPQN);
+
 			while (ActiveStreamFlag) 
 			{
 				///reading tracks
@@ -296,6 +306,7 @@ struct MIDICollectionThreadedMerger
 					else
 						ddt = -1;
 				}
+
 				for (std::uint64_t Tick = 0; ActiveTrackReading; Tick++, InTrackDelta++)
 				{
 					std::uint8_t IO = 0, EVENTTYPE = 0;///yas
@@ -385,7 +396,7 @@ struct MIDICollectionThreadedMerger
 								std::cout << "Inplace error @" << std::hex << pos << std::dec << std::endl;
 
 								ThrowAlert_Error("DTI Failure at " + std::to_string(pos) + ". Type: " +
-									std::to_string(EVENTTYPE) + ". Tell developer about it and give him source midi.\n");
+									std::to_string(EVENTTYPE) + ". Tell developer about it and give him source midis.\n");
 
 								Track.push_back(0xCA);
 								Track.push_back(0);
@@ -433,7 +444,7 @@ struct MIDICollectionThreadedMerger
 					}
 				}
 				ActiveTrackReading = 1;
-				constexpr UINT32 EDGE = 0x7F000000;
+				constexpr std::uint32_t EDGE = 0x7F000000;
 
 				if (Track.size() > 0xFFFFFFFFu)
 					std::cout << "TrackSize overflow!!!\n";
