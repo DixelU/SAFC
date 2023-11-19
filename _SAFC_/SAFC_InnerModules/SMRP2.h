@@ -389,9 +389,6 @@ struct single_midi_processor_2
 			base_type* storage, 
 			const typename std::enable_if<std::is_same<T, raw_storage>::value, T>::type& value)
 		{
-			/*for (size_t i = 0; i < value.size; i++)
-				std::cout << std::hex << (int)((unsigned char*)value.ptr)[i] << ' ';
-			std::cout << std::endl;*/
 			std::memcpy(storage, value.ptr, value.size);
 		}
 
@@ -400,7 +397,6 @@ struct single_midi_processor_2
 			base_type* storage, 
 			const typename std::enable_if<(!std::is_same<T, raw_storage>::value), T>::type& value)
 		{
-			//std::cout << std::hex << (tick_type)value << std::endl;
 			*(T*)(storage) = value;
 		}
 
