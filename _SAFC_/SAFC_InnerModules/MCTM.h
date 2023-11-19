@@ -249,19 +249,27 @@ struct MIDICollectionThreadedMerger
 		
 		IITrackCount = 0;
 		std::thread([](mpd_t IMC, std::uint16_t PPQN, std::wstring _SaveTo, 
-			std::reference_wrapper<std::atomic_bool> FinishedFlag, std::reference_wrapper<std::atomic_uint64_t> TrackCount) {
+				std::reference_wrapper<std::atomic_bool> FinishedFlag,
+				std::reference_wrapper<std::atomic_uint64_t> TrackCount)
+		{
 			if (IMC.empty()) 
 			{
 				FinishedFlag.get() = true; /// Will this work?
 				return;
 			}
-			bool ActiveStreamFlag = 1;
-			bool ActiveTrackReading = 1;
+
+			bool ActiveStreamFlag = true;
+			bool ActiveTrackReading = true;
 			std::vector<bbb_ffr*> fiv;
+
 #define pfiv (*fiv[i])
+
 			std::vector<std::int64_t> DecayingDeltaTimes;
 #define ddt (DecayingDeltaTimes[i])
+
 			std::vector<std::uint8_t> Track, FrontEdge, BackEdge;
+			Track.reserve(1000000);
+
 			bbb_ffr* fi;
 			std::ofstream file_output(_SaveTo + L".I.mid", std::ios::binary | std::ios::out);
 			file_output << "MThd" << '\0' << '\0' << '\0' << (char)6 << '\0' << (char)1;
@@ -273,10 +281,12 @@ struct MIDICollectionThreadedMerger
 				DecayingDeltaTimes.push_back(0);
 				fiv.push_back(fi);
 			}
+
 			file_output.put(TrackCount.get() >> 8);
 			file_output.put(TrackCount.get());
 			file_output.put(PPQN >> 8);
 			file_output.put(PPQN);
+
 			while (ActiveStreamFlag) 
 			{
 				///reading tracks
@@ -296,6 +306,7 @@ struct MIDICollectionThreadedMerger
 					else
 						ddt = -1;
 				}
+
 				for (std::uint64_t Tick = 0; ActiveTrackReading; Tick++, InTrackDelta++)
 				{
 					std::uint8_t IO = 0, EVENTTYPE = 0;///yas
@@ -385,7 +396,7 @@ struct MIDICollectionThreadedMerger
 								std::cout << "Inplace error @" << std::hex << pos << std::dec << std::endl;
 
 								ThrowAlert_Error("DTI Failure at " + std::to_string(pos) + ". Type: " +
-									std::to_string(EVENTTYPE) + ". Tell developer about it and give him source midi.\n");
+									std::to_string(EVENTTYPE) + ". Tell developer about it and give him source midis.\n");
 
 								Track.push_back(0xCA);
 								Track.push_back(0);
@@ -433,7 +444,7 @@ struct MIDICollectionThreadedMerger
 					}
 				}
 				ActiveTrackReading = 1;
-				constexpr UINT32 EDGE = 0x7F000000;
+				constexpr std::uint32_t EDGE = 0x7F000000;
 
 				if (Track.size() > 0xFFFFFFFFu)
 					std::cout << "TrackSize overflow!!!\n";
@@ -523,47 +534,62 @@ struct MIDICollectionThreadedMerger
 		std::copy_if(midi_processing_data.begin(), midi_processing_data.end(), std::back_inserter(regular_merge_candidates),
 			[](mpd_t::value_type& el) { return !el.first->settings.details.inplace_mergable; });
 
-		std::thread([](mpd_t RMC, std::uint16_t PPQN, std::wstring _SaveTo,
-			std::reference_wrapper<std::atomic_bool> FinishedFlag, std::reference_wrapper<std::atomic_uint64_t> TrackCount)
+		if (regular_merge_candidates.size() == 1)
 		{
-			if (RMC.empty()) 
-			{
-				FinishedFlag.get() = true;
-				return;
-			}
-			//bool FirstFlag = 1;
-			const size_t buffer_size = 20000000;
-			std::uint8_t* buffer = new std::uint8_t[buffer_size];
-			std::ofstream file_output(_SaveTo + L".R.mid", std::ios::binary | std::ios::out);
-			std::wstring filename = RMC.front().first->filename + RMC.front().first->postfix;
-			bbb_ffr file_input(filename.c_str());
-			file_output.rdbuf()->pubsetbuf((char*)buffer, buffer_size);
-			file_output << "MThd" << '\0' << '\0' << '\0' << (char)6 << '\0' << (char)1;
-			file_output.put(0);
-			file_output.put(0);
-			file_output.put(PPQN >> 8);
-			file_output.put(PPQN);
-			for (auto Y = RMC.begin(); Y != RMC.end(); Y++) 
-			{
-				filename = Y->first->filename + Y->first->postfix;
-				if (Y != RMC.begin())
-					file_input.reopen_next_file(filename.c_str());
-				for (int i = 0; i < 14; i++)
-					file_input.get();
-				file_input.put_into_ostream(file_output);
-				TrackCount.get() += Y->first->tracks_count;
-				int t;
-				if (Y->first->settings.proc_details.remove_remnants)
-					t = _wremove(filename.c_str());
-			}
-			file_output.seekp(10, std::ios::beg);
-			file_output.put(TrackCount.get() >> 8);
-			file_output.put(TrackCount.get());
-			FinishedFlag.get() = true; /// Will this work?
-			file_output.flush();
-			file_output.close();
-			delete[] buffer;
-			}, regular_merge_candidates, FinalPPQN, SaveTo, std::ref(IntermediateRegularFlag), std::ref(IRTrackCount)).detach();
+			std::wstring filename = 
+				regular_merge_candidates.front().first->filename + 
+				regular_merge_candidates.front().first->postfix;
+			auto save_to_with_postfix = SaveTo + L".R.mid";
+			_wremove(save_to_with_postfix.c_str());
+			auto result = _wrename(filename.c_str(), save_to_with_postfix.c_str());
+
+			IntermediateRegularFlag = true; /// Will this work?
+		}
+		else
+		{
+			std::thread([](mpd_t RMC, std::uint16_t PPQN, std::wstring _SaveTo,
+				std::reference_wrapper<std::atomic_bool> FinishedFlag, std::reference_wrapper<std::atomic_uint64_t> TrackCount)
+				{
+					if (RMC.empty())
+					{
+						FinishedFlag.get() = true;
+						return;
+					}
+					//bool FirstFlag = 1;
+					const size_t buffer_size = 20000000;
+					std::uint8_t* buffer = new std::uint8_t[buffer_size];
+					std::ofstream file_output(_SaveTo + L".R.mid", std::ios::binary | std::ios::out);
+					std::wstring filename = RMC.front().first->filename + RMC.front().first->postfix;
+					bbb_ffr file_input(filename.c_str());
+					file_output.rdbuf()->pubsetbuf((char*)buffer, buffer_size);
+					file_output << "MThd" << '\0' << '\0' << '\0' << (char)6 << '\0' << (char)1;
+					file_output.put(0);
+					file_output.put(0);
+					file_output.put(PPQN >> 8);
+					file_output.put(PPQN);
+					for (auto Y = RMC.begin(); Y != RMC.end(); Y++)
+					{
+						filename = Y->first->filename + Y->first->postfix;
+						if (Y != RMC.begin())
+							file_input.reopen_next_file(filename.c_str());
+						for (int i = 0; i < 14; i++)
+							file_input.get();
+						file_input.put_into_ostream(file_output);
+						TrackCount.get() += Y->first->tracks_count;
+						int t;
+						if (Y->first->settings.proc_details.remove_remnants)
+							t = _wremove(filename.c_str());
+					}
+					file_output.seekp(10, std::ios::beg);
+					file_output.put(TrackCount.get() >> 8);
+					file_output.put(TrackCount.get());
+					FinishedFlag.get() = true; /// Will this work?
+					file_output.flush();
+					file_output.close();
+					delete[] buffer;
+				}, regular_merge_candidates, FinalPPQN, SaveTo, std::ref(IntermediateRegularFlag), std::ref(IRTrackCount)).detach();
+		}
+
 	}
 	void Start_RI_Merge() 
 	{
