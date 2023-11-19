@@ -258,6 +258,7 @@ struct single_midi_processor_2
 			bool remove_remnants;
 			bool remove_empty_tracks;
 			bool channel_split;
+			bool whole_midi_collapse;
 		};
 
 		sgtick_type offset;
@@ -808,7 +809,7 @@ struct single_midi_processor_2
 		auto hi = value >> 32;
 		auto lo = value & (~0u);
 
-		return value * (hi * to / from) * radix + (lo * to / from);
+		return (hi * to / from) * radix + (lo * to / from);
 	}
 
 	using filters_multimap = std::multimap<base_type, event_transforming_filter>;
@@ -1264,16 +1265,14 @@ struct single_midi_processor_2
 		{
 			auto& tick = get_value<tick_type>(cur, tick_position);
 
-			if (offset < 0 && tick < -offset)
-				return (tick = disable_tick), false;
-			else
-				tick += offset;
-
 			if (old_ppqn == new_ppqn)
 				return true;
 
-			tick = convert_ppq(tick, old_ppqn, new_ppqn);
-			return true;
+			auto new_tick = convert_ppq(tick, old_ppqn, new_ppqn) + offset;
+
+			if(offset < 0 && new_tick > tick)
+				return (tick = disable_tick), false;
+			return (tick = new_tick),true;
 		};
 
 		filters.insert({ 0, selection_filter });
@@ -1300,16 +1299,21 @@ struct single_midi_processor_2
 
 		std::vector<uint8_t> data;
 		tick_type prev_tick;
-		inline std::vector<uint8_t>& get_vec(const uint8_t&)
+		inline std::vector<uint8_t>& get_vec(uint8_t)
 		{
 			return data;
+		}
+		inline void swap(track_data<false>& track)
+		{
+			data.swap(track.data);
+			std::swap(prev_tick, track.prev_tick);
 		}
 		inline void clear()
 		{
 			data.clear();
 			prev_tick = 0;
 		}
-		inline tick_type& get_tick(const uint8_t&)
+		inline tick_type& get_tick(uint8_t)
 		{
 			return prev_tick;
 		}
@@ -1317,7 +1321,7 @@ struct single_midi_processor_2
 		{
 			return !disallow_empty_tracks || !data.empty();
 		}
-		inline void reserve(const uint64_t& size)
+		inline void reserve(uint64_t size)
 		{
 			data.reserve(size);
 		}
@@ -1350,19 +1354,28 @@ struct single_midi_processor_2
 				out.write((const char*)&placeholder[0], sizeof(placeholder));
 			out.write((const char*)&ending[0], sizeof(ending));
 		}
+		inline void swap_zero_and_channel(const uint8_t&) { return; }
 	};
 
 	template<>
 	struct track_data<true>
 	{
 		track_data<false> data[16];
+		uint8_t last_channel{0};
 
-		inline std::vector<uint8_t>& get_vec(const uint8_t& channel)
+		inline std::vector<uint8_t>& get_vec(uint8_t channel)
 		{
+			if (channel == 0xFF)
+				channel = last_channel;
 			return data[channel].get_vec(channel);
+		}
+		inline void swap_zero_and_channel(const uint8_t& channel)
+		{
+			data[0].swap(data[channel]);
 		}
 		inline void clear()
 		{
+			last_channel = 0;
 			for (auto& singleData : data)
 				singleData.clear();
 		}
@@ -1373,8 +1386,10 @@ struct single_midi_processor_2
 				counter += singleData.count(disallow_empty_tracks);
 			return counter;
 		}
-		inline tick_type& get_tick(const uint8_t& channel)
+		inline tick_type& get_tick(uint8_t channel)
 		{
+			if (channel == 0xFF)
+				channel = last_channel;
 			return data[channel].get_tick(channel);
 		}
 		inline void dump(std::ostream& out, bool disallow_empty_tracks)
@@ -1382,7 +1397,7 @@ struct single_midi_processor_2
 			for (auto& singleData : data)
 				singleData.dump(out, disallow_empty_tracks);
 		}
-		inline void reserve(const uint64_t& size)
+		inline void reserve(uint64_t size)
 		{
 			for (auto& singleData : data)
 				singleData.reserve(size);
@@ -1394,12 +1409,13 @@ struct single_midi_processor_2
 		tick_type selection_front_tick,
 		single_track_data& std_ref,
 		message_buffers& buffers,
-		track_data<channels_split>& out_buffer)
+		track_data<channels_split>& out_buffer, 
+		bool& had_non_meta_events)
 	{
 		if (std_ref.selection_data.frontal_tempo != single_track_data::selection::default_tempo)
 		{
-			auto& prev_tick = out_buffer.get_tick(0);
-			auto& track_data = out_buffer.get_vec(0);
+			auto& prev_tick = out_buffer.get_tick(0xFF);
+			auto& track_data = out_buffer.get_vec(0xFF);
 			auto delta = selection_front_tick - prev_tick;
 			prev_tick = selection_front_tick;
 			push_vlv_s(delta, track_data);
@@ -1415,8 +1431,8 @@ struct single_midi_processor_2
 
 		if (!std_ref.selection_data.frontal_color_event.is_empty)
 		{
-			auto& prev_tick = out_buffer.get_tick(0);
-			auto& track_data = out_buffer.get_vec(0);
+			auto& prev_tick = out_buffer.get_tick(0xFF);
+			auto& track_data = out_buffer.get_vec(0xFF);
 			auto delta = selection_front_tick - prev_tick;
 			prev_tick = selection_front_tick;
 			push_vlv_s(delta, track_data);
@@ -1435,6 +1451,12 @@ struct single_midi_processor_2
 			auto param_1 = key_param1 & 0xFF;
 			auto channel = event_kind & 0xF;
 
+			if (!had_non_meta_events)
+			{
+				had_non_meta_events = true;
+				out_buffer.swap_zero_and_channel(channel);
+			}
+
 			auto& prev_tick = out_buffer.get_tick(channel);
 			auto& track_data = out_buffer.get_vec(channel);
 			auto delta = selection_front_tick - prev_tick;
@@ -1450,6 +1472,12 @@ struct single_midi_processor_2
 		for (auto& [event_kind, data] : std_ref.selection_data.channel_events_at_selection_front)
 		{
 			auto channel = event_kind & 0xF;
+
+			if (!had_non_meta_events)
+			{
+				had_non_meta_events = true;
+				out_buffer.swap_zero_and_channel(channel);
+			}
 
 			auto& prev_tick = out_buffer.get_tick(channel);
 			auto& track_data = out_buffer.get_vec(channel);
@@ -1478,6 +1506,7 @@ struct single_midi_processor_2
 		auto db_begin = data_buffer.begin();
 		auto db_end = data_buffer.end();
 		auto db_current = data_buffer.begin();
+		bool had_non_meta_events = false;
 
 		auto size = data_buffer.size();
 		std::size_t i = 0;
@@ -1502,7 +1531,8 @@ struct single_midi_processor_2
 					selection_front_tick,
 					std_ref,
 					buffers,
-					out_buffer);
+					out_buffer, 
+					had_non_meta_events);
 				first_tick = false;
 			}
 		};
@@ -1524,7 +1554,18 @@ struct single_midi_processor_2
 				write_selection_front_wrap();
 
 				const auto& event_kind = get_value<base_type>(data_buffer, i + event_type);
-				const auto channel = event_kind & 0xF;
+				auto channel = event_kind & 0xF;
+
+				const bool is_non_meta_event = (event_kind & 0xF0) != 0xF0;
+				if (is_non_meta_event && !had_non_meta_events)
+				{
+					had_non_meta_events = is_non_meta_event;
+					out_buffer.swap_zero_and_channel(channel);
+				}
+
+				if (!is_non_meta_event)
+					channel = 0xFF;
+
 				auto& prev_tick = out_buffer.get_tick(channel);
 				auto& track_data = out_buffer.get_vec(channel);
 				auto delta = tick - prev_tick;
@@ -1610,7 +1651,8 @@ struct single_midi_processor_2
 
 		while (file_input.good())
 		{
-			track_buffers.data_buffer.clear();
+			if(!data.settings.proc_details.whole_midi_collapse)
+				track_buffers.data_buffer.clear();
 
 			bool is_readable = put_data_in_buffer(file_input, track_buffers, loggers, data.settings, polyphony_stacks);
 
@@ -1618,33 +1660,58 @@ struct single_midi_processor_2
 			track_processing_data.selection_data.frontal_tempo =
 				data.settings.tempo.tempo_override_value;
 
-			if (track_buffers.data_buffer.size())
+			bool buffer_should_be_processed =
+				(!data.settings.proc_details.whole_midi_collapse || !file_input.good()) &&
+				track_buffers.data_buffer.size();
+
+			bool sort_data_buffer_flag =
+				data.settings.proc_details.whole_midi_collapse && !file_input.good();
+			bool data_buffer_is_dumpable =
+				!data.settings.proc_details.whole_midi_collapse || !file_input.good();
+
+			if (buffer_should_be_processed)
 			{
 				bool successful_processing =
 					process_buffer(track_buffers.data_buffer, filter_iters, track_processing_data, loggers);
 				if (!successful_processing)
-					(*loggers.error) << "Something went wrong";
+					(*loggers.error) << "Something went wrong during processing";
 			}
 
-			if(data.settings.legacy.rsb_compression)
-				write_track<true, channels_split>(
-					track_buffers.data_buffer,
-					track_processing_data, 
-					loggers, 
-					data,
-					write_buffer);
-			else 
-				write_track<false, channels_split>(
-					track_buffers.data_buffer,
-					track_processing_data, 
-					loggers, 
-					data,
-					write_buffer);
+			if (sort_data_buffer_flag)
+			{
+				bool successful_processing =
+					sort_buffer(track_buffers.data_buffer, track_processing_data, loggers);
+				if (!successful_processing)
+					(*loggers.error) << "Something went wrong during sorting";
+			}
+
+			if (data_buffer_is_dumpable)
+			{
+				if (data.settings.legacy.rsb_compression)
+					write_track<true, channels_split>(
+						track_buffers.data_buffer,
+						track_processing_data,
+						loggers,
+						data,
+						write_buffer);
+				else
+					write_track<false, channels_split>(
+						track_buffers.data_buffer,
+						track_processing_data,
+						loggers,
+						data,
+						write_buffer);
+			}
 
 			auto current_count = write_buffer.count(data.settings.proc_details.remove_empty_tracks);
 			track_counter += current_count;
-			write_buffer.dump(file_output, data.settings.proc_details.remove_empty_tracks);
-			write_buffer.clear();
+
+			if (data_buffer_is_dumpable)
+			{
+				write_buffer.dump(file_output, data.settings.proc_details.remove_empty_tracks);
+				write_buffer.clear();
+			}
+
 			loggers.last_input_position = file_input.tellg();
 			(*loggers.log) << (std::to_string(track_counter) + " tracks processed. (" + std::to_string(current_count) + ") new.");
 		}
