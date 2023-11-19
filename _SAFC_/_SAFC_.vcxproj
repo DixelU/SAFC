@@ -189,6 +189,7 @@
       <DelayLoadDLLs>
       </DelayLoadDLLs>
       <AdditionalLibraryDirectories>C:\dev\vcpkg\installed</AdditionalLibraryDirectories>
+      <Profile>true</Profile>
     </Link>
     <ResourceCompile>
       <AdditionalIncludeDirectories>

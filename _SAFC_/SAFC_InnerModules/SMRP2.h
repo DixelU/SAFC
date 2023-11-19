@@ -323,8 +323,12 @@ struct single_midi_processor_2
 			size++;
 		} while (value);
 		r_size = size;
-		while (size)
-			vec.push_back(stack[--size]);
+
+		copy_back_traits::copy_back(
+			vec,
+			copy_back_traits::raw_storage{ stack, size }
+		);
+
 		return r_size;
 	}
 
@@ -485,7 +489,9 @@ struct single_midi_processor_2
 			//case 16: { copy_back_traits::copy_back(vec, get_value<uint64_t>(begin, 0), get_value<uint64_t>(begin, 0 + 8)); break; }
 			default:
 			{
-				vec.insert(vec.end(), begin, end);
+				//vec.insert(vec.end(), begin, end);
+				std::size_t size = end - begin;
+				copy_back_traits::copy_back(vec, copy_back_traits::raw_storage{ &*begin, size });
 				break;
 			}
 		}
@@ -631,11 +637,11 @@ struct single_midi_processor_2
 				bool polyphony_error = false;
 				auto& current_polyphony_object = current_polyphony[key_polyindex];
 				if (com & 0x10)
-					current_polyphony_object.push_back(current_index);
+					current_polyphony_object.push_back(current_index); // hot smh
 				else if (current_polyphony_object.size())
 				{
 					reference = current_polyphony_object.back();
-					current_polyphony_object.pop_back();
+					current_polyphony_object.pop_back(); // hot smh
 					auto other_note_reference = reference + event_param3;
 					if (true || is_valid_index<tick_type>(data_buffer, other_note_reference)) [[likely]]
 						get_value<tick_type>(data_buffer, other_note_reference) = current_index;
@@ -859,16 +865,16 @@ struct single_midi_processor_2
 				auto& [begin, end] = filters[0];
 				auto beg_copy = begin;
 
-				for (; isActive && beg_copy != end; ++beg_copy)
-					isActive &= (beg_copy->second)(db_begin, db_end, db_current, std_ref);
+				for (; isActive && beg_copy != end; ++beg_copy) // hot smh
+					isActive &= (beg_copy->second)(db_begin, db_end, db_current, std_ref); // hot smh
 			}
 
 			{
 				auto& [begin, end] = filters[channellless_type];
 				auto beg_copy = begin;
 
-				for (; isActive && beg_copy != end; ++beg_copy)
-					isActive &= (beg_copy->second)(db_begin, db_end, db_current, std_ref);
+				for (; isActive && beg_copy != end; ++beg_copy) // hot smh
+					isActive &= (beg_copy->second)(db_begin, db_end, db_current, std_ref); // hot smh
 			}
 
 			db_current += di;
@@ -1265,10 +1271,11 @@ struct single_midi_processor_2
 		{
 			auto& tick = get_value<tick_type>(cur, tick_position);
 
-			if (old_ppqn == new_ppqn && offset == 0)
-				return true;
-
-			auto new_tick = sgtick_type(convert_ppq(tick, old_ppqn, new_ppqn)) + offset;
+			auto new_tick = sgtick_type(
+				old_ppqn == new_ppqn ? 
+					tick : 
+					convert_ppq(tick, old_ppqn, new_ppqn)) +
+				offset;
 
 			if(new_tick < 0)
 				return (tick = disable_tick), false;
@@ -1573,7 +1580,7 @@ struct single_midi_processor_2
 
 				push_vlv_s(delta, track_data);
 
-				auto actual_event_size = expected_size<true>(db_current);
+				auto actual_event_size = expected_size<true>(db_current); // hot smh
 
 				if (!compression)
 				{

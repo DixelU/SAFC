@@ -117,12 +117,15 @@ namespace dixelu
         type_erased_function_container(self_type&& f) = default;
         type_erased_function_container(const self_type& f) = default;
 
+        type_erased_function_container& operator=(type_erased_function_container&& ref) = default;
+        type_erased_function_container& operator=(const type_erased_function_container& ref) = default;
+
         ~type_erased_function_container()
         {
             _function_ref = decltype(_function_ref){&__dummy_func};
         }
 
-        inline R operator()(Args... args) const { return _function_ref(soa::detail::forward<Args>(args)...); }
+        inline R operator()(Args... args) const { return (_function_ref)(soa::detail::forward<Args>(args)...); }
         operator bool() const { return _callable; }
     };
 }
