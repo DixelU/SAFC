@@ -324,10 +324,8 @@ struct single_midi_processor_2
 		} while (value);
 		r_size = size;
 
-		copy_back_traits::copy_back(
-			vec,
-			copy_back_traits::raw_storage{ stack, size }
-		);
+		while (size)
+			vec.push_back(stack[--size]);
 
 		return r_size;
 	}
@@ -655,7 +653,7 @@ struct single_midi_processor_2
 					(*buffers.warning) << (std::to_string(file_input.tellg()) + ": OFF of nonON Note: " + std::to_string(noteoff_misses));
 				}
 
-				if (polyphony_error)
+				if (polyphony_error) [[unlikely]]
 				{
 					data_buffer.resize(current_index);
 					continue;
