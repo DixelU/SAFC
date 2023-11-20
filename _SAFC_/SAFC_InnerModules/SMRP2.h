@@ -308,26 +308,29 @@ struct single_midi_processor_2
 
 	FORCEDINLINE static uint8_t push_vlv_s(const tick_type& s_value, std::vector<base_type>& vec)
 	{
-		constexpr uint8_t $7byte_mask = 0x7F, max_size = 10, $7byte_mask_size = 7;
+		constexpr uint8_t $7byte_mask = 0x7F, max_size = 11, $7byte_mask_size = 7;
 		constexpr uint8_t $adjacent7byte_mask = ~$7byte_mask;
 		uint64_t value = s_value;
-		uint8_t stack[max_size]{};
-		uint8_t size = 0;
-		uint8_t r_size = 0;
+		uint8_t __stack[max_size]{};
+		uint8_t* const stack_end = __stack + max_size;
+		uint8_t* stack = stack_end;
 		do
 		{
-			stack[size] = (value & $7byte_mask);
+			stack--;
+			*stack = (value & $7byte_mask);
 			value >>= $7byte_mask_size;
-			if (size)
-				stack[size] |= $adjacent7byte_mask;
-			size++;
+			if (stack_end - stack != 1)
+				*stack |= $adjacent7byte_mask;
 		} while (value);
-		r_size = size;
 
-		while (size)
-			vec.push_back(stack[--size]);
+		auto stack_size = size_t(stack_end - stack);
 
-		return r_size;
+		copy_back_traits::copy_back(
+			vec,
+			copy_back_traits::raw_storage{ stack, stack_size }
+		);
+
+		return stack_size;
 	}
 
 	FORCEDINLINE static uint64_t get_vlv(bbb_ffr& file_input)

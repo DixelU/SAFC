@@ -1274,6 +1274,10 @@ namespace PropsAndSets
 			DefaultBoolSettings = Y->BoolSettings = _Data[currentID].BoolSettings;
 			_Data.InplaceMergeFlag = Y->InplaceMergeEnabled = _Data[currentID].InplaceMergeEnabled;
 			Y->AllowLegacyRunningStatusMetaIgnorance = _Data[currentID].AllowLegacyRunningStatusMetaIgnorance;
+			Y->CollapseMIDI = _Data[currentID].CollapseMIDI;
+			Y->AllowSysex = _Data[currentID].AllowSysex;
+			Y->ChannelsSplit = _Data[currentID].ChannelsSplit;
+			Y->RSBCompression = _Data[currentID].RSBCompression;
 		}
 	}
 
@@ -1630,7 +1634,7 @@ namespace Settings
 		{
 			TRY_CATCH(RegestryAccess.SetDwordValue(L"AUTOUPDATECHECK", check_autoupdates);, "Failed on setting AUTOUPDATECHECK")
 			TRY_CATCH(RegestryAccess.SetDwordValue(L"SPLIT_TRACKS", _Data.ChannelsSplit); , "Failed on setting SPLIT_TRACKS")
-			TRY_CATCH(RegestryAccess.SetDwordValue(L"COLLAPSE_MIDI", _Data.ChannelsSplit); , "Failed on setting COLLAPSE_MIDI")
+			TRY_CATCH(RegestryAccess.SetDwordValue(L"COLLAPSE_MIDI", _Data.CollapseMIDI); , "Failed on setting COLLAPSE_MIDI")
 			//TRY_CATCH(RegestryAccess.SetDwordValue(L"RSB_COMPRESS", check_autoupdates);, "Failed on setting RSB_COMPRESS")
 			TRY_CATCH(RegestryAccess.SetDwordValue(L"DEFAULT_BOOL_SETTINGS", DefaultBoolSettings);, "Failed on setting DEFAULT_BOOL_SETTINGS")
 			TRY_CATCH(RegestryAccess.SetDwordValue(L"FONTSIZE", lFontSymbolsInfo::Size); , "Failed on setting FONTSIZE")
@@ -1663,6 +1667,7 @@ namespace Settings
 			Y->InplaceMergeEnabled = _Data.InplaceMergeFlag && !_Data.ChannelsSplit;
 			Y->ChannelsSplit = _Data.ChannelsSplit;
 			Y->RSBCompression = _Data.RSBCompression;
+			Y->CollapseMIDI = _Data.CollapseMIDI;
 		}
 	}
 	void ApplyFSWheel(double new_val)
@@ -2581,6 +2586,10 @@ struct SafcCliRuntime:
 			auto channel_split = object.find(L"channel_split");
 			if (channel_split != object.end())
 				_Data.Files[index].ChannelsSplit = channel_split->second->AsBool();
+
+			auto collapse_midi = object.find(L"collapse_midi");
+			if (collapse_midi != object.end())
+				_Data.Files[index].CollapseMIDI = channel_split->second->AsBool();
 
 			auto rsb_compression = object.find(L"rsb_compression");
 			if (rsb_compression != object.end())
