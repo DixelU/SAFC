@@ -255,6 +255,7 @@ struct single_midi_processor_2
 
 		struct processing_details
 		{
+			bool apply_offset_after;
 			bool remove_remnants;
 			bool remove_empty_tracks;
 			bool channel_split;
@@ -889,6 +890,7 @@ struct single_midi_processor_2
 		auto db_end = data_buffer.end();
 		auto db_current = data_buffer.begin();
 
+#pragma pack (push, 1)
 		struct data
 		{
 			tick_type tick;
@@ -900,11 +902,14 @@ struct single_midi_processor_2
 				return tick < op.tick;
 			}
 		};
+#pragma pack(pop)
 
 		auto size = data_buffer.size();
 
 		if (size == 0) // [[unlikely]]
-			return ((*buffers.log) << "Empty buffer"), false;
+			return ((*buffers.log) << "Empty buffer (sort)"), false;
+		else
+			(*buffers.log) << "Prepairing buffer (size: " + std::to_string(size) + ")";
 
 		std::vector<data> data_pointers;
 		data_pointers.reserve(2500000);
@@ -925,13 +930,18 @@ struct single_midi_processor_2
 
 			di = expected_size(db_current);
 
-			data_pointers.emplace_back(tick, i, di);
+			if(tick != disable_tick)
+				data_pointers.emplace_back(tick, i, di);
 
 			db_current += di;
 			i += di;
 		}
 
+		(*buffers.log) << "Sorting buffer (elements: " + std::to_string(data_pointers.size()) + ")";
+
 		std::sort(data_pointers.begin(), data_pointers.end());
+
+		(*buffers.log) << "Copying buffer (elements: " + std::to_string(data_pointers.size()) + ")";
 
 		std::vector<base_type> sorted_data_buffer;
 		sorted_data_buffer.reserve(data_buffer.size());
@@ -1263,19 +1273,33 @@ struct single_midi_processor_2
 		};
 
 		const event_transforming_filter tick_positive_linear_transform =
-			[old_ppqn = settings.old_ppqn, new_ppqn = settings.new_ppqn, offset = settings.offset]
+			[old_ppqn = settings.old_ppqn,
+			 new_ppqn = settings.new_ppqn, 
+			 offset = settings.offset,
+			 apply_offset_after = settings.proc_details.apply_offset_after]
 		(const data_iterator& begin, const data_iterator& end, const data_iterator& cur, single_track_data& std_ref) -> bool
 		{
 			auto& tick = get_value<tick_type>(cur, tick_position);
 
-			auto new_tick = sgtick_type(
-				old_ppqn == new_ppqn ? 
-					tick : 
+			if (apply_offset_after)
+			{
+				auto new_tick = sgtick_type(
+					old_ppqn == new_ppqn ?
+					tick :
 					convert_ppq(tick, old_ppqn, new_ppqn)) +
-				offset;
+					offset;
 
+				if (new_tick < 0)
+					return (tick = disable_tick), false;
+				return (tick = new_tick), true;
+			}
+
+			sgtick_type new_tick = sgtick_type(tick) + offset;
 			if(new_tick < 0)
 				return (tick = disable_tick), false;
+
+			if (old_ppqn != new_ppqn)
+				new_tick = convert_ppq(new_tick, old_ppqn, new_ppqn);
 			return (tick = new_tick), true;
 		};
 
