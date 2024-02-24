@@ -525,6 +525,7 @@ struct SAFCData
 		CollapseMIDI = false;
 		SaveDirectory = L"";
 		ChannelsSplit = RSBCompression = false;
+		ApplyOffsetAfter = true;
 	}
 	void ResolveSubdivisionProblem_GroupIDAssign(std::uint16_t ThreadsCount = 0)
 	{
