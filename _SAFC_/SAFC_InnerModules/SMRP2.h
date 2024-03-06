@@ -1713,6 +1713,8 @@ struct single_midi_processor_2
 					(*loggers.error) << "Something went wrong during sorting";
 			}
 
+			size_t current_count;
+
 			if (data_buffer_is_dumpable)
 			{
 				if (data.settings.legacy.rsb_compression)
@@ -1731,11 +1733,11 @@ struct single_midi_processor_2
 						write_buffer);
 			}
 
-			auto current_count = write_buffer.count(data.settings.proc_details.remove_empty_tracks);
-			track_counter += current_count;
+			current_count = write_buffer.count(data.settings.proc_details.remove_empty_tracks);
 
 			if (data_buffer_is_dumpable)
 			{
+				track_counter += current_count;
 				write_buffer.dump(file_output, data.settings.proc_details.remove_empty_tracks);
 				write_buffer.clear();
 			}
