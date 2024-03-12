@@ -1649,8 +1649,8 @@ namespace Settings
 			TRY_CATCH(RegestryAccess.SetDwordValue(L"APPLY_OFFSET_AFTER", _Data.CollapseMIDI);, "Failed on setting APPLY_OFFSET_AFTER")
 			//TRY_CATCH(RegestryAccess.SetDwordValue(L"RSB_COMPRESS", check_autoupdates);, "Failed on setting RSB_COMPRESS")
 			TRY_CATCH(RegestryAccess.SetDwordValue(L"DEFAULT_BOOL_SETTINGS", DefaultBoolSettings);, "Failed on setting DEFAULT_BOOL_SETTINGS")
-			TRY_CATCH(RegestryAccess.SetDwordValue(L"FONTSIZE", lFontSymbolsInfo::Size); , "Failed on setting FONTSIZE")
-			TRY_CATCH(RegestryAccess.SetDwordValue(L"FLOAT_FONTHTW", *(std::uint32_t*)(&lFONT_HEIGHT_TO_WIDTH)); , "Failed on setting FLOAT_FONTHTW")
+			TRY_CATCH(RegestryAccess.SetDwordValue(L"FONTSIZE_POST1P4", lFontSymbolsInfo::Size); , "Failed on setting FONTSIZE_POST1P4")
+			TRY_CATCH(RegestryAccess.SetDwordValue(L"FLOAT_FONTHTW_POST1P4", *(std::uint32_t*)(&lFONT_HEIGHT_TO_WIDTH)); , "Failed on setting FLOAT_FONTHTW_POST1P4")
 		}
 
 		_Data.InplaceMergeFlag = (((CheckBox*)(*pptr)["INPLACE_MERGE"])->State);
@@ -1660,7 +1660,7 @@ namespace Settings
 		((InputField*)(*pptr)["AS_FONT_NAME"])->PutIntoSource();
 		std::wstring ws(default_font_name.begin(), default_font_name.end());
 		if (isRegestryOpened)
-			TRY_CATCH(RegestryAccess.SetStringValue(L"COLLAPSEDFONTNAME", ws.c_str()); , "Failed on setting AS_BCKGID")
+			TRY_CATCH(RegestryAccess.SetStringValue(L"COLLAPSEDFONTNAME_POST1P4", ws.c_str()); , "Failed on setting COLLAPSEDFONTNAME_POST1P4")
 			if (isRegestryOpened)
 				Settings::RegestryAccess.Close();
 	}
