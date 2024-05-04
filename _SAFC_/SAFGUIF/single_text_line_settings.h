@@ -7,8 +7,8 @@
 
 constexpr auto CharWidthPerHeight_Fonted = 0.666f;
 constexpr auto CharWidthPerHeight = 0.5f;
-#define CharSpaceBetween(CharHeight) CharHeight/2.f
-#define CharLineWidth(CharHeight) ceil(CharHeight/7.5f)
+#define CharSpaceBetween(CharHeight) (CharHeight)/2.f
+#define CharLineWidth(CharHeight) ceil((CharHeight)/7.5f)
 
 struct SingleTextLineSettings
 {
@@ -20,7 +20,7 @@ struct SingleTextLineSettings
 	std::uint32_t RGBAColor, gRGBAColor;
 	SingleTextLineSettings(std::string Text, float CXpos, float CYpos, float XUnitSize, float YUnitSize, std::uint8_t LineWidth, std::uint8_t SpaceWidth, std::uint32_t RGBAColor, std::uint32_t gRGBAColor, std::uint8_t BasePoint, std::uint8_t GradPoint)
 	{
-		this->STLstring = Text;
+		this->STLstring = std::move(Text);
 		this->CXpos = CXpos;
 		this->CYpos = CYpos;
 		this->XUnitSize = XUnitSize;
@@ -64,20 +64,20 @@ struct SingleTextLineSettings
 		if (GradPoint & 0xF0 && !isFonted)
 			ptr = new SingleTextLine(STLstring, CXpos, CYpos, XUnitSize, YUnitSize, SpaceWidth, LineWidth, RGBAColor);
 		else if (!isFonted)
-			ptr = new SingleTextLine(STLstring, CXpos, CYpos, XUnitSize, YUnitSize, SpaceWidth, LineWidth, RGBAColor, new std::uint32_t(gRGBAColor), ((BasePoint & 0xF) << 4) | (GradPoint & 0xF));
+			ptr = new SingleTextLine(STLstring, CXpos, CYpos, XUnitSize, YUnitSize, SpaceWidth, LineWidth, RGBAColor, new std::uint32_t{gRGBAColor}, ((BasePoint & 0xF) << 4) | (GradPoint & 0xF));
 		else
 			ptr = new SingleTextLine(STLstring, CXpos, CYpos, XUnitSize, YUnitSize, SpaceWidth, LineWidth, RGBAColor, nullptr, 0xF, true);
 		RGBAColor = default_RGBAC;
 		gRGBAColor = default_gRGBAC;
 		return ptr;
 	}
-	SingleTextLine* CreateOne(std::string TextOverride)
+	SingleTextLine* CreateOne(const std::string& TextOverride)
 	{
 		SingleTextLine* ptr = nullptr;
 		if (GradPoint & 0xF0 && !isFonted)
 			ptr = new SingleTextLine(TextOverride, CXpos, CYpos, XUnitSize, YUnitSize, SpaceWidth, LineWidth, RGBAColor);
 		else if (!isFonted)
-			ptr = new SingleTextLine(TextOverride, CXpos, CYpos, XUnitSize, YUnitSize, SpaceWidth, LineWidth, RGBAColor, new std::uint32_t(gRGBAColor), ((BasePoint & 0xF) << 4) | (GradPoint & 0xF));
+			ptr = new SingleTextLine(TextOverride, CXpos, CYpos, XUnitSize, YUnitSize, SpaceWidth, LineWidth, RGBAColor, new std::uint32_t{gRGBAColor}, ((BasePoint & 0xF) << 4) | (GradPoint & 0xF));
 		else
 			ptr = new SingleTextLine(TextOverride, CXpos, CYpos, XUnitSize, YUnitSize, SpaceWidth, LineWidth, RGBAColor, nullptr, 0xF, true);
 		RGBAColor = default_RGBAC;

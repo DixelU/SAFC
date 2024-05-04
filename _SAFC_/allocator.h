@@ -16,8 +16,9 @@ namespace moya_alloc {
         public:
             buffer *const next;
             buffer(buffer *next) :
-                next(next) {
-
+                next(next),
+                data()
+            {
             }
 
             T *get_block(std::size_t index) {

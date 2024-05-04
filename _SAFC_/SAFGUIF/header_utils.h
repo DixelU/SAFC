@@ -103,7 +103,7 @@ int TIMESEED()
 
 void ThrowAlert_Error(std::string&& AlertText);
 void ThrowAlert_Warning(std::string&& AlertText);
-void AddFiles(std::vector<std::wstring> Filenames);
+void AddFiles(const std::vector<std::wstring>& Filenames);
 #pragma warning(disable : 4996)
 
 #define MD_CASE(value) case (value): case ((value|1))

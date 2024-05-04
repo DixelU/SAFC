@@ -34,7 +34,7 @@ struct CAT_Piano :HandleableUIPart
 		this->PianoHeight = PianoHeight;
 		this->CalculatedHeight = PianoHeight * 4;
 		this->CalculatedWidth = KeyWidth * (128 * 3);
-		this->PianoTransform = PianoTransform;
+		this->PianoTransform = std::move(PianoTransform);
 		this->Focused = 0;
 		System_White->SetNewPos(BaseXPos + KeyWidth * (128 * 1.25f), BaseYPos - 0.75f * PianoHeight);
 		this->MinCont = System_White->CreateOne("_");

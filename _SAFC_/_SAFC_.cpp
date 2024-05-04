@@ -190,7 +190,7 @@ bool SAFC_Update(const std::wstring& latest_release)
 	bool updated_flag = false;
 	//GetCurrentDirectoryW(MAX_PATH, current_file_path);
 	GetModuleFileNameW(NULL, current_file_path, MAX_PATH);
-	std::wstring executablepath = current_file_path;
+	//std::wstring executablepath = current_file_path;
 	std::wstring filename = ExtractDirectory(current_file_path);
 	std::wstring pathway = filename;
 	filename += L"update.7z";
@@ -256,6 +256,9 @@ bool SAFC_Update(const std::wstring& latest_release)
 
 void SAFC_VersionCheck()
 {
+	if (!check_autoupdates)
+		return;
+
 	std::thread version_checker([]() 
 	{
 		bool flag = false;
@@ -277,7 +280,7 @@ void SAFC_VersionCheck()
 				std::getline(input, temp_buffer);
 				input.close();
 				auto JSON_Value = JSON::Parse(temp_buffer.c_str());
-				auto& git_latest_version = ((JSON_Value)->AsArray()[0])->AsObject().find(L"name")->second->AsString();
+				auto& git_latest_version = ((JSON_Value)->AsArray()[0])->AsObject().at(L"name")->AsString();
 				std::uint16_t version_partied[4] = { 0,0,0,0 };
 				std::vector<std::string> ans;
 				std::wstring git_version_numbers_only = git_latest_version.substr(1);//v?.?.?.?
@@ -416,6 +419,8 @@ struct FileSettings
 		FastMIDIChecker FMIC(Filename);
 		this->IsMIDI = FMIC.IsAcssessable && FMIC.IsMIDI;
 		OldPPQN = FMIC.PPQN;
+		NewPPQN = FMIC.PPQN;
+		MergeMultiplier = 0;
 		OldTrackNumber = FMIC.ExpectedTrackNumber;
 		OffsetTicks = InplaceMergeEnabled = 0;
 		AllowSysex = false;
@@ -503,7 +508,7 @@ struct _SFD_RSP
 struct SAFCData 
 { ////overall settings and storing perfile settings....
 	std::vector<FileSettings> Files;
-	std::wstring SaveDirectory;
+	std::wstring SavePath;
 	std::uint16_t GlobalPPQN;
 	std::uint32_t GlobalOffset;
 	float GlobalNewTempo;
@@ -523,7 +528,7 @@ struct SAFCData
 		InplaceMergeFlag = false;
 		IsCLIMode = false;
 		CollapseMIDI = false;
-		SaveDirectory = L"";
+		SavePath = L"";
 		ChannelsSplit = RSBCompression = false;
 		ApplyOffsetAfter = true;
 	}
@@ -533,11 +538,11 @@ struct SAFCData
 			ThreadsCount = DetectedThreads;
 		if (Files.empty())
 		{
-			SaveDirectory = L"";
+			SavePath = L"";
 			return;
 		}
-		else if (Files.size())
-			SaveDirectory = Files[0].Filename + L".AfterSAFC.mid";
+		else
+			SavePath = Files[0].Filename + L".AfterSAFC.mid";
 
 		if (Files.size() == 1)
 		{
@@ -550,7 +555,7 @@ struct SAFCData
 
 		for (int i = 0; i < Files.size(); i++)
 		{
-			Sizes.push_back(_SFD_RSP(i, Files[i].FileSize));
+			Sizes.emplace_back(i, Files[i].FileSize);
 		}
 
 		sort(Sizes.begin(), Sizes.end());
@@ -604,7 +609,7 @@ struct SAFCData
 		std::vector<proc_data_ptr> SMRPv;
 		for (int i = 0; i < Files.size(); i++)
 			SMRPv.push_back(Files[i].BuildSMRPProcessingData());
-		return std::make_shared<MIDICollectionThreadedMerger>(SMRPv, GlobalPPQN, SaveDirectory, IsCLIMode);
+		return std::make_shared<MIDICollectionThreadedMerger>(SMRPv, GlobalPPQN, SavePath, IsCLIMode);
 	}
 	FileSettings& operator[](std::int32_t ID)
 	{
@@ -633,7 +638,7 @@ std::vector<std::wstring> MOFD(const wchar_t* Title)
 	wchar_t szFile[50000];       // buffer for file name
 	std::vector<std::wstring> InpLinks;
 	ZeroMemory(&ofn, sizeof(ofn));
-	ZeroMemory(szFile, 50000);
+	ZeroMemory(szFile, 50000 * sizeof(wchar_t));
 	ofn.lStructSize = sizeof(ofn);
 	ofn.hwndOwner = NULL;
 	ofn.lpstrFile = szFile;
@@ -656,7 +661,7 @@ std::vector<std::wstring> MOFD(const wchar_t* Title)
 		for (; i < 49998;)
 		{
 			counter++;
-			Gen = L"";
+			Gen.clear();
 			for (; i < 49998 && szFile[i] != '\0'; i++)
 				Gen.push_back(szFile[i]);
 			i++;
@@ -740,7 +745,7 @@ std::wstring SOFD(const wchar_t* Title)
 #define _WH(Window,Element) ((*(*WH)[Window])[Element])//...uh
 #define _WH_t(Window,Element,Type) ((Type)_WH(Window,Element))
 
-void AddFiles(std::vector<std::wstring> Filenames)
+void AddFiles(const std::vector<std::wstring>& Filenames)
 {
 	if(WH)
 		WH->DisableAllWindows();
@@ -749,23 +754,24 @@ void AddFiles(std::vector<std::wstring> Filenames)
 		if (Filenames[i].empty())
 			continue;
 		_Data.Files.push_back(FileSettings(Filenames[i]));
-		if (_Data.Files.back().IsMIDI)
+		auto& lastFile = _Data.Files.back();
+		if (lastFile.IsMIDI)
 		{
 			if (WH)
-				_WH_t("MAIN", "List", SelectablePropertedList*)->SafePushBackNewString(_Data.Files.back().AppearanceFilename);
+				_WH_t("MAIN", "List", SelectablePropertedList*)->SafePushBackNewString(lastFile.AppearanceFilename);
 
 			std::uint32_t Counter = 0;
-			_Data.Files.back().NewTempo = _Data.GlobalNewTempo;
-			_Data.Files.back().OffsetTicks = _Data.GlobalOffset;
-			_Data.Files.back().InplaceMergeEnabled = _Data.InplaceMergeFlag;
-			_Data.Files.back().ChannelsSplit = _Data.ChannelsSplit;
-			_Data.Files.back().RSBCompression = _Data.RSBCompression;
-			_Data.Files.back().CollapseMIDI = _Data.CollapseMIDI;
-			_Data.Files.back().ApplyOffsetAfter = _Data.ApplyOffsetAfter;
+			lastFile.NewTempo = _Data.GlobalNewTempo;
+			lastFile.OffsetTicks = _Data.GlobalOffset;
+			lastFile.InplaceMergeEnabled = _Data.InplaceMergeFlag;
+			lastFile.ChannelsSplit = _Data.ChannelsSplit;
+			lastFile.RSBCompression = _Data.RSBCompression;
+			lastFile.CollapseMIDI = _Data.CollapseMIDI;
+			lastFile.ApplyOffsetAfter = _Data.ApplyOffsetAfter;
 
 			for (int q = 0; q < _Data.Files.size(); q++)
 			{
-				if (_Data[q].Filename == _Data.Files.back().Filename)
+				if (_Data[q].Filename == lastFile.Filename)
 				{
 					_Data[q].FileNamePostfix = std::to_string(Counter) + "_.mid";
 					_Data[q].WFileNamePostfix = std::to_wstring(Counter) + L"_.mid";
@@ -1034,7 +1040,7 @@ namespace PropsAndSets
 						Polyphony = t.Polyphony;
 						t.Seconds = seconds;
 						t.Tempo = tempo;
-						it_ptree++;
+						++it_ptree;
 					}
 					if (it_ptree->first == cur_pair.first)
 						info[it_ptree->first].Tempo = cur_pair.second;
@@ -1057,7 +1063,7 @@ namespace PropsAndSets
 					Polyphony = t.Polyphony;
 					t.Seconds = seconds;
 					t.Tempo = tempo;
-					it_ptree++;
+					++it_ptree;
 				}
 				std::ofstream out(SMICptr->FileName + ((ForPersonalUse) ? L".a.csv" : L".atraw"),
 					((ForPersonalUse) ? (std::ios::out) : (std::ios::out | std::ios::binary))
@@ -1277,7 +1283,7 @@ namespace PropsAndSets
 			return;
 		}
 		OnApplySettings();
-		for (auto Y = _Data.Files.begin(); Y != _Data.Files.end(); Y++)
+		for (auto Y = _Data.Files.begin(); Y != _Data.Files.end(); ++Y)
 		{
 			DefaultBoolSettings = Y->BoolSettings = _Data[currentID].BoolSettings;
 			_Data.InplaceMergeFlag = Y->InplaceMergeEnabled = _Data[currentID].InplaceMergeEnabled;
@@ -1365,7 +1371,7 @@ namespace PropsAndSets
 			auto IFDeg = ((InputField*)(*Wptr)["VM_DEGREE"]);
 			((Button*)(*Wptr)["VM_SETMODE"])->SafeStringReplace("Single");
 			IFDeg->UpdateInputString("1");
-			IFDeg->CurrentString = "";
+			IFDeg->CurrentString.clear();
 			VM->ActiveSetting = 0;
 			VM->Hovered = 0;
 			VM->RePutMode = 0;
@@ -1381,8 +1387,7 @@ namespace PropsAndSets
 			if (VM->PLC_bb)
 			{
 				auto IFDeg = ((InputField*)(*Wptr)["VM_DEGREE"]);
-				float Degree = 1.;
-				Degree = std::stof(IFDeg->GetCurrentInput("0"));
+				float Degree = std::stof(IFDeg->GetCurrentInput("0"));
 				VM->PLC_bb->ConversionMap.clear();
 				VM->PLC_bb->ConversionMap[127] = 127;
 				for (int i = 0; i < 128; i++) 
@@ -1458,7 +1463,7 @@ namespace PropsAndSets
 void OnRem()
 {
 	auto ptr = _WH_t("MAIN", "List", SelectablePropertedList*);
-	for (auto ID = ptr->SelectedID.rbegin(); ID != ptr->SelectedID.rend(); ID++)
+	for (auto ID = ptr->SelectedID.rbegin(); ID != ptr->SelectedID.rend(); ++ID)
 		_Data.RemoveByID(*ID);
 	ptr->RemoveSelected();
 	WH->DisableAllWindows();
@@ -1660,9 +1665,9 @@ namespace Settings
 		((InputField*)(*pptr)["AS_FONT_NAME"])->PutIntoSource();
 		std::wstring ws(default_font_name.begin(), default_font_name.end());
 		if (isRegestryOpened)
-			TRY_CATCH(RegestryAccess.SetStringValue(L"COLLAPSEDFONTNAME_POST1P4", ws.c_str()); , "Failed on setting COLLAPSEDFONTNAME_POST1P4")
-			if (isRegestryOpened)
-				Settings::RegestryAccess.Close();
+			TRY_CATCH(RegestryAccess.SetStringValue(L"COLLAPSEDFONTNAME_POST1P4", ws); , "Failed on setting COLLAPSEDFONTNAME_POST1P4")
+
+		Settings::RegestryAccess.Close();
 	}
 	void ChangeIsFontedVar()
 	{
@@ -1673,7 +1678,7 @@ namespace Settings
 	void ApplyToAll()
 	{
 		OnSetApply();
-		for (auto Y = _Data.Files.begin(); Y != _Data.Files.end(); Y++)
+		for (auto Y = _Data.Files.begin(); Y != _Data.Files.end(); ++Y)
 		{
 			Y->BoolSettings = DefaultBoolSettings;
 			Y->InplaceMergeEnabled = _Data.InplaceMergeFlag && !_Data.ChannelsSplit;
@@ -1723,7 +1728,7 @@ void OnStart()
 	std::uint32_t ID = 0;
 
 	MW = (*WH)["SMRP_CONTAINER"];
-	std::list<std::string> undesired_window_activities;
+	std::vector<std::string> undesired_window_activities;
 
 	for (auto& single_activity_pair : MW->WindowActivities) 
 	{
@@ -1846,10 +1851,10 @@ void OnStart()
 
 void OnSaveTo()
 {
-	_Data.SaveDirectory = SOFD(L"Save final midi to...");
-	size_t Pos = _Data.SaveDirectory.rfind(L".mid");
-	if (Pos >= _Data.SaveDirectory.size() || Pos <= _Data.SaveDirectory.size() - 4)
-		_Data.SaveDirectory += L".mid";
+	_Data.SavePath = SOFD(L"Save final midi to...");
+	size_t Pos = _Data.SavePath.rfind(L".mid");
+	if (Pos >= _Data.SavePath.size() || Pos <= _Data.SavePath.size() - 4)
+		_Data.SavePath += L".mid";
 }
 
 void RestoreRegSettings()
@@ -2638,10 +2643,10 @@ struct SafcCliRuntime:
 		auto save_to = config.find(L"save_to");
 		if (save_to != config.end())
 		{
-			_Data.SaveDirectory = (save_to->second->AsString());
-			size_t Pos = _Data.SaveDirectory.rfind(L".mid");
-			if (Pos >= _Data.SaveDirectory.size() || Pos <= _Data.SaveDirectory.size() - 4)
-				_Data.SaveDirectory += L".mid";
+			_Data.SavePath = (save_to->second->AsString());
+			size_t Pos = _Data.SavePath.rfind(L".mid");
+			if (Pos >= _Data.SavePath.size() || Pos <= _Data.SavePath.size() - 4)
+				_Data.SavePath += L".mid";
 		}
 
 		auto LocalMCTM = _Data.MCTM_Constructor();

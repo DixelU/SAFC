@@ -151,7 +151,7 @@ bool JSON::SkipWhitespace(const wchar_t **data)
  */
 bool JSON::ExtractString(const wchar_t **data, std::wstring &str)
 {
-	str = L"";
+	str.clear();
 	
 	while (**data != 0)
 	{

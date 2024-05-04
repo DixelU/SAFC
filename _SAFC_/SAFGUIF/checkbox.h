@@ -16,12 +16,12 @@ struct CheckBox : HandleableUIPart
 	~CheckBox() override 
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
-		if (Tip)
-			delete Tip;
+		delete Tip;
 	}
 	CheckBox(float Xpos, float Ypos, float SideSize, std::uint32_t BorderRGBAColor, std::uint32_t UncheckedRGBABackground, std::uint32_t CheckedRGBABackground, std::uint8_t BorderWidth, bool StartState = false, SingleTextLineSettings* TipSettings = NULL, _Align TipAlign = _Align::left, std::string TipText = " ")
 	{
 		this->Xpos = Xpos;
+		this->Tip = nullptr;
 		this->Ypos = Ypos;
 		this->SideSize = SideSize;
 		this->BorderRGBAColor = BorderRGBAColor;
