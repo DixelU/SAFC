@@ -19,7 +19,7 @@ struct Button : HandleableUIPart
 	~Button() override
 	{
 		delete STL;
-		if (Tip)delete Tip;
+		delete Tip;
 	}
 	Button(std::string ButtonText, void(*OnClick)(), float Xpos, float Ypos, float Width, float Height, float CharHeight, std::uint32_t RGBAColor, std::uint32_t gRGBAColor, std::uint8_t BasePoint/*15 if gradient is disabled*/, std::uint8_t GradPoint, std::uint8_t BorderWidth, std::uint32_t RGBABackground, std::uint32_t RGBABorder, std::uint32_t HoveredRGBAColor, std::uint32_t HoveredRGBABackground, std::uint32_t HoveredRGBABorder, SingleTextLineSettings* Tip, std::string TipText = " ")
 	{

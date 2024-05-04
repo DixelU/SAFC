@@ -160,9 +160,7 @@ struct MIDICollectionThreadedMerger
 				out.pop_back();
 		}
 	};
-	~MIDICollectionThreadedMerger() 
-	{
-	}
+	~MIDICollectionThreadedMerger() = default;
 	MIDICollectionThreadedMerger(
 		std::vector<proc_data_ptr> processing_data, 
 		std::uint16_t FinalPPQN, 
@@ -170,8 +168,10 @@ struct MIDICollectionThreadedMerger
 		bool is_console_oriented)
 	{
 		for (auto& single_midi_data : processing_data)
-			midi_processing_data.push_back({ single_midi_data , std::make_shared<message_buffer_ptr::element_type>(is_console_oriented) });
-		this->SaveTo = SaveTo;
+			midi_processing_data.emplace_back( single_midi_data , std::make_shared<message_buffer_ptr::element_type>(is_console_oriented) );
+		this->SaveTo = std::move(SaveTo);
+		this->FirstStageComplete = false;
+		this->RemnantsRemove = true;
 		this->FinalPPQN = FinalPPQN;
 		IntermediateRegularFlag = IntermediateInplaceFlag = CompleteFlag = IRTrackCount = IITrackCount = 0;
 	}
@@ -476,7 +476,7 @@ struct MIDICollectionThreadedMerger
 						file_output.put(0xFF);
 						file_output.put(0x2F);
 						file_output.put(0);
-						(TrackCount.get())++;
+						++(TrackCount.get());
 						PrevEdgePos = DTI.CurPosition;
 						FrontEdge.clear();
 						DTI.PutCurrentHoldedNotes(FrontEdge, true);
@@ -494,7 +494,7 @@ struct MIDICollectionThreadedMerger
 
 					FrontEdge.clear();
 					BackEdge.clear();
-					(TrackCount.get())++;
+					++(TrackCount.get());
 				}
 				else
 				{
@@ -506,7 +506,7 @@ struct MIDICollectionThreadedMerger
 
 					single_midi_processor_2::ostream_write(Track, file_output);
 					//copy(Track.begin(), Track.end(), ostream_iterator<std::uint8_t>(file_output));
-					(TrackCount.get())++;
+					++(TrackCount.get());
 				}
 				Track.clear();
 			}
@@ -606,7 +606,7 @@ struct MIDICollectionThreadedMerger
 			std::ofstream F(_SaveTo, std::ios::binary | std::ios::out);
 			bool IMgood = !IM->eof(), RMgood = !RM->eof();
 
-			auto TotalTracks = IITrackCount + IRTrackCount;
+			auto TotalTracks = IITrackCount.load() + IRTrackCount.load();
 			if ((~0xFFFFULL) & TotalTracks)
 			{
 				printf("Track count overflow: %llu\n", TotalTracks);

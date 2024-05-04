@@ -23,7 +23,7 @@ private:
 public:
 	std::deque<SingleTextLine*> Words;
 	char_pos CursorPosition;/*points at the symbol after the cursor in current word?*/
-	void (*OnEdit)();
+	//void (*OnEdit)();
 	SingleTextLineSettings* STLS;
 	float Xpos, Ypos, Height, Width, VerticalOffset;
 	std::uint32_t RGBABackground, RGBABorder;
@@ -68,7 +68,7 @@ public:
 				CursorPosition.first = Words.insert(CursorPosition.first + 1, STLS->CreateOne(cur_word.substr(maximal_whole_word_size-1, 0x7FFFFFFF)));
 				CursorPosition.second++;
 				if (CursorPosition.second < maximal_whole_word_size) 
-					CursorPosition.first--;
+					--CursorPosition.first;
 				else 
 					CursorPosition.second -= maximal_whole_word_size - 1;
 			}
@@ -86,7 +86,7 @@ public:
 				std::string str = " ";
 				str[0] = ch;
 				CursorPosition.first = Words.insert(CursorPosition.first, STLS->CreateOne(str));
-				CursorPosition.first++;
+				++CursorPosition.first;
 				CursorPosition.second = 0;
 			}
 			else if (ch < 32 || ch == 127)
@@ -98,7 +98,7 @@ public:
 				auto itt = CursorPosition.first;
 				CursorPosition.first = Words.insert(CursorPosition.first + 1, STLS->CreateOne(cur_word.substr(maximal_whole_word_size - 1, 0x7FFFFFFF))),itt;
 				CursorPosition.second++;
-				CursorPosition.first--;
+				--CursorPosition.first;
 			}
 			else 
 			{
@@ -115,7 +115,7 @@ public:
 	void RemoveSymbolBeforeCursorPos()
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
-		auto cur_pos = CursorPosition;
+		//auto cur_pos = CursorPosition;
 		if (CursorPosition.second) 
 		{
 			std::string cur_word = CursorWordIter->_CurrentText;
@@ -153,7 +153,7 @@ public:
 	void UpdateBufferedCurText() 
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
-		BufferedCurText = "";
+		BufferedCurText.clear();
 		for (auto& word : Words) 
 			if (word->_CurrentText != "\t")
 				BufferedCurText += word->_CurrentText;
@@ -211,7 +211,7 @@ public:
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		for (auto& line : Words)
-			if(line)delete line;
+			delete line;
 	}
 	bool MouseHandler(float mx, float my, CHAR Button/*-1 left, 1 right, 0 move*/, CHAR State /*-1 down, 1 up*/) override 
 	{
@@ -220,7 +220,7 @@ public:
 	void SafeStringReplace(std::string NewString) override
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
-		BufferedCurText = NewString;
+		BufferedCurText = std::move(NewString);
 		ReparseCurrentTextFromScratch();
 	}
 	inline std::string _UnsafeGetCurrentText() const
@@ -241,11 +241,11 @@ public:
 			//printf("left %i %i\n", (*CursorPosition.first), CursorPosition.second);
 			if (CursorPosition.second>0)
 			{
-				CursorPosition.second--;
+				--CursorPosition.second;
 			}
 			else if (CursorPosition.first != Words.begin()) 
 			{
-				CursorPosition.first--;
+				--CursorPosition.first;
 				CursorPosition.second = (*CursorPosition.first)->_CurrentText.size()-1;
 			}
 			break;
@@ -253,11 +253,11 @@ public:
 			//printf("right %i %i\n", (*CursorPosition.first), CursorPosition.second);
 			if (CursorPosition.second < (*CursorPosition.first)->_CurrentText.size() - 1)
 			{
-				CursorPosition.second++;
+				++CursorPosition.second;
 			}
 			else if (CursorPosition.first != Words.end() - 1)
 			{
-				CursorPosition.first++;
+				++CursorPosition.first;
 				CursorPosition.second = 0;
 			}
 			break;
@@ -277,6 +277,8 @@ public:
 					cur_x_coord - STLS->XUnitSize*0.5 > (*CursorPosition.first)->Chars[CursorPosition.second]->Xpos ||
 					cur_y_coord == (*CursorPosition.first)->CYpos
 				));
+			break;
+		case _Align::center:
 			break;
 		}
 	}

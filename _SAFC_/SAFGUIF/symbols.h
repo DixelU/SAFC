@@ -24,7 +24,7 @@ struct DottedSymbol
 	DottedSymbol(std::string RenderWay, float Xpos, float Ypos, float XUnitSize, float YUnitSize, std::uint8_t LineWidth = 2, std::uint8_t Red = 255, std::uint8_t Green = 255, std::uint8_t Blue = 255, std::uint8_t Alpha = 255)
 	{
 		if (!RenderWay.size())RenderWay = " ";
-		this->RenderWay = RenderWay;
+		this->RenderWay = std::move(RenderWay);
 		this->Xpos = Xpos;
 		this->LineWidth = LineWidth;
 		this->Ypos = Ypos;
@@ -79,7 +79,7 @@ struct DottedSymbol
 	void virtual Draw()
 	{
 		if (RenderWay == " ")return;
-		float VerticalFlag = 0.f;
+		float VerticalShift = 0.f;
 		CHAR BACK = 0;
 		if (RenderWay.back() == '#' || RenderWay.back() == '~')
 		{
@@ -88,15 +88,15 @@ struct DottedSymbol
 			switch (BACK)
 			{
 			case '#':
-				VerticalFlag = Points->y - Points[3].y;
+				VerticalShift = Points[0].y - Points[3].y;
 				break;
 			case '~':
-				VerticalFlag = (Points->y - Points[3].y) / 2;
+				VerticalShift = (Points[0].y - Points[3].y) / 2;
 				break;
 			}
 		}
 		if (is_fonted)
-			VerticalFlag = 0;
+			VerticalShift = 0;
 		glColor4ub(R, G, B, A);
 		glLineWidth(LineWidth);
 		glPointSize(LineWidth);
@@ -111,12 +111,12 @@ struct DottedSymbol
 				continue;
 			}
 			IO = RenderWay[i] - '1';
-			glVertex2f(Xpos + Points[IO].x, Ypos + Points[IO].y + VerticalFlag);
+			glVertex2f(Xpos + Points[IO].x, Ypos + Points[IO].y + VerticalShift);
 		}
 		glEnd();
 		glBegin(GL_POINTS);
 		for (int i = 0; i < PointPlacement.size(); ++i)
-			glVertex2f(Xpos + Points[PointPlacement[i] - '1'].x, Ypos + Points[PointPlacement[i] - '1'].y + VerticalFlag);
+			glVertex2f(Xpos + Points[PointPlacement[i] - '1'].x, Ypos + Points[PointPlacement[i] - '1'].y + VerticalShift);
 		glEnd();
 		if (BACK)
 			RenderWay.back() = BACK;
@@ -169,7 +169,7 @@ namespace lFontSymbolsInfo
 		}
 	};
 	lFontSymbInfosListDestructor __wFSILD{};
-	void InitialiseFont(std::string FontName, bool force = false)
+	void InitialiseFont(const std::string& FontName, bool force = false)
 	{
 		if (!force && FontName == PrevFontName && PrevSize == Size &&
 			(std::abs)(Prev_lFONT_HEIGHT_TO_WIDTH - lFONT_HEIGHT_TO_WIDTH) < FLT_EPSILON)
@@ -411,7 +411,7 @@ struct BiColoredDottedSymbol : DottedSymbol
 	{
 		if (RenderWay == " ")
 			return;
-		float VerticalFlag = 0.;
+		float VerticalShift = 0.;
 		CHAR BACK = 0;
 		if (RenderWay.back() == '#' || RenderWay.back() == '~') 
 		{
@@ -420,15 +420,15 @@ struct BiColoredDottedSymbol : DottedSymbol
 			switch (BACK)
 			{
 			case '#':
-				VerticalFlag = Points->y - Points[3].y;
+				VerticalShift = Points[0].y - Points[3].y;
 				break;
 			case '~':
-				VerticalFlag = (Points->y - Points[3].y) / 2;
+				VerticalShift = (Points[0].y - Points[3].y) / 2;
 				break;
 			}
 		}
 		if (is_fonted)
-			VerticalFlag = 0;
+			VerticalShift = 0;
 		std::uint8_t IO;
 		glLineWidth(LineWidth);
 		glPointSize(LineWidth);
@@ -444,7 +444,7 @@ struct BiColoredDottedSymbol : DottedSymbol
 			IO = RenderWay[i] - '1';
 			//printf("%x %x %x %x\n", gR[IO], gG[IO], gB[IO], gA[IO]);
 			glColor4ub(gR[IO], gG[IO], gB[IO], gA[IO]);
-			glVertex2f(Xpos + Points[IO].x, Ypos + Points[IO].y + VerticalFlag);
+			glVertex2f(Xpos + Points[IO].x, Ypos + Points[IO].y + VerticalShift);
 		}
 		glEnd();
 		glBegin(GL_POINTS);
@@ -452,7 +452,7 @@ struct BiColoredDottedSymbol : DottedSymbol
 		{
 			IO = PointPlacement[i] - '1';
 			glColor4ub(gR[IO], gG[IO], gB[IO], gA[IO]);
-			glVertex2f(Xpos + Points[IO].x, Ypos + Points[IO].y + VerticalFlag);
+			glVertex2f(Xpos + Points[IO].x, Ypos + Points[IO].y + VerticalShift);
 		}
 		glEnd();
 		if (BACK)

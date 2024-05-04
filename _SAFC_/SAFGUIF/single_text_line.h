@@ -19,8 +19,8 @@ struct SingleTextLine
 
 	~SingleTextLine() 
 	{
-		for (auto i = Chars.begin(); i != Chars.end(); i++)
-			if (*i)delete* i;
+		for (auto i = Chars.begin(); i != Chars.end(); ++i)
+			delete *i;
 		Chars.clear();
 	}
 	SingleTextLine(const SingleTextLine&) = delete;
@@ -33,6 +33,9 @@ struct SingleTextLine
 		this->CXpos = CXpos;
 		this->CYpos = CYpos;
 		this->RGBAColor = RGBAColor;
+		this->gRGBAColor = 0;
+		if (RGBAGradColor)
+			this->gRGBAColor = *RGBAGradColor;
 		this->SpaceWidth = SpaceWidth;
 		this->_XUnitSize = XUnitSize;
 		this->_YUnitSize = YUnitSize;
@@ -41,10 +44,10 @@ struct SingleTextLine
 		for (int i = 0; i < Text.size(); i++)
 		{
 			if (!RGBAGradColor && !isListedFont)Chars.push_back(
-				new DottedSymbol(Text[i], CharXPosition, CYpos, XUnitSize, YUnitSize, LineWidth, new std::uint32_t(RGBAColor))
+				new DottedSymbol(Text[i], CharXPosition, CYpos, XUnitSize, YUnitSize, LineWidth, new std::uint32_t{RGBAColor})
 				);
-			else if (!isListedFont) Chars.push_back(
-				new BiColoredDottedSymbol(Text[i], CharXPosition, CYpos, XUnitSize, YUnitSize, LineWidth, new std::uint32_t(RGBAColor), new std::uint32_t(*RGBAGradColor), (std::uint8_t)(OrigNGradPoints >> 4), (std::uint8_t)(OrigNGradPoints & 0xF))
+			else if (RGBAGradColor && !isListedFont) Chars.push_back(
+				new BiColoredDottedSymbol(Text[i], CharXPosition, CYpos, XUnitSize, YUnitSize, LineWidth, new std::uint32_t{ RGBAColor }, new std::uint32_t{ this->gRGBAColor }, (std::uint8_t)(OrigNGradPoints >> 4), (std::uint8_t)(OrigNGradPoints & 0xF))
 				);
 			else Chars.push_back(
 				new lFontSymbol(Text[i], CharXPosition, CYpos, XUnitSize, YUnitSize, RGBAColor)
@@ -87,7 +90,7 @@ struct SingleTextLine
 		if (!isBicolored)
 			return SafeColorChange(NewBaseRGBAColor);
 		for (int i = 0; i < Chars.size(); i++)
-			Chars[i]->RefillGradient(new std::uint32_t(NewBaseRGBAColor), new std::uint32_t(NewGRGBAColor), BasePoint, gPoint);
+			Chars[i]->RefillGradient(new std::uint32_t{ NewBaseRGBAColor }, new std::uint32_t{ NewGRGBAColor }, BasePoint, gPoint);
 	}
 	void SafeChangePosition(float NewCXPos, float NewCYPos)
 	{
@@ -108,6 +111,13 @@ struct SingleTextLine
 		if (isListedFont)
 		{
 			auto ch = dynamic_cast<lFontSymbol*>(Chars[i]);
+
+			if (!ch)
+			{
+				std::cerr << "Error during safe char replacement [1]" << std::endl;
+				return 0;
+			}
+
 			ch->Symb = CH;
 			ch->ReinitGlyphMetrics();
 		}
@@ -118,7 +128,7 @@ struct SingleTextLine
 		}
 		return 1;
 	}
-	bool SafeReplaceChar(int i, std::string CHrenderway)
+	bool SafeReplaceChar(int i, const std::string& CHrenderway)
 	{
 		if (i >= Chars.size())return 0;
 		if (isListedFont) return 0;
@@ -195,12 +205,23 @@ struct SingleTextLine
 		for (auto& ch : Chars)
 		{
 			auto fontedSymb = dynamic_cast<lFontSymbol*>(ch);
+			if (!fontedSymb)
+			{
+				std::cerr << "Error during repositionment of a character [1]" << std::endl;
+				return TotalPixelWidth * PixelSize;
+			}
 			TotalPixelWidth += fontedSymb->GM.gmCellIncX;
 		}
 
 		if (Chars.size())
 		{
 			auto lastChar = dynamic_cast<lFontSymbol*>(Chars.back());
+			if (!lastChar)
+			{
+				std::cerr << "Error during repositionment of a character [2]" << std::endl;
+				return TotalPixelWidth * PixelSize;
+			}
+
 			TotalPixelWidth -= ((ptrdiff_t)lastChar->GM.gmCellIncX - (ptrdiff_t)lastChar->GM.gmBlackBoxX);
 		}
 
@@ -229,7 +250,7 @@ struct SingleTextLine
 
 	void Draw()
 	{
-		if (CalculatedWidth == 0)
+		if (CalculatedWidth < FLT_EPSILON)
 			RecalculateWidth();
 
 		for (auto& ch: Chars)

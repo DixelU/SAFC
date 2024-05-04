@@ -19,6 +19,7 @@ bool RestoreIsFontedVar()
 	{
 		std::cout << "RK opening failed\n";
 	}
+
 	if (RK_OP)
 	{
 		try
@@ -27,8 +28,9 @@ bool RestoreIsFontedVar()
 		}
 		catch (...) { std::cout << "Exception thrown while restoring FONTS_ENABLED from registry\n"; }
 	}
-	if (RK_OP)
-		RK.Close();
+
+	RK.Close();
+
 	return false;
 }
 
@@ -53,8 +55,8 @@ void SetIsFontedVar(bool VAL)
 		}
 		catch (...) { std::cout << "Exception thrown while saving FONTS_ENABLED from registry\n"; }
 	}
-	if (RK_OP)
-		RK.Close();
+
+	RK.Close();
 }
 bool _______unused = RestoreIsFontedVar();
 

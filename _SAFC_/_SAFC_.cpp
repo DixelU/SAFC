@@ -190,7 +190,7 @@ bool SAFC_Update(const std::wstring& latest_release)
 	bool updated_flag = false;
 	//GetCurrentDirectoryW(MAX_PATH, current_file_path);
 	GetModuleFileNameW(NULL, current_file_path, MAX_PATH);
-	std::wstring executablepath = current_file_path;
+	//std::wstring executablepath = current_file_path;
 	std::wstring filename = ExtractDirectory(current_file_path);
 	std::wstring pathway = filename;
 	filename += L"update.7z";
@@ -256,6 +256,9 @@ bool SAFC_Update(const std::wstring& latest_release)
 
 void SAFC_VersionCheck()
 {
+	if (!check_autoupdates)
+		return;
+
 	std::thread version_checker([]() 
 	{
 		bool flag = false;
@@ -277,7 +280,7 @@ void SAFC_VersionCheck()
 				std::getline(input, temp_buffer);
 				input.close();
 				auto JSON_Value = JSON::Parse(temp_buffer.c_str());
-				auto& git_latest_version = ((JSON_Value)->AsArray()[0])->AsObject().find(L"name")->second->AsString();
+				auto& git_latest_version = ((JSON_Value)->AsArray()[0])->AsObject().at(L"name")->AsString();
 				std::uint16_t version_partied[4] = { 0,0,0,0 };
 				std::vector<std::string> ans;
 				std::wstring git_version_numbers_only = git_latest_version.substr(1);//v?.?.?.?
@@ -396,7 +399,8 @@ struct FileSettings
 		RSBCompression,
 		ChannelsSplit,
 		CollapseMIDI,
-		AllowSysex;
+		AllowSysex,
+		ApplyOffsetAfter;
 	std::shared_ptr<CutAndTransposeKeys> KeyMap;
 	std::shared_ptr<PLC<std::uint8_t, std::uint8_t>> VolumeMap;
 	std::shared_ptr<PLC<std::uint16_t, std::uint16_t>> PitchBendMap;
@@ -415,6 +419,8 @@ struct FileSettings
 		FastMIDIChecker FMIC(Filename);
 		this->IsMIDI = FMIC.IsAcssessable && FMIC.IsMIDI;
 		OldPPQN = FMIC.PPQN;
+		NewPPQN = FMIC.PPQN;
+		MergeMultiplier = 0;
 		OldTrackNumber = FMIC.ExpectedTrackNumber;
 		OffsetTicks = InplaceMergeEnabled = 0;
 		AllowSysex = false;
@@ -428,6 +434,7 @@ struct FileSettings
 		RSBCompression = ChannelsSplit = false;
 		CollapseMIDI = true;
 		AllowLegacyRunningStatusMetaIgnorance = false;
+		ApplyOffsetAfter = true;
 	}
 	inline void SwitchBoolSetting(std::uint32_t SMP_BoolSetting) 
 	{
@@ -461,6 +468,7 @@ struct FileSettings
 		settings.proc_details.remove_empty_tracks = BoolSettings & _BoolSettings::remove_empty_tracks;
 		settings.proc_details.channel_split = ChannelsSplit;
 		settings.proc_details.whole_midi_collapse = CollapseMIDI;
+		settings.proc_details.apply_offset_after = ApplyOffsetAfter;
 		settings.legacy.ignore_meta_rsb = AllowLegacyRunningStatusMetaIgnorance;
 		settings.legacy.rsb_compression = RSBCompression;
 		settings.filter.pass_sysex = AllowSysex;
@@ -500,7 +508,7 @@ struct _SFD_RSP
 struct SAFCData 
 { ////overall settings and storing perfile settings....
 	std::vector<FileSettings> Files;
-	std::wstring SaveDirectory;
+	std::wstring SavePath;
 	std::uint16_t GlobalPPQN;
 	std::uint32_t GlobalOffset;
 	float GlobalNewTempo;
@@ -509,6 +517,7 @@ struct SAFCData
 	bool ChannelsSplit;
 	bool RSBCompression;
 	bool CollapseMIDI;
+	bool ApplyOffsetAfter;
 	bool IsCLIMode;
 	std::uint16_t DetectedThreads;
 	SAFCData()
@@ -519,8 +528,9 @@ struct SAFCData
 		InplaceMergeFlag = false;
 		IsCLIMode = false;
 		CollapseMIDI = false;
-		SaveDirectory = L"";
+		SavePath = L"";
 		ChannelsSplit = RSBCompression = false;
+		ApplyOffsetAfter = true;
 	}
 	void ResolveSubdivisionProblem_GroupIDAssign(std::uint16_t ThreadsCount = 0)
 	{
@@ -528,11 +538,11 @@ struct SAFCData
 			ThreadsCount = DetectedThreads;
 		if (Files.empty())
 		{
-			SaveDirectory = L"";
+			SavePath = L"";
 			return;
 		}
-		else if (Files.size())
-			SaveDirectory = Files[0].Filename + L".AfterSAFC.mid";
+		else
+			SavePath = Files[0].Filename + L".AfterSAFC.mid";
 
 		if (Files.size() == 1)
 		{
@@ -545,7 +555,7 @@ struct SAFCData
 
 		for (int i = 0; i < Files.size(); i++)
 		{
-			Sizes.push_back(_SFD_RSP(i, Files[i].FileSize));
+			Sizes.emplace_back(i, Files[i].FileSize);
 		}
 
 		sort(Sizes.begin(), Sizes.end());
@@ -599,7 +609,7 @@ struct SAFCData
 		std::vector<proc_data_ptr> SMRPv;
 		for (int i = 0; i < Files.size(); i++)
 			SMRPv.push_back(Files[i].BuildSMRPProcessingData());
-		return std::make_shared<MIDICollectionThreadedMerger>(SMRPv, GlobalPPQN, SaveDirectory, IsCLIMode);
+		return std::make_shared<MIDICollectionThreadedMerger>(SMRPv, GlobalPPQN, SavePath, IsCLIMode);
 	}
 	FileSettings& operator[](std::int32_t ID)
 	{
@@ -628,7 +638,7 @@ std::vector<std::wstring> MOFD(const wchar_t* Title)
 	wchar_t szFile[50000];       // buffer for file name
 	std::vector<std::wstring> InpLinks;
 	ZeroMemory(&ofn, sizeof(ofn));
-	ZeroMemory(szFile, 50000);
+	ZeroMemory(szFile, 50000 * sizeof(wchar_t));
 	ofn.lStructSize = sizeof(ofn);
 	ofn.hwndOwner = NULL;
 	ofn.lpstrFile = szFile;
@@ -651,7 +661,7 @@ std::vector<std::wstring> MOFD(const wchar_t* Title)
 		for (; i < 49998;)
 		{
 			counter++;
-			Gen = L"";
+			Gen.clear();
 			for (; i < 49998 && szFile[i] != '\0'; i++)
 				Gen.push_back(szFile[i]);
 			i++;
@@ -735,7 +745,7 @@ std::wstring SOFD(const wchar_t* Title)
 #define _WH(Window,Element) ((*(*WH)[Window])[Element])//...uh
 #define _WH_t(Window,Element,Type) ((Type)_WH(Window,Element))
 
-void AddFiles(std::vector<std::wstring> Filenames)
+void AddFiles(const std::vector<std::wstring>& Filenames)
 {
 	if(WH)
 		WH->DisableAllWindows();
@@ -744,22 +754,24 @@ void AddFiles(std::vector<std::wstring> Filenames)
 		if (Filenames[i].empty())
 			continue;
 		_Data.Files.push_back(FileSettings(Filenames[i]));
-		if (_Data.Files.back().IsMIDI)
+		auto& lastFile = _Data.Files.back();
+		if (lastFile.IsMIDI)
 		{
 			if (WH)
-				_WH_t("MAIN", "List", SelectablePropertedList*)->SafePushBackNewString(_Data.Files.back().AppearanceFilename);
+				_WH_t("MAIN", "List", SelectablePropertedList*)->SafePushBackNewString(lastFile.AppearanceFilename);
 
 			std::uint32_t Counter = 0;
-			_Data.Files.back().NewTempo = _Data.GlobalNewTempo;
-			_Data.Files.back().OffsetTicks = _Data.GlobalOffset;
-			_Data.Files.back().InplaceMergeEnabled = _Data.InplaceMergeFlag;
-			_Data.Files.back().ChannelsSplit = _Data.ChannelsSplit;
-			_Data.Files.back().RSBCompression = _Data.RSBCompression;
-			_Data.Files.back().CollapseMIDI = _Data.CollapseMIDI;
+			lastFile.NewTempo = _Data.GlobalNewTempo;
+			lastFile.OffsetTicks = _Data.GlobalOffset;
+			lastFile.InplaceMergeEnabled = _Data.InplaceMergeFlag;
+			lastFile.ChannelsSplit = _Data.ChannelsSplit;
+			lastFile.RSBCompression = _Data.RSBCompression;
+			lastFile.CollapseMIDI = _Data.CollapseMIDI;
+			lastFile.ApplyOffsetAfter = _Data.ApplyOffsetAfter;
 
 			for (int q = 0; q < _Data.Files.size(); q++)
 			{
-				if (_Data[q].Filename == _Data.Files.back().Filename)
+				if (_Data[q].Filename == lastFile.Filename)
 				{
 					_Data[q].FileNamePostfix = std::to_string(Counter) + "_.mid";
 					_Data[q].WFileNamePostfix = std::to_wstring(Counter) + L"_.mid";
@@ -819,6 +831,7 @@ namespace PropsAndSets
 			((CheckBox*)((*PASWptr)["ALLOW_SYSEX"]))->State = _Data[ID].AllowSysex;
 
 			((CheckBox*)((*PASWptr)["COLLAPSE_MIDI"]))->State = _Data[ID].CollapseMIDI;
+			((CheckBox*)((*PASWptr)["APPLY_OFFSET_AFTER"]))->State = _Data[ID].ApplyOffsetAfter;
 
 			((TextBox*)((*PASWptr)["CONSTANT_PROPS"]))->SafeStringReplace(
 				"File size: " + std::to_string(_Data[ID].FileSize) + "b\n" +
@@ -1027,7 +1040,7 @@ namespace PropsAndSets
 						Polyphony = t.Polyphony;
 						t.Seconds = seconds;
 						t.Tempo = tempo;
-						it_ptree++;
+						++it_ptree;
 					}
 					if (it_ptree->first == cur_pair.first)
 						info[it_ptree->first].Tempo = cur_pair.second;
@@ -1050,7 +1063,7 @@ namespace PropsAndSets
 					Polyphony = t.Polyphony;
 					t.Seconds = seconds;
 					t.Tempo = tempo;
-					it_ptree++;
+					++it_ptree;
 				}
 				std::ofstream out(SMICptr->FileName + ((ForPersonalUse) ? L".a.csv" : L".atraw"),
 					((ForPersonalUse) ? (std::ios::out) : (std::ios::out | std::ios::binary))
@@ -1256,6 +1269,7 @@ namespace PropsAndSets
 		_Data[currentID].RSBCompression = ((CheckBox*)(*SMPASptr)["RSB_COMPRESS"])->State;
 		_Data[currentID].ChannelsSplit = ((CheckBox*)(*SMPASptr)["SPLIT_TRACKS"])->State;
 		_Data[currentID].CollapseMIDI = ((CheckBox*)(*SMPASptr)["COLLAPSE_MIDI"])->State;
+		_Data[currentID].ApplyOffsetAfter = ((CheckBox*)(*SMPASptr)["APPLY_OFFSET_AFTER"])->State; 
 		auto& inplaceMergeState = ((CheckBox*)(*SMPASptr)["INPLACE_MERGE"])->State;
 
 		inplaceMergeState &= !_Data[currentID].RSBCompression;
@@ -1269,11 +1283,16 @@ namespace PropsAndSets
 			return;
 		}
 		OnApplySettings();
-		for (auto Y = _Data.Files.begin(); Y != _Data.Files.end(); Y++)
+		for (auto Y = _Data.Files.begin(); Y != _Data.Files.end(); ++Y)
 		{
 			DefaultBoolSettings = Y->BoolSettings = _Data[currentID].BoolSettings;
 			_Data.InplaceMergeFlag = Y->InplaceMergeEnabled = _Data[currentID].InplaceMergeEnabled;
 			Y->AllowLegacyRunningStatusMetaIgnorance = _Data[currentID].AllowLegacyRunningStatusMetaIgnorance;
+			Y->CollapseMIDI = _Data[currentID].CollapseMIDI;
+			Y->ApplyOffsetAfter = _Data[currentID].ApplyOffsetAfter;
+			Y->AllowSysex = _Data[currentID].AllowSysex;
+			Y->ChannelsSplit = _Data[currentID].ChannelsSplit;
+			Y->RSBCompression = _Data[currentID].RSBCompression;
 		}
 	}
 
@@ -1352,7 +1371,7 @@ namespace PropsAndSets
 			auto IFDeg = ((InputField*)(*Wptr)["VM_DEGREE"]);
 			((Button*)(*Wptr)["VM_SETMODE"])->SafeStringReplace("Single");
 			IFDeg->UpdateInputString("1");
-			IFDeg->CurrentString = "";
+			IFDeg->CurrentString.clear();
 			VM->ActiveSetting = 0;
 			VM->Hovered = 0;
 			VM->RePutMode = 0;
@@ -1368,8 +1387,7 @@ namespace PropsAndSets
 			if (VM->PLC_bb)
 			{
 				auto IFDeg = ((InputField*)(*Wptr)["VM_DEGREE"]);
-				float Degree = 1.;
-				Degree = std::stof(IFDeg->GetCurrentInput("0"));
+				float Degree = std::stof(IFDeg->GetCurrentInput("0"));
 				VM->PLC_bb->ConversionMap.clear();
 				VM->PLC_bb->ConversionMap[127] = 127;
 				for (int i = 0; i < 128; i++) 
@@ -1445,7 +1463,7 @@ namespace PropsAndSets
 void OnRem()
 {
 	auto ptr = _WH_t("MAIN", "List", SelectablePropertedList*);
-	for (auto ID = ptr->SelectedID.rbegin(); ID != ptr->SelectedID.rend(); ID++)
+	for (auto ID = ptr->SelectedID.rbegin(); ID != ptr->SelectedID.rend(); ++ID)
 		_Data.RemoveByID(*ID);
 	ptr->RemoveSelected();
 	WH->DisableAllWindows();
@@ -1565,7 +1583,8 @@ namespace Settings
 
 		((CheckBox*)((*pptr)["SPLIT_TRACKS"]))->State = _Data.ChannelsSplit;
 		((CheckBox*)((*pptr)["RSB_COMPRESS"]))->State = _Data.RSBCompression;
-		((CheckBox*)((*pptr)["COLLAPSE_MIDI"]))->State = _Data.CollapseMIDI;
+		((CheckBox*)((*pptr)["COLLAPSE_MIDI"]))->State = _Data.CollapseMIDI; 
+		((CheckBox*)((*pptr)["APPLY_OFFSET_AFTER"]))->State = _Data.ApplyOffsetAfter;
 		
 		((CheckBox*)((*pptr)["INPLACE_MERGE"]))->State = _Data.InplaceMergeFlag;
 		((CheckBox*)((*pptr)["AUTOUPDATECHECK"]))->State = check_autoupdates;
@@ -1625,16 +1644,18 @@ namespace Settings
 		_Data.RSBCompression = ((CheckBox*)((*pptr)["RSB_COMPRESS"]))->State;
 
 		_Data.CollapseMIDI = ((CheckBox*)((*pptr)["COLLAPSE_MIDI"]))->State;
+		_Data.ApplyOffsetAfter = ((CheckBox*)((*pptr)["APPLY_OFFSET_AFTER"]))->State;
 
 		if (isRegestryOpened)
 		{
 			TRY_CATCH(RegestryAccess.SetDwordValue(L"AUTOUPDATECHECK", check_autoupdates);, "Failed on setting AUTOUPDATECHECK")
 			TRY_CATCH(RegestryAccess.SetDwordValue(L"SPLIT_TRACKS", _Data.ChannelsSplit); , "Failed on setting SPLIT_TRACKS")
-			TRY_CATCH(RegestryAccess.SetDwordValue(L"COLLAPSE_MIDI", _Data.ChannelsSplit); , "Failed on setting COLLAPSE_MIDI")
+			TRY_CATCH(RegestryAccess.SetDwordValue(L"COLLAPSE_MIDI", _Data.CollapseMIDI);, "Failed on setting COLLAPSE_MIDI")
+			TRY_CATCH(RegestryAccess.SetDwordValue(L"APPLY_OFFSET_AFTER", _Data.CollapseMIDI);, "Failed on setting APPLY_OFFSET_AFTER")
 			//TRY_CATCH(RegestryAccess.SetDwordValue(L"RSB_COMPRESS", check_autoupdates);, "Failed on setting RSB_COMPRESS")
 			TRY_CATCH(RegestryAccess.SetDwordValue(L"DEFAULT_BOOL_SETTINGS", DefaultBoolSettings);, "Failed on setting DEFAULT_BOOL_SETTINGS")
-			TRY_CATCH(RegestryAccess.SetDwordValue(L"FONTSIZE", lFontSymbolsInfo::Size); , "Failed on setting FONTSIZE")
-			TRY_CATCH(RegestryAccess.SetDwordValue(L"FLOAT_FONTHTW", *(std::uint32_t*)(&lFONT_HEIGHT_TO_WIDTH)); , "Failed on setting FLOAT_FONTHTW")
+			TRY_CATCH(RegestryAccess.SetDwordValue(L"FONTSIZE_POST1P4", lFontSymbolsInfo::Size); , "Failed on setting FONTSIZE_POST1P4")
+			TRY_CATCH(RegestryAccess.SetDwordValue(L"FLOAT_FONTHTW_POST1P4", *(std::uint32_t*)(&lFONT_HEIGHT_TO_WIDTH)); , "Failed on setting FLOAT_FONTHTW_POST1P4")
 		}
 
 		_Data.InplaceMergeFlag = (((CheckBox*)(*pptr)["INPLACE_MERGE"])->State);
@@ -1644,9 +1665,9 @@ namespace Settings
 		((InputField*)(*pptr)["AS_FONT_NAME"])->PutIntoSource();
 		std::wstring ws(default_font_name.begin(), default_font_name.end());
 		if (isRegestryOpened)
-			TRY_CATCH(RegestryAccess.SetStringValue(L"COLLAPSEDFONTNAME", ws.c_str()); , "Failed on setting AS_BCKGID")
-			if (isRegestryOpened)
-				Settings::RegestryAccess.Close();
+			TRY_CATCH(RegestryAccess.SetStringValue(L"COLLAPSEDFONTNAME_POST1P4", ws); , "Failed on setting COLLAPSEDFONTNAME_POST1P4")
+
+		Settings::RegestryAccess.Close();
 	}
 	void ChangeIsFontedVar()
 	{
@@ -1657,12 +1678,14 @@ namespace Settings
 	void ApplyToAll()
 	{
 		OnSetApply();
-		for (auto Y = _Data.Files.begin(); Y != _Data.Files.end(); Y++)
+		for (auto Y = _Data.Files.begin(); Y != _Data.Files.end(); ++Y)
 		{
 			Y->BoolSettings = DefaultBoolSettings;
 			Y->InplaceMergeEnabled = _Data.InplaceMergeFlag && !_Data.ChannelsSplit;
 			Y->ChannelsSplit = _Data.ChannelsSplit;
 			Y->RSBCompression = _Data.RSBCompression;
+			Y->CollapseMIDI = _Data.CollapseMIDI;
+			Y->ApplyOffsetAfter = _Data.ApplyOffsetAfter;
 		}
 	}
 	void ApplyFSWheel(double new_val)
@@ -1705,7 +1728,7 @@ void OnStart()
 	std::uint32_t ID = 0;
 
 	MW = (*WH)["SMRP_CONTAINER"];
-	std::list<std::string> undesired_window_activities;
+	std::vector<std::string> undesired_window_activities;
 
 	for (auto& single_activity_pair : MW->WindowActivities) 
 	{
@@ -1775,7 +1798,7 @@ void OnStart()
 			(100., 0., System_White, &(pMCTM->IntermediateRegularFlag), &(pMCTM->IRTrackCount));
 		std::thread ILO([](std::shared_ptr<MIDICollectionThreadedMerger> pMCTM, SAFCData* SD, MoveableWindow* MW)
 		{
-			while (!pMCTM->CheckRIMerge()) 
+			while (!pMCTM->CheckRIMerge())
 			{
 				std::this_thread::sleep_for(std::chrono::milliseconds(66));
 			}
@@ -1828,10 +1851,10 @@ void OnStart()
 
 void OnSaveTo()
 {
-	_Data.SaveDirectory = SOFD(L"Save final midi to...");
-	size_t Pos = _Data.SaveDirectory.rfind(L".mid");
-	if (Pos >= _Data.SaveDirectory.size() || Pos <= _Data.SaveDirectory.size() - 4)
-		_Data.SaveDirectory += L".mid";
+	_Data.SavePath = SOFD(L"Save final midi to...");
+	size_t Pos = _Data.SavePath.rfind(L".mid");
+	if (Pos >= _Data.SavePath.size() || Pos <= _Data.SavePath.size() - 4)
+		_Data.SavePath += L".mid";
 }
 
 void RestoreRegSettings()
@@ -1870,6 +1893,11 @@ void RestoreRegSettings()
 			_Data.CollapseMIDI = Settings::RegestryAccess.GetDwordValue(L"COLLAPSE_MIDI");
 		}
 		catch (...) { std::cout << "Exception thrown while restoring COLLAPSE_MIDI from registry\n"; }
+		try
+		{
+			_Data.ApplyOffsetAfter = Settings::RegestryAccess.GetDwordValue(L"APPLY_OFFSET_AFTER");
+		}
+		catch (...) { std::cout << "Exception thrown while restoring APPLY_OFFSET_AFTER from registry\n"; }
 		try
 		{
 			_Data.DetectedThreads = Settings::RegestryAccess.GetDwordValue(L"AS_THREADS_COUNT");
@@ -1971,8 +1999,10 @@ void Init()
 	T = new MoveableWindow("Props. and sets.", System_White, -100, 100, 200, 200, 0x3F3F3FCF, 0x7F7F7F7F);
 	(*T)["FileName"] = new TextBox("_", System_White, 0, 88.5 - WindowHeapSize, 6, 200 - 1.5 * WindowHeapSize, 7.5, 0, 0, 0, _Align::left, TextBox::VerticalOverflow::cut);
 	(*T)["PPQN"] = new InputField(" ", -90 + WindowHeapSize, 75 - WindowHeapSize, 10, 25, System_White, PropsAndSets::PPQN, 0x007FFFFF, System_White, "PPQN is lesser than 65536.", 5, _Align::center, _Align::left, InputField::Type::NaturalNumbers);
-	(*T)["TEMPO"] = new InputField(" ", -45 + WindowHeapSize, 75 - WindowHeapSize, 10, 55, System_White, PropsAndSets::TEMPO, 0x007FFFFF, System_White, "Specific tempo override field", 8, _Align::center, _Align::left, InputField::Type::FP_PositiveNumbers);
-	(*T)["OFFSET"] = new InputField(" ", 17.5 + WindowHeapSize, 75 - WindowHeapSize, 10, 60, System_White, PropsAndSets::OFFSET, 0x007FFFFF, System_White, "Offset from begining in ticks", 10, _Align::center, _Align::right, InputField::Type::WholeNumbers);
+	(*T)["TEMPO"] = new InputField(" ", -50 + WindowHeapSize, 75 - WindowHeapSize, 10, 45, System_White, PropsAndSets::TEMPO, 0x007FFFFF, System_White, "Specific tempo override field", 8, _Align::center, _Align::left, InputField::Type::FP_PositiveNumbers);
+	(*T)["OFFSET"] = new InputField(" ", 20 + WindowHeapSize, 75 - WindowHeapSize, 10, 55, System_White, PropsAndSets::OFFSET, 0x007FFFFF, System_White, "Offset from begining in ticks", 10, _Align::center, _Align::right, InputField::Type::WholeNumbers);
+
+	(*T)["APPLY_OFFSET_AFTER"] = new CheckBox(12.5 - WindowHeapSize, 75 - WindowHeapSize, 10, 0x007FFFFF, 0xFF7F00AF, 0x7FFF00AF, 1, 0, System_White, _Align::center, "Apply offset after PPQ change");
 
 	(*T)["BOOL_REM_TRCKS"] = new CheckBox(-97.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, System_White, _Align::left, "Remove empty tracks");
 	(*T)["BOOL_REM_REM"] = new CheckBox(-82.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, System_White, _Align::left, "Remove merge \"remnants\"");
@@ -2074,6 +2104,7 @@ void Init()
 	(*T)["INPLACE_MERGE"] = new CheckBox(97.5 - WindowHeapSize, 95 - WindowHeapSize, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, 0, System_White, _Align::right, "Enable/disable inplace merge");
 
 	(*T)["COLLAPSE_MIDI"] = new CheckBox(72.5 - WindowHeapSize, 75 - WindowHeapSize, 10, 0x007FFFFF, 0xFF7F00AF, 0x7FFF00AF, 1, 0, System_White, _Align::right, "Collapse tracks of a MIDI into one");
+	(*T)["APPLY_OFFSET_AFTER"] = new CheckBox(57.5 - WindowHeapSize, 75 - WindowHeapSize, 10, 0x007FFFFF, 0xFF7F00AF, 0x7FFF00AF, 1, 0, System_White, _Align::right, "Apply offset after PPQ change");
 
 	(*T)["AS_THREADS_COUNT"] = new InputField(std::to_string(_Data.DetectedThreads), 92.5 - WindowHeapSize, 75 - WindowHeapSize, 10, 20, System_White, NULL, 0x007FFFFF, System_White, "Threads count", 2, _Align::center, _Align::right, InputField::Type::NaturalNumbers);
 
@@ -2582,6 +2613,14 @@ struct SafcCliRuntime:
 			if (channel_split != object.end())
 				_Data.Files[index].ChannelsSplit = channel_split->second->AsBool();
 
+			auto collapse_midi = object.find(L"collapse_midi");
+			if (collapse_midi != object.end())
+				_Data.Files[index].CollapseMIDI = collapse_midi->second->AsBool();
+
+			auto apply_offset_after = object.find(L"apply_offset_after");
+			if (apply_offset_after != object.end())
+				_Data.Files[index].ApplyOffsetAfter = apply_offset_after->second->AsBool();
+
 			auto rsb_compression = object.find(L"rsb_compression");
 			if (rsb_compression != object.end())
 				_Data.Files[index].RSBCompression = rsb_compression->second->AsBool();
@@ -2604,10 +2643,10 @@ struct SafcCliRuntime:
 		auto save_to = config.find(L"save_to");
 		if (save_to != config.end())
 		{
-			_Data.SaveDirectory = (save_to->second->AsString());
-			size_t Pos = _Data.SaveDirectory.rfind(L".mid");
-			if (Pos >= _Data.SaveDirectory.size() || Pos <= _Data.SaveDirectory.size() - 4)
-				_Data.SaveDirectory += L".mid";
+			_Data.SavePath = (save_to->second->AsString());
+			size_t Pos = _Data.SavePath.rfind(L".mid");
+			if (Pos >= _Data.SavePath.size() || Pos <= _Data.SavePath.size() - 4)
+				_Data.SavePath += L".mid";
 		}
 
 		auto LocalMCTM = _Data.MCTM_Constructor();

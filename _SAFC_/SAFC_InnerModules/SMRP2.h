@@ -136,7 +136,7 @@ struct single_midi_processor_2
 			std::unordered_map<std::uint16_t, base_type> key_events_at_selection_front;
 			std::unordered_map<base_type, event_data_fixed_size_2> channel_events_at_selection_front;
 			std::uint32_t frontal_tempo = default_tempo;
-			color_event frontal_color_event;
+			color_event frontal_color_event{};
 
 			inline void clear()
 			{
@@ -255,6 +255,7 @@ struct single_midi_processor_2
 
 		struct processing_details
 		{
+			bool apply_offset_after;
 			bool remove_remnants;
 			bool remove_empty_tracks;
 			bool channel_split;
@@ -301,35 +302,36 @@ struct single_midi_processor_2
 		out.write(((char*)vec.data()), vec.size());;
 	}
 
-	FORCEDINLINE static uint8_t push_vlv(const uint32_t& value, std::vector<base_type>& vec)
+	FORCEDINLINE static uint8_t push_vlv(uint32_t value, std::vector<base_type>& vec)
 	{
 		return push_vlv_s(value, vec);
 	};
 
-	FORCEDINLINE static uint8_t push_vlv_s(const tick_type& s_value, std::vector<base_type>& vec)
+	FORCEDINLINE static uint8_t push_vlv_s(tick_type s_value, std::vector<base_type>& vec)
 	{
-		constexpr uint8_t $7byte_mask = 0x7F, max_size = 10, $7byte_mask_size = 7;
+		constexpr uint8_t $7byte_mask = 0x7F, max_size = 11, $7byte_mask_size = 7;
 		constexpr uint8_t $adjacent7byte_mask = ~$7byte_mask;
 		uint64_t value = s_value;
-		uint8_t stack[max_size]{};
-		uint8_t size = 0;
-		uint8_t r_size = 0;
+		uint8_t __stack[max_size]{};
+		uint8_t* const stack_end = __stack + max_size;
+		uint8_t* stack = stack_end;
 		do
 		{
-			stack[size] = (value & $7byte_mask);
+			stack--;
+			*stack = (value & $7byte_mask);
 			value >>= $7byte_mask_size;
-			if (size)
-				stack[size] |= $adjacent7byte_mask;
-			size++;
+			if (stack_end - stack != 1)
+				*stack |= $adjacent7byte_mask;
 		} while (value);
-		r_size = size;
+
+		auto stack_size = size_t(stack_end - stack);
 
 		copy_back_traits::copy_back(
 			vec,
-			copy_back_traits::raw_storage{ stack, size }
+			copy_back_traits::raw_storage{ stack, stack_size }
 		);
 
-		return r_size;
+		return stack_size;
 	}
 
 	FORCEDINLINE static uint64_t get_vlv(bbb_ffr& file_input)
@@ -497,19 +499,19 @@ struct single_midi_processor_2
 	}
 
 	template<typename T>
-	FORCEDINLINE static T& get_value(std::vector<base_type>& vec, const size_t& index)
+	FORCEDINLINE static T& get_value(std::vector<base_type>& vec, size_t index)
 	{
 		return *(T*)&vec[index];
 	}
 
 	template<typename T>
-	FORCEDINLINE static T& get_value(const std::vector<base_type>::iterator& vec, const size_t& index)
+	FORCEDINLINE static T& get_value(const std::vector<base_type>::iterator& vec, size_t index)
 	{
 		return *(T*)&vec[index];
 	}
 
 	template<typename T>
-	FORCEDINLINE static bool is_valid_index(std::vector<base_type>& vec, const size_t& index)
+	FORCEDINLINE static bool is_valid_index(std::vector<base_type>& vec, size_t index)
 	{
 		return vec.size() <= index + sizeof(T);
 	}
@@ -655,7 +657,7 @@ struct single_midi_processor_2
 					(*buffers.warning) << (std::to_string(file_input.tellg()) + ": OFF of nonON Note: " + std::to_string(noteoff_misses));
 				}
 
-				if (polyphony_error)
+				if (polyphony_error) [[unlikely]]
 				{
 					data_buffer.resize(current_index);
 					continue;
@@ -749,7 +751,7 @@ struct single_midi_processor_2
 	}
 
 	template<bool ready_for_write = false>
-	FORCEDINLINE constexpr static std::ptrdiff_t expected_size(const base_type& v)
+	FORCEDINLINE constexpr static std::ptrdiff_t expected_size(base_type v)
 	{
 		switch (v >> 4)
 		{
@@ -805,7 +807,7 @@ struct single_midi_processor_2
 		};
 	}
 
-	FORCEDINLINE static tick_type convert_ppq(const tick_type& value, const ppq_type& from, const ppq_type& to)
+	FORCEDINLINE static tick_type convert_ppq(tick_type value, ppq_type from, ppq_type to)
 	{
 		constexpr auto radix = 1ull << 32;
 		auto hi = value >> 32;
@@ -884,10 +886,9 @@ struct single_midi_processor_2
 		single_track_data& std_ref,
 		message_buffers& buffers)
 	{
-		auto db_begin = data_buffer.begin();
-		auto db_end = data_buffer.end();
 		auto db_current = data_buffer.begin();
 
+#pragma pack (push, 1)
 		struct data
 		{
 			tick_type tick;
@@ -899,11 +900,14 @@ struct single_midi_processor_2
 				return tick < op.tick;
 			}
 		};
+#pragma pack(pop)
 
 		auto size = data_buffer.size();
 
 		if (size == 0) // [[unlikely]]
-			return ((*buffers.log) << "Empty buffer"), false;
+			return ((*buffers.log) << "Empty buffer (sort)"), false;
+		else
+			(*buffers.log) << "Prepairing buffer (size: " + std::to_string(size) + ")";
 
 		std::vector<data> data_pointers;
 		data_pointers.reserve(2500000);
@@ -924,13 +928,18 @@ struct single_midi_processor_2
 
 			di = expected_size(db_current);
 
-			data_pointers.emplace_back(tick, i, di);
+			if(tick != disable_tick)
+				data_pointers.emplace_back(tick, i, di);
 
 			db_current += di;
 			i += di;
 		}
 
+		(*buffers.log) << "Sorting buffer (elements: " + std::to_string(data_pointers.size()) + ")";
+
 		std::sort(data_pointers.begin(), data_pointers.end());
+
+		(*buffers.log) << "Copying buffer (elements: " + std::to_string(data_pointers.size()) + ")";
 
 		std::vector<base_type> sorted_data_buffer;
 		sorted_data_buffer.reserve(data_buffer.size());
@@ -1262,32 +1271,46 @@ struct single_midi_processor_2
 		};
 
 		const event_transforming_filter tick_positive_linear_transform =
-			[old_ppqn = settings.old_ppqn, new_ppqn = settings.new_ppqn, offset = settings.offset]
+			[old_ppqn = settings.old_ppqn,
+			 new_ppqn = settings.new_ppqn, 
+			 offset = settings.offset,
+			 apply_offset_after = settings.proc_details.apply_offset_after]
 		(const data_iterator& begin, const data_iterator& end, const data_iterator& cur, single_track_data& std_ref) -> bool
 		{
 			auto& tick = get_value<tick_type>(cur, tick_position);
 
-			auto new_tick = sgtick_type(
-				old_ppqn == new_ppqn ? 
-					tick : 
+			if (apply_offset_after)
+			{
+				auto new_tick = sgtick_type(
+					old_ppqn == new_ppqn ?
+					tick :
 					convert_ppq(tick, old_ppqn, new_ppqn)) +
-				offset;
+					offset;
 
+				if (new_tick < 0)
+					return (tick = disable_tick), false;
+				return (tick = new_tick), true;
+			}
+
+			sgtick_type new_tick = sgtick_type(tick) + offset;
 			if(new_tick < 0)
 				return (tick = disable_tick), false;
+
+			if (old_ppqn != new_ppqn)
+				new_tick = convert_ppq(new_tick, old_ppqn, new_ppqn);
 			return (tick = new_tick), true;
 		};
 
-		filters.insert({ 0, selection_filter });
-		filters.insert({ 0, tick_positive_linear_transform });
-		filters.insert({ 0x80, key_transform });
-		filters.insert({ 0x90, key_transform });
-		filters.insert({ 0xA0, others_transform });
-		filters.insert({ 0xB0, others_transform });
-		filters.insert({ 0xC0, program_transform });
-		filters.insert({ 0xD0, others_transform });
-		filters.insert({ 0xE0, pitch_transform });
-		filters.insert({ 0xF0, meta_transform });
+		filters.emplace( 0, selection_filter );
+		filters.emplace( 0, tick_positive_linear_transform );
+		filters.emplace( 0x80, key_transform );
+		filters.emplace( 0x90, key_transform );
+		filters.emplace( 0xA0, others_transform );
+		filters.emplace( 0xB0, others_transform );
+		filters.emplace( 0xC0, program_transform );
+		filters.emplace( 0xD0, others_transform );
+		filters.emplace( 0xE0, pitch_transform );
+		filters.emplace( 0xF0, meta_transform );
 
 		return filters;
 	}
@@ -1357,13 +1380,13 @@ struct single_midi_processor_2
 				out.write((const char*)&placeholder[0], sizeof(placeholder));
 			out.write((const char*)&ending[0], sizeof(ending));
 		}
-		inline void swap_zero_and_channel(const uint8_t&) { return; }
+		inline void swap_zero_and_channel(uint8_t) { return; }
 	};
 
 	template<>
 	struct track_data<true>
 	{
-		track_data<false> data[16];
+		track_data<false> data[16]{};
 		uint8_t last_channel{0};
 
 		inline std::vector<uint8_t>& get_vec(uint8_t channel)
@@ -1372,7 +1395,7 @@ struct single_midi_processor_2
 				channel = last_channel;
 			return data[channel].get_vec(channel);
 		}
-		inline void swap_zero_and_channel(const uint8_t& channel)
+		inline void swap_zero_and_channel(uint8_t channel)
 		{
 			data[0].swap(data[channel]);
 		}
@@ -1520,7 +1543,9 @@ struct single_midi_processor_2
 		auto write_selection_front_wrap = [&]() {
 			if (first_tick)
 			{
-				auto original_front_tick = settings_data.settings.selection_data.begin + settings_data.settings.offset;
+				auto original_front_tick = 
+					sgtick_type(settings_data.settings.selection_data.begin) + settings_data.settings.offset;
+
 				original_front_tick = (original_front_tick < 0) ? 0 : original_front_tick;
 
 				auto selection_front_tick =
@@ -1688,6 +1713,8 @@ struct single_midi_processor_2
 					(*loggers.error) << "Something went wrong during sorting";
 			}
 
+			size_t current_count;
+
 			if (data_buffer_is_dumpable)
 			{
 				if (data.settings.legacy.rsb_compression)
@@ -1706,11 +1733,11 @@ struct single_midi_processor_2
 						write_buffer);
 			}
 
-			auto current_count = write_buffer.count(data.settings.proc_details.remove_empty_tracks);
-			track_counter += current_count;
+			current_count = write_buffer.count(data.settings.proc_details.remove_empty_tracks);
 
 			if (data_buffer_is_dumpable)
 			{
+				track_counter += current_count;
 				write_buffer.dump(file_output, data.settings.proc_details.remove_empty_tracks);
 				write_buffer.clear();
 			}

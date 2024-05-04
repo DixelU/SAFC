@@ -16,8 +16,9 @@ struct ButtonSettings
 	ButtonSettings(std::string ButtonText, void(*OnClick)(), float Xpos, float Ypos, float Width, float Height, float CharHeight, std::uint32_t RGBAColor, std::uint32_t gRGBAColor, std::uint8_t BasePoint, std::uint8_t GradPoint, std::uint8_t BorderWidth, std::uint32_t RGBABackground, std::uint32_t RGBABorder, std::uint32_t HoveredRGBAColor, std::uint32_t HoveredRGBABackground, std::uint32_t HoveredRGBABorder, SingleTextLineSettings* Tip, std::string TipText)
 	{
 		this->STLSBasedSettings = 0;
-		this->ButtonText = ButtonText;
-		this->TipText = TipText;
+		this->STLS = nullptr;
+		this->ButtonText = std::move(ButtonText);
+		this->TipText = std::move(TipText);
 		this->OnClick = OnClick;
 		this->Tip = Tip;
 		this->Xpos = Xpos;
@@ -32,14 +33,15 @@ struct ButtonSettings
 		this->BorderWidth = BorderWidth;
 		this->RGBABackground = RGBABackground;
 		this->RGBABorder = RGBABorder;
+		this->HoveredRGBAColor = HoveredRGBAColor;
 		this->HoveredRGBABackground = HoveredRGBABackground;
 		this->HoveredRGBABorder = HoveredRGBABorder;
 	}
 	ButtonSettings(std::string ButtonText, SingleTextLineSettings* ButtonTextSTLS, void(*OnClick)(), float Xpos, float Ypos, float Width, float Height, std::uint8_t BorderWidth, std::uint32_t RGBABackground, std::uint32_t RGBABorder, std::uint32_t HoveredRGBAColor, std::uint32_t HoveredRGBABackground, std::uint32_t HoveredRGBABorder, SingleTextLineSettings* Tip, std::string TipText = " ")
 	{
 		this->STLSBasedSettings = 1;
-		this->ButtonText = ButtonText;
-		this->TipText = TipText;
+		this->ButtonText = std::move(ButtonText);
+		this->TipText = std::move(TipText);
 		this->OnClick = OnClick;
 		this->Tip = Tip;
 		this->Xpos = Xpos;
@@ -48,6 +50,9 @@ struct ButtonSettings
 		this->Height = Height;
 		this->STLS = ButtonTextSTLS;
 		this->BorderWidth = BorderWidth;
+		this->gRGBAColor = 0;
+		this->BasePoint = 0;
+		this->GradPoint = 0;
 		this->RGBAColor = ButtonTextSTLS->RGBAColor;
 		this->RGBABackground = RGBABackground;
 		this->RGBABorder = RGBABorder;
@@ -68,17 +73,10 @@ struct ButtonSettings
 		this->STLSBasedSettings = 1;
 		this->ButtonText = (KeepText) ? Example->STL->_CurrentText : " ";
 		if (!this->ButtonText.size())this->ButtonText = " ";
-		if (Example->Tip) {
-			this->Tip = Tip;
-			if (TipText.size())
-				this->TipText = TipText;
-			else
-				this->TipText = " ";
-		}
-		else {
-			this->TipText = " ";
-			this->Tip = NULL;
-		}
+		
+		this->TipText = " ";
+		this->Tip = NULL;
+		
 		this->OnClick = Example->OnClick;
 		this->Xpos = Example->Xpos;
 		this->Ypos = Example->Ypos;
@@ -105,7 +103,7 @@ struct ButtonSettings
 		NewY -= Ypos;
 		Move(NewX, NewY);
 	}
-	Button* CreateOne(std::string ButtonText, bool KeepText = false) 
+	Button* CreateOne(const std::string& ButtonText, bool KeepText = false) 
 	{
 		if (STLS && STLSBasedSettings)
 			return new Button(((KeepText) ? this->ButtonText : ButtonText), STLS, OnClick, Xpos, Ypos, Width, Height, BorderWidth, RGBABackground, RGBABorder, HoveredRGBAColor, HoveredRGBABackground, HoveredRGBABorder, Tip, TipText);

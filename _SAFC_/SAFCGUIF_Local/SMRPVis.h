@@ -68,7 +68,7 @@ struct SMRP_Vis : HandleableUIPart
 	{
 		return;
 	}
-	void SetInfoString(std::string NewInfoString) 
+	void SetInfoString(const std::string& NewInfoString) 
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		this->_stl_info->SafeStringReplace(NewInfoString);

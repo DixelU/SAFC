@@ -136,7 +136,7 @@ struct MoveableWindow : HandleableUIPart
 		NewYpos -= YWindowPos;
 		SafeMove(NewXpos, NewYpos);
 	}
-	bool DeleteUIElementByName(std::string ElementName, bool DeleteElement = true)
+	bool DeleteUIElementByName(const std::string& ElementName, bool DeleteElement = true)
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		HUIP_MapWasChanged = true;
@@ -149,7 +149,7 @@ struct MoveableWindow : HandleableUIPart
 			delete deletable;
 		return 1;
 	}
-	bool AddUIElement(std::string ElementName, HandleableUIPart* Elem)
+	bool AddUIElement(const std::string& ElementName, HandleableUIPart* Elem)
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		HUIP_MapWasChanged = true;
@@ -240,7 +240,7 @@ struct MoveableWindow : HandleableUIPart
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		SafeWindowRename(NewWindowTitle);
 	}
-	void SafeWindowRename(std::string NewWindowTitle)
+	void SafeWindowRename(const std::string& NewWindowTitle)
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		if (WindowName) {
@@ -248,7 +248,7 @@ struct MoveableWindow : HandleableUIPart
 			WindowName->SafeChangePosition_Argumented(GLOBAL_LEFT, XWindowPos + WindowHeapSize * 0.5f, WindowName->CYpos);
 		}
 	}
-	HandleableUIPart*& operator[](std::string ID)
+	HandleableUIPart*& operator[](const std::string& ID)
 	{
 		return WindowActivities[ID];
 	}
