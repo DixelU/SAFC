@@ -513,7 +513,7 @@ struct SAFCData
 	std::vector<FileSettings> Files;
 	std::wstring SavePath;
 	std::uint16_t GlobalPPQN;
-	std::uint32_t GlobalOffset;
+	std::int32_t GlobalOffset;
 	float GlobalNewTempo;
 	bool IncrementalPPQN;
 	bool InplaceMergeFlag;
@@ -589,7 +589,7 @@ struct SAFCData
 			Files[i].NewPPQN = NewPPQN;
 		GlobalPPQN = NewPPQN;
 	}
-	void SetGlobalOffset(std::uint32_t Offset)
+	void SetGlobalOffset(std::int32_t Offset)
 	{
 		for (int i = 0; i < Files.size(); i++)
 			Files[i].OffsetTicks = Offset;
@@ -1514,7 +1514,7 @@ void OnSubmitGlobalOffset()
 void OnGlobalOffset()
 {
 	WH->ThrowPrompt("Sets new global offset", "Global Offset", OnSubmitGlobalOffset, _Align::center, InputField::Type::WholeNumbers, std::to_string(_Data.GlobalOffset), 10);
-	std::cout << _Data.GlobalOffset << std::to_string(_Data.GlobalOffset) << std::endl;
+	std::cout << _Data.GlobalOffset << " " << std::to_string(_Data.GlobalOffset) << std::endl;
 }
 
 void OnSubmitGlobalTempo()
