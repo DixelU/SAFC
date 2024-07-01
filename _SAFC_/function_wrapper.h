@@ -102,15 +102,15 @@ namespace dixelu
         template<typename F>
         type_erased_function_container(F&& f) :
             _callable(
-                new std::decay<F>::type(std::move(f)),
-                [](void* ptr) {delete (static_cast<std::decay<F>::type*>(ptr)); }),
-            _function_ref(static_cast<std::decay<F>::type*>(_callable.get()))
+                new typename std::decay<F>::type(std::move(f)),
+                [](void* ptr) {delete (static_cast<typename std::decay<F>::type*>(ptr)); }),
+            _function_ref(static_cast<typename std::decay<F>::type*>(_callable.get()))
         {
         }
 
         template<typename F>
         type_erased_function_container(const F& f) :
-            type_erased_function_container((std::decay<F>::type)(f))
+            type_erased_function_container((typename std::decay<F>::type)(f))
         {
         }
 

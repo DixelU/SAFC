@@ -411,7 +411,7 @@ struct FileSettings
 	{
 		this->Filename = Filename;
 		AppearanceFilename = AppearancePath = "";
-		auto pos = Filename.rfind('\\');
+		auto pos = Filename.rfind('/');
 		for (; pos < Filename.size(); pos++)
 			AppearanceFilename.push_back(Filename[pos] & 0xFF);
 		for (int i = 0; i < Filename.size(); i++)
