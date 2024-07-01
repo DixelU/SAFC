@@ -198,8 +198,9 @@ struct SingleTextLine
 
 	float HorizontallyRepositionFontedSymbols()
 	{
-		float PixelSize = (internal_range * 2) / window_base_width;
 		float TotalWidth = 0;
+#ifdef WINDOWS
+		float PixelSize = (internal_range * 2) / window_base_width;
 		ptrdiff_t TotalPixelWidth = 0;
 
 		for (auto& ch : Chars)
@@ -244,13 +245,13 @@ struct SingleTextLine
 		}
 		/*std::cout << "Width: " << TotalPixelWidth << std::endl;
 		std::cout << "====" << std::endl;*/
-
+#endif
 		return TotalWidth;
 	}
 
 	void Draw()
 	{
-		if (CalculatedWidth < FLT_EPSILON)
+		if (CalculatedWidth < std::numeric_limits<float>::epsilon())
 			RecalculateWidth();
 
 		for (auto& ch: Chars)

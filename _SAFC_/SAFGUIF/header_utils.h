@@ -34,7 +34,12 @@ std_unicode_string default_reg_path =
 #endif
 
 std::string default_font_name = "Arial";
-bool is_fonted = true;
+bool is_fonted = 
+#ifdef WINDOWS
+	true;
+#else
+	false;
+#endif
 
 //#define ROT_ANGLE 0.7
 #define TRY_CATCH(code,msg) try{code}catch(...){std::cout<<msg<<std::endl;}

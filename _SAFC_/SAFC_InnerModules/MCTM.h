@@ -334,7 +334,7 @@ struct MIDICollectionThreadedMerger
 							} while (IO & 0x80);
 							if (pfiv.eof())
 								goto trackending;
-							if (ddt = DIO)
+							if ((ddt = DIO))
 								goto escape;
 
 						eventevalution:
@@ -548,18 +548,38 @@ struct MIDICollectionThreadedMerger
 
 		if (regular_merge_candidates.size() == 1)
 		{
-			std::wstring filename = 
+			auto filename = 
 				regular_merge_candidates.front().first->filename + 
 				regular_merge_candidates.front().first->postfix;
-			auto save_to_with_postfix = SaveTo + L".R.mid";
-			_wremove(save_to_with_postfix.c_str());
-			auto result = _wrename(filename.c_str(), save_to_with_postfix.c_str());
+			auto save_to_with_postfix = SaveTo + 
+#ifdef WINDOWS
+				L".R.mid";
+#else
+				".R.mid";
+#endif
+
+			auto remove_functor =
+#ifdef WINDOWS
+					_wremove;
+#else
+					remove;
+#endif
+
+			auto rename_functor = 
+#ifdef WINDOWS
+					_wrename;
+#else
+					rename;
+#endif
+
+			remove_functor(save_to_with_postfix.c_str());
+			auto result = rename_functor(filename.c_str(), save_to_with_postfix.c_str());
 
 			IntermediateRegularFlag = true; /// Will this work?
 		}
 		else
 		{
-					std::thread([](mpd_t RMC, std::uint16_t PPQN, std_unicode_string _SaveTo,
+		std::thread([](mpd_t RMC, std::uint16_t PPQN, std_unicode_string _SaveTo,
 			std::reference_wrapper<std::atomic_bool> FinishedFlag, std::reference_wrapper<std::atomic_uint64_t> TrackCount)
 		{
 			if (RMC.empty()) 

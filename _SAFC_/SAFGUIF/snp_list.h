@@ -333,7 +333,7 @@ struct SelectablePropertedList : HandleableUIPart
 		for (auto Y = LStrings.begin(); Y != LStrings.end(); ++Y)
 			SafePushBackNewString(*Y);
 	}
-	void SafeChangePosition_Argumented(std::uint8_t Arg, float NewX, float NewY)
+	void SafeChangePosition_Argumented(std::uint8_t Arg, float NewX, float NewY) override
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		float CW = 0.5f * (

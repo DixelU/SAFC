@@ -34,6 +34,7 @@ bool RestoreIsFontedVar()
 
 	RK.Close();
 
+#endif
 	return false;
 }
 

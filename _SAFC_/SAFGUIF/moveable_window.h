@@ -52,7 +52,7 @@ struct MoveableWindow : HandleableUIPart
 		this->PCurX = 0.;
 		this->PCurY = 0.;
 	}
-	void KeyboardHandler(char CH)
+	void KeyboardHandler(char CH) override
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		for (auto i = WindowActivities.begin(); i != WindowActivities.end(); i++) {
@@ -166,7 +166,7 @@ struct MoveableWindow : HandleableUIPart
 			if (Y->second)
 				Y->second->SafeMove(dx, dy);
 	}
-	void SafeChangePosition_Argumented(std::uint8_t Arg, float NewX, float NewY)
+	void SafeChangePosition_Argumented(std::uint8_t Arg, float NewX, float NewY) override
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		float CW = 0.5f * (
@@ -252,7 +252,7 @@ struct MoveableWindow : HandleableUIPart
 	{
 		return WindowActivities[ID];
 	}
-	std::uint32_t TellType()
+	std::uint32_t TellType() override
 	{
 		return TT_MOVEABLE_WINDOW;
 	}

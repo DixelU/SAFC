@@ -129,7 +129,7 @@ struct InputField : HandleableUIPart
 		}
 		return !first_symb;
 	}
-	void SafeMove(float dx, float dy) 
+	void SafeMove(float dx, float dy) override
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		STL->SafeMove(dx, dy);
@@ -137,7 +137,7 @@ struct InputField : HandleableUIPart
 		Xpos += dx;
 		Ypos += dy;
 	}
-	void SafeChangePosition(float NewX, float NewY)
+	void SafeChangePosition(float NewX, float NewY) override
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		NewX = Xpos - NewX;
@@ -208,7 +208,7 @@ struct InputField : HandleableUIPart
 		else
 			return "0";
 	}
-	void KeyboardHandler(char CH) 
+	void KeyboardHandler(char CH) override
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		if (Focused)
@@ -257,7 +257,7 @@ struct InputField : HandleableUIPart
 			UpdateInputString();
 		}
 	}
-	void SafeChangePosition_Argumented(std::uint8_t Arg, float NewX, float NewY)
+	void SafeChangePosition_Argumented(std::uint8_t Arg, float NewX, float NewY) override
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		float CW = 0.5f * (

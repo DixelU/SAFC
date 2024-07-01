@@ -43,7 +43,7 @@ struct FastMIDIChecker
 		std::uint32_t MTHD = 0;
 
 		for(int i = 0; i < 4; ++i)
-			MTHD = (MTHD << 8) | (f.get());
+			MTHD = (MTHD << 8) | (f->get());
 
 		if (MTHD == MThd && f->good())
 		{

@@ -111,7 +111,7 @@ struct Button : HandleableUIPart
 		}
 		return 0;
 	}
-	void SafeMove(float dx, float dy) 
+	void SafeMove(float dx, float dy) override
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		if (Tip)
@@ -129,14 +129,14 @@ struct Button : HandleableUIPart
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		this->STL->SafeStringReplace(NewString);
 	}
-	void SafeChangePosition(float NewX, float NewY) 
+	void SafeChangePosition(float NewX, float NewY) override
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		NewX -= Xpos;
 		NewY -= Ypos;
 		SafeMove(NewX, NewY);
 	}
-	void SafeChangePosition_Argumented(std::uint8_t Arg, float NewX, float NewY)
+	void SafeChangePosition_Argumented(std::uint8_t Arg, float NewX, float NewY) override
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		float CW = 0.5f * (
@@ -149,7 +149,7 @@ struct Button : HandleableUIPart
 				) * Height;
 		SafeChangePosition(NewX + CW, NewY + CH);
 	}
-	void Draw()
+	void Draw() override
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		if (!Enabled) 

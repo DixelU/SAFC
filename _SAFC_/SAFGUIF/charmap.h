@@ -7,12 +7,14 @@
 #include <fstream>
 
 std::unordered_map<char, std::string> ASCII;
+
 void InitASCIIMap()
 {
 	ASCII.clear();
 	std::ifstream file("ascii.dotmap", std::ios::in);
 	std::string T;
-	if (true) {
+	if (true) 
+	{
 		for (int i = 0; i <= 32; i++)ASCII[i] = " ";
 		ASCII['!'] = "85 2";
 		ASCII['"'] = "74 96";

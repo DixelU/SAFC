@@ -96,7 +96,7 @@ public:
 				cur_word.insert(cur_word.begin() + 1, ch);
 				CursorWordIter->SafeStringReplace(cur_word.substr(0, maximal_whole_word_size - 1));
 				auto itt = CursorPosition.first;
-				CursorPosition.first = Words.insert(CursorPosition.first + 1, STLS->CreateOne(cur_word.substr(maximal_whole_word_size - 1, 0x7FFFFFFF))),itt;
+				CursorPosition.first = Words.insert(CursorPosition.first + 1, STLS->CreateOne(cur_word.substr(maximal_whole_word_size - 1, 0x7FFFFFFF))), itt;
 				CursorPosition.second++;
 				--CursorPosition.first;
 			}

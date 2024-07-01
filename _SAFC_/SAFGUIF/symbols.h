@@ -51,7 +51,7 @@ struct DottedSymbol
 	virtual ~DottedSymbol() {}
 	inline static bool IsRenderwaySymb(char C)
 	{
-		return (C <= '9' && C >= '0' || C == ' ');
+		return ((C <= '9' && C >= '0') || C == ' ');
 	}
 	inline static bool IsNumber(char C)
 	{
@@ -258,12 +258,15 @@ struct lFontSymbol : DottedSymbol
 	lFontSymbol(char Symb, float CXpos, float CYpos, float XUnitSize, float YUnitSize, std::uint32_t RGBA) :
 		DottedSymbol(" ", CXpos, CYpos, XUnitSize, YUnitSize, 1, RGBA >> 24, (RGBA >> 16) & 0xFF, (RGBA >> 8) & 0xFF, RGBA & 0xFF)
 	{
+
+#ifdef WINDOWS
 		GM.gmBlackBoxX = 0;
 		GM.gmBlackBoxY = 0;
 		GM.gmCellIncX = 0;
 		GM.gmCellIncY = 0;
 		GM.gmptGlyphOrigin.x = 0;
 		GM.gmptGlyphOrigin.y = 0;
+#endif
 
 		this->Symb = Symb;
 		ReinitGlyphMetrics();
@@ -280,8 +283,10 @@ struct lFontSymbol : DottedSymbol
 			std::cout << std::hex << std::setw(2) << std::setfill('0') << (int)gmdata[i];
 		std::cout << std::endl;*/
 
+#ifdef WINDOWS
 		auto result = GetGlyphOutline(hDc, Symb, GGO_GRAY8_BITMAP, &GM, 0, NULL, &lFontSymbolsInfo::MT);
-
+#endif
+		
 		/*std::cout << "ReinitGlyphMetrics ar: ";
 		for (size_t i = 0; i < sizeof(GM); ++i)
 			std::cout << std::hex << std::setw(2) << std::setfill('0') << (int)gmdata[i];

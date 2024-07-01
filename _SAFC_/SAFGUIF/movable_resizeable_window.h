@@ -20,7 +20,7 @@ struct MoveableResizeableWindow : MoveableWindow
 	{
 
 	}
-	bool virtual IsResizeable() 
+	bool virtual IsResizeable() override
 	{
 		return true;
 	}

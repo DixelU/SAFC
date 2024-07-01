@@ -122,7 +122,7 @@ struct TextBox : HandleableUIPart
 		for (auto i = Lines.begin(); i != Lines.end(); ++i)
 			(*i)->SafeColorChange(NewColor);
 	}
-	bool MouseHandler(float mx, float my, char Button/*-1 left, 1 right, 0 move*/, char State /*-1 down, 1 up*/)  override
+	bool MouseHandler(float mx, float my, char Button/*-1 left, 1 right, 0 move*/, char State /*-1 down, 1 up*/) override
 	{
 		return 0;
 	}
@@ -134,7 +134,7 @@ struct TextBox : HandleableUIPart
 		RecalculateAvailableSpaceForText();
 		TextReformat();
 	}
-	void KeyboardHandler(char CH)
+	void KeyboardHandler(char CH) override
 	{
 		return;
 	}
@@ -143,7 +143,7 @@ struct TextBox : HandleableUIPart
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		SymbolsPerLine = std::floor((Width + STLS->XUnitSize * 2) / (STLS->XUnitSize * 2 + STLS->SpaceWidth));
 	}
-	void SafeMove(float dx, float dy)
+	void SafeMove(float dx, float dy) override
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		Xpos += dx;
@@ -153,14 +153,14 @@ struct TextBox : HandleableUIPart
 			Lines[i]->SafeMove(dx, dy);
 		}
 	}
-	void SafeChangePosition(float NewX, float NewY)
+	void SafeChangePosition(float NewX, float NewY) override
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		NewX -= Xpos;
 		NewY -= Ypos;
 		SafeMove(NewX, NewY);
 	}
-	void SafeChangePosition_Argumented(std::uint8_t Arg, float NewX, float NewY)
+	void SafeChangePosition_Argumented(std::uint8_t Arg, float NewX, float NewY) override
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		float CW = 0.5f * (

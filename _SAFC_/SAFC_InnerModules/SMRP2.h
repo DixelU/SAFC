@@ -1047,7 +1047,7 @@ struct single_midi_processor_2
 			di = expected_size(db_current);
 
 			if(tick != disable_tick)
-				data_pointers.emplace_back(tick, i, di);
+				data_pointers.push_back(data{tick, i, di});
 
 			db_current += di;
 			i += di;
@@ -1884,4 +1884,4 @@ struct single_midi_processor_2
 	}
 };
 
-#endif SAF_SMRP2
+#endif //SAF_SMRP2

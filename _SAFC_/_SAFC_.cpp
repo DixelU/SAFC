@@ -2076,9 +2076,12 @@ void Init()
 
 	std::stringstream MainWindowName;
 
+#ifdef WINDOWS
 	auto [maj, min, ver, build] = __versionTuple;
 	MainWindowName << "SAFC v" << maj << "." << min << "." << ver << "." << build << "";
-
+	#else
+	MainWindowName << "SAFC for linux (custom v1.4.4.1)";
+#endif
 	SelectablePropertedList* SPL = new SelectablePropertedList(BS_List_Black_Small, NULL, PropsAndSets::OGPInMIDIList, -50, 172, 300, 12, 65, 30);
 	MoveableWindow* T = new MoveableResizeableWindow(MainWindowName.str(), System_White, -200, 200, 400, 400, 0x3F3F3FAF, 0x7F7F7F7F, 0, [SPL](float dH, float dW, float NewHeight, float NewWidth) {
 		constexpr float TopMargin = 200 - 172;
@@ -2687,13 +2690,13 @@ struct SafcCliRuntime:
 			_Data.SetGlobalOffset(global_offset->second->AsNumber());
 
 		auto& filesArray = files->second->AsArray();
-		std::vector<std::wstring> filenames;
+		std::vector<std_unicode_string> filenames;
 
 		for (auto& singleEntry : filesArray)
 		{
 			auto& object = singleEntry->AsObject();
 			auto& filename = object.at(L"filename")->AsString();
-			filenames.push_back(std::move(filename));
+			filenames.push_back(std_unicode_string(filename.begin(), filename.end()));
 		}
 
 		AddFiles(filenames);
@@ -2814,7 +2817,9 @@ struct SafcCliRuntime:
 
 int main(int argc, char** argv)
 {
+#ifdef WINDOWS
 	__versionTuple = ___GetVersion();
+#endif
 
 	std::ios_base::sync_with_stdio(false); //why not
 

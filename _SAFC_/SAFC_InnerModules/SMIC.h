@@ -160,7 +160,7 @@ struct SingleMIDIInfoCollector
 					do 
 					{
 						IO = file_input.get();
-						meta_data_size = meta_data_size << 7 | IO & 0x7F;
+						meta_data_size = (meta_data_size << 7) | (IO & 0x7F);
 					} while (IO & 0x80 && !file_input.eof());
 					if (type == 0x2F)
 					{
@@ -193,7 +193,7 @@ struct SingleMIDIInfoCollector
 					if (!volume && change == 1)
 						change = -1;
 
-					int index = EventType & 0xF | (key << 4);
+					int index = (EventType & 0xF) | (key << 4);
 					if (change == -1)
 					{
 						if (polyphony[index] == 0)
@@ -246,7 +246,7 @@ struct SingleMIDIInfoCollector
 						if (!volume && change == 1)
 							change = -1;
 
-						int index = EventType & 0xF | (FirstParam << 4);
+						int index = (EventType & 0xF) | (FirstParam << 4);
 						if (change == -1) 
 						{
 							if (polyphony[index] == 0)
