@@ -941,7 +941,7 @@ namespace WinReg {
 			const size_t currStringLength = wcslen(currStringPtr);
 
 			// Add current string to the result vector
-			result.push_back(std::wstring{ currStringPtr, currStringLength });
+			result.emplace_back(currStringPtr, currStringLength);
 
 			// Move to the next string
 			currStringPtr += currStringLength + 1;
@@ -1105,7 +1105,7 @@ namespace WinReg {
 			// subkey name in the subKeyNameLen output parameter 
 			// (not including the terminating NUL).
 			// So I can build a wstring based on that length.
-			subkeyNames.push_back(std::wstring{ nameBuffer.get(), subKeyNameLen });
+			subkeyNames.emplace_back(nameBuffer.get(), subKeyNameLen);
 		}
 
 		return subkeyNames;
@@ -1178,7 +1178,7 @@ namespace WinReg {
 			// value name in the valueNameLen output parameter 
 			// (not including the terminating NUL).
 			// So we can build a wstring based on that.
-			valueInfo.push_back(
+			valueInfo.emplace_back(
 				std::make_pair(std::wstring{ nameBuffer.get(), valueNameLen }, valueType)
 			);
 		}

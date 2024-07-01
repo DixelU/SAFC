@@ -34,7 +34,7 @@ struct CAT_Piano :HandleableUIPart
 		this->PianoHeight = PianoHeight;
 		this->CalculatedHeight = PianoHeight * 4;
 		this->CalculatedWidth = KeyWidth * (128 * 3);
-		this->PianoTransform = PianoTransform;
+		this->PianoTransform = std::move(PianoTransform);
 		this->Focused = 0;
 		System_White->SetNewPos(BaseXPos + KeyWidth * (128 * 1.25f), BaseYPos - 0.75f * PianoHeight);
 		this->MinCont = System_White->CreateOne("_");
@@ -155,12 +155,12 @@ struct CAT_Piano :HandleableUIPart
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		float CW = 0.5f * (
-			(int32_t)((bool)(GLOBAL_LEFT & Arg))
-			- (int32_t)((bool)(GLOBAL_RIGHT & Arg))
+			(std::int32_t)((bool)(GLOBAL_LEFT & Arg))
+			- (std::int32_t)((bool)(GLOBAL_RIGHT & Arg))
 			) * CalculatedWidth,
 			CH = 0.5f * (
-				(int32_t)((bool)(GLOBAL_BOTTOM & Arg))
-				- (int32_t)((bool)(GLOBAL_TOP & Arg))
+				(std::int32_t)((bool)(GLOBAL_BOTTOM & Arg))
+				- (std::int32_t)((bool)(GLOBAL_TOP & Arg))
 				) * CalculatedHeight;
 		SafeChangePosition(NewX + CW, NewY + CH);
 	}

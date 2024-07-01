@@ -107,7 +107,7 @@ struct MoveableResizeableWindow : MoveableWindow
 		if (ResizeCornerIsActive)
 		{
 			if(Button == -1 && State == 1)
-				ResizeCornerIsActive = !ResizeCornerIsActive;
+				ResizeCornerIsActive = false;
 			SafeResize(Height + dH, Width + dW);
 			return 1;
 		}

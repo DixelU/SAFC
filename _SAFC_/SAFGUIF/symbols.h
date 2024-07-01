@@ -25,7 +25,7 @@ struct DottedSymbol
 	DottedSymbol(std::string RenderWay, float Xpos, float Ypos, float XUnitSize, float YUnitSize, std::uint8_t LineWidth = 2, std::uint8_t Red = 255, std::uint8_t Green = 255, std::uint8_t Blue = 255, std::uint8_t Alpha = 255)
 	{
 		if (!RenderWay.size())RenderWay = " ";
-		this->RenderWay = RenderWay;
+		this->RenderWay = std::move(RenderWay);
 		this->Xpos = Xpos;
 		this->LineWidth = LineWidth;
 		this->Ypos = Ypos;
@@ -48,6 +48,7 @@ struct DottedSymbol
 	{
 		delete RGBAColor;
 	}
+	virtual ~DottedSymbol() {}
 	inline static bool IsRenderwaySymb(char C)
 	{
 		return (C <= '9' && C >= '0' || C == ' ');
@@ -79,7 +80,7 @@ struct DottedSymbol
 	void virtual Draw()
 	{
 		if (RenderWay == " ")return;
-		float VerticalFlag = 0.f;
+		float VerticalShift = 0.f;
 		char BACK = 0;
 		if (RenderWay.back() == '#' || RenderWay.back() == '~')
 		{
@@ -88,15 +89,15 @@ struct DottedSymbol
 			switch (BACK)
 			{
 			case '#':
-				VerticalFlag = Points->y - Points[3].y;
+				VerticalShift = Points[0].y - Points[3].y;
 				break;
 			case '~':
-				VerticalFlag = (Points->y - Points[3].y) / 2;
+				VerticalShift = (Points[0].y - Points[3].y) / 2;
 				break;
 			}
 		}
 		if (is_fonted)
-			VerticalFlag = 0;
+			VerticalShift = 0;
 		glColor4ub(R, G, B, A);
 		glLineWidth(LineWidth);
 		glPointSize(LineWidth);
@@ -111,12 +112,12 @@ struct DottedSymbol
 				continue;
 			}
 			IO = RenderWay[i] - '1';
-			glVertex2f(Xpos + Points[IO].x, Ypos + Points[IO].y + VerticalFlag);
+			glVertex2f(Xpos + Points[IO].x, Ypos + Points[IO].y + VerticalShift);
 		}
 		glEnd();
 		glBegin(GL_POINTS);
 		for (int i = 0; i < PointPlacement.size(); ++i)
-			glVertex2f(Xpos + Points[PointPlacement[i] - '1'].x, Ypos + Points[PointPlacement[i] - '1'].y + VerticalFlag);
+			glVertex2f(Xpos + Points[PointPlacement[i] - '1'].x, Ypos + Points[PointPlacement[i] - '1'].y + VerticalShift);
 		glEnd();
 		if (BACK)
 			RenderWay.back() = BACK;
@@ -157,22 +158,21 @@ namespace lFontSymbolsInfo
 #ifdef WINDOWS
 	HFONT SelectedFont = nullptr;
 #endif
-	int32_t Size = 16;
+	std::int32_t Size = 15;
 
-	int32_t PrevSize = Size;
+	std::int32_t PrevSize = Size;
 	float Prev_lFONT_HEIGHT_TO_WIDTH = lFONT_HEIGHT_TO_WIDTH;
 	std::string PrevFontName;
 
 	struct lFontSymbInfosListDestructor
 	{
-		bool abc;
 		~lFontSymbInfosListDestructor()
 		{
 			glDeleteLists(CurrentFont, 256);
 		}
 	};
-	lFontSymbInfosListDestructor __wFSILD = { 0 };
-	void InitialiseFont(std::string FontName, bool force = false)
+	lFontSymbInfosListDestructor __wFSILD{};
+	void InitialiseFont(const std::string& FontName, bool force = false)
 	{
 		if (!force && FontName == PrevFontName && PrevSize == Size &&
 			(std::abs)(Prev_lFONT_HEIGHT_TO_WIDTH - lFONT_HEIGHT_TO_WIDTH) < 1e-5f)
@@ -206,18 +206,21 @@ namespace lFontSymbolsInfo
 			OUT_TT_PRECIS,
 			CLIP_DEFAULT_PRECIS,
 			NONANTIALIASED_QUALITY,
-			FF_MODERN | DEFAULT_PITCH,
+			FF_DONTCARE,
 			FontName.c_str()
 		);
 
-		wglUseFontBitmaps(hDc, 0, 255, CurrentFont);
-
 		if (SelectedFont)
-			SelectObject(hDc, SelectedFont);
+		{
+			auto hdiobj = SelectObject(hDc, SelectedFont);
+			auto status = wglUseFontBitmaps(hDc, 0, 255, CurrentFont);
+
+			SetMapMode(hDc, MM_TEXT);
+		}
 #endif
 
-		if (!force)
-			InitialiseFont(FontName, true);
+		//if (!force)
+		//	InitialiseFont(FontName, true);
 	}
 	inline void CallListOnChar(char C)
 	{
@@ -250,28 +253,58 @@ struct lFontSymbol : DottedSymbol
 {
 	char Symb;
 #ifdef WINDOWS
-	GLYPHMETRICS GM = { 0 };
+	GLYPHMETRICS GM;
 #endif
 	lFontSymbol(char Symb, float CXpos, float CYpos, float XUnitSize, float YUnitSize, std::uint32_t RGBA) :
 		DottedSymbol(" ", CXpos, CYpos, XUnitSize, YUnitSize, 1, RGBA >> 24, (RGBA >> 16) & 0xFF, (RGBA >> 8) & 0xFF, RGBA & 0xFF)
 	{
+		GM.gmBlackBoxX = 0;
+		GM.gmBlackBoxY = 0;
+		GM.gmCellIncX = 0;
+		GM.gmCellIncY = 0;
+		GM.gmptGlyphOrigin.x = 0;
+		GM.gmptGlyphOrigin.y = 0;
+
 		this->Symb = Symb;
+		ReinitGlyphMetrics();
+	}
+	~lFontSymbol() override = default;
+	void ReinitGlyphMetrics()
+	{
+		//SelectObject(hDc, lFontSymbolsInfo::SelectedFont);
+
+		/*auto gmdata = reinterpret_cast<std::uint8_t*>(&GM);
+		std::cout << "Symb: " << Symb << std::endl;
+		std::cout << "ReinitGlyphMetrics b4: ";
+		for (size_t i = 0; i < sizeof(GM); ++i)
+			std::cout << std::hex << std::setw(2) << std::setfill('0') << (int)gmdata[i];
+		std::cout << std::endl;*/
+
+		auto result = GetGlyphOutline(hDc, Symb, GGO_GRAY8_BITMAP, &GM, 0, NULL, &lFontSymbolsInfo::MT);
+
+		/*std::cout << "ReinitGlyphMetrics ar: ";
+		for (size_t i = 0; i < sizeof(GM); ++i)
+			std::cout << std::hex << std::setw(2) << std::setfill('0') << (int)gmdata[i];
+		std::cout << std::dec << std::setw(0) << std::setfill(' ') << std::endl;
+		std::cout << "res: " << result << std::endl;
+
+		if (result == GDI_ERROR)
+			throw "idkman";*/
 	}
 	void Draw() override
 	{
 #ifdef WINDOWS
-		if (!lFontSymbolsInfo::SelectedFont)
+		if (!lFontSymbolsInfo::SelectedFont || !hDc)
 			return;
+
 		float PixelSize = (internal_range * 2) / window_base_width;
-		float rotX = Xpos, rotY = Ypos;
-		//rotate(rotX, rotY);
-		if (fabsf(rotX) + lFONT_HEIGHT_TO_WIDTH > PixelSize * WindX / 2 || 
-			fabsf(rotY) + lFONT_HEIGHT_TO_WIDTH > PixelSize * WindY / 2)
+
+		if (fabsf(Xpos) + lFONT_HEIGHT_TO_WIDTH > PixelSize * WindX / 2 ||
+			fabsf(Ypos) + lFONT_HEIGHT_TO_WIDTH > PixelSize * WindY / 2)
 			return;
-		SelectObject(hDc, lFontSymbolsInfo::SelectedFont);
-		GetGlyphOutline(hDc, Symb, GGO_METRICS, &GM, 0, NULL, &lFontSymbolsInfo::MT);
+
 		glColor4ub(R, G, B, A);
-		glRasterPos2f(Xpos - PixelSize * GM.gmBlackBoxX * 0.5, Ypos - _YUnitSize() * 0.5);
+		glRasterPos2f(Xpos, Ypos - _YUnitSize() * 0.5);
 		lFontSymbolsInfo::CallListOnChar(Symb);
 #endif
 	}
@@ -321,6 +354,7 @@ struct BiColoredDottedSymbol : DottedSymbol
 		delete RGBAColor;
 		delete gRGBAColor;
 	}
+	~BiColoredDottedSymbol() override = default;
 	void RefillGradient(std::uint8_t Red = 255, std::uint8_t Green = 255, std::uint8_t Blue = 255, std::uint8_t Alpha = 255,
 		std::uint8_t gRed = 255, std::uint8_t gGreen = 255, std::uint8_t gBlue = 255, std::uint8_t gAlpha = 255,
 		std::uint8_t BaseColorPoint = 5, std::uint8_t GradColorPoint = 8) override
@@ -388,7 +422,7 @@ struct BiColoredDottedSymbol : DottedSymbol
 	{
 		if (RenderWay == " ")
 			return;
-		float VerticalFlag = 0.;
+		float VerticalShift = 0.;
 		char BACK = 0;
 		if (RenderWay.back() == '#' || RenderWay.back() == '~') 
 		{
@@ -397,15 +431,15 @@ struct BiColoredDottedSymbol : DottedSymbol
 			switch (BACK)
 			{
 			case '#':
-				VerticalFlag = Points->y - Points[3].y;
+				VerticalShift = Points[0].y - Points[3].y;
 				break;
 			case '~':
-				VerticalFlag = (Points->y - Points[3].y) / 2;
+				VerticalShift = (Points[0].y - Points[3].y) / 2;
 				break;
 			}
 		}
 		if (is_fonted)
-			VerticalFlag = 0;
+			VerticalShift = 0;
 		std::uint8_t IO;
 		glLineWidth(LineWidth);
 		glPointSize(LineWidth);
@@ -421,7 +455,7 @@ struct BiColoredDottedSymbol : DottedSymbol
 			IO = RenderWay[i] - '1';
 			//printf("%x %x %x %x\n", gR[IO], gG[IO], gB[IO], gA[IO]);
 			glColor4ub(gR[IO], gG[IO], gB[IO], gA[IO]);
-			glVertex2f(Xpos + Points[IO].x, Ypos + Points[IO].y + VerticalFlag);
+			glVertex2f(Xpos + Points[IO].x, Ypos + Points[IO].y + VerticalShift);
 		}
 		glEnd();
 		glBegin(GL_POINTS);
@@ -429,7 +463,7 @@ struct BiColoredDottedSymbol : DottedSymbol
 		{
 			IO = PointPlacement[i] - '1';
 			glColor4ub(gR[IO], gG[IO], gB[IO], gA[IO]);
-			glVertex2f(Xpos + Points[IO].x, Ypos + Points[IO].y + VerticalFlag);
+			glVertex2f(Xpos + Points[IO].x, Ypos + Points[IO].y + VerticalShift);
 		}
 		glEnd();
 		if (BACK)

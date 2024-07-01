@@ -21,15 +21,15 @@ struct PLC_VolumeWorker : HandleableUIPart
 	}
 	PLC_VolumeWorker(float CXPos, float CYPos, float Width, float Height, std::shared_ptr<PLC<std::uint8_t, std::uint8_t>> PLC_bb = nullptr)
 	{
-		this->PLC_bb = PLC_bb;
+		this->PLC_bb = std::move(PLC_bb);
 		this->CXPos = CXPos;
 		this->CYPos = CYPos;
 		this->_xsqsz = Width / 256;
 		this->_ysqsz = Height / 256;
 		this->HorizontalSidesSize = Width;
 		this->VerticalSidesSize = Height;
-
-		this->STL_MSG = new SingleTextLine("_", CXPos, CYPos, System_White->XUnitSize, System_White->YUnitSize, System_White->SpaceWidth, 2, 0xFFAFFFCF, new std::uint32_t(0xAFFFAFCF), (7 << 4) | 3);
+		this->RePutMode = false;
+		this->STL_MSG = new SingleTextLine("_", CXPos, CYPos, System_White->XUnitSize, System_White->YUnitSize, System_White->SpaceWidth, 2, 0xFFAFFFCF, new std::uint32_t{0xAFFFAFCF}, (7 << 4) | 3);
 		this->MouseX = this->MouseY = 0.f;
 		this->_HoveredPoint = std::pair<std::uint8_t, std::uint8_t>(0, 0);
 		ActiveSetting = Hovered = FPX = FPY = XCP = YCP = 0;
@@ -104,7 +104,7 @@ struct PLC_VolumeWorker : HandleableUIPart
 				Y = PLC_bb->ConversionMap.lower_bound(FPX);
 				if (Y != PLC_bb->ConversionMap.end() && Y != PLC_bb->ConversionMap.begin())
 				{
-					Y--;
+					--Y;
 					glVertex2f(begx + (Y->first + 0.5f) * _xsqsz, begy + (Y->second + 0.5f) * _ysqsz);
 					glVertex2f(begx + (FPX + 0.5f) * _xsqsz, begy + (FPY + 0.5f) * _ysqsz);
 				}
@@ -119,7 +119,7 @@ struct PLC_VolumeWorker : HandleableUIPart
 				Y = PLC_bb->ConversionMap.lower_bound(XCP);
 				if (Y != PLC_bb->ConversionMap.end() && Y != PLC_bb->ConversionMap.begin())
 				{
-					Y--;
+					--Y;
 					glVertex2f(begx + (Y->first + 0.5f) * _xsqsz, begy + (Y->second + 0.5f) * _ysqsz);
 					glVertex2f(begx + (XCP + 0.5f) * _xsqsz, begy + (YCP + 0.5f) * _ysqsz);
 				}
@@ -181,12 +181,12 @@ struct PLC_VolumeWorker : HandleableUIPart
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		float CW = 0.5f * (
-			(int32_t)((bool)(GLOBAL_LEFT & Arg))
-			- (int32_t)((bool)(GLOBAL_RIGHT & Arg))
+			(std::int32_t)((bool)(GLOBAL_LEFT & Arg))
+			- (std::int32_t)((bool)(GLOBAL_RIGHT & Arg))
 			) * HorizontalSidesSize,
 			CH = 0.5f * (
-				(int32_t)((bool)(GLOBAL_BOTTOM & Arg))
-				- (int32_t)((bool)(GLOBAL_TOP & Arg))
+				(std::int32_t)((bool)(GLOBAL_BOTTOM & Arg))
+				- (std::int32_t)((bool)(GLOBAL_TOP & Arg))
 				) * VerticalSidesSize;
 		SafeChangePosition(NewX + CW, NewY + CH);
 	}

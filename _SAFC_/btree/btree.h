@@ -202,7 +202,7 @@ struct btree_is_key_compare_to
 // with common comparison functors.
 template <typename Compare>
 struct btree_key_compare_to_adapter : Compare {
-  btree_key_compare_to_adapter() { }
+  btree_key_compare_to_adapter() = default;
   btree_key_compare_to_adapter(const Compare &c) : Compare(c) { }
   btree_key_compare_to_adapter(const btree_key_compare_to_adapter<Compare> &c)
       : Compare(c) {
@@ -212,7 +212,7 @@ struct btree_key_compare_to_adapter : Compare {
 template <>
 struct btree_key_compare_to_adapter<std::less<std::string> >
     : public btree_key_compare_to_tag {
-  btree_key_compare_to_adapter() {}
+  btree_key_compare_to_adapter() = default;
   btree_key_compare_to_adapter(const std::less<std::string>&) {}
   btree_key_compare_to_adapter(
       const btree_key_compare_to_adapter<std::less<std::string> >&) {}
@@ -224,7 +224,7 @@ struct btree_key_compare_to_adapter<std::less<std::string> >
 template <>
 struct btree_key_compare_to_adapter<std::greater<std::string> >
     : public btree_key_compare_to_tag {
-  btree_key_compare_to_adapter() {}
+  btree_key_compare_to_adapter() = default;
   btree_key_compare_to_adapter(const std::greater<std::string>&) {}
   btree_key_compare_to_adapter(
       const btree_key_compare_to_adapter<std::greater<std::string> >&) {}
@@ -238,7 +238,7 @@ struct btree_key_compare_to_adapter<std::greater<std::string> >
 // compare-to functor.
 template <typename Key, typename Compare, bool HaveCompareTo>
 struct btree_key_comparer {
-  btree_key_comparer() {}
+  btree_key_comparer() = default;
   btree_key_comparer(Compare c) : comp(c) {}
   static bool bool_compare(const Compare &comp, const Key &x, const Key &y) {
     return comp(x, y);
@@ -254,7 +254,7 @@ struct btree_key_comparer {
 // code, such as insert-with-hint.
 template <typename Key, typename Compare>
 struct btree_key_comparer<Key, Compare, true> {
-  btree_key_comparer() {}
+  btree_key_comparer() = default;
   btree_key_comparer(Compare c) : comp(c) {}
   static bool bool_compare(const Compare &comp, const Key &x, const Key &y) {
     return comp(x, y) < 0;

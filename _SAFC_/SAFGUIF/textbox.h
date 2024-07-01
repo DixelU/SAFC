@@ -22,8 +22,8 @@ struct TextBox : HandleableUIPart
 	~TextBox() override 
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
-		for (auto i = Lines.begin(); i != Lines.end(); i++)
-			if (*i)delete* i;
+		for (auto i = Lines.begin(); i != Lines.end(); ++i)
+			delete* i;
 		Lines.clear();
 	}
 	TextBox(std::string Text, SingleTextLineSettings* STLS, float Xpos, float Ypos, float Height, float Width, float VerticalOffset, std::uint32_t RGBABackground, std::uint32_t RGBABorder, std::uint8_t BorderWidth, _Align TextAlign = _Align::left, VerticalOverflow VOverflow = VerticalOverflow::cut)
@@ -90,7 +90,7 @@ struct TextBox : HandleableUIPart
 				}
 				while (Line.size() >= SymbolsPerLine)
 				{
-					Paragraph.push_back(Line.substr(0, SymbolsPerLine));
+					Paragraph.emplace_back(Line.substr(0, SymbolsPerLine));
 					Line = Line.erase(0, SymbolsPerLine);
 				}
 			}
@@ -112,14 +112,14 @@ struct TextBox : HandleableUIPart
 		if (VOverflow == VerticalOverflow::recalibrate)
 		{
 			float dy = (CalculatedTextHeight - this->Height);
-			for (auto Y = Lines.begin(); Y != Lines.end(); Y++)
+			for (auto Y = Lines.begin(); Y != Lines.end(); ++Y)
 				(*Y)->SafeMove(0, (dy + Lines.front()->CalculatedHeight) * 0.5f);
 		}
 	}
 	void SafeTextColorChange(std::uint32_t NewColor)
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
-		for (auto i = Lines.begin(); i != Lines.end(); i++)
+		for (auto i = Lines.begin(); i != Lines.end(); ++i)
 			(*i)->SafeColorChange(NewColor);
 	}
 	bool MouseHandler(float mx, float my, char Button/*-1 left, 1 right, 0 move*/, char State /*-1 down, 1 up*/)  override
@@ -164,12 +164,12 @@ struct TextBox : HandleableUIPart
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		float CW = 0.5f * (
-			(int32_t)((bool)(GLOBAL_LEFT & Arg))
-			- (int32_t)((bool)(GLOBAL_RIGHT & Arg))
+			(std::int32_t)((bool)(GLOBAL_LEFT & Arg))
+			- (std::int32_t)((bool)(GLOBAL_RIGHT & Arg))
 			) * Width,
 			CH = 0.5f * (
-				(int32_t)((bool)(GLOBAL_BOTTOM & Arg))
-				- (int32_t)((bool)(GLOBAL_TOP & Arg))
+				(std::int32_t)((bool)(GLOBAL_BOTTOM & Arg))
+				- (std::int32_t)((bool)(GLOBAL_TOP & Arg))
 				) * Height;
 		SafeChangePosition(NewX + CW, NewY + CH);
 	}

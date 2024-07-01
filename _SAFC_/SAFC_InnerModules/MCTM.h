@@ -160,9 +160,7 @@ struct MIDICollectionThreadedMerger
 				out.pop_back();
 		}
 	};
-	~MIDICollectionThreadedMerger() 
-	{
-	}
+	~MIDICollectionThreadedMerger() = default;
 	MIDICollectionThreadedMerger(
 		std::vector<proc_data_ptr> processing_data, 
 		std::uint16_t FinalPPQN, 
@@ -170,8 +168,10 @@ struct MIDICollectionThreadedMerger
 		bool is_console_oriented)
 	{
 		for (auto& single_midi_data : processing_data)
-			midi_processing_data.push_back({ single_midi_data , std::make_shared<message_buffer_ptr::element_type>(is_console_oriented) });
-		this->SaveTo = SaveTo;
+			midi_processing_data.emplace_back( single_midi_data , std::make_shared<message_buffer_ptr::element_type>(is_console_oriented) );
+		this->SaveTo = std::move(SaveTo);
+		this->FirstStageComplete = false;
+		this->RemnantsRemove = true;
 		this->FinalPPQN = FinalPPQN;
 		IntermediateRegularFlag = IntermediateInplaceFlag = CompleteFlag = IRTrackCount = IITrackCount = 0;
 	}
@@ -248,20 +248,28 @@ struct MIDICollectionThreadedMerger
 			[](mpd_t::value_type& el) { return el.first->settings.details.inplace_mergable; });
 		
 		IITrackCount = 0;
-		std::thread([](mpd_t IMC, std::uint16_t PPQN, std_unicode_string _SaveTo,
-			std::reference_wrapper<std::atomic_bool> FinishedFlag, std::reference_wrapper<std::atomic_uint64_t> TrackCount) {
+		std::thread([](mpd_t IMC, std::uint16_t PPQN, std_unicode_string _SaveTo, 
+				std::reference_wrapper<std::atomic_bool> FinishedFlag,
+				std::reference_wrapper<std::atomic_uint64_t> TrackCount)
+		{
 			if (IMC.empty()) 
 			{
 				FinishedFlag.get() = true; /// Will this work?
 				return;
 			}
-			bool ActiveStreamFlag = 1;
-			bool ActiveTrackReading = 1;
+
+			bool ActiveStreamFlag = true;
+			bool ActiveTrackReading = true;
 			std::vector<bbb_ffr*> fiv;
+
 #define pfiv (*fiv[i])
+
 			std::vector<std::int64_t> DecayingDeltaTimes;
 #define ddt (DecayingDeltaTimes[i])
+
 			std::vector<std::uint8_t> Track, FrontEdge, BackEdge;
+			Track.reserve(1000000);
+
 			bbb_ffr* fi;
 			auto [file_output, fo_ptr] = open_wide_stream<std::ostream>
 #ifdef WINDOWS
@@ -278,10 +286,12 @@ struct MIDICollectionThreadedMerger
 				DecayingDeltaTimes.push_back(0);
 				fiv.push_back(fi);
 			}
+
 			file_output->put(TrackCount.get() >> 8);
 			file_output->put(TrackCount.get());
 			file_output->put(PPQN >> 8);
 			file_output->put(PPQN);
+
 			while (ActiveStreamFlag) 
 			{
 				///reading tracks
@@ -301,6 +311,7 @@ struct MIDICollectionThreadedMerger
 					else
 						ddt = -1;
 				}
+				
 				for (std::uint64_t Tick = 0; ActiveTrackReading; Tick++, InTrackDelta++)
 				{
 					std::uint8_t IO = 0, EVENTTYPE = 0;///yas
@@ -387,10 +398,10 @@ struct MIDICollectionThreadedMerger
 							else 
 							{   ///RSB CANNOT APPEAR IN THIS STAGE
 								auto pos = pfiv.tellg();
-								printf("Inplace error @%X\n", pos);
+								std::cout << "Inplace error @" << std::hex << pos << std::dec << std::endl;
 
 								ThrowAlert_Error("DTI Failure at " + std::to_string(pos) + ". Type: " +
-									std::to_string(EVENTTYPE) + ". Tell developer about it and give him source midi.\n");
+									std::to_string(EVENTTYPE) + ". Tell developer about it and give him source midis.\n");
 
 								Track.push_back(0xCA);
 								Track.push_back(0);
@@ -438,7 +449,7 @@ struct MIDICollectionThreadedMerger
 					}
 				}
 				ActiveTrackReading = 1;
-				constexpr uint32_t EDGE = 0x7F000000;
+				constexpr std::uint32_t EDGE = 0x7F000000;
 
 				if (Track.size() > 0xFFFFFFFFu)
 					std::cout << "TrackSize overflow!!!\n";
@@ -488,7 +499,7 @@ struct MIDICollectionThreadedMerger
 
 					FrontEdge.clear();
 					BackEdge.clear();
-					(TrackCount.get())++;
+					++(TrackCount.get());
 				}
 				else
 				{
@@ -500,7 +511,7 @@ struct MIDICollectionThreadedMerger
 
 					single_midi_processor_2::ostream_write(Track, *file_output);
 					//copy(Track.begin(), Track.end(), ostream_iterator<std::uint8_t>(file_output));
-					(TrackCount.get())++;
+					++(TrackCount.get());
 				}
 				Track.clear();
 			}
@@ -535,7 +546,20 @@ struct MIDICollectionThreadedMerger
 		std::copy_if(midi_processing_data.begin(), midi_processing_data.end(), std::back_inserter(regular_merge_candidates),
 			[](mpd_t::value_type& el) { return !el.first->settings.details.inplace_mergable; });
 
-		std::thread([](mpd_t RMC, std::uint16_t PPQN, std_unicode_string _SaveTo,
+		if (regular_merge_candidates.size() == 1)
+		{
+			std::wstring filename = 
+				regular_merge_candidates.front().first->filename + 
+				regular_merge_candidates.front().first->postfix;
+			auto save_to_with_postfix = SaveTo + L".R.mid";
+			_wremove(save_to_with_postfix.c_str());
+			auto result = _wrename(filename.c_str(), save_to_with_postfix.c_str());
+
+			IntermediateRegularFlag = true; /// Will this work?
+		}
+		else
+		{
+					std::thread([](mpd_t RMC, std::uint16_t PPQN, std_unicode_string _SaveTo,
 			std::reference_wrapper<std::atomic_bool> FinishedFlag, std::reference_wrapper<std::atomic_uint64_t> TrackCount)
 		{
 			if (RMC.empty()) 
@@ -589,6 +613,9 @@ struct MIDICollectionThreadedMerger
 			delete[] buffer;
 			delete file_output;
 			}, regular_merge_candidates, FinalPPQN, SaveTo, std::ref(IntermediateRegularFlag), std::ref(IRTrackCount)).detach();
+
+		}
+
 	}
 	void Start_RI_Merge() 
 	{
@@ -616,7 +643,7 @@ struct MIDICollectionThreadedMerger
 
 			bool IMgood = !IM->eof(), RMgood = !RM->eof();
 
-			auto TotalTracks = IITrackCount + IRTrackCount;
+			auto TotalTracks = IITrackCount.load() + IRTrackCount.load();
 			if ((~0xFFFFULL) & TotalTracks)
 			{
 				printf("Track count overflow: %llu\n", TotalTracks);
