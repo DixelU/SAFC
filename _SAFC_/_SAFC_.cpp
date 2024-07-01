@@ -382,6 +382,25 @@ size_t GetAvailableMemory()
 		GlobalMemoryStatus(&m);
 		ret = (int)(m.dwAvailPhys >> 20);
 	}
+#else
+	std::ifstream meminfo("/proc/meminfo");
+    std::string line;
+    long availableMemory = 0;
+
+    while (std::getline(meminfo, line))
+    {
+        if (line.find("MemAvailable:") == 0)
+        {
+            std::string value = line.substr(line.find_first_of("0123456789"));
+            availableMemory = std::stol(value);
+            break;
+        }
+    }
+
+    meminfo.close();
+
+    ret = (int)(availableMemory >> 10);
+    //std::cout << ret << std::endl;
 #endif
 	return ret;
 }

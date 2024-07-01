@@ -459,7 +459,7 @@ struct single_midi_processor_2
 		do
 		{
 			single_byte = file_input.get();
-			value = value << 7 | single_byte & 0x7F;
+			value = (value << 7) | (single_byte & 0x7F);
 		} while (single_byte & 0x80 && !file_input.eof());
 		return value;
 	}
