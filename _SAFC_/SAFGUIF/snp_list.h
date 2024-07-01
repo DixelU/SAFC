@@ -24,7 +24,7 @@ struct SelectablePropertedList : HandleableUIPart
 	~SelectablePropertedList() override
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
-		for (auto Y = Selectors.begin(); Y != Selectors.end(); Y++)
+		for (auto Y = Selectors.begin(); Y != Selectors.end(); ++Y)
 			delete (*Y);
 	}
 	SelectablePropertedList(ButtonSettings* ButtSettings, void(*OnSelect)(int SelectedID), void(*OnGetProperties)(int ID), float HeaderCXPos, float HeaderYPos, float Width, float SpaceBetween, std::uint32_t MaxCharsInLine = 0, std::uint32_t MaxVisibleLines = 0, _Align TextInButtonsAlign = _Align::left)
@@ -141,7 +141,7 @@ struct SelectablePropertedList : HandleableUIPart
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		this->SafeStringReplace(NewString, 0xFFFFFFFF);
 	}
-	void SafeStringReplace(std::string NewString, std::uint32_t LineID)
+	void SafeStringReplace(const std::string& NewString, std::uint32_t LineID)
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		if (LineID == 0xFFFFFFFF)
@@ -235,7 +235,7 @@ struct SelectablePropertedList : HandleableUIPart
 		SafeUpdateLines();
 		RecalculateCurrentHeight();
 	}
-	void SafeRotateList(int32_t Delta)
+	void SafeRotateList(std::int32_t Delta)
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		if (!MaxVisibleLines)
@@ -296,7 +296,7 @@ struct SelectablePropertedList : HandleableUIPart
 	void ResetAlign_All(_Align Align)
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
-		if (!Align) 
+		if (Align == _Align::center) 
 			return;
 		float nx = HeaderCXPos - ((Align == _Align::left) ? 0.5f : ((Align == _Align::right) ? 0 - 0.5f : 0)) * (Width - SpaceBetween);
 		for (int i = 0; i < Selectors.size(); i++)
@@ -321,34 +321,28 @@ struct SelectablePropertedList : HandleableUIPart
 		RecalculateCurrentHeight();
 		ResetAlignFor(SelectorsText.size() - 1, this->TextInButtonsAlign);
 	}
-	void PushStrings(std::list<std::string> LStrings)
-	{
-		std::lock_guard<std::recursive_mutex> locker(Lock);
-		for (auto Y = LStrings.begin(); Y != LStrings.end(); Y++)
-			SafePushBackNewString(*Y);
-	}
 	void PushStrings(std::vector<std::string> LStrings)
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
-		for (auto Y = LStrings.begin(); Y != LStrings.end(); Y++)
+		for (auto Y = LStrings.begin(); Y != LStrings.end(); ++Y)
 			SafePushBackNewString(*Y);
 	}
 	void PushStrings(std::initializer_list<std::string> LStrings)
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
-		for (auto Y = LStrings.begin(); Y != LStrings.end(); Y++)
+		for (auto Y = LStrings.begin(); Y != LStrings.end(); ++Y)
 			SafePushBackNewString(*Y);
 	}
-	void SafeChangePosition_Argumented(std::uint8_t Arg, float NewX, float NewY)
+	void SafeChangePosition_Argumented(std::uint8_t Arg, float NewX, float NewY) override
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		float CW = 0.5f * (
-			(int32_t)((bool)(GLOBAL_LEFT & Arg))
-			- (int32_t)((bool)(GLOBAL_RIGHT & Arg))
+			(std::int32_t)((bool)(GLOBAL_LEFT & Arg))
+			- (std::int32_t)((bool)(GLOBAL_RIGHT & Arg))
 			) * Width,
 			CH = 0.5f * (
-				(int32_t)((bool)(GLOBAL_BOTTOM & Arg))
-				- (int32_t)((bool)(GLOBAL_TOP & Arg))
+				(std::int32_t)((bool)(GLOBAL_BOTTOM & Arg))
+				- (std::int32_t)((bool)(GLOBAL_TOP & Arg))
 				) * CalculatedHeight;
 		SafeChangePosition(NewX + CW, NewY - 0.5f * CalculatedHeight + CH);
 	}
@@ -368,7 +362,7 @@ struct SelectablePropertedList : HandleableUIPart
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		HeaderCXPos += dx;
 		HeaderYPos += dy;
-		for (auto Y = Selectors.begin(); Y != Selectors.end(); Y++)
+		for (auto Y = Selectors.begin(); Y != Selectors.end(); ++Y)
 			(*Y)->SafeMove(dx, dy);
 	}
 	void Draw() override
@@ -425,7 +419,7 @@ struct SelectablePropertedList : HandleableUIPart
 			glVertex2f(HeaderCXPos - ARROW_STICK_HEIGHT * 0.5f, HeaderYPos - CalculatedHeight - ARROW_STICK_HEIGHT / 10);
 			glEnd();
 		}
-		for (auto Y = Selectors.begin(); Y != Selectors.end(); Y++)
+		for (auto Y = Selectors.begin(); Y != Selectors.end(); ++Y)
 			(*Y)->Draw();
 	}
 	inline std::uint32_t TellType() override

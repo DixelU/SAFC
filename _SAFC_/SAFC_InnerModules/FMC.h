@@ -25,7 +25,7 @@ struct FastMIDIChecker
 #else
 			"rb");
 #endif
-		if (*f)IsAcssessable = 1;
+		if (*f) IsAcssessable = 1;
 		else IsAcssessable = 0;
 		FileSize = PPQN = ExpectedTrackNumber = IsMIDI = 0;
 		fclose(fo_ptr);
@@ -41,10 +41,10 @@ struct FastMIDIChecker
 			"rb");
 #endif
 		std::uint32_t MTHD = 0;
-		MTHD = (MTHD << 8) | (f->get());
-		MTHD = (MTHD << 8) | (f->get());
-		MTHD = (MTHD << 8) | (f->get());
-		MTHD = (MTHD << 8) | (f->get());
+
+		for(int i = 0; i < 4; ++i)
+			MTHD = (MTHD << 8) | (f->get());
+
 		if (MTHD == MThd && f->good())
 		{
 			IsMIDI = 1;

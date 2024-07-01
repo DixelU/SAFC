@@ -53,7 +53,7 @@ struct InputField : HandleableUIPart
 		this->Ypos = Ypos;
 		this->Height = (DefaultStringSettings->YUnitSize * 2 > Height) ? DefaultStringSettings->YUnitSize * 2 : Height;
 		this->Width = Width;
-		this->CurrentString = "";//DefaultString;
+		this->CurrentString.clear();//DefaultString;
 		this->FirstInput = this->Focused = false;
 		this->OutputSource = OutputSource;
 	}
@@ -129,7 +129,7 @@ struct InputField : HandleableUIPart
 		}
 		return !first_symb;
 	}
-	void SafeMove(float dx, float dy) 
+	void SafeMove(float dx, float dy) override
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		STL->SafeMove(dx, dy);
@@ -137,7 +137,7 @@ struct InputField : HandleableUIPart
 		Xpos += dx;
 		Ypos += dy;
 	}
-	void SafeChangePosition(float NewX, float NewY)
+	void SafeChangePosition(float NewX, float NewY) override
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		NewX = Xpos - NewX;
@@ -150,11 +150,11 @@ struct InputField : HandleableUIPart
 		this->Focused = !this->Focused;
 		BorderRGBAColor = (((~(BorderRGBAColor >> 8)) << 8) | (BorderRGBAColor & 0xFF));
 	}
-	void UpdateInputString(std::string NewString = "")
+	void UpdateInputString(const std::string& NewString = "")
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		if (NewString.size())
-			CurrentString = "";
+			CurrentString.clear();
 		float x = Xpos - ((InputAlign == _Align::left) ? 1 : ((InputAlign == _Align::right) ? -1 : 0)) * (0.5f * Width - STL->_XUnitSize);
 		this->STL->SafeStringReplace((NewString.size()) ? NewString.substr(0, this->MaxChars) : CurrentString);
 		this->STL->SafeChangePosition_Argumented(InputAlign, x, Ypos);
@@ -193,11 +193,11 @@ struct InputField : HandleableUIPart
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		if (FirstInput) 
 		{
-			FirstInput = 0;
-			CurrentString = "";
+			FirstInput = false;
+			CurrentString.clear();
 		}
 	}
-	std::string GetCurrentInput(std::string Replacement)
+	std::string GetCurrentInput(const std::string& Replacement)
 	{
 		if (InputField::CheckStringOnType(CurrentString, InputType))
 			return CurrentString;
@@ -208,7 +208,7 @@ struct InputField : HandleableUIPart
 		else
 			return "0";
 	}
-	void KeyboardHandler(char CH) 
+	void KeyboardHandler(char CH) override
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		if (Focused)
@@ -240,7 +240,8 @@ struct InputField : HandleableUIPart
 					}
 				}
 
-				if (InputType == PassCharsType::PassAll)Input(CH);
+				if ((InputType & PassCharsType::PassAll) == InputType)
+					Input(CH);
 			}
 			else if (CH == 13)PutIntoSource();
 			else if (CH == 8)BackSpace();
@@ -256,16 +257,16 @@ struct InputField : HandleableUIPart
 			UpdateInputString();
 		}
 	}
-	void SafeChangePosition_Argumented(std::uint8_t Arg, float NewX, float NewY)
+	void SafeChangePosition_Argumented(std::uint8_t Arg, float NewX, float NewY) override
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		float CW = 0.5f * (
-			(int32_t)((bool)(GLOBAL_LEFT & Arg))
-			- (int32_t)((bool)(GLOBAL_RIGHT & Arg))
+			(std::int32_t)((bool)(GLOBAL_LEFT & Arg))
+			- (std::int32_t)((bool)(GLOBAL_RIGHT & Arg))
 			) * Width,
 			CH = 0.5f * (
-				(int32_t)((bool)(GLOBAL_BOTTOM & Arg))
-				- (int32_t)((bool)(GLOBAL_TOP & Arg))
+				(std::int32_t)((bool)(GLOBAL_BOTTOM & Arg))
+				- (std::int32_t)((bool)(GLOBAL_TOP & Arg))
 				) * Height;
 		SafeChangePosition(NewX + CW, NewY + CH);
 	}

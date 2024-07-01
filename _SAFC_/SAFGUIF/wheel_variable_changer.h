@@ -21,10 +21,8 @@ struct WheelVariableChanger :HandleableUIPart
 	void(*OnApply)(double);
 	~WheelVariableChanger() override
 	{
-		if (var_if)
-			delete var_if;
-		if (var_if)
-			delete fac_if;
+		delete var_if;
+		delete fac_if;
 	}
 	WheelVariableChanger(void(*OnApply)(double), float Xpos, float Ypos, double default_var, double default_fact, SingleTextLineSettings* STLS, std::string var_string = " ", std::string fac_string = " ", Type type = Type::exponential) : Width(100), Height(50)
 	{
@@ -49,7 +47,7 @@ struct WheelVariableChanger :HandleableUIPart
 		glVertex2f(Xpos + 50, Ypos - 25);
 		glVertex2f(Xpos + 50, Ypos + 25);
 		glEnd();
-		__glcolor((0x007FFF3F + WheelFieldHovered * 0x3F));
+		__glcolor(0x007FFF3F + WheelFieldHovered * 0x3F);
 		glBegin(GL_LINE_LOOP);
 		glVertex2f(Xpos, Ypos + 25);
 		glVertex2f(Xpos, Ypos - 25);
@@ -84,12 +82,12 @@ struct WheelVariableChanger :HandleableUIPart
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		float CW = 0.5f * (
-			(int32_t)((bool)(GLOBAL_LEFT & Arg))
-			- (int32_t)((bool)(GLOBAL_RIGHT & Arg))
+			(std::int32_t)((bool)(GLOBAL_LEFT & Arg))
+			- (std::int32_t)((bool)(GLOBAL_RIGHT & Arg))
 			) * Width,
 			CH = 0.5f * (
-				(int32_t)((bool)(GLOBAL_BOTTOM & Arg))
-				- (int32_t)((bool)(GLOBAL_TOP & Arg))
+				(std::int32_t)((bool)(GLOBAL_BOTTOM & Arg))
+				- (std::int32_t)((bool)(GLOBAL_TOP & Arg))
 				) * Height;
 		SafeChangePosition(NewX + CW, NewY + CH);
 	}

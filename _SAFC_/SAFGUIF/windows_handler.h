@@ -21,7 +21,7 @@ struct WindowsHandler
 	static constexpr float alerttext_vert_pos = -7.5, alertheight = 65;
 	WindowsHandler()
 	{
-		MW_ID_Holder = "";
+		MW_ID_Holder.clear();
 		MainWindow_ID = "MAIN";
 		WindowWasDisabledDuringMouseHandling = 0;
 		MoveableWindow* ptr;
@@ -53,14 +53,21 @@ struct WindowsHandler
 		else
 		{
 			while (AWIterator != ActiveWindows.end() && !((*AWIterator)->second->MouseHandler(mx, my, Button, State)) && !WindowWasDisabledDuringMouseHandling)
-				AWIterator++;
+				++AWIterator;
 			if (!WindowWasDisabledDuringMouseHandling && ActiveWindows.size() > 1 && AWIterator != ActiveWindows.end() && AWIterator != ActiveWindows.begin())
 				if (CurrentAW == ActiveWindows.begin())EnableWindow(*AWIterator);
 			if (WindowWasDisabledDuringMouseHandling)
 				WindowWasDisabledDuringMouseHandling = 0;
 		}
 	}
-	void ThrowPrompt(std::string StaticTipText, std::string WindowTitle, void(*OnSubmit)(), _Align STipAlign, InputField::Type InputType, std::string DefaultString = "", std::uint32_t MaxChars = 0)
+	void ThrowPrompt(
+		const std::string& StaticTipText, 
+		const std::string& WindowTitle, 
+		void(*OnSubmit)(),
+		_Align STipAlign,
+		InputField::Type InputType,
+		const std::string& DefaultString = "",
+		std::uint32_t MaxChars = 0)
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		auto wptr = Map["PROMPT"];
@@ -77,7 +84,13 @@ struct WindowsHandler
 		wptr->SafeChangePosition(-50, 50);
 		EnableWindow("PROMPT");
 	}
-	void ThrowAlert(std::string AlertText, std::string AlertHeader, void(*SpecialSignsDrawFunc)(float, float, float, std::uint32_t, std::uint32_t), bool Update = false, std::uint32_t FRGBA = 0, std::uint32_t SRGBA = 0)
+	void ThrowAlert(
+		const std::string& AlertText,
+		const std::string& AlertHeader, 
+		void(*SpecialSignsDrawFunc)(float, float, float, std::uint32_t, std::uint32_t),
+		bool Update = false,
+		std::uint32_t FRGBA = 0,
+		std::uint32_t SRGBA = 0)
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		auto AlertWptr = Map["ALERT"];
@@ -100,7 +113,7 @@ struct WindowsHandler
 		}
 		EnableWindow("ALERT");
 	}
-	void DisableWindow(std::string ID)
+	void DisableWindow(const std::string& ID)
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		auto Y = Map.find(ID);
@@ -121,14 +134,14 @@ struct WindowsHandler
 	void TurnOnMainWindow()
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
-		if (this->MW_ID_Holder != "")
+		if (!this->MW_ID_Holder.empty())
 			swap(this->MainWindow_ID, this->MW_ID_Holder);
 		this->EnableWindow(MainWindow_ID);
 	}
 	void TurnOffMainWindow()
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
-		if (this->MW_ID_Holder == "")
+		if (this->MW_ID_Holder.empty())
 			swap(this->MainWindow_ID, this->MW_ID_Holder);
 		this->DisableWindow(MainWindow_ID);
 	}
@@ -146,7 +159,7 @@ struct WindowsHandler
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		if (Window == Map.end()) 
 			return;
-		for (auto Y = ActiveWindows.begin(), Q = ActiveWindows.begin(); Y != ActiveWindows.end(); Y++)
+		for (auto Y = ActiveWindows.begin(), Q = ActiveWindows.begin(); Y != ActiveWindows.end(); ++Y)
 		{
 			if (*Y == Window)
 			{
@@ -154,7 +167,7 @@ struct WindowsHandler
 				if (Y != ActiveWindows.begin())
 				{
 					Q = Y;
-					Q--;
+					--Q;
 					ActiveWindows.erase(Y);
 					Y = Q;
 				}
@@ -171,7 +184,7 @@ struct WindowsHandler
 		ActiveWindows.push_front(Window);
 		//cout << Window->first << " " << ActiveWindows.front()->first << endl;
 	}
-	void EnableWindow(std::string ID)
+	void EnableWindow(const std::string& ID)
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		this->EnableWindow(Map.find(ID));
@@ -220,7 +233,7 @@ struct WindowsHandler
 		if (!MetMain)
 			this->EnableWindow(MainWindow_ID);
 	}
-	inline MoveableWindow*& operator[](std::string ID)
+	inline MoveableWindow*& operator[](const std::string& ID)
 	{
 		return (this->Map[ID]);
 	}

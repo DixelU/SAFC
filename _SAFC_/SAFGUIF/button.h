@@ -19,7 +19,7 @@ struct Button : HandleableUIPart
 	~Button() override
 	{
 		delete STL;
-		if (Tip)delete Tip;
+		delete Tip;
 	}
 	Button(std::string ButtonText, void(*OnClick)(), float Xpos, float Ypos, float Width, float Height, float CharHeight, std::uint32_t RGBAColor, std::uint32_t gRGBAColor, std::uint8_t BasePoint/*15 if gradient is disabled*/, std::uint8_t GradPoint, std::uint8_t BorderWidth, std::uint32_t RGBABackground, std::uint32_t RGBABorder, std::uint32_t HoveredRGBAColor, std::uint32_t HoveredRGBABackground, std::uint32_t HoveredRGBABorder, SingleTextLineSettings* Tip, std::string TipText = " ")
 	{
@@ -111,7 +111,7 @@ struct Button : HandleableUIPart
 		}
 		return 0;
 	}
-	void SafeMove(float dx, float dy) 
+	void SafeMove(float dx, float dy) override
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		if (Tip)
@@ -129,27 +129,27 @@ struct Button : HandleableUIPart
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		this->STL->SafeStringReplace(NewString);
 	}
-	void SafeChangePosition(float NewX, float NewY) 
+	void SafeChangePosition(float NewX, float NewY) override
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		NewX -= Xpos;
 		NewY -= Ypos;
 		SafeMove(NewX, NewY);
 	}
-	void SafeChangePosition_Argumented(std::uint8_t Arg, float NewX, float NewY)
+	void SafeChangePosition_Argumented(std::uint8_t Arg, float NewX, float NewY) override
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		float CW = 0.5f * (
-			(int32_t)((bool)(GLOBAL_LEFT & Arg))
-			- (int32_t)((bool)(GLOBAL_RIGHT & Arg))
+			(std::int32_t)((bool)(GLOBAL_LEFT & Arg))
+			- (std::int32_t)((bool)(GLOBAL_RIGHT & Arg))
 			) * Width,
 			CH = 0.5f * (
-				(int32_t)((bool)(GLOBAL_BOTTOM & Arg))
-				- (int32_t)((bool)(GLOBAL_TOP & Arg))
+				(std::int32_t)((bool)(GLOBAL_BOTTOM & Arg))
+				- (std::int32_t)((bool)(GLOBAL_TOP & Arg))
 				) * Height;
 		SafeChangePosition(NewX + CW, NewY + CH);
 	}
-	void Draw()
+	void Draw() override
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		if (!Enabled) 

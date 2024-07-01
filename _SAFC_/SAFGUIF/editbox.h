@@ -11,6 +11,7 @@
 constexpr int eb_cursor_flash_fraction = 30;
 constexpr int eb_cursor_flash_subcycle = eb_cursor_flash_fraction / 2;
 
+// doesn't work with fonted mode anymore!
 struct EditBox : HandleableUIPart
 {
 private:
@@ -22,7 +23,7 @@ private:
 public:
 	std::deque<SingleTextLine*> Words;
 	char_pos CursorPosition;/*points at the symbol after the cursor in current word?*/
-	void (*OnEdit)();
+	//void (*OnEdit)();
 	SingleTextLineSettings* STLS;
 	float Xpos, Ypos, Height, Width, VerticalOffset;
 	std::uint32_t RGBABackground, RGBABorder;
@@ -32,7 +33,7 @@ public:
 
 	EditBox(std::string Text, SingleTextLineSettings* STLS, float Xpos, float Ypos, float Height, float Width, float VerticalOffset, std::uint32_t RGBABackground, std::uint32_t RGBABorder, std::uint8_t BorderWidth): STLS(STLS),Xpos(Xpos),Ypos(Ypos),Height(Height), Width(Width), VerticalOffset(VerticalOffset), RGBABackground(RGBABackground), RGBABorder(RGBABorder), BorderWidth(BorderWidth), BufferedCurText(Text), VisibilityCountDown(0)
 	{
-		Words.push_back(STLS->CreateOne("\r"));
+		Words.push_back(STLS->CreateOne(" "));
 		CursorPosition = { Words.begin(), 0 };
 		RearrangePositions();
 		for (auto& ch : Text)
@@ -67,7 +68,7 @@ public:
 				CursorPosition.first = Words.insert(CursorPosition.first + 1, STLS->CreateOne(cur_word.substr(maximal_whole_word_size-1, 0x7FFFFFFF)));
 				CursorPosition.second++;
 				if (CursorPosition.second < maximal_whole_word_size) 
-					CursorPosition.first--;
+					--CursorPosition.first;
 				else 
 					CursorPosition.second -= maximal_whole_word_size - 1;
 			}
@@ -85,7 +86,7 @@ public:
 				std::string str = " ";
 				str[0] = ch;
 				CursorPosition.first = Words.insert(CursorPosition.first, STLS->CreateOne(str));
-				CursorPosition.first++;
+				++CursorPosition.first;
 				CursorPosition.second = 0;
 			}
 			else if (ch < 32 || ch == 127)
@@ -95,9 +96,9 @@ public:
 				cur_word.insert(cur_word.begin() + 1, ch);
 				CursorWordIter->SafeStringReplace(cur_word.substr(0, maximal_whole_word_size - 1));
 				auto itt = CursorPosition.first;
-				CursorPosition.first = Words.insert(CursorPosition.first + 1, STLS->CreateOne(cur_word.substr(maximal_whole_word_size - 1, 0x7FFFFFFF))),itt;
+				CursorPosition.first = Words.insert(CursorPosition.first + 1, STLS->CreateOne(cur_word.substr(maximal_whole_word_size - 1, 0x7FFFFFFF))), itt;
 				CursorPosition.second++;
-				CursorPosition.first--;
+				--CursorPosition.first;
 			}
 			else 
 			{
@@ -114,7 +115,7 @@ public:
 	void RemoveSymbolBeforeCursorPos()
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
-		auto cur_pos = CursorPosition;
+		//auto cur_pos = CursorPosition;
 		if (CursorPosition.second) 
 		{
 			std::string cur_word = CursorWordIter->_CurrentText;
@@ -152,7 +153,7 @@ public:
 	void UpdateBufferedCurText() 
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
-		BufferedCurText = "";
+		BufferedCurText.clear();
 		for (auto& word : Words) 
 			if (word->_CurrentText != "\t")
 				BufferedCurText += word->_CurrentText;
@@ -210,7 +211,7 @@ public:
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		for (auto& line : Words)
-			if(line)delete line;
+			delete line;
 	}
 	bool MouseHandler(float mx, float my, char Button/*-1 left, 1 right, 0 move*/, char State /*-1 down, 1 up*/) override
 	{
@@ -219,7 +220,7 @@ public:
 	void SafeStringReplace(std::string NewString) override
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
-		BufferedCurText = NewString;
+		BufferedCurText = std::move(NewString);
 		ReparseCurrentTextFromScratch();
 	}
 	inline std::string _UnsafeGetCurrentText() const
@@ -240,11 +241,11 @@ public:
 			//printf("left %i %i\n", (*CursorPosition.first), CursorPosition.second);
 			if (CursorPosition.second>0)
 			{
-				CursorPosition.second--;
+				--CursorPosition.second;
 			}
 			else if (CursorPosition.first != Words.begin()) 
 			{
-				CursorPosition.first--;
+				--CursorPosition.first;
 				CursorPosition.second = (*CursorPosition.first)->_CurrentText.size()-1;
 			}
 			break;
@@ -252,11 +253,11 @@ public:
 			//printf("right %i %i\n", (*CursorPosition.first), CursorPosition.second);
 			if (CursorPosition.second < (*CursorPosition.first)->_CurrentText.size() - 1)
 			{
-				CursorPosition.second++;
+				++CursorPosition.second;
 			}
 			else if (CursorPosition.first != Words.end() - 1)
 			{
-				CursorPosition.first++;
+				++CursorPosition.first;
 				CursorPosition.second = 0;
 			}
 			break;
@@ -276,6 +277,8 @@ public:
 					cur_x_coord - STLS->XUnitSize*0.5 > (*CursorPosition.first)->Chars[CursorPosition.second]->Xpos ||
 					cur_y_coord == (*CursorPosition.first)->CYpos
 				));
+			break;
+		case _Align::center:
 			break;
 		}
 	}
@@ -335,12 +338,12 @@ public:
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		float CW = 0.5f * (
-			(int32_t)((bool)(GLOBAL_LEFT & Arg))
-			- (int32_t)((bool)(GLOBAL_RIGHT & Arg))
+			(std::int32_t)((bool)(GLOBAL_LEFT & Arg))
+			- (std::int32_t)((bool)(GLOBAL_RIGHT & Arg))
 			) * Width,
 		CH = 0.5f * (
-			(int32_t)((bool)(GLOBAL_BOTTOM & Arg))
-			- (int32_t)((bool)(GLOBAL_TOP & Arg))
+			(std::int32_t)((bool)(GLOBAL_BOTTOM & Arg))
+			- (std::int32_t)((bool)(GLOBAL_TOP & Arg))
 			) * Height;
 		SafeChangePosition(NewX + CW, NewY + CH);
 	}

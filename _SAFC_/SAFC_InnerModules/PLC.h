@@ -39,18 +39,18 @@ struct PLC
 		U = ConversionMap.upper_bound(key);
 
 		if (U == ConversionMap.end())
-			U--;
+			--U;
 		if (L == ConversionMap.end()) {
 			L = U;
 			if (L != ConversionMap.begin())
-				L--;
+				--L;
 			else
-				U++;
+				++U;
 		}
 		if (U == L) {
 			if (U == ConversionMap.begin())
-				U++;
-			else L--;
+				++U;
+			else --L;
 		}
 		//           x(y1 - y0) + (x1y0 - x0y1) 
 		//  y   =    --------------------------

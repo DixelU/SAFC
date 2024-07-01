@@ -16,12 +16,12 @@ struct CheckBox : HandleableUIPart
 	~CheckBox() override 
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
-		if (Tip)
-			delete Tip;
+		delete Tip;
 	}
 	CheckBox(float Xpos, float Ypos, float SideSize, std::uint32_t BorderRGBAColor, std::uint32_t UncheckedRGBABackground, std::uint32_t CheckedRGBABackground, std::uint8_t BorderWidth, bool StartState = false, SingleTextLineSettings* TipSettings = NULL, _Align TipAlign = _Align::left, std::string TipText = " ")
 	{
 		this->Xpos = Xpos;
+		this->Tip = nullptr;
 		this->Ypos = Ypos;
 		this->SideSize = SideSize;
 		this->BorderRGBAColor = BorderRGBAColor;
@@ -89,12 +89,12 @@ struct CheckBox : HandleableUIPart
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		float CW = 0.5f * (
-			(int32_t)((bool)(GLOBAL_LEFT & Arg))
-			- (int32_t)((bool)(GLOBAL_RIGHT & Arg))
+			(std::int32_t)((bool)(GLOBAL_LEFT & Arg))
+			- (std::int32_t)((bool)(GLOBAL_RIGHT & Arg))
 			) * SideSize,
 			CH = 0.5f * (
-				(int32_t)((bool)(GLOBAL_BOTTOM & Arg))
-				- (int32_t)((bool)(GLOBAL_TOP & Arg))
+				(std::int32_t)((bool)(GLOBAL_BOTTOM & Arg))
+				- (std::int32_t)((bool)(GLOBAL_TOP & Arg))
 				) * SideSize;
 		SafeChangePosition(NewX + CW, NewY + CH);
 	}

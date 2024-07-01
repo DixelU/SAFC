@@ -52,7 +52,7 @@ struct MoveableWindow : HandleableUIPart
 		this->PCurX = 0.;
 		this->PCurY = 0.;
 	}
-	void KeyboardHandler(char CH)
+	void KeyboardHandler(char CH) override
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		for (auto i = WindowActivities.begin(); i != WindowActivities.end(); i++) {
@@ -136,7 +136,7 @@ struct MoveableWindow : HandleableUIPart
 		NewYpos -= YWindowPos;
 		SafeMove(NewXpos, NewYpos);
 	}
-	bool DeleteUIElementByName(std::string ElementName, bool DeleteElement = true)
+	bool DeleteUIElementByName(const std::string& ElementName, bool DeleteElement = true)
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		HUIP_MapWasChanged = true;
@@ -149,7 +149,7 @@ struct MoveableWindow : HandleableUIPart
 			delete deletable;
 		return 1;
 	}
-	bool AddUIElement(std::string ElementName, HandleableUIPart* Elem)
+	bool AddUIElement(const std::string& ElementName, HandleableUIPart* Elem)
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		HUIP_MapWasChanged = true;
@@ -166,16 +166,16 @@ struct MoveableWindow : HandleableUIPart
 			if (Y->second)
 				Y->second->SafeMove(dx, dy);
 	}
-	void SafeChangePosition_Argumented(std::uint8_t Arg, float NewX, float NewY)
+	void SafeChangePosition_Argumented(std::uint8_t Arg, float NewX, float NewY) override
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		float CW = 0.5f * (
-			(int32_t)(!!(GLOBAL_LEFT & Arg))
-			- (int32_t)(!!(GLOBAL_RIGHT & Arg))
+			(std::int32_t)(!!(GLOBAL_LEFT & Arg))
+			- (std::int32_t)(!!(GLOBAL_RIGHT & Arg))
 			- 1) * Width,
 			CH = 0.5f * (
-				(int32_t)(!!(GLOBAL_BOTTOM & Arg))
-				- (int32_t)(!!(GLOBAL_TOP & Arg))
+				(std::int32_t)(!!(GLOBAL_BOTTOM & Arg))
+				- (std::int32_t)(!!(GLOBAL_TOP & Arg))
 				+ 1) * Height;
 		SafeChangePosition(NewX + CW, NewY + CH);
 	}
@@ -240,7 +240,7 @@ struct MoveableWindow : HandleableUIPart
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		SafeWindowRename(NewWindowTitle);
 	}
-	void SafeWindowRename(std::string NewWindowTitle)
+	void SafeWindowRename(const std::string& NewWindowTitle)
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		if (WindowName) {
@@ -248,11 +248,11 @@ struct MoveableWindow : HandleableUIPart
 			WindowName->SafeChangePosition_Argumented(GLOBAL_LEFT, XWindowPos + WindowHeapSize * 0.5f, WindowName->CYpos);
 		}
 	}
-	HandleableUIPart*& operator[](std::string ID)
+	HandleableUIPart*& operator[](const std::string& ID)
 	{
 		return WindowActivities[ID];
 	}
-	std::uint32_t TellType()
+	std::uint32_t TellType() override
 	{
 		return TT_MOVEABLE_WINDOW;
 	}
