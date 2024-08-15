@@ -158,7 +158,23 @@ struct single_midi_processor_2
 		}
 	};
 
-	using data_iterator = std::vector<base_type>::iterator;
+	constexpr static bool should_use_ram_buffers = false;
+
+	using data_buffer_type =
+		typename std::conditional<
+			should_use_ram_buffers, 
+			std::vector<base_type>,
+			vector_like_mmbe_wrapper>::type;
+
+	struct data_buffers
+	{
+		//std::vector<base_type> data_buffer;
+		data_buffer_type data_buffer;
+		std::vector<base_type> meta_buffer;
+	};
+
+	using data_iterator =
+		decltype(std::declval<data_buffer_type>().begin());
 
 	/* returns false if event was disabled */
 	using event_transforming_filter = dixelu::type_erased_function_container<
@@ -456,6 +472,48 @@ struct single_midi_processor_2
 			__copy_to_array(new_storage, types...);
 			//std::cout << "##SCE##" << std::endl;
 		}
+
+
+
+		template<typename T>
+		static void __copy_T_to_array(
+			vector_like_mmbe_wrapper& storage,
+			const typename std::enable_if<std::is_same<T, raw_storage>::value, T>::type& value)
+		{
+			storage.copy_back_from(value.ptr, value.size);
+		}
+
+		template<typename T>
+		static void __copy_T_to_array(
+			vector_like_mmbe_wrapper& storage,
+			const typename std::enable_if<(!std::is_same<T, raw_storage>::value), T>::type& value)
+		{
+			storage.copy_back(value);
+		}
+
+		template<typename _head, typename... _tail>
+		FORCEDINLINE void static __copy_to_array(
+			vector_like_mmbe_wrapper& storage, _head head_value, _tail... tail_values)
+		{
+			__copy_T_to_array<_head>(storage, head_value);
+
+			__copy_to_array(storage + sizeof(_head), tail_values...);
+		}
+
+		template<typename _head>
+		FORCEDINLINE void static __copy_to_array(
+			vector_like_mmbe_wrapper& storage, _head head_value)
+		{
+			__copy_T_to_array<_head>(storage, head_value);
+		}
+
+		template<typename... _variadic_types>
+		FORCEDINLINE void static copy_back(
+			vector_like_mmbe_wrapper& vec,
+			_variadic_types... types)
+		{
+			__copy_to_array(types...);
+		}
 	};
 
 	FORCEDINLINE static void copy_back(
@@ -498,16 +556,41 @@ struct single_midi_processor_2
 #endif
 	}
 
-	template<typename T>
-	FORCEDINLINE static T& get_value(std::vector<base_type>& vec, size_t index)
+	FORCEDINLINE static void copy_back(
+		std::vector<base_type>& vec,
+		const vector_like_mmbe_wrapper::trivial_element_proxy<unsigned char>& begin,
+		const vector_like_mmbe_wrapper::trivial_element_proxy<unsigned char>& end,
+		const size_t)
 	{
-		return *(T*)&vec[index];
+
+	}
+
+	template<typename T>
+	FORCEDINLINE static auto get_value(std::vector<base_type>& vec, size_t index)
+	{
+		auto ptr = (T*)&vec[index];
+		struct vector_proxy
+		{
+			operator T() { return *ptr; }
+			T operator=(T rhs) { return (*ptr = rhs); }
+
+			T* ptr;
+		};
+		return vector_proxy{ptr};
 	}
 
 	template<typename T>
 	FORCEDINLINE static T& get_value(const std::vector<base_type>::iterator& vec, size_t index)
 	{
-		return *(T*)&vec[index];
+		auto ptr = (T*)&vec[index];
+		struct vector_proxy
+		{
+			operator T() { return *ptr; }
+			T operator=(T rhs) { return (*ptr = rhs); }
+
+			T* ptr;
+		};
+		return vector_proxy{ ptr };
 	}
 
 	template<typename T>
@@ -516,11 +599,23 @@ struct single_midi_processor_2
 		return vec.size() <= index + sizeof(T);
 	}
 
-	struct data_buffers
+	template<typename T>
+	FORCEDINLINE static auto get_value(const vector_like_mmbe_wrapper& vec, int64_t index)
 	{
-		std::vector<base_type> data_buffer;
-		std::vector<base_type> meta_buffer;
-	};
+		return vec.get_value<T>(index);
+	}
+
+	template<typename T, typename U>
+	FORCEDINLINE static auto get_value(const vector_like_mmbe_wrapper::trivial_element_proxy<U>& vec, int64_t index)
+	{
+		return vec.rebind<T>()[index];
+	}
+
+	template<typename T>
+	FORCEDINLINE static bool is_valid_index(vector_like_mmbe_wrapper& vec, size_t index)
+	{
+		return vec.size() <= index + sizeof(T);
+	}
 
 	inline static bool put_data_in_buffer(
 		bbb_ffr& file_input,
@@ -827,7 +922,7 @@ struct single_midi_processor_2
 	}
 
 	inline static bool process_buffer(
-		std::vector<base_type>& data_buffer,
+		data_buffer_type& data_buffer,
 		std::array<filters_iterators, 16>& filters,
 		single_track_data& std_ref,
 		message_buffers& buffers)
@@ -882,7 +977,7 @@ struct single_midi_processor_2
 	}
 
 	inline static bool sort_buffer(
-		std::vector<base_type>& data_buffer,
+		data_buffer_type& data_buffer,
 		single_track_data& std_ref,
 		message_buffers& buffers)
 	{
@@ -941,7 +1036,7 @@ struct single_midi_processor_2
 
 		(*buffers.log) << "Copying buffer (elements: " + std::to_string(data_pointers.size()) + ")";
 
-		std::vector<base_type> sorted_data_buffer;
+		/*std::vector<base_type> sorted_data_buffer;
 		sorted_data_buffer.reserve(data_buffer.size());
 		for (auto& el : data_pointers)
 		{
@@ -952,7 +1047,7 @@ struct single_midi_processor_2
 				el.length);
 		}
 
-		sorted_data_buffer.swap(data_buffer);
+		sorted_data_buffer.swap(data_buffer);*/
 
 		return true;
 	}
@@ -965,7 +1060,7 @@ struct single_midi_processor_2
 		const event_transforming_filter selection_filter = [&selection_data = settings.selection_data]
 		(const data_iterator& begin, const data_iterator& end, const data_iterator& cur, single_track_data& std_ref) -> bool
 		{
-			auto& tick = get_value<tick_type>(cur, tick_position);
+			auto tick = get_value<tick_type>(cur, tick_position);
 			
 			bool before_selection = tick < selection_data.begin;
 			bool after_selection = tick >= selection_data.end;
@@ -976,7 +1071,7 @@ struct single_midi_processor_2
 			if (tick == disable_tick)
 				return false;
 
-			const auto& type = get_value<base_type>(cur, event_type);
+			base_type type = get_value<base_type>(cur, event_type);
 			auto channelless_type = type & 0xF0;
 
 			switch (channelless_type)
@@ -986,8 +1081,8 @@ struct single_midi_processor_2
 			{
 				bool is_note_on = channelless_type & 0x10;
 
-				auto& reference_event_pair = get_value<tick_type>(cur, event_param3);
-				auto& reference_event_tick = get_value<tick_type>(begin, reference_event_pair);
+				auto reference_event_pair = get_value<tick_type>(cur, event_param3);
+				auto reference_event_tick = get_value<tick_type>(begin, reference_event_pair);
 				bool trim_condition = 
 					(is_note_on && before_selection && (
 						reference_event_tick >= selection_data.begin && 
@@ -1024,8 +1119,8 @@ struct single_midi_processor_2
 					case 0xA0:
 					case 0xB0:
 					{
-						const auto& param1 = get_value<base_type>(cur, event_param1);
-						const auto& param2 = get_value<base_type>(cur, event_param2);
+						auto param1 = get_value<base_type>(cur, event_param1);
+						auto param2 = get_value<base_type>(cur, event_param2);
 						const std::uint16_t key = (type << 8) | (param1);
 						auto& data = std_ref.selection_data.key_events_at_selection_front[key];
 						data = param2;
@@ -1034,7 +1129,7 @@ struct single_midi_processor_2
 					case 0xC0:
 					case 0xD0:
 					{
-						const auto& param = get_value<base_type>(cur, event_param1);
+						auto param = get_value<base_type>(cur, event_param1);
 						const std::uint16_t key = type;
 						auto& data = std_ref.selection_data.channel_events_at_selection_front[key];
 						data.field1 = param;
@@ -1043,8 +1138,8 @@ struct single_midi_processor_2
 					}
 					case 0xE0:
 					{
-						const auto& param1 = get_value<base_type>(cur, event_param1);
-						const auto& param2 = get_value<base_type>(cur, event_param2);
+						auto param1 = get_value<base_type>(cur, event_param1);
+						auto param2 = get_value<base_type>(cur, event_param2);
 						const std::uint16_t key = type;
 						auto& data = std_ref.selection_data.channel_events_at_selection_front[key];
 						data.field1 = param1;
@@ -1055,7 +1150,7 @@ struct single_midi_processor_2
 					case 0xF0:
 					{
 						if (type != 0xFF) [[unlikely]] break;
-						const auto& meta_subtype = get_value<base_type>(cur, event_param1);
+						auto meta_subtype = get_value<base_type>(cur, event_param1);
 
 						// 8 tick  1 type  1 metatype  1 vlv size  4 size  ...<raw meta>~vlv+data
 						//const auto& vlv_size = get_value<base_type>(cur, event_param3);
@@ -1065,9 +1160,9 @@ struct single_midi_processor_2
 						case 0x51:
 						{
 							constexpr auto base_position = get_meta_param_index(1, 0);
-							const auto& tempo_byte1 = get_value<base_type>(cur, base_position + 0);
-							const auto& tempo_byte2 = get_value<base_type>(cur, base_position + 1);
-							const auto& tempo_byte3 = get_value<base_type>(cur, base_position + 2);
+							auto tempo_byte1 = get_value<base_type>(cur, base_position + 0);
+							auto tempo_byte2 = get_value<base_type>(cur, base_position + 1);
+							auto tempo_byte3 = get_value<base_type>(cur, base_position + 2);
 
 							std_ref.selection_data.frontal_tempo = (tempo_byte1 << 16) | (tempo_byte2 << 8) | tempo_byte3;
 							break;
@@ -1076,18 +1171,20 @@ struct single_midi_processor_2
 						{
 							constexpr auto base_position = get_meta_param_index(1, 0);
 
-							const auto& size = get_value<base_type>(cur, base_position);
+							auto size = get_value<base_type>(cur, base_position);
 							if (size != 0x8 && size != 0xB) [[unlikely]]
 								break;
 
-							const auto& signature = get_value<base_type>(cur, base_position + 0);
+							auto signature = get_value<base_type>(cur, base_position + 0);
 							if (signature) [[unlikely]]
 								break;
+
 							std_ref.selection_data.frontal_color_event.is_empty = false;
 							std_ref.selection_data.frontal_color_event.size = size;
 							std_ref.selection_data.frontal_color_event.data[0] = signature;
 							for(size_t i = 1; i < size; ++i)
 								std_ref.selection_data.frontal_color_event.data[i] = get_value<base_type>(cur, event_param3 + i);
+
 							break;
 						}
 						default:
@@ -1107,7 +1204,7 @@ struct single_midi_processor_2
 		const event_transforming_filter program_transform = [filtering = settings.filter]
 		(const data_iterator& begin, const data_iterator& end, const data_iterator& cur, single_track_data& std_ref) -> bool 
 		{
-			auto& tick = get_value<tick_type>(cur, tick_position);
+			auto tick = get_value<tick_type>(cur, tick_position);
 			//const auto& type = get_value<base_type>(cur, event_type);
 
 			if (!filtering.pass_other)
@@ -1116,7 +1213,7 @@ struct single_midi_processor_2
 				return false;
 			}
 
-			auto& program = get_value<base_type>(cur, event_param1);
+			auto program = get_value<base_type>(cur, event_param1);
 
 			if (filtering.piano_only)
 				program = 0;
@@ -1127,7 +1224,7 @@ struct single_midi_processor_2
 		const event_transforming_filter pitch_transform = [filtering = settings.filter, pm = settings.pitch_map]
 		(const data_iterator& begin, const data_iterator& end, const data_iterator& cur, single_track_data& std_ref) -> bool
 		{
-			auto& tick = get_value<tick_type>(cur, tick_position);
+			auto tick = get_value<tick_type>(cur, tick_position);
 			//const auto& type = get_value<base_type>(cur, event_type);
 
 			if (!filtering.pass_pitch)
@@ -1138,8 +1235,8 @@ struct single_midi_processor_2
 
 			if (pm)
 			{
-				auto& lsb = get_value<base_type>(cur, event_param1);
-				auto& msb = get_value<base_type>(cur, event_param2);
+				auto lsb = get_value<base_type>(cur, event_param1);
+				auto msb = get_value<base_type>(cur, event_param2);
 
 				std::uint16_t pitch = ((msb & 0x7F) << 7) | (lsb & 0x7F);
 				pitch = (*pm)[pitch];
@@ -1154,13 +1251,13 @@ struct single_midi_processor_2
 		const event_transforming_filter key_transform = [ filtering = settings.filter, cat = settings.key_converter, vm = settings.volume_map ]
 		(const data_iterator& begin, const data_iterator& end, const data_iterator& cur, single_track_data& std_ref) -> bool
 		{
-			auto& tick = get_value<tick_type>(cur, tick_position);
-			const auto& type = get_value<base_type>(cur, event_type);
+			auto tick = get_value<tick_type>(cur, tick_position);
+			auto type = get_value<base_type>(cur, event_type);
 
 			if (!filtering.pass_notes)
 			{
-				auto& reference_event_pair = get_value<tick_type>(cur, event_param3);
-				auto& reference_event_tick = get_value<tick_type>(begin, reference_event_pair);
+				auto reference_event_pair = get_value<tick_type>(cur, event_param3);
+				auto reference_event_tick = get_value<tick_type>(begin, reference_event_pair);
 
 				reference_event_tick = disable_tick;
 				tick = disable_tick;
@@ -1169,13 +1266,13 @@ struct single_midi_processor_2
 
 			if (cat)
 			{
-				auto& key = get_value<base_type>(cur, event_param1);
+				auto key = get_value<base_type>(cur, event_param1);
 				auto optkey = (*cat).process(key);
 
 				if (!optkey)
 				{
-					auto& reference_event_pair = get_value<tick_type>(cur, event_param3);
-					auto& reference_event_tick = get_value<tick_type>(begin, reference_event_pair);
+					auto reference_event_pair = get_value<tick_type>(cur, event_param3);
+					auto reference_event_tick = get_value<tick_type>(begin, reference_event_pair);
 
 					reference_event_tick = disable_tick;
 					tick = disable_tick;
@@ -1187,13 +1284,13 @@ struct single_midi_processor_2
 
 			if (vm && (type & 0x10)) // only for note-on events
 			{
-				auto& velocity = get_value<base_type>(cur, event_param2);
+				auto velocity = get_value<base_type>(cur, event_param2);
 				velocity = (*vm)[velocity];
 
 				if (!velocity)
 				{
-					auto& reference_event_pair = get_value<tick_type>(cur, event_param3);
-					auto& reference_event_tick = get_value<tick_type>(begin, reference_event_pair);
+					auto reference_event_pair = get_value<tick_type>(cur, event_param3);
+					auto reference_event_tick = get_value<tick_type>(begin, reference_event_pair);
 
 					reference_event_tick = disable_tick;
 					tick = disable_tick;
@@ -1207,9 +1304,9 @@ struct single_midi_processor_2
 		const event_transforming_filter meta_transform = [ filtering = settings.filter, tempo = settings.tempo ]
 		(const data_iterator& begin, const data_iterator& end, const data_iterator& cur, single_track_data& std_ref) -> bool
 		{
-			auto& tick = get_value<tick_type>(cur, tick_position);
-			const auto& event_class = get_value<base_type>(cur, event_type);
-			const auto& meta_type = get_value<base_type>(cur, event_param1);
+			auto tick = get_value<tick_type>(cur, tick_position);
+			auto event_class = get_value<base_type>(cur, event_type);
+			auto meta_type = get_value<base_type>(cur, event_param1);
 
 			// 8 tick  1 type  1 metatype  1 vlv size  4 size  ...<raw meta>~vlv+data
 
@@ -1223,9 +1320,9 @@ struct single_midi_processor_2
 
 				constexpr auto base_position = get_meta_param_index(1, 0);
 
-				auto& tempo_bit1 = get_value<base_type>(cur, base_position + 0);
-				auto& tempo_bit2 = get_value<base_type>(cur, base_position + 1);
-				auto& tempo_bit3 = get_value<base_type>(cur, base_position + 2);
+				auto tempo_bit1 = get_value<base_type>(cur, base_position + 0);
+				auto tempo_bit2 = get_value<base_type>(cur, base_position + 1);
+				auto tempo_bit3 = get_value<base_type>(cur, base_position + 2);
 				auto new_tempo = tempo.process((tempo_bit1 << 16) | (tempo_bit2 << 8) | tempo_bit3);
 
 				if (!new_tempo)
@@ -1259,7 +1356,7 @@ struct single_midi_processor_2
 		const event_transforming_filter others_transform = [ filtering = settings.filter ]
 		(const data_iterator& begin, const data_iterator& end, const data_iterator& cur, single_track_data& std_ref) -> bool
 		{
-			auto& tick = get_value<tick_type>(cur, tick_position);
+			auto tick = get_value<tick_type>(cur, tick_position);
 			//const auto& type = get_value<base_type>(cur, event_type);
 			if (!filtering.pass_other)
 			{
@@ -1277,7 +1374,7 @@ struct single_midi_processor_2
 			 apply_offset_after = settings.proc_details.apply_offset_after]
 		(const data_iterator& begin, const data_iterator& end, const data_iterator& cur, single_track_data& std_ref) -> bool
 		{
-			auto& tick = get_value<tick_type>(cur, tick_position);
+			auto tick = get_value<tick_type>(cur, tick_position);
 
 			if (apply_offset_after)
 			{
@@ -1581,7 +1678,7 @@ struct single_midi_processor_2
 			{
 				write_selection_front_wrap();
 
-				const auto& event_kind = get_value<base_type>(data_buffer, i + event_type);
+				auto event_kind = get_value<base_type>(data_buffer, i + event_type);
 				auto channel = event_kind & 0xF;
 
 				const bool is_non_meta_event = (event_kind & 0xF0) != 0xF0;

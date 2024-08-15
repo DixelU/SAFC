@@ -44,6 +44,7 @@
 
 #include <stack>
 #include "bbb_ffio.h"
+#include "mmbe.h"
 
 #include "JSON/JSON.h"
 #include "JSON/JSON.cpp"
@@ -2672,6 +2673,8 @@ struct SafcCliRuntime:
 
 int main(int argc, char** argv)
 {
+	test();
+
 	__versionTuple = ___GetVersion();
 
 	std::ios_base::sync_with_stdio(false); //why not
