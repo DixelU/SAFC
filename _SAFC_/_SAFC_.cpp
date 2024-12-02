@@ -62,6 +62,7 @@
 #include <archive.h>
 #include <archive_entry.h>
 
+std::tuple<std::uint16_t, std::uint16_t, std::uint16_t, std::uint16_t> __versionTuple;
 std::tuple<std::uint16_t, std::uint16_t, std::uint16_t, std::uint16_t> ___GetVersion() 
 {
 	// get the filename of the executable containing the version resource
@@ -256,6 +257,9 @@ bool SAFC_Update(const std::wstring& latest_release)
 
 void SAFC_VersionCheck()
 {
+	auto [maj, min, ver, build] = __versionTuple;
+	std::wcout << L"Current vesion: v" << maj << L"." << min << L"." << ver << L"." << build << L"\n";
+
 	if (!check_autoupdates)
 		return;
 
@@ -274,7 +278,7 @@ void SAFC_VersionCheck()
 		{
 			if (res == S_OK) 
 			{
-				auto [maj, min, ver, build] = ___GetVersion();
+				auto [maj, min, ver, build] = __versionTuple;
 				std::ifstream input(filename);
 				std::string temp_buffer;
 				std::getline(input, temp_buffer);
@@ -302,7 +306,6 @@ void SAFC_VersionCheck()
 				}
 				std::wcout << L"Git latest version: v" << 
 					version_partied[0] << L"." << version_partied[1] << L"." << version_partied[2] << L"." << version_partied[3] << L"\n";
-				std::wcout << L"Current vesion: v" << maj << L"." << min << L"." << ver << L"." << build << L"\n";
 				if (check_autoupdates &&
 					(maj < version_partied[0] ||
 						maj == version_partied[0] && min < version_partied[1] ||
@@ -510,7 +513,7 @@ struct SAFCData
 	std::vector<FileSettings> Files;
 	std::wstring SavePath;
 	std::uint16_t GlobalPPQN;
-	std::uint32_t GlobalOffset;
+	std::int32_t GlobalOffset;
 	float GlobalNewTempo;
 	bool IncrementalPPQN;
 	bool InplaceMergeFlag;
@@ -586,7 +589,7 @@ struct SAFCData
 			Files[i].NewPPQN = NewPPQN;
 		GlobalPPQN = NewPPQN;
 	}
-	void SetGlobalOffset(std::uint32_t Offset)
+	void SetGlobalOffset(std::int32_t Offset)
 	{
 		for (int i = 0; i < Files.size(); i++)
 			Files[i].OffsetTicks = Offset;
@@ -1510,8 +1513,8 @@ void OnSubmitGlobalOffset()
 }
 void OnGlobalOffset()
 {
-	WH->ThrowPrompt("Sets new global offset", "Global Offset", OnSubmitGlobalOffset, _Align::center, InputField::Type::NaturalNumbers, std::to_string(_Data.GlobalOffset), 10);
-	std::cout << _Data.GlobalOffset << std::to_string(_Data.GlobalOffset) << std::endl;
+	WH->ThrowPrompt("Sets new global offset", "Global Offset", OnSubmitGlobalOffset, _Align::center, InputField::Type::WholeNumbers, std::to_string(_Data.GlobalOffset), 10);
+	std::cout << _Data.GlobalOffset << " " << std::to_string(_Data.GlobalOffset) << std::endl;
 }
 
 void OnSubmitGlobalTempo()
@@ -1953,8 +1956,13 @@ void Init()
 
 	WH = std::make_shared<WindowsHandler>();
 
+	std::stringstream MainWindowName;
+
+	auto [maj, min, ver, build] = __versionTuple;
+	MainWindowName << "SAFC v" << maj << "." << min << "." << ver << "." << build << "";
+
 	SelectablePropertedList* SPL = new SelectablePropertedList(BS_List_Black_Small, NULL, PropsAndSets::OGPInMIDIList, -50, 172, 300, 12, 65, 30);
-	MoveableWindow* T = new MoveableResizeableWindow("Main window", System_White, -200, 200, 400, 400, 0x3F3F3FAF, 0x7F7F7F7F, 0, [SPL](float dH, float dW, float NewHeight, float NewWidth) {
+	MoveableWindow* T = new MoveableResizeableWindow(MainWindowName.str(), System_White, -200, 200, 400, 400, 0x3F3F3FAF, 0x7F7F7F7F, 0, [SPL](float dH, float dW, float NewHeight, float NewWidth) {
 		constexpr float TopMargin = 200 - 172;
 		constexpr float BottomMargin = 12;
 		float SPLNewHight = (NewHeight - TopMargin - BottomMargin);
@@ -2664,6 +2672,8 @@ struct SafcCliRuntime:
 
 int main(int argc, char** argv)
 {
+	__versionTuple = ___GetVersion();
+
 	std::ios_base::sync_with_stdio(false); //why not
 
 	std::shared_ptr<SafcRuntime> runtime;
