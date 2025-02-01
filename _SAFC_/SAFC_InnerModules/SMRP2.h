@@ -1157,7 +1157,7 @@ struct single_midi_processor_2
 			auto& tick = get_value<tick_type>(cur, tick_position);
 			const auto& type = get_value<base_type>(cur, event_type);
 
-			if (!filtering.pass_notes)
+			if (!filtering.pass_notes) [[unlikely]]
 			{
 				auto& reference_event_pair = get_value<tick_type>(cur, event_param3);
 				auto& reference_event_tick = get_value<tick_type>(begin, reference_event_pair);
@@ -1167,7 +1167,7 @@ struct single_midi_processor_2
 				return false;
 			}
 
-			if (cat)
+			if (cat) [[unlikely]]
 			{
 				auto& key = get_value<base_type>(cur, event_param1);
 				auto optkey = (*cat).process(key);
@@ -1185,7 +1185,7 @@ struct single_midi_processor_2
 				key = *optkey;
 			}
 
-			if (vm && (type & 0x10)) // only for note-on events
+			if (vm && (type & 0x10)) [[unlikely]] // only for note-on events
 			{
 				auto& velocity = get_value<base_type>(cur, event_param2);
 				velocity = (*vm)[velocity];
@@ -1656,6 +1656,7 @@ struct single_midi_processor_2
 
 		for (auto& el : polyphony_stacks)
 			el.reserve(1000);
+
 		track_buffers.data_buffer.reserve(1ull << 26);
 		write_buffer.reserve(1ull << (24 - 4 * channels_split));
 		track_buffers.meta_buffer.reserve(1ull << 10);
