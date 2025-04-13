@@ -6,7 +6,7 @@
 #include "../SAFC_InnerModules/SAFC_IM.h"
 
 using local_fp_type = float;
-constexpr float __epsilon = FLT_EPSILON;
+constexpr float __epsilon = std::numeric_limits<float>::min() * 10;
 
 template<typename ordered_map_type = std::map<int, int>>
 struct Graphing : HandleableUIPart
@@ -52,13 +52,12 @@ struct Graphing : HandleableUIPart
 			local_fp_type begin = Graph->begin()->first;
 			local_fp_type end = Graph->rbegin()->first;
 			local_fp_type max_value = -1e31f, min_value = 1e31f;
-			local_fp_type prev_value = CYpos - 0.5 * TargetHeight + (ScaleCoef * Graph->begin()->second + Shift) * TargetHeight;
+			local_fp_type prev_value = 0;
 			local_fp_type t_prev_value = prev_value;
-			bool IsLastLoopComplete = false;
+			bool IsLastLoopComplete = false, IsFirst = true;
 			__glcolor(Color);
 			glBegin(GL_LINE_STRIP);
-			glVertex2f(CXpos - 0.5f * Width, t_prev_value);
-			for (auto T : *Graph) 
+			for (auto T : *Graph)
 			{
 				IsLastLoopComplete = false;
 				local_fp_type cur_pos = T.first;
@@ -71,6 +70,13 @@ struct Graphing : HandleableUIPart
 					continue;
 				if (cur_x > 0.5f)
 					break;
+
+				if (IsFirst)
+				{
+					glVertex2f(CXpos - 0.5f * Width, t_prev_value);
+					IsFirst = false;
+				}
+
 				if (max_value < cur_y)
 					max_value = cur_y;
 				if (min_value > cur_y)
@@ -99,7 +105,9 @@ struct Graphing : HandleableUIPart
 			{
 				if (min_value != max_value) {
 					Shift = (Shift - min_value);
-					ScaleCoef = std::max(ScaleCoef / (max_value - min_value), __epsilon * 4.f);
+					float NewScaleCoef = std::max(ScaleCoef / (max_value - min_value), __epsilon * 4.f);
+					if (!isnan(NewScaleCoef))
+						ScaleCoef = NewScaleCoef;
 				}
 			}
 			if (IsHovered)
