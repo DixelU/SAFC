@@ -3,12 +3,14 @@
 #ifndef SAF_SMRP2
 #define SAF_SMRP2
 
+#include <iostream>
 #include <string>
 #include <vector>
 #include <map>
 #include <thread>
 #include <memory>
 #include <mutex>
+#include <algorithm>
 #include <functional>
 #include <stack>
 #include <array>
@@ -334,7 +336,7 @@ struct single_midi_processor_2
 		return stack_size;
 	}
 
-	FORCEDINLINE static uint64_t get_vlv(bbb_ffr& file_input)
+	FORCEDINLINE static uint64_t get_vlv(bbb_mmap& file_input)
 	{
 		uint64_t value = 0;
 		base_type single_byte;
@@ -523,7 +525,7 @@ struct single_midi_processor_2
 	};
 
 	inline static bool put_data_in_buffer(
-		bbb_ffr& file_input,
+		bbb_mmap& file_input,
 		data_buffers& data_buffers,
 		message_buffers& buffers,
 		const settings_obj& settings,
@@ -1664,7 +1666,7 @@ struct single_midi_processor_2
 		auto filters = filters_constructor(data.settings);
 		auto filter_iters = make_filter_bounding_iters(filters);
 
-		bbb_ffr file_input(data.filename.c_str());
+		bbb_mmap file_input(data.filename.c_str());
 		std::ofstream file_output(data.filename + data.postfix, std::ios::binary | std::ios::out);
 
 		for (int i = 0; i < 12 && file_input.good(); i++)
