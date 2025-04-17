@@ -403,6 +403,7 @@ struct FileSettings
 		ChannelsSplit,
 		CollapseMIDI,
 		AllowSysex,
+		EnableZeroVelocity,
 		ApplyOffsetAfter;
 	std::shared_ptr<CutAndTransposeKeys> KeyMap;
 	std::shared_ptr<PLC<std::uint8_t, std::uint8_t>> VolumeMap;
@@ -427,6 +428,7 @@ struct FileSettings
 		OldTrackNumber = FMIC.ExpectedTrackNumber;
 		OffsetTicks = InplaceMergeEnabled = 0;
 		AllowSysex = false;
+		EnableZeroVelocity = false;
 		FileSize = FMIC.FileSize;
 		GroupID = NewTempo = 0;
 		SelectionStart = 0;
@@ -472,6 +474,7 @@ struct FileSettings
 		settings.proc_details.channel_split = ChannelsSplit;
 		settings.proc_details.whole_midi_collapse = CollapseMIDI;
 		settings.proc_details.apply_offset_after = ApplyOffsetAfter;
+		settings.legacy.enable_zero_velocity = EnableZeroVelocity;
 		settings.legacy.ignore_meta_rsb = AllowLegacyRunningStatusMetaIgnorance;
 		settings.legacy.rsb_compression = RSBCompression;
 		settings.filter.pass_sysex = AllowSysex;
@@ -832,6 +835,7 @@ namespace PropsAndSets
 			((CheckBox*)((*PASWptr)["INPLACE_MERGE"]))->State = _Data[ID].InplaceMergeEnabled;
 			((CheckBox*)((*PASWptr)["LEGACY_META_RSB_BEHAVIOR"]))->State = _Data[ID].AllowLegacyRunningStatusMetaIgnorance;
 			((CheckBox*)((*PASWptr)["ALLOW_SYSEX"]))->State = _Data[ID].AllowSysex;
+			((CheckBox*)((*PASWptr)["ENABLE_ZERO_VELOCITY"]))->State = _Data[ID].EnableZeroVelocity;
 
 			((CheckBox*)((*PASWptr)["COLLAPSE_MIDI"]))->State = _Data[ID].CollapseMIDI;
 			((CheckBox*)((*PASWptr)["APPLY_OFFSET_AFTER"]))->State = _Data[ID].ApplyOffsetAfter;
@@ -1268,6 +1272,7 @@ namespace PropsAndSets
 		_Data[currentID].SetBoolSetting(_BoolSettings::ignore_notes, (((CheckBox*)(*SMPASptr)["BOOL_IGN_NOTES"])->State));
 		_Data[currentID].SetBoolSetting(_BoolSettings::ignore_all_but_tempos_notes_and_pitch, (((CheckBox*)(*SMPASptr)["BOOL_IGN_ALL_EX_TPS"])->State));
 
+		_Data[currentID].EnableZeroVelocity = (((CheckBox*)(*SMPASptr)["ENABLE_ZERO_VELOCITY"])->State);
 		_Data[currentID].AllowSysex = (((CheckBox*)(*SMPASptr)["ALLOW_SYSEX"])->State);
 		_Data[currentID].RSBCompression = ((CheckBox*)(*SMPASptr)["RSB_COMPRESS"])->State;
 		_Data[currentID].ChannelsSplit = ((CheckBox*)(*SMPASptr)["SPLIT_TRACKS"])->State;
@@ -2004,7 +2009,7 @@ void Init()
 
 	(*WH)["MAIN"] = T;
 
-	T = new MoveableWindow("Props. and sets.", System_White, -100, 100, 200, 200, 0x3F3F3FCF, 0x7F7F7F7F);
+	T = new MoveableWindow("Props. and sets.", System_White, -100, 100, 200, 225, 0x3F3F3FCF, 0x7F7F7F7F);
 	(*T)["FileName"] = new TextBox("_", System_White, 0, 88.5 - WindowHeapSize, 6, 200 - 1.5 * WindowHeapSize, 7.5, 0, 0, 0, _Align::left, TextBox::VerticalOverflow::cut);
 	(*T)["PPQN"] = new InputField(" ", -90 + WindowHeapSize, 75 - WindowHeapSize, 10, 25, System_White, PropsAndSets::PPQN, 0x007FFFFF, System_White, "PPQN is lesser than 65536.", 5, _Align::center, _Align::left, InputField::Type::NaturalNumbers);
 	(*T)["TEMPO"] = new InputField(" ", -50 + WindowHeapSize, 75 - WindowHeapSize, 10, 45, System_White, PropsAndSets::TEMPO, 0x007FFFFF, System_White, "Specific tempo override field", 8, _Align::center, _Align::left, InputField::Type::FP_PositiveNumbers);
@@ -2045,14 +2050,15 @@ void Init()
 	Butt->Tip->SafeChangePosition_Argumented(_Align::right, 100 - WindowHeapSize, Butt->Tip->CYpos);
 
 	(*T)["SELECT_START"] = new InputField(" ", -37.5 - WindowHeapSize, -5 - WindowHeapSize, 10, 70, System_White, NULL, 0x007FFFFF, System_White, "Selection start", 13, _Align::center, _Align::right, InputField::Type::NaturalNumbers);
-	(*T)["SELECT_LENGTH"] = new InputField(" ", 37.5 - WindowHeapSize, -5 - WindowHeapSize, 10, 70, System_White, NULL, 0x007FFFFF, System_White, "Selection length", 14, _Align::center, _Align::right, InputField::Type::WholeNumbers);
+	(*T)["SELECT_LENGTH"] = new InputField(" ", -37.5 - WindowHeapSize, -25 - WindowHeapSize, 10, 70, System_White, NULL, 0x007FFFFF, System_White, "Selection length", 14, _Align::center, _Align::right, InputField::Type::WholeNumbers);
 
 	(*T)["LEGACY_META_RSB_BEHAVIOR"] = new CheckBox(97.5 - WindowHeapSize, -5 - WindowHeapSize, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, false, System_White, _Align::right, "Enables legacy RSB/Meta behavior");
-	(*T)["ALLOW_SYSEX"] = new CheckBox(82.5 - WindowHeapSize, -5 - WindowHeapSize, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, 0, System_White, _Align::right, "Allow sysex events");	
+	(*T)["ALLOW_SYSEX"] = new CheckBox(82.5 - WindowHeapSize, -5 - WindowHeapSize, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, 0, System_White, _Align::right, "Allow sysex events");
+	(*T)["ENABLE_ZERO_VELOCITY"] = new CheckBox(97.5 - WindowHeapSize, -25 - WindowHeapSize, 10, 0x007FFFFF, 0x00001F3F, 0xFF3F00FF, 1, 0, System_White, _Align::right, "\"Enable\" zero velocity notes");
 
 	(*T)["COLLAPSE_MIDI"] = new CheckBox(97.5 - WindowHeapSize, 35 - WindowHeapSize, 10, 0x007FFFFF, 0xFF7F00AF, 0x7FFF00AF, 1, 0, System_White, _Align::right, "Collapse all tracks of a MIDI into one");
 
-	(*T)["CONSTANT_PROPS"] = new TextBox("_Props text example_", System_White, 0, -57.5 - WindowHeapSize, 80 - WindowHeapSize, 200 - 1.5 * WindowHeapSize, 7.5, 0, 0, 1);
+	(*T)["CONSTANT_PROPS"] = new TextBox("_Props text example_", System_White, 0, -75 - WindowHeapSize, 80 - WindowHeapSize, 200 - 1.5 * WindowHeapSize, 7.5, 0, 0, 1);
 
 	(*WH)["SMPAS"] = T;//Selected midi properties and settings
 
