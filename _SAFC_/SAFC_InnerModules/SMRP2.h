@@ -632,8 +632,8 @@ struct single_midi_processor_2
 
 				if (!settings.legacy.enable_zero_velocity) [[likely]]
 					com ^= ((!bool(vel) & bool(com & 0x10)) << 4);
-				else
-					vel += (!vel & bool(com & 0x10));
+				else if (!vel && bool(com & 0x10))
+					vel = 1;
 
 				std::uint16_t key_polyindex = (com & 0xF) | (((std::uint16_t)key) << 4);
 				bool polyphony_error = false;
