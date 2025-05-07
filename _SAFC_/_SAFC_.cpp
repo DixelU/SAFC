@@ -2492,25 +2492,25 @@ struct SafcCliRuntime:
 	[
 		{
 			"filename": "D:\\Download\\Downloads\\Paprika's Aua Ah Community Merge (FULL).mid", // string (utf8)
-				"ppq_override" : 960,                      // optional; unisnged short;
-				"tempo_override" : 3.94899,                // optional; double;
-				"offset" : 0,                              // optional; signed long long int;
-				"selection_start" : 50,                    // optional; signed long long int;
-				"selection_length" : 50,                   // optional; signed long long int;
-				"ignore_notes" : false,                    // optional; bool;
-				"ignore_pitches" : false,                  // optional; bool;
-				"ignore_tempos" : false,                   // optional; bool;
-				"ignore_other" : false,                    // optional; bool;
-				"piano_only" : true,                       // optional; bool;
-				"remove_remnants" : true,                  // optional; bool;
-				"remove_empty_tracks" : true,              // optional; bool;
-				"channel_split" : false,                   // optional; bool;
-				"ignore_meta_rsb" : false,                 // optional; bool;
-				"rsb_compression" : false,                 // optional; bool;
-				"inplace_mergable" : false,                // optional; bool;
-				"allow_sysex" : false                      // optional; bool;
-				"enable_zero_velocity" : false,            // optional; bool;
-				"apply_offset_after" : false               // optional; bool;
+			"ppq_override" : 960,                      // optional; unisnged short;
+			"tempo_override" : 3.94899,                // optional; double;
+			"offset" : 0,                              // optional; signed long long int;
+			"selection_start" : 50,                    // optional; signed long long int;
+			"selection_length" : 50,                   // optional; signed long long int;
+			"ignore_notes" : false,                    // optional; bool;
+			"ignore_pitches" : false,                  // optional; bool;
+			"ignore_tempos" : false,                   // optional; bool;
+			"ignore_other" : false,                    // optional; bool;
+			"piano_only" : true,                       // optional; bool;
+			"remove_remnants" : true,                  // optional; bool;
+			"remove_empty_tracks" : true,              // optional; bool;
+			"channel_split" : false,                   // optional; bool;
+			"ignore_meta_rsb" : false,                 // optional; bool;
+			"rsb_compression" : false,                 // optional; bool;
+			"inplace_mergable" : false,                // optional; bool;
+			"allow_sysex" : false                      // optional; bool;
+			"enable_zero_velocity" : false,            // optional; bool;
+			"apply_offset_after" : false               // optional; bool;
 		}
 	]
 }
