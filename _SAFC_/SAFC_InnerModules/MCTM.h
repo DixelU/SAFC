@@ -536,13 +536,15 @@ struct MIDICollectionThreadedMerger
 
 		if (regular_merge_candidates.size() == 1)
 		{
+			auto& current_merge_candidate = regular_merge_candidates.front();
 			std::wstring filename = 
-				regular_merge_candidates.front().first->filename + 
-				regular_merge_candidates.front().first->postfix;
+				current_merge_candidate.first->filename +
+				current_merge_candidate.first->postfix;
 			auto save_to_with_postfix = SaveTo + L".R.mid";
 			_wremove(save_to_with_postfix.c_str());
 			auto result = _wrename(filename.c_str(), save_to_with_postfix.c_str());
 
+			IRTrackCount += current_merge_candidate.first->tracks_count;
 			IntermediateRegularFlag = true; /// Will this work?
 		}
 		else
@@ -634,9 +636,12 @@ struct MIDICollectionThreadedMerger
 				FinishedFlag.get() = true;
 				return;
 			}
+
 			printf("Active merging at last stage (untested)\n");
+
 			std::uint16_t T = 0;
 			std::uint8_t A = 0, B = 0;
+
 			F.put('M');
 			F.put('T');
 			F.put('h');

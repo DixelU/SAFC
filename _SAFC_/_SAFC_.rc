@@ -63,8 +63,8 @@ END
 //
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 1,4,4,4
- PRODUCTVERSION 1,4,4,4
+ FILEVERSION 1,4,4,5
+ PRODUCTVERSION 1,4,4,5
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
  FILEFLAGS 0x1L
@@ -81,12 +81,12 @@ BEGIN
         BEGIN
             VALUE "CompanyName", "SAF"
             VALUE "FileDescription", "SAF Converter"
-            VALUE "FileVersion", "1.4.4.4"
+            VALUE "FileVersion", "1.4.4.5"
             VALUE "InternalName", "SAFC v1"
             VALUE "LegalCopyright", "Copyright (C) 2023"
             VALUE "OriginalFilename", "Simple AF Converter"
             VALUE "ProductName", "SAFC"
-            VALUE "ProductVersion", "1.4.4.4"
+            VALUE "ProductVersion", "1.4.4.5"
         END
     END
     BLOCK "VarFileInfo"
