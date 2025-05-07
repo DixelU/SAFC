@@ -313,7 +313,7 @@ struct single_midi_processor_2
 		constexpr uint8_t $7byte_mask = 0x7F, max_size = 11, $7byte_mask_size = 7;
 		constexpr uint8_t $adjacent7byte_mask = ~$7byte_mask;
 		uint64_t value = s_value;
-		uint8_t __stack[max_size]{};
+		uint8_t __stack[max_size];
 		uint8_t* const stack_end = __stack + max_size;
 		uint8_t* stack = stack_end;
 		do
@@ -1545,7 +1545,7 @@ struct single_midi_processor_2
 		bool first_tick = settings_data.settings.selection_data.enable_selection_front;
 
 		auto write_selection_front_wrap = [&]() {
-			if (first_tick)
+			if (first_tick) [[unlikely]]
 			{
 				auto original_front_tick = 
 					sgtick_type(settings_data.settings.selection_data.begin) + settings_data.settings.offset;
