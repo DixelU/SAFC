@@ -28,7 +28,8 @@ struct FastMIDIChecker
 		if (*f) IsAcssessable = 1;
 		else IsAcssessable = 0;
 		FileSize = PPQN = ExpectedTrackNumber = IsMIDI = 0;
-		fclose(fo_ptr);
+		if (!fo_ptr)
+			fclose(fo_ptr);
 		delete f;
 		Collect();
 	}
@@ -53,7 +54,10 @@ struct FastMIDIChecker
 			ExpectedTrackNumber = (ExpectedTrackNumber << 8) | (f->get());
 			PPQN = (PPQN << 8) | (f->get());
 			PPQN = (PPQN << 8) | (f->get());
-			fclose(fo_ptr);
+			
+			if (!fo_ptr)
+				fclose(fo_ptr);
+
 			std::error_code ec;
 			auto size = std::filesystem::file_size(File, ec);
 			if (ec) {
@@ -70,7 +74,8 @@ struct FastMIDIChecker
 		{
 			IsMIDI = 0;
 			ThrowAlert_Error("Error accured while getting the MIDI file info!");
-			fclose(fo_ptr);
+			if (!fo_ptr)
+				fclose(fo_ptr);
 		}
 		delete f;
 	}
