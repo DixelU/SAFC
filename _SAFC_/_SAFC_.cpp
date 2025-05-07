@@ -2513,6 +2513,43 @@ struct SafcGuiRuntime :
 struct SafcCliRuntime:
 	public SafcRuntime
 {
+	constexpr static auto CLI_inplace_doc = "SAFC CLI (Beta) wiki page: https://github.com/DixelU/SAFC/wiki/SAFC-CLI-(Beta)\n"
+		"To run SAFC in CLI mode you need to pass the path to the JSON config file as an argument:\n\t(example:) SAFC.exe \"X:\\SAFC configs\\my_merge_config.json\"\n\n"
+		"Or drop it on top of the executable.\n\n"
+		"JSON file is expected to have the following structure \n\t(Field's optionality and type is provided after the double slashes on each line //)\n\n"
+		R"({
+	"global_ppq_override": 3860,                       // optional; signed long long int;
+	"global_tempo_override" : 485,                     // optional; double;
+	"global_offset_override" : 4558,                   // optional; signed long long int;
+	"save_to" : "C:\\MIDIs\\merge.mid",                // optional; string (utf8)
+	"files" :
+	[
+		{
+			"filename": "D:\\Download\\Downloads\\Paprika's Aua Ah Community Merge (FULL).mid", // string (utf8)
+				"ppq_override" : 960,                      // optional; unisnged short;
+				"tempo_override" : 3.94899,                // optional; double;
+				"offset" : 0,                              // optional; signed long long int;
+				"selection_start" : 50,                    // optional; signed long long int;
+				"selection_length" : 50,                   // optional; signed long long int;
+				"ignore_notes" : false,                    // optional; bool;
+				"ignore_pitches" : false,                  // optional; bool;
+				"ignore_tempos" : false,                   // optional; bool;
+				"ignore_other" : false,                    // optional; bool;
+				"piano_only" : true,                       // optional; bool;
+				"remove_remnants" : true,                  // optional; bool;
+				"remove_empty_tracks" : true,              // optional; bool;
+				"channel_split" : false,                   // optional; bool;
+				"ignore_meta_rsb" : false,                 // optional; bool;
+				"rsb_compression" : false,                 // optional; bool;
+				"inplace_mergable" : false,                // optional; bool;
+				"allow_sysex" : false                      // optional; bool;
+				"enable_zero_velocity" : false,            // optional; bool;
+				"apply_offset_after" : false               // optional; bool;
+		}
+	]
+}
+)";
+
 	virtual void operator()(int argc, char** argv) override
 	{
 		ShowWindow(GetConsoleWindow(), SW_SHOW);
@@ -2531,15 +2568,43 @@ struct SafcCliRuntime:
 		_Data.IsCLIMode = true;
 
 		if (argc < 2)
-			throw std::runtime_error("No config provided");
+		{
+			std::cerr << CLI_inplace_doc << std::flush;
 
-		auto config_path = std::filesystem::u8path(argv[1]);
-		std::ifstream fin(config_path);
-		std::stringstream ss;
-		ss << fin.rdbuf();
-		auto config_content = ss.str();
-		auto config_object = JSON::Parse(config_content.c_str());
-		auto config = config_object->AsObject();
+			throw std::runtime_error("No config provided");
+		}
+
+		auto first_argument = std::string_view(argv[1]);
+		if (first_argument == "/?" || first_argument == "-?" || first_argument == "--help" || first_argument == "/help")
+		{
+			std::cout << CLI_inplace_doc << std::flush;
+			return;
+		}
+
+		JSONObject config;
+
+		try
+		{
+			auto config_path = std::filesystem::u8path(argv[1]);
+			std::ifstream fin(config_path);
+			std::stringstream ss;
+			ss << fin.rdbuf();
+			auto config_content = ss.str();
+			auto config_object = JSON::Parse(config_content.c_str());
+			if (!config_object)
+				throw std::runtime_error("No JSON data found");
+
+			config = config_object->AsObject();
+		}
+		catch (const std::exception& ex)
+		{
+			std::cerr << "Error parsing JSON config object at '" << argv[1] << "'\n" << std::flush;
+			std::cerr << "\t" << ex.what() << "\n" << std::endl;
+
+			std::cerr << CLI_inplace_doc << std::flush;
+
+			return;
+		}
 
 		auto global_ppq_override = config.find(L"global_ppq_override");
 		auto global_tempo_override = config.find(L"global_tempo_override");
@@ -2547,7 +2612,12 @@ struct SafcCliRuntime:
 		auto files = config.find(L"files");
 
 		if (files == config.end())
+		{
+			std::cerr << "Error finding the 'files' field\n\n" << std::flush;
+			std::cerr << CLI_inplace_doc << std::flush;
+
 			return;
+		}
 
 		if (global_ppq_override != config.end())
 			_Data.SetGlobalPPQN(global_ppq_override->second->AsNumber());
@@ -2650,6 +2720,10 @@ struct SafcCliRuntime:
 			auto allow_sysex = object.find(L"allow_sysex");
 			if (allow_sysex != object.end())
 				_Data.Files[index].AllowSysex = allow_sysex->second->AsBool();
+
+			auto enable_zero_vel = object.find(L"enable_zero_velocity");
+			if (enable_zero_vel != object.end())
+				_Data.Files[index].EnableZeroVelocity = enable_zero_vel->second->AsBool();
 
 			index++;
 		}
