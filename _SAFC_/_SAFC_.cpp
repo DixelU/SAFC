@@ -403,6 +403,7 @@ struct FileSettings
 		ChannelsSplit,
 		CollapseMIDI,
 		AllowSysex,
+		EnableZeroVelocity,
 		ApplyOffsetAfter;
 	std::shared_ptr<CutAndTransposeKeys> KeyMap;
 	std::shared_ptr<PLC<std::uint8_t, std::uint8_t>> VolumeMap;
@@ -427,6 +428,7 @@ struct FileSettings
 		OldTrackNumber = FMIC.ExpectedTrackNumber;
 		OffsetTicks = InplaceMergeEnabled = 0;
 		AllowSysex = false;
+		EnableZeroVelocity = false;
 		FileSize = FMIC.FileSize;
 		GroupID = NewTempo = 0;
 		SelectionStart = 0;
@@ -472,6 +474,7 @@ struct FileSettings
 		settings.proc_details.channel_split = ChannelsSplit;
 		settings.proc_details.whole_midi_collapse = CollapseMIDI;
 		settings.proc_details.apply_offset_after = ApplyOffsetAfter;
+		settings.legacy.enable_zero_velocity = EnableZeroVelocity;
 		settings.legacy.ignore_meta_rsb = AllowLegacyRunningStatusMetaIgnorance;
 		settings.legacy.rsb_compression = RSBCompression;
 		settings.filter.pass_sysex = AllowSysex;
@@ -832,6 +835,7 @@ namespace PropsAndSets
 			((CheckBox*)((*PASWptr)["INPLACE_MERGE"]))->State = _Data[ID].InplaceMergeEnabled;
 			((CheckBox*)((*PASWptr)["LEGACY_META_RSB_BEHAVIOR"]))->State = _Data[ID].AllowLegacyRunningStatusMetaIgnorance;
 			((CheckBox*)((*PASWptr)["ALLOW_SYSEX"]))->State = _Data[ID].AllowSysex;
+			((CheckBox*)((*PASWptr)["ENABLE_ZERO_VELOCITY"]))->State = _Data[ID].EnableZeroVelocity;
 
 			((CheckBox*)((*PASWptr)["COLLAPSE_MIDI"]))->State = _Data[ID].CollapseMIDI;
 			((CheckBox*)((*PASWptr)["APPLY_OFFSET_AFTER"]))->State = _Data[ID].ApplyOffsetAfter;
@@ -1268,6 +1272,7 @@ namespace PropsAndSets
 		_Data[currentID].SetBoolSetting(_BoolSettings::ignore_notes, (((CheckBox*)(*SMPASptr)["BOOL_IGN_NOTES"])->State));
 		_Data[currentID].SetBoolSetting(_BoolSettings::ignore_all_but_tempos_notes_and_pitch, (((CheckBox*)(*SMPASptr)["BOOL_IGN_ALL_EX_TPS"])->State));
 
+		_Data[currentID].EnableZeroVelocity = (((CheckBox*)(*SMPASptr)["ENABLE_ZERO_VELOCITY"])->State);
 		_Data[currentID].AllowSysex = (((CheckBox*)(*SMPASptr)["ALLOW_SYSEX"])->State);
 		_Data[currentID].RSBCompression = ((CheckBox*)(*SMPASptr)["RSB_COMPRESS"])->State;
 		_Data[currentID].ChannelsSplit = ((CheckBox*)(*SMPASptr)["SPLIT_TRACKS"])->State;
@@ -2004,7 +2009,7 @@ void Init()
 
 	(*WH)["MAIN"] = T;
 
-	T = new MoveableWindow("Props. and sets.", System_White, -100, 100, 200, 200, 0x3F3F3FCF, 0x7F7F7F7F);
+	T = new MoveableWindow("Props. and sets.", System_White, -100, 100, 200, 225, 0x3F3F3FCF, 0x7F7F7F7F);
 	(*T)["FileName"] = new TextBox("_", System_White, 0, 88.5 - WindowHeapSize, 6, 200 - 1.5 * WindowHeapSize, 7.5, 0, 0, 0, _Align::left, TextBox::VerticalOverflow::cut);
 	(*T)["PPQN"] = new InputField(" ", -90 + WindowHeapSize, 75 - WindowHeapSize, 10, 25, System_White, PropsAndSets::PPQN, 0x007FFFFF, System_White, "PPQN is lesser than 65536.", 5, _Align::center, _Align::left, InputField::Type::NaturalNumbers);
 	(*T)["TEMPO"] = new InputField(" ", -50 + WindowHeapSize, 75 - WindowHeapSize, 10, 45, System_White, PropsAndSets::TEMPO, 0x007FFFFF, System_White, "Specific tempo override field", 8, _Align::center, _Align::left, InputField::Type::FP_PositiveNumbers);
@@ -2045,14 +2050,15 @@ void Init()
 	Butt->Tip->SafeChangePosition_Argumented(_Align::right, 100 - WindowHeapSize, Butt->Tip->CYpos);
 
 	(*T)["SELECT_START"] = new InputField(" ", -37.5 - WindowHeapSize, -5 - WindowHeapSize, 10, 70, System_White, NULL, 0x007FFFFF, System_White, "Selection start", 13, _Align::center, _Align::right, InputField::Type::NaturalNumbers);
-	(*T)["SELECT_LENGTH"] = new InputField(" ", 37.5 - WindowHeapSize, -5 - WindowHeapSize, 10, 70, System_White, NULL, 0x007FFFFF, System_White, "Selection length", 14, _Align::center, _Align::right, InputField::Type::WholeNumbers);
+	(*T)["SELECT_LENGTH"] = new InputField(" ", -37.5 - WindowHeapSize, -25 - WindowHeapSize, 10, 70, System_White, NULL, 0x007FFFFF, System_White, "Selection length", 14, _Align::center, _Align::right, InputField::Type::WholeNumbers);
 
 	(*T)["LEGACY_META_RSB_BEHAVIOR"] = new CheckBox(97.5 - WindowHeapSize, -5 - WindowHeapSize, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, false, System_White, _Align::right, "Enables legacy RSB/Meta behavior");
-	(*T)["ALLOW_SYSEX"] = new CheckBox(82.5 - WindowHeapSize, -5 - WindowHeapSize, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, 0, System_White, _Align::right, "Allow sysex events");	
+	(*T)["ALLOW_SYSEX"] = new CheckBox(82.5 - WindowHeapSize, -5 - WindowHeapSize, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, 0, System_White, _Align::right, "Allow sysex events");
+	(*T)["ENABLE_ZERO_VELOCITY"] = new CheckBox(97.5 - WindowHeapSize, -25 - WindowHeapSize, 10, 0x007FFFFF, 0x00001F3F, 0xFF3F00FF, 1, 0, System_White, _Align::right, "\"Enable\" zero velocity notes");
 
 	(*T)["COLLAPSE_MIDI"] = new CheckBox(97.5 - WindowHeapSize, 35 - WindowHeapSize, 10, 0x007FFFFF, 0xFF7F00AF, 0x7FFF00AF, 1, 0, System_White, _Align::right, "Collapse all tracks of a MIDI into one");
 
-	(*T)["CONSTANT_PROPS"] = new TextBox("_Props text example_", System_White, 0, -57.5 - WindowHeapSize, 80 - WindowHeapSize, 200 - 1.5 * WindowHeapSize, 7.5, 0, 0, 1);
+	(*T)["CONSTANT_PROPS"] = new TextBox("_Props text example_", System_White, 0, -75 - WindowHeapSize, 80 - WindowHeapSize, 200 - 1.5 * WindowHeapSize, 7.5, 0, 0, 1);
 
 	(*WH)["SMPAS"] = T;//Selected midi properties and settings
 
@@ -2470,43 +2476,46 @@ struct SafcGuiRuntime :
 	}
 };
 
-
-/*
-
-{
-	"global_ppq_override": 3860,					// optional; signed long long int;
-	"global_tempo_override": 485,					// optional; double;
-	"global_offset_override": 4558,					// optional; signed long long int;
-	"save_to": "C:\\MIDIs\\merge.mid",				// optional; string (utf8)
-	"files":
-	[
-		{
-			"filename": "D:\\Download\\Downloads\\Paprika's Aua Ah Community Merge (FULL).mid", // string (utf8)
-			"ppq_override": 960, 					// optional; unisnged short;
-			"tempo_override": 3.94899, 				// optional; double;
-			"offset": 0, 							// optional; signed long long int;
-			"selection_start": 50, 					// optional; signed long long int;
-			"selection_length": 50, 				// optional; signed long long int;
-			"ignore_notes": false, 					// optional; bool;
-			"ignore_pitches": false, 				// optional; bool;
-			"ignore_tempos": false, 				// optional; bool;
-			"ignore_other": false, 					// optional; bool;
-			"piano_only": true, 					// optional; bool;
-			"remove_remnants": true, 				// optional; bool;
-			"remove_empty_tracks": true, 			// optional; bool;
-			"channel_split": false, 				// optional; bool;
-			"ignore_meta_rsb": false, 				// optional; bool;
-			"rsb_compression": false, 				// optional; bool;
-			"inplace_mergable": false, 				// optional; bool;
-		}
-	]
-}
-
-*/
-
 struct SafcCliRuntime:
 	public SafcRuntime
 {
+	constexpr static auto CLI_inplace_doc = "SAFC CLI (Beta) wiki page: https://github.com/DixelU/SAFC/wiki/SAFC-CLI-(Beta)\n"
+		"To run SAFC in CLI mode you need to pass the path to the JSON config file as an argument:\n\t(example:) SAFC.exe \"X:\\SAFC configs\\my_merge_config.json\"\n\n"
+		"Or drop it on top of the executable.\n\n"
+		"JSON file is expected to have the following structure \n\t(Field's optionality and type is provided after the double slashes on each line //)\n\n"
+		R"({
+	"global_ppq_override": 3860,                       // optional; signed long long int;
+	"global_tempo_override" : 485,                     // optional; double;
+	"global_offset_override" : 4558,                   // optional; signed long long int;
+	"save_to" : "C:\\MIDIs\\merge.mid",                // optional; string (utf8)
+	"files" :
+	[
+		{
+			"filename": "D:\\Download\\Downloads\\Paprika's Aua Ah Community Merge (FULL).mid", // string (utf8)
+			"ppq_override" : 960,                      // optional; unisnged short;
+			"tempo_override" : 3.94899,                // optional; double;
+			"offset" : 0,                              // optional; signed long long int;
+			"selection_start" : 50,                    // optional; signed long long int;
+			"selection_length" : 50,                   // optional; signed long long int;
+			"ignore_notes" : false,                    // optional; bool;
+			"ignore_pitches" : false,                  // optional; bool;
+			"ignore_tempos" : false,                   // optional; bool;
+			"ignore_other" : false,                    // optional; bool;
+			"piano_only" : true,                       // optional; bool;
+			"remove_remnants" : true,                  // optional; bool;
+			"remove_empty_tracks" : true,              // optional; bool;
+			"channel_split" : false,                   // optional; bool;
+			"ignore_meta_rsb" : false,                 // optional; bool;
+			"rsb_compression" : false,                 // optional; bool;
+			"inplace_mergable" : false,                // optional; bool;
+			"allow_sysex" : false                      // optional; bool;
+			"enable_zero_velocity" : false,            // optional; bool;
+			"apply_offset_after" : false               // optional; bool;
+		}
+	]
+}
+)";
+
 	virtual void operator()(int argc, char** argv) override
 	{
 		ShowWindow(GetConsoleWindow(), SW_SHOW);
@@ -2525,15 +2534,43 @@ struct SafcCliRuntime:
 		_Data.IsCLIMode = true;
 
 		if (argc < 2)
-			throw std::runtime_error("No config provided");
+		{
+			std::cerr << CLI_inplace_doc << std::flush;
 
-		auto config_path = std::filesystem::u8path(argv[1]);
-		std::ifstream fin(config_path);
-		std::stringstream ss;
-		ss << fin.rdbuf();
-		auto config_content = ss.str();
-		auto config_object = JSON::Parse(config_content.c_str());
-		auto config = config_object->AsObject();
+			throw std::runtime_error("No config provided");
+		}
+
+		auto first_argument = std::string_view(argv[1]);
+		if (first_argument == "/?" || first_argument == "-?" || first_argument == "--help" || first_argument == "/help")
+		{
+			std::cout << CLI_inplace_doc << std::flush;
+			return;
+		}
+
+		JSONObject config;
+
+		try
+		{
+			auto config_path = std::filesystem::u8path(argv[1]);
+			std::ifstream fin(config_path);
+			std::stringstream ss;
+			ss << fin.rdbuf();
+			auto config_content = ss.str();
+			auto config_object = JSON::Parse(config_content.c_str());
+			if (!config_object)
+				throw std::runtime_error("No JSON data found");
+
+			config = config_object->AsObject();
+		}
+		catch (const std::exception& ex)
+		{
+			std::cerr << "Error parsing JSON config object at '" << argv[1] << "'\n" << std::flush;
+			std::cerr << "\t" << ex.what() << "\n" << std::endl;
+
+			std::cerr << CLI_inplace_doc << std::flush;
+
+			return;
+		}
 
 		auto global_ppq_override = config.find(L"global_ppq_override");
 		auto global_tempo_override = config.find(L"global_tempo_override");
@@ -2541,7 +2578,12 @@ struct SafcCliRuntime:
 		auto files = config.find(L"files");
 
 		if (files == config.end())
+		{
+			std::cerr << "Error finding the 'files' field\n\n" << std::flush;
+			std::cerr << CLI_inplace_doc << std::flush;
+
 			return;
+		}
 
 		if (global_ppq_override != config.end())
 			_Data.SetGlobalPPQN(global_ppq_override->second->AsNumber());
@@ -2644,6 +2686,10 @@ struct SafcCliRuntime:
 			auto allow_sysex = object.find(L"allow_sysex");
 			if (allow_sysex != object.end())
 				_Data.Files[index].AllowSysex = allow_sysex->second->AsBool();
+
+			auto enable_zero_vel = object.find(L"enable_zero_velocity");
+			if (enable_zero_vel != object.end())
+				_Data.Files[index].EnableZeroVelocity = enable_zero_vel->second->AsBool();
 
 			index++;
 		}
