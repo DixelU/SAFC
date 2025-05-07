@@ -2476,40 +2476,6 @@ struct SafcGuiRuntime :
 	}
 };
 
-
-/*
-
-{
-	"global_ppq_override": 3860,					// optional; signed long long int;
-	"global_tempo_override": 485,					// optional; double;
-	"global_offset_override": 4558,					// optional; signed long long int;
-	"save_to": "C:\\MIDIs\\merge.mid",				// optional; string (utf8)
-	"files":
-	[
-		{
-			"filename": "D:\\Download\\Downloads\\Paprika's Aua Ah Community Merge (FULL).mid", // string (utf8)
-			"ppq_override": 960, 					// optional; unisnged short;
-			"tempo_override": 3.94899, 				// optional; double;
-			"offset": 0, 							// optional; signed long long int;
-			"selection_start": 50, 					// optional; signed long long int;
-			"selection_length": 50, 				// optional; signed long long int;
-			"ignore_notes": false, 					// optional; bool;
-			"ignore_pitches": false, 				// optional; bool;
-			"ignore_tempos": false, 				// optional; bool;
-			"ignore_other": false, 					// optional; bool;
-			"piano_only": true, 					// optional; bool;
-			"remove_remnants": true, 				// optional; bool;
-			"remove_empty_tracks": true, 			// optional; bool;
-			"channel_split": false, 				// optional; bool;
-			"ignore_meta_rsb": false, 				// optional; bool;
-			"rsb_compression": false, 				// optional; bool;
-			"inplace_mergable": false, 				// optional; bool;
-		}
-	]
-}
-
-*/
-
 struct SafcCliRuntime:
 	public SafcRuntime
 {
