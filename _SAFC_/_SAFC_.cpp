@@ -441,16 +441,23 @@ struct FileSettings
 		AllowLegacyRunningStatusMetaIgnorance = false;
 		ApplyOffsetAfter = true;
 	}
+
 	inline void SwitchBoolSetting(std::uint32_t SMP_BoolSetting) 
 	{
 		BoolSettings ^= SMP_BoolSetting;
 	}
+
 	inline void SetBoolSetting(std::uint32_t SMP_BoolSetting, bool NewState) 
 	{
-		if (BoolSettings & SMP_BoolSetting && NewState)return;
-		if (!(BoolSettings & SMP_BoolSetting) && !NewState)return;
+		if (BoolSettings & SMP_BoolSetting && NewState)
+			return;
+		
+		if (!(BoolSettings & SMP_BoolSetting) && !NewState)
+			return;
+
 		SwitchBoolSetting(SMP_BoolSetting);
 	}
+
 	std::shared_ptr<single_midi_processor_2::processing_data> BuildSMRPProcessingData() 
 	{
 		auto smrp_data = std::make_shared<single_midi_processor_2::processing_data>();
@@ -464,6 +471,12 @@ struct FileSettings
 		settings.key_converter = KeyMap;
 		settings.new_ppqn = NewPPQN;
 		settings.old_ppqn = OldPPQN;
+		settings.enable_imp_events_filter = (BoolSettings & _BoolSettings::enable_important_filter);
+		settings.imp_events_filter.pass_instument_cnage = settings.enable_imp_events_filter && (BoolSettings & _BoolSettings::imp_filter_allow_progc);
+		settings.imp_events_filter.pass_notes = settings.enable_imp_events_filter && (BoolSettings & _BoolSettings::imp_filter_allow_notes);
+		settings.imp_events_filter.pass_pitch = settings.enable_imp_events_filter && (BoolSettings & _BoolSettings::imp_filter_allow_pitch);
+		settings.imp_events_filter.pass_tempo = settings.enable_imp_events_filter && (BoolSettings & _BoolSettings::imp_filter_allow_tempo);
+		settings.imp_events_filter.pass_other = settings.enable_imp_events_filter && (BoolSettings & _BoolSettings::imp_filter_allow_other);
 		settings.filter.pass_notes = !(BoolSettings & _BoolSettings::ignore_notes);
 		settings.filter.pass_pitch = !(BoolSettings & _BoolSettings::ignore_pitches);
 		settings.filter.pass_tempo = !(BoolSettings & _BoolSettings::ignore_tempos);
@@ -812,6 +825,8 @@ namespace PropsAndSets
 		{
 			currentID = ID;
 			auto PASWptr = (*WH)["SMPAS"];
+			auto OSptr = (*WH)["OTHER_SETS"];
+
 			((TextBox*)((*PASWptr)["FileName"]))->SafeStringReplace("..." + _Data[ID].AppearanceFilename);
 			((InputField*)((*PASWptr)["PPQN"]))->UpdateInputString();
 			((InputField*)((*PASWptr)["PPQN"]))->SafeStringReplace(std::to_string((_Data[ID].NewPPQN) ? _Data[ID].NewPPQN : _Data[ID].OldPPQN));
@@ -824,11 +839,13 @@ namespace PropsAndSets
 
 			((CheckBox*)((*PASWptr)["BOOL_REM_TRCKS"]))->State = _Data[ID].BoolSettings & _BoolSettings::remove_empty_tracks;
 			((CheckBox*)((*PASWptr)["BOOL_REM_REM"]))->State = _Data[ID].BoolSettings & _BoolSettings::remove_remnants;
-			((CheckBox*)((*PASWptr)["BOOL_PIANO_ONLY"]))->State = _Data[ID].BoolSettings & _BoolSettings::all_instruments_to_piano;
-			((CheckBox*)((*PASWptr)["BOOL_IGN_TEMPO"]))->State = _Data[ID].BoolSettings & _BoolSettings::ignore_tempos;
-			((CheckBox*)((*PASWptr)["BOOL_IGN_PITCH"]))->State = _Data[ID].BoolSettings & _BoolSettings::ignore_pitches;
-			((CheckBox*)((*PASWptr)["BOOL_IGN_NOTES"]))->State = _Data[ID].BoolSettings & _BoolSettings::ignore_notes;
-			((CheckBox*)((*PASWptr)["BOOL_IGN_ALL_EX_TPS"]))->State = _Data[ID].BoolSettings & _BoolSettings::ignore_all_but_tempos_notes_and_pitch;
+
+			((CheckBox*)((*OSptr)["BOOL_PIANO_ONLY"]))->State = _Data[ID].BoolSettings & _BoolSettings::all_instruments_to_piano;
+			((CheckBox*)((*OSptr)["BOOL_IGN_TEMPO"]))->State = _Data[ID].BoolSettings & _BoolSettings::ignore_tempos;
+			((CheckBox*)((*OSptr)["BOOL_IGN_PITCH"]))->State = _Data[ID].BoolSettings & _BoolSettings::ignore_pitches;
+			((CheckBox*)((*OSptr)["BOOL_IGN_NOTES"]))->State = _Data[ID].BoolSettings & _BoolSettings::ignore_notes;
+			((CheckBox*)((*OSptr)["BOOL_IGN_ALL_EX_TPS"]))->State = _Data[ID].BoolSettings & _BoolSettings::ignore_all_but_tempos_notes_and_pitch;
+
 			((CheckBox*)((*PASWptr)["SPLIT_TRACKS"]))->State = _Data[ID].ChannelsSplit;
 			((CheckBox*)((*PASWptr)["RSB_COMPRESS"]))->State = _Data[ID].RSBCompression;
 
@@ -1211,6 +1228,7 @@ namespace PropsAndSets
 		std::int32_t T;
 		std::string CurStr = "";
 		auto SMPASptr = (*WH)["SMPAS"];
+		auto OSptr = (*WH)["OTHER_SETS"];
 
 		CurStr = ((InputField*)(*SMPASptr)["PPQN"])->GetCurrentInput("0");
 		if (CurStr.size())
@@ -1266,11 +1284,12 @@ namespace PropsAndSets
 
 		_Data[currentID].SetBoolSetting(_BoolSettings::remove_empty_tracks, (((CheckBox*)(*SMPASptr)["BOOL_REM_TRCKS"])->State));
 		_Data[currentID].SetBoolSetting(_BoolSettings::remove_remnants, (((CheckBox*)(*SMPASptr)["BOOL_REM_REM"])->State));
-		_Data[currentID].SetBoolSetting(_BoolSettings::all_instruments_to_piano, (((CheckBox*)(*SMPASptr)["BOOL_PIANO_ONLY"])->State));
-		_Data[currentID].SetBoolSetting(_BoolSettings::ignore_tempos, (((CheckBox*)(*SMPASptr)["BOOL_IGN_TEMPO"])->State));
-		_Data[currentID].SetBoolSetting(_BoolSettings::ignore_pitches, (((CheckBox*)(*SMPASptr)["BOOL_IGN_PITCH"])->State));
-		_Data[currentID].SetBoolSetting(_BoolSettings::ignore_notes, (((CheckBox*)(*SMPASptr)["BOOL_IGN_NOTES"])->State));
-		_Data[currentID].SetBoolSetting(_BoolSettings::ignore_all_but_tempos_notes_and_pitch, (((CheckBox*)(*SMPASptr)["BOOL_IGN_ALL_EX_TPS"])->State));
+
+		_Data[currentID].SetBoolSetting(_BoolSettings::all_instruments_to_piano, (((CheckBox*)(*OSptr)["BOOL_PIANO_ONLY"])->State));
+		_Data[currentID].SetBoolSetting(_BoolSettings::ignore_tempos, (((CheckBox*)(*OSptr)["BOOL_IGN_TEMPO"])->State));
+		_Data[currentID].SetBoolSetting(_BoolSettings::ignore_pitches, (((CheckBox*)(*OSptr)["BOOL_IGN_PITCH"])->State));
+		_Data[currentID].SetBoolSetting(_BoolSettings::ignore_notes, (((CheckBox*)(*OSptr)["BOOL_IGN_NOTES"])->State));
+		_Data[currentID].SetBoolSetting(_BoolSettings::ignore_all_but_tempos_notes_and_pitch, (((CheckBox*)(*OSptr)["BOOL_IGN_ALL_EX_TPS"])->State));
 
 		_Data[currentID].EnableZeroVelocity = (((CheckBox*)(*SMPASptr)["ENABLE_ZERO_VELOCITY"])->State);
 		_Data[currentID].AllowSysex = (((CheckBox*)(*SMPASptr)["ALLOW_SYSEX"])->State);
@@ -1942,6 +1961,11 @@ void RestoreRegSettings()
 	}
 }
 
+void OnOtherSettings()
+{
+
+}
+
 void Init()
 {
 	lFontSymbolsInfo::InitialiseFont(default_font_name, true);
@@ -2019,11 +2043,8 @@ void Init()
 
 	(*T)["BOOL_REM_TRCKS"] = new CheckBox(-97.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, System_White, _Align::left, "Remove empty tracks");
 	(*T)["BOOL_REM_REM"] = new CheckBox(-82.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, System_White, _Align::left, "Remove merge \"remnants\"");
-	(*T)["BOOL_PIANO_ONLY"] = new CheckBox(-67.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, System_White, _Align::left, "Replace all instruments with piano");
-	(*T)["BOOL_IGN_TEMPO"] = new CheckBox(-52.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::left, "Ignore tempo events");
-	(*T)["BOOL_IGN_PITCH"] = new CheckBox(-37.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::center, "Ignore pitch bending events");
-	(*T)["BOOL_IGN_NOTES"] = new CheckBox(-22.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::center, "Ignore note events");
-	(*T)["BOOL_IGN_ALL_EX_TPS"] = new CheckBox(-7.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::center, "Ignore everything except specified");
+	(*T)["OTHER_CHECKBOXES"] = new Button("Other settings", System_White, OnOtherSettings, -67.5 + WindowHeapSize, 55 - WindowHeapSize, 70, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, System_White, "Other MIDI processing settings");
+
 	(*T)["SPLIT_TRACKS"] = new CheckBox(7.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, 0, System_White, _Align::center, "Multichannel split");
 	(*T)["RSB_COMPRESS"] = new CheckBox(22.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, 0, System_White, _Align::center, "Enable RSB compression");
 	
@@ -2061,6 +2082,24 @@ void Init()
 	(*T)["CONSTANT_PROPS"] = new TextBox("_Props text example_", System_White, 0, -75 - WindowHeapSize, 80 - WindowHeapSize, 200 - 1.5 * WindowHeapSize, 7.5, 0, 0, 1);
 
 	(*WH)["SMPAS"] = T;//Selected midi properties and settings
+
+	T = new MoveableWindow("Other settings.", System_White, -75, 50, 150, 100, 0x3F3F3FCF, 0x7F7F7F7F);
+
+	(*T)["BOOL_PIANO_ONLY"] = new CheckBox(-67.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, System_White, _Align::left, "Replace all instruments with piano");
+	(*T)["BOOL_IGN_TEMPO"] = new CheckBox(-52.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::left, "Ignore tempo events");
+	(*T)["BOOL_IGN_PITCH"] = new CheckBox(-37.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::center, "Ignore pitch bending events");
+	(*T)["BOOL_IGN_NOTES"] = new CheckBox(-22.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::center, "Ignore note events");
+	(*T)["BOOL_IGN_ALL_EX_TPS"] = new CheckBox(-7.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::center, "Ignore everything except specified");
+
+	(*T)["IMP_FLT_ENABLE"] = new CheckBox(7.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 0x007FFFFF, 0xFF7F007F, 0x00FF007F, 1, 0, System_White, _Align::center, "Enable important event filter");
+
+	(*T)["IMP_FLT_PIANO"] = new CheckBox(-67.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, System_White, _Align::left, "Important filter: piano");
+	(*T)["IMP_FLT_TEMPO"] = new CheckBox(-52.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::left, "Important filter: tempo");
+	(*T)["IMP_FLT_PITCH"] = new CheckBox(-37.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::center, "Important filter: pitch");
+	(*T)["IMP_FLT_PROGC"] = new CheckBox(-22.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::center, "Important filter: program change");
+	(*T)["IMP_FLT_OTHER"] = new CheckBox(-7.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::center, "Important filter: other");
+
+	(*WH)["OTHER_SETS"] = T; // Other settings
 
 	T = new MoveableWindow("Cut and Transpose.", System_White, -200, 50, 400, 100, 0x3F3F3FCF, 0x7F7F7F7F);
 	(*T)["CAT_ITSELF"] = new CAT_Piano(0, 25 - WindowHeapSize, 1, 10, NULL);
@@ -2124,7 +2163,6 @@ void Init()
 
 	(*T)["AUTOUPDATECHECK"] = new CheckBox(-97.5 + WindowHeapSize, 35 - WindowHeapSize, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, check_autoupdates, System_White, _Align::left, "Check for updates automatically"); 
 
-
 	(*WH)["APP_SETTINGS"] = T;
 
 	T = new MoveableWindow("SMRP Container", System_White, -300, 300, 600, 600, 0x000000CF, 0xFFFFFF7F);
@@ -2186,6 +2224,7 @@ void Init()
 	//WH->EnableWindow("CAT");
 	//WH->EnableWindow("SMPAS");//Debug line
 	//WH->EnableWindow("PROMPT");////DEBUUUUG
+	WH->EnableWindow("OTHER_SETS");
 
 	DragAcceptFiles(hWnd, TRUE);
 	OleInitialize(NULL);

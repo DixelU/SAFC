@@ -151,10 +151,12 @@ struct single_midi_processor_2
 		};
 
 		selection selection_data;
+		bool has_important_events = false;
 
 		inline void clear()
 		{
 			selection_data.clear();
+			has_important_events = false;
 		}
 	};
 
@@ -220,6 +222,15 @@ struct single_midi_processor_2
 			bool piano_only = false;
 		};
 
+		struct important_filter_settings
+		{
+			bool pass_tempo = true;
+			bool pass_pitch = true;
+			bool pass_notes = true;
+			bool pass_other = true;
+			bool pass_instument_cnage = true;
+		};
+
 		struct tempo_override
 		{
 			double tempo_multiplier;
@@ -272,6 +283,9 @@ struct single_midi_processor_2
 		legacy_filter_settings filter;
 		tempo_override tempo;
 		selection selection_data;
+
+		bool enable_imp_events_filter = false;
+		important_filter_settings imp_events_filter;
 
 		std::shared_ptr<BYTE_PLC_Core> volume_map;
 		std::shared_ptr<_14BIT_PLC_Core> pitch_map;
@@ -1321,9 +1335,55 @@ struct single_midi_processor_2
 			return true;
 		};
 
+		const event_transforming_filter important_events_checker = [filter = settings.imp_events_filter]
+		(const data_iterator& begin, const data_iterator& end, const data_iterator& cur, single_track_data& std_ref) -> bool
+		{
+			auto tick = get_value<tick_type>(cur, tick_position);
+
+			const auto& type = get_value<base_type>(cur, event_type);
+			const auto channelless_type = type >> 4;
+
+			// Check if this is an important event based on filter settings
+			bool is_important = false;
+
+			switch (channelless_type) 
+			{
+				case 0x8: case 0x9: // Note on/off
+					is_important = filter.pass_notes;
+					break;
+				case 0xC:
+					is_important = filter.pass_instument_cnage;
+					break;
+				//case 0xA: case 0xB: case 0xD: // Program change, channel pressure
+				//	is_important = filter.pass_other;
+				//	break;
+				case 0xE: // Aftertouch, controller, pitch bend
+					is_important = filter.pass_pitch;
+					break;
+				case 0xF: // Meta/Sysex
+					if (type == 0xFF) 
+					{
+						auto meta_type = get_value<base_type>(cur, event_param1);
+						is_important = (meta_type == 0x51 && filter.pass_tempo) || filter.pass_other;
+					}
+					else 
+						is_important = filter.pass_other;
+					break;
+				default:
+					is_important = filter.pass_other;
+			}
+
+			if (is_important)
+				std_ref.has_important_events = true;
+
+			return true;
+		};
 
 		filters.emplace( 0, selection_filter );
 		filters.emplace( 0, tick_positive_linear_transform );
+
+		if (settings.enable_imp_events_filter)
+			filters.emplace( 0, important_events_checker );
 		
 		if (settings.key_converter || settings.volume_map || !settings.filter.pass_notes)
 		{
@@ -1685,6 +1745,15 @@ struct single_midi_processor_2
 		return true;
 	}
 		
+	static void post_processing(
+		std::vector<base_type>& data_buffer,
+		const single_track_data& std_ref,
+		const processing_data& settings)
+	{
+		if (settings.settings.enable_imp_events_filter && !std_ref.has_important_events)
+			data_buffer.clear();
+	}
+
 	template<bool channels_split>
 	static void sync_processing(processing_data& data, message_buffers& loggers)
 	{
@@ -1742,8 +1811,11 @@ struct single_midi_processor_2
 			{
 				bool successful_processing =
 					process_buffer(track_buffers.data_buffer, filter_iters, track_processing_data, loggers);
+
 				if (!successful_processing)
 					(*loggers.error) << "Something went wrong during processing";
+				else
+					post_processing(track_buffers.data_buffer, track_processing_data, data.settings);
 			}
 
 			if (sort_data_buffer_flag)
