@@ -1815,7 +1815,7 @@ struct single_midi_processor_2
 				if (!successful_processing)
 					(*loggers.error) << "Something went wrong during processing";
 				else
-					post_processing(track_buffers.data_buffer, track_processing_data, data.settings);
+					post_processing(track_buffers.data_buffer, track_processing_data, data);
 			}
 
 			if (sort_data_buffer_flag)

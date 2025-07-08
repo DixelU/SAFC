@@ -398,7 +398,7 @@ struct FileSettings
 	bool
 		IsMIDI,
 		InplaceMergeEnabled,
-		AllowLegacyRunningStatusMetaIgnorance,
+		AllowLegacyRunningStatusMetaBehaviour,
 		RSBCompression,
 		ChannelsSplit,
 		CollapseMIDI,
@@ -438,7 +438,7 @@ struct FileSettings
 		WFileNamePostfix = L"_.mid";
 		RSBCompression = ChannelsSplit = false;
 		CollapseMIDI = true;
-		AllowLegacyRunningStatusMetaIgnorance = false;
+		AllowLegacyRunningStatusMetaBehaviour = false;
 		ApplyOffsetAfter = true;
 	}
 
@@ -488,7 +488,7 @@ struct FileSettings
 		settings.proc_details.whole_midi_collapse = CollapseMIDI;
 		settings.proc_details.apply_offset_after = ApplyOffsetAfter;
 		settings.legacy.enable_zero_velocity = EnableZeroVelocity;
-		settings.legacy.ignore_meta_rsb = AllowLegacyRunningStatusMetaIgnorance;
+		settings.legacy.ignore_meta_rsb = AllowLegacyRunningStatusMetaBehaviour;
 		settings.legacy.rsb_compression = RSBCompression;
 		settings.filter.pass_sysex = AllowSysex;
 		InplaceMergeEnabled = 
@@ -846,13 +846,21 @@ namespace PropsAndSets
 			((CheckBox*)((*OSptr)["BOOL_IGN_NOTES"]))->State = _Data[ID].BoolSettings & _BoolSettings::ignore_notes;
 			((CheckBox*)((*OSptr)["BOOL_IGN_ALL_EX_TPS"]))->State = _Data[ID].BoolSettings & _BoolSettings::ignore_all_but_tempos_notes_and_pitch;
 
+			((CheckBox*)((*OSptr)["IMP_FLT_ENABLE"]))->State = _Data[ID].BoolSettings & _BoolSettings::enable_important_filter;
+			((CheckBox*)((*OSptr)["IMP_FLT_NOTES"]))->State = _Data[ID].BoolSettings & _BoolSettings::imp_filter_allow_notes;
+			((CheckBox*)((*OSptr)["IMP_FLT_TEMPO"]))->State = _Data[ID].BoolSettings & _BoolSettings::imp_filter_allow_tempo;
+			((CheckBox*)((*OSptr)["IMP_FLT_PITCH"]))->State = _Data[ID].BoolSettings & _BoolSettings::imp_filter_allow_pitch;
+			((CheckBox*)((*OSptr)["IMP_FLT_PROGC"]))->State = _Data[ID].BoolSettings & _BoolSettings::imp_filter_allow_progc;
+			((CheckBox*)((*OSptr)["IMP_FLT_OTHER"]))->State = _Data[ID].BoolSettings & _BoolSettings::imp_filter_allow_other;
+
+			((CheckBox*)((*OSptr)["LEGACY_META_RSB_BEHAVIOR"]))->State = _Data[ID].AllowLegacyRunningStatusMetaBehaviour;
+			((CheckBox*)((*OSptr)["ALLOW_SYSEX"]))->State = _Data[ID].AllowSysex;
+			((CheckBox*)((*OSptr)["ENABLE_ZERO_VELOCITY"]))->State = _Data[ID].EnableZeroVelocity;
+
 			((CheckBox*)((*PASWptr)["SPLIT_TRACKS"]))->State = _Data[ID].ChannelsSplit;
 			((CheckBox*)((*PASWptr)["RSB_COMPRESS"]))->State = _Data[ID].RSBCompression;
 
 			((CheckBox*)((*PASWptr)["INPLACE_MERGE"]))->State = _Data[ID].InplaceMergeEnabled;
-			((CheckBox*)((*PASWptr)["LEGACY_META_RSB_BEHAVIOR"]))->State = _Data[ID].AllowLegacyRunningStatusMetaIgnorance;
-			((CheckBox*)((*PASWptr)["ALLOW_SYSEX"]))->State = _Data[ID].AllowSysex;
-			((CheckBox*)((*PASWptr)["ENABLE_ZERO_VELOCITY"]))->State = _Data[ID].EnableZeroVelocity;
 
 			((CheckBox*)((*PASWptr)["COLLAPSE_MIDI"]))->State = _Data[ID].CollapseMIDI;
 			((CheckBox*)((*PASWptr)["APPLY_OFFSET_AFTER"]))->State = _Data[ID].ApplyOffsetAfter;
@@ -885,7 +893,7 @@ namespace PropsAndSets
 			{ std::lock_guard<std::recursive_mutex> locker(UIElement->Lock); }
 			UIElement->Graph = nullptr;
 		}
-		SMICptr = new SingleMIDIInfoCollector(_Data.Files[currentID].Filename, _Data.Files[currentID].OldPPQN, _Data.Files[currentID].AllowLegacyRunningStatusMetaIgnorance);
+		SMICptr = new SingleMIDIInfoCollector(_Data.Files[currentID].Filename, _Data.Files[currentID].OldPPQN, _Data.Files[currentID].AllowLegacyRunningStatusMetaBehaviour);
 		std::thread th([]()
 		{
 			WH->MainWindow_ID = "SMIC";
@@ -1277,9 +1285,9 @@ namespace PropsAndSets
 			_Data[currentID].SelectionLength = T;
 		}
 
-		_Data[currentID].AllowLegacyRunningStatusMetaIgnorance = (((CheckBox*)(*SMPASptr)["LEGACY_META_RSB_BEHAVIOR"])->State);
+		_Data[currentID].AllowLegacyRunningStatusMetaBehaviour = (((CheckBox*)(*OSptr)["LEGACY_META_RSB_BEHAVIOR"])->State);
 
-		if (_Data[currentID].AllowLegacyRunningStatusMetaIgnorance)
+		if (_Data[currentID].AllowLegacyRunningStatusMetaBehaviour)
 			std::cout << "WARNING: Legacy way of treating running status events can also allow major corruptions of midi structure!" << std::endl;
 
 		_Data[currentID].SetBoolSetting(_BoolSettings::remove_empty_tracks, (((CheckBox*)(*SMPASptr)["BOOL_REM_TRCKS"])->State));
@@ -1291,8 +1299,16 @@ namespace PropsAndSets
 		_Data[currentID].SetBoolSetting(_BoolSettings::ignore_notes, (((CheckBox*)(*OSptr)["BOOL_IGN_NOTES"])->State));
 		_Data[currentID].SetBoolSetting(_BoolSettings::ignore_all_but_tempos_notes_and_pitch, (((CheckBox*)(*OSptr)["BOOL_IGN_ALL_EX_TPS"])->State));
 
-		_Data[currentID].EnableZeroVelocity = (((CheckBox*)(*SMPASptr)["ENABLE_ZERO_VELOCITY"])->State);
-		_Data[currentID].AllowSysex = (((CheckBox*)(*SMPASptr)["ALLOW_SYSEX"])->State);
+		_Data[currentID].SetBoolSetting(_BoolSettings::enable_important_filter, (((CheckBox*)(*OSptr)["IMP_FLT_ENABLE"])->State));
+		_Data[currentID].SetBoolSetting(_BoolSettings::imp_filter_allow_notes, (((CheckBox*)(*OSptr)["IMP_FLT_NOTES"])->State));
+		_Data[currentID].SetBoolSetting(_BoolSettings::imp_filter_allow_tempo, (((CheckBox*)(*OSptr)["IMP_FLT_TEMPO"])->State));
+		_Data[currentID].SetBoolSetting(_BoolSettings::imp_filter_allow_pitch, (((CheckBox*)(*OSptr)["IMP_FLT_PITCH"])->State));
+		_Data[currentID].SetBoolSetting(_BoolSettings::imp_filter_allow_progc, (((CheckBox*)(*OSptr)["IMP_FLT_PROGC"])->State));
+		_Data[currentID].SetBoolSetting(_BoolSettings::imp_filter_allow_other, (((CheckBox*)(*OSptr)["IMP_FLT_OTHER"])->State));
+
+		_Data[currentID].EnableZeroVelocity = (((CheckBox*)(*OSptr)["ENABLE_ZERO_VELOCITY"])->State);
+		_Data[currentID].AllowSysex = (((CheckBox*)(*OSptr)["ALLOW_SYSEX"])->State);
+
 		_Data[currentID].RSBCompression = ((CheckBox*)(*SMPASptr)["RSB_COMPRESS"])->State;
 		_Data[currentID].ChannelsSplit = ((CheckBox*)(*SMPASptr)["SPLIT_TRACKS"])->State;
 		_Data[currentID].CollapseMIDI = ((CheckBox*)(*SMPASptr)["COLLAPSE_MIDI"])->State;
@@ -1309,12 +1325,14 @@ namespace PropsAndSets
 			ThrowAlert_Error("You cannot apply current settings to file with ID " + std::to_string(currentID));
 			return;
 		}
+
 		OnApplySettings();
+
 		for (auto Y = _Data.Files.begin(); Y != _Data.Files.end(); ++Y)
 		{
 			DefaultBoolSettings = Y->BoolSettings = _Data[currentID].BoolSettings;
 			_Data.InplaceMergeFlag = Y->InplaceMergeEnabled = _Data[currentID].InplaceMergeEnabled;
-			Y->AllowLegacyRunningStatusMetaIgnorance = _Data[currentID].AllowLegacyRunningStatusMetaIgnorance;
+			Y->AllowLegacyRunningStatusMetaBehaviour = _Data[currentID].AllowLegacyRunningStatusMetaBehaviour;
 			Y->CollapseMIDI = _Data[currentID].CollapseMIDI;
 			Y->ApplyOffsetAfter = _Data[currentID].ApplyOffsetAfter;
 			Y->AllowSysex = _Data[currentID].AllowSysex;
@@ -1615,7 +1633,6 @@ namespace Settings
 		
 		((CheckBox*)((*pptr)["INPLACE_MERGE"]))->State = _Data.InplaceMergeFlag;
 		((CheckBox*)((*pptr)["AUTOUPDATECHECK"]))->State = check_autoupdates;
-
 	}
 	void OnSetApply()
 	{
@@ -1963,7 +1980,7 @@ void RestoreRegSettings()
 
 void OnOtherSettings()
 {
-
+	WH->EnableWindow("OTHER_SETS");
 }
 
 void Init()
@@ -2043,7 +2060,7 @@ void Init()
 
 	(*T)["BOOL_REM_TRCKS"] = new CheckBox(-97.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, System_White, _Align::left, "Remove empty tracks");
 	(*T)["BOOL_REM_REM"] = new CheckBox(-82.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, System_White, _Align::left, "Remove merge \"remnants\"");
-	(*T)["OTHER_CHECKBOXES"] = new Button("Other settings", System_White, OnOtherSettings, -67.5 + WindowHeapSize, 55 - WindowHeapSize, 70, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, System_White, "Other MIDI processing settings");
+	(*T)["OTHER_CHECKBOXES"] = new Button("Other settings", System_White, OnOtherSettings, -37.5 + WindowHeapSize, 55 - WindowHeapSize, 70, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, System_White, "Other MIDI processing settings");
 
 	(*T)["SPLIT_TRACKS"] = new CheckBox(7.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, 0, System_White, _Align::center, "Multichannel split");
 	(*T)["RSB_COMPRESS"] = new CheckBox(22.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, 0, System_White, _Align::center, "Enable RSB compression");
@@ -2054,9 +2071,6 @@ void Init()
 	(*T)["INPLACE_MERGE"] = new CheckBox(97.5 - WindowHeapSize, 55 - WindowHeapSize, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, 0, System_White, _Align::right, "Enables/disables inplace merge");
 
 	(*T)["GROUPID"] = new InputField(" ", 92.5 - WindowHeapSize, 75 - WindowHeapSize, 10, 20, System_White, PropsAndSets::PPQN, 0x007FFFFF, System_White, "Group ID...", 2, _Align::center, _Align::right, InputField::Type::NaturalNumbers);
-
-	//(*T)["OR"] = Butt = new Button("OR", System_White, PropsAndSets::OR, 37.5, 15 - WindowHeapSize, 20, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, System_White, "Overlaps remover");
-	//(*T)["SR"] = new Button("SR", System_White, PropsAndSets::SR, 12.5, 15 - WindowHeapSize, 20, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, System_White, "Sustains remover");
 
 	(*T)["MIDIINFO"] = Butt = new Button("Collect info", System_White, PropsAndSets::InitializeCollecting, 20, 15 - WindowHeapSize, 65, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, System_White, "Collects additional info about the midi");
 	Butt->Tip->SafeMove(-20, 0);
@@ -2073,31 +2087,38 @@ void Init()
 	(*T)["SELECT_START"] = new InputField(" ", -37.5 - WindowHeapSize, -5 - WindowHeapSize, 10, 70, System_White, NULL, 0x007FFFFF, System_White, "Selection start", 13, _Align::center, _Align::right, InputField::Type::NaturalNumbers);
 	(*T)["SELECT_LENGTH"] = new InputField(" ", -37.5 - WindowHeapSize, -25 - WindowHeapSize, 10, 70, System_White, NULL, 0x007FFFFF, System_White, "Selection length", 14, _Align::center, _Align::right, InputField::Type::WholeNumbers);
 
-	(*T)["LEGACY_META_RSB_BEHAVIOR"] = new CheckBox(97.5 - WindowHeapSize, -5 - WindowHeapSize, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, false, System_White, _Align::right, "Enables legacy RSB/Meta behavior");
-	(*T)["ALLOW_SYSEX"] = new CheckBox(82.5 - WindowHeapSize, -5 - WindowHeapSize, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, 0, System_White, _Align::right, "Allow sysex events");
-	(*T)["ENABLE_ZERO_VELOCITY"] = new CheckBox(97.5 - WindowHeapSize, -25 - WindowHeapSize, 10, 0x007FFFFF, 0x00001F3F, 0xFF3F00FF, 1, 0, System_White, _Align::right, "\"Enable\" zero velocity notes");
-
 	(*T)["COLLAPSE_MIDI"] = new CheckBox(97.5 - WindowHeapSize, 35 - WindowHeapSize, 10, 0x007FFFFF, 0xFF7F00AF, 0x7FFF00AF, 1, 0, System_White, _Align::right, "Collapse all tracks of a MIDI into one");
 
 	(*T)["CONSTANT_PROPS"] = new TextBox("_Props text example_", System_White, 0, -75 - WindowHeapSize, 80 - WindowHeapSize, 200 - 1.5 * WindowHeapSize, 7.5, 0, 0, 1);
 
 	(*WH)["SMPAS"] = T;//Selected midi properties and settings
 
-	T = new MoveableWindow("Other settings.", System_White, -75, 50, 150, 100, 0x3F3F3FCF, 0x7F7F7F7F);
+	T = new MoveableWindow("Other settings.", System_White, -75, 50, 150, 50 + WindowHeapSize, 0x3F3F3FCF, 0x7F7F7F7F);
 
-	(*T)["BOOL_PIANO_ONLY"] = new CheckBox(-67.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, System_White, _Align::left, "Replace all instruments with piano");
-	(*T)["BOOL_IGN_TEMPO"] = new CheckBox(-52.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::left, "Ignore tempo events");
-	(*T)["BOOL_IGN_PITCH"] = new CheckBox(-37.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::center, "Ignore pitch bending events");
-	(*T)["BOOL_IGN_NOTES"] = new CheckBox(-22.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::center, "Ignore note events");
-	(*T)["BOOL_IGN_ALL_EX_TPS"] = new CheckBox(-7.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::center, "Ignore everything except specified");
+	CheckBox* Chk = nullptr;
 
-	(*T)["IMP_FLT_ENABLE"] = new CheckBox(7.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 0x007FFFFF, 0xFF7F007F, 0x00FF007F, 1, 0, System_White, _Align::center, "Enable important event filter");
+	(*T)["BOOL_PIANO_ONLY"] = new CheckBox(-65, 35 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, System_White, _Align::left, "All instruments to piano");
+	(*T)["BOOL_IGN_TEMPO"] = new CheckBox(-50, 35 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::left, "Remove tempo events");
+	(*T)["BOOL_IGN_PITCH"] = new CheckBox(-35, 35 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::left, "Remove pitch events");
+	(*T)["BOOL_IGN_NOTES"] = new CheckBox(-20, 35 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::center, "Remove notes");
+	(*T)["BOOL_IGN_ALL_EX_TPS"] = new CheckBox(-5, 35 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::center, "Ignore other events");
 
-	(*T)["IMP_FLT_PIANO"] = new CheckBox(-67.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, System_White, _Align::left, "Important filter: piano");
-	(*T)["IMP_FLT_TEMPO"] = new CheckBox(-52.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::left, "Important filter: tempo");
-	(*T)["IMP_FLT_PITCH"] = new CheckBox(-37.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::center, "Important filter: pitch");
-	(*T)["IMP_FLT_PROGC"] = new CheckBox(-22.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::center, "Important filter: program change");
-	(*T)["IMP_FLT_OTHER"] = new CheckBox(-7.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::center, "Important filter: other");
+	(*T)["LEGACY_META_RSB_BEHAVIOR"] = Chk = new CheckBox(10, 35 - WindowHeapSize, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, false, System_White, _Align::center, "Enables legacy RSB/Meta behavior");
+	Chk->Tip->SafeChangePosition_Argumented(_Align::left, -70, 25 - WindowHeapSize);
+	(*T)["ALLOW_SYSEX"] = new CheckBox(25, 35 - WindowHeapSize, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, 0, System_White, _Align::right, "Allow sysex events");
+
+	(*T)["OVERLAY"] = new TextBox("", System_White, -35, 10 - WindowHeapSize, 20, 80, 0, 0xFFFFFF1F, 0x007FFF7F, 1);
+
+	(*T)["IMP_FLT_ENABLE"] = new CheckBox(65, 35 - WindowHeapSize, 10, 0x007FFFFF, 0xFF7F1F7F, 0x5FFF007F, 1, 0, System_White, _Align::right, "Enable important event filter");
+
+	(*T)["IMP_FLT_NOTES"] = new CheckBox(-65, 15 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, System_White, _Align::left, "Important filter: piano");
+	(*T)["IMP_FLT_TEMPO"] = new CheckBox(-50, 15 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::left, "Important filter: tempo");
+	(*T)["IMP_FLT_PITCH"] = new CheckBox(-35, 15 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::left, "Important filter: pitch");
+	(*T)["IMP_FLT_PROGC"] = Chk = new CheckBox(-20, 15 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::center, "Important filter: program change");
+	Chk->Tip->SafeChangePosition_Argumented(_Align::left, -70, 5 - WindowHeapSize);
+	(*T)["IMP_FLT_OTHER"] = new CheckBox(-5, 15 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::center, "Important filter: other");
+
+	(*T)["ENABLE_ZERO_VELOCITY"] = new CheckBox(50, 15 - WindowHeapSize, 10, 0x007FFFFF, 0x00001F3F, 0x00FF00FF, 1, 0, System_White, _Align::right, "\"Enable\" zero velocity notes");
 
 	(*WH)["OTHER_SETS"] = T; // Other settings
 
@@ -2224,7 +2245,7 @@ void Init()
 	//WH->EnableWindow("CAT");
 	//WH->EnableWindow("SMPAS");//Debug line
 	//WH->EnableWindow("PROMPT");////DEBUUUUG
-	WH->EnableWindow("OTHER_SETS");
+	//WH->EnableWindow("OTHER_SETS");
 
 	DragAcceptFiles(hWnd, TRUE);
 	OleInitialize(NULL);
@@ -2716,7 +2737,7 @@ struct SafcCliRuntime:
 
 			auto ignore_meta_rsb = object.find(L"ignore_meta_rsb");
 			if (ignore_meta_rsb != object.end())
-				_Data.Files[index].AllowLegacyRunningStatusMetaIgnorance = ignore_meta_rsb->second->AsBool();
+				_Data.Files[index].AllowLegacyRunningStatusMetaBehaviour = ignore_meta_rsb->second->AsBool();
 
 			auto inplace_mergable = object.find(L"inplace_mergable");
 			if (inplace_mergable != object.end())

@@ -100,10 +100,10 @@ struct SingleMIDIInfoCollector
 	polyphony_graph Polyphony;
 	std::vector<TrackData> Tracks;
 	std::uint16_t PPQ;
-	bool AllowLegacyRunningStatusMetaIgnorance;
+	bool AllowLegacyRunningStatusMetaBehaviour;
 	//Locker<btree::btree_map<std::uint64_t, std::uint64_t>> Polyphony;
 	//Locker<btree::btree_map<>>
-	SingleMIDIInfoCollector(std::wstring filename, std::uint16_t PPQ, bool AllowLegacyRunningStatusMetaIgnorance = false) : FileName(filename), LogLine(" "), Processing(0), Finished(0), PPQ(PPQ), AllowLegacyRunningStatusMetaIgnorance(AllowLegacyRunningStatusMetaIgnorance) { }
+	SingleMIDIInfoCollector(std::wstring filename, std::uint16_t PPQ, bool AllowLegacyRunningStatusMetaBehaviour = false) : FileName(filename), LogLine(" "), Processing(0), Finished(0), PPQ(PPQ), AllowLegacyRunningStatusMetaBehaviour(AllowLegacyRunningStatusMetaBehaviour) { }
 	void Lookup() 
 	{
 		der_polyphony_graph PolyphonyFiniteDifference;
@@ -144,7 +144,7 @@ struct SingleMIDIInfoCollector
 				std::uint8_t EventType = file_input.get();
 				if (EventType == 0xFF)
 				{
-					if(AllowLegacyRunningStatusMetaIgnorance)
+					if(AllowLegacyRunningStatusMetaBehaviour)
 						RSB = 0;
 					std::uint8_t type = file_input.get();
 					std::uint32_t meta_data_size = 0;
@@ -213,7 +213,7 @@ struct SingleMIDIInfoCollector
 				}
 				else if (EventType == 0xF0 || EventType == 0xF7)
 				{
-					if(AllowLegacyRunningStatusMetaIgnorance)
+					if(AllowLegacyRunningStatusMetaBehaviour)
 						RSB = 0;
 					std::uint32_t meta_data_size = 0;
 					do
