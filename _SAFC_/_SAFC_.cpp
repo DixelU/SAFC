@@ -577,7 +577,7 @@ struct SAFCData
 			Sizes.emplace_back(i, Files[i].FileSize);
 		}
 
-		sort(Sizes.begin(), Sizes.end());
+		std::sort(Sizes.begin(), Sizes.end());
 
 		for (int i = 0; i < Sizes.size(); i++)
 		{
@@ -2064,7 +2064,9 @@ void Init()
 
 	(*T)["SPLIT_TRACKS"] = new CheckBox(7.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, 0, System_White, _Align::center, "Multichannel split");
 	(*T)["RSB_COMPRESS"] = new CheckBox(22.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, 0, System_White, _Align::center, "Enable RSB compression");
-	
+
+	(*T)["COLLAPSE_MIDI"] = new CheckBox(97.5 - WindowHeapSize, 35 - WindowHeapSize, 10, 0x007FFFFF, 0xFF7F00AF, 0x7FFF00AF, 1, 0, System_White, _Align::right, "Collapse all tracks of a MIDI into one");
+
 	(*T)["BOOL_APPLY_TO_ALL_MIDIS"] = Butt = new Button("A2A", System_White, PropsAndSets::OnApplyBS2A, 80 - WindowHeapSize, 55 - WindowHeapSize, 15, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, System_White, "Sets \"bool settings\" to all midis");
 	Butt->Tip->SafeChangePosition_Argumented(_Align::right, 87.5 - WindowHeapSize, Butt->Tip->CYpos);
 
@@ -2085,40 +2087,40 @@ void Init()
 	Butt->Tip->SafeChangePosition_Argumented(_Align::right, 100 - WindowHeapSize, Butt->Tip->CYpos);
 
 	(*T)["SELECT_START"] = new InputField(" ", -37.5 - WindowHeapSize, -5 - WindowHeapSize, 10, 70, System_White, NULL, 0x007FFFFF, System_White, "Selection start", 13, _Align::center, _Align::right, InputField::Type::NaturalNumbers);
-	(*T)["SELECT_LENGTH"] = new InputField(" ", -37.5 - WindowHeapSize, -25 - WindowHeapSize, 10, 70, System_White, NULL, 0x007FFFFF, System_White, "Selection length", 14, _Align::center, _Align::right, InputField::Type::WholeNumbers);
+	(*T)["SELECT_LENGTH"] = new InputField(" ", 37.5 - WindowHeapSize, -5 - WindowHeapSize, 10, 70, System_White, NULL, 0x007FFFFF, System_White, "Selection length", 14, _Align::center, _Align::right, InputField::Type::WholeNumbers);
 
-	(*T)["COLLAPSE_MIDI"] = new CheckBox(97.5 - WindowHeapSize, 35 - WindowHeapSize, 10, 0x007FFFFF, 0xFF7F00AF, 0x7FFF00AF, 1, 0, System_White, _Align::right, "Collapse all tracks of a MIDI into one");
-
-	(*T)["CONSTANT_PROPS"] = new TextBox("_Props text example_", System_White, 0, -75 - WindowHeapSize, 80 - WindowHeapSize, 200 - 1.5 * WindowHeapSize, 7.5, 0, 0, 1);
+	(*T)["CONSTANT_PROPS"] = new TextBox("_Props text example_", System_White, 0, -55 - WindowHeapSize, 80 - WindowHeapSize, 200 - 1.5 * WindowHeapSize, 7.5, 0, 0, 1);
 
 	(*WH)["SMPAS"] = T;//Selected midi properties and settings
 
-	T = new MoveableWindow("Other settings.", System_White, -75, 50, 150, 50 + WindowHeapSize, 0x3F3F3FCF, 0x7F7F7F7F);
+	T = new MoveableWindow("Other settings.", System_White, -75, 35, 150, 65 + WindowHeapSize, 0x3F3F3FFF, 0x7F7F7F7F);
 
 	CheckBox* Chk = nullptr;
 
-	(*T)["BOOL_PIANO_ONLY"] = new CheckBox(-65, 35 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, System_White, _Align::left, "All instruments to piano");
-	(*T)["BOOL_IGN_TEMPO"] = new CheckBox(-50, 35 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::left, "Remove tempo events");
-	(*T)["BOOL_IGN_PITCH"] = new CheckBox(-35, 35 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::left, "Remove pitch events");
-	(*T)["BOOL_IGN_NOTES"] = new CheckBox(-20, 35 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::center, "Remove notes");
-	(*T)["BOOL_IGN_ALL_EX_TPS"] = new CheckBox(-5, 35 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::center, "Ignore other events");
+	(*T)["BOOL_PIANO_ONLY"] = new CheckBox(-65, 25 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, System_White, _Align::left, "All instruments to piano");
+	(*T)["BOOL_IGN_TEMPO"] = new CheckBox(-50, 25 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::left, "Remove tempo events");
+	(*T)["BOOL_IGN_PITCH"] = new CheckBox(-35, 25 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::left, "Remove pitch events");
+	(*T)["BOOL_IGN_NOTES"] = new CheckBox(-20, 25 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::center, "Remove notes");
+	(*T)["BOOL_IGN_ALL_EX_TPS"] = new CheckBox(-5, 25 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::center, "Ignore other events");
 
-	(*T)["LEGACY_META_RSB_BEHAVIOR"] = Chk = new CheckBox(10, 35 - WindowHeapSize, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, false, System_White, _Align::center, "Enables legacy RSB/Meta behavior");
-	Chk->Tip->SafeChangePosition_Argumented(_Align::left, -70, 25 - WindowHeapSize);
-	(*T)["ALLOW_SYSEX"] = new CheckBox(25, 35 - WindowHeapSize, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, 0, System_White, _Align::right, "Allow sysex events");
+	(*T)["LEGACY_META_RSB_BEHAVIOR"] = Chk = new CheckBox(10, 25 - WindowHeapSize, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, false, System_White, _Align::center, "Enables legacy RSB/Meta behavior");
+	Chk->Tip->SafeChangePosition_Argumented(_Align::left, -70, 15 - WindowHeapSize);
+	(*T)["ALLOW_SYSEX"] = new CheckBox(25, 25 - WindowHeapSize, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, 0, System_White, _Align::right, "Allow sysex events");
 
-	(*T)["OVERLAY"] = new TextBox("", System_White, -35, 10 - WindowHeapSize, 20, 80, 0, 0xFFFFFF1F, 0x007FFF7F, 1);
+	(*T)["IMP_FLT_ENABLE"] = new CheckBox(65, 25 - WindowHeapSize, 10, 0x007FFFFF, 0xFF7F1F7F, 0x5FFF007F, 1, 0, System_White, _Align::right, "Enable important event filter");
 
-	(*T)["IMP_FLT_ENABLE"] = new CheckBox(65, 35 - WindowHeapSize, 10, 0x007FFFFF, 0xFF7F1F7F, 0x5FFF007F, 1, 0, System_White, _Align::right, "Enable important event filter");
+	(*T)["OVERLAY"] = new TextBox("", System_White, -35, 0 - WindowHeapSize, 20, 80, 0, 0xFFFFFF1F, 0x007FFF7F, 1);
 
-	(*T)["IMP_FLT_NOTES"] = new CheckBox(-65, 15 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, System_White, _Align::left, "Important filter: piano");
-	(*T)["IMP_FLT_TEMPO"] = new CheckBox(-50, 15 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::left, "Important filter: tempo");
-	(*T)["IMP_FLT_PITCH"] = new CheckBox(-35, 15 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::left, "Important filter: pitch");
-	(*T)["IMP_FLT_PROGC"] = Chk = new CheckBox(-20, 15 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::center, "Important filter: program change");
-	Chk->Tip->SafeChangePosition_Argumented(_Align::left, -70, 5 - WindowHeapSize);
-	(*T)["IMP_FLT_OTHER"] = new CheckBox(-5, 15 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::center, "Important filter: other");
+	(*T)["IMP_FLT_NOTES"] = new CheckBox(-65, 0 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, System_White, _Align::left, "Important filter: piano");
+	(*T)["IMP_FLT_TEMPO"] = new CheckBox(-50, 0 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::left, "Important filter: tempo");
+	(*T)["IMP_FLT_PITCH"] = new CheckBox(-35, 0 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::left, "Important filter: pitch");
+	(*T)["IMP_FLT_PROGC"] = Chk = new CheckBox(-20, 0 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::center, "Important filter: program change");
+	Chk->Tip->SafeChangePosition_Argumented(_Align::left, -70, -10 - WindowHeapSize);
+	(*T)["IMP_FLT_OTHER"] = new CheckBox(-5, 0 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::center, "Important filter: other");
 
-	(*T)["ENABLE_ZERO_VELOCITY"] = new CheckBox(50, 15 - WindowHeapSize, 10, 0x007FFFFF, 0x00001F3F, 0x00FF00FF, 1, 0, System_White, _Align::right, "\"Enable\" zero velocity notes");
+	(*T)["ENABLE_ZERO_VELOCITY"] = new CheckBox(65, 0 - WindowHeapSize, 10, 0x007FFFFF, 0x00001F3F, 0x00FF00FF, 1, 0, System_White, _Align::right, "\"Enable\" zero velocity notes");
+
+	(*T)["APPLY"] = new Button("Apply", System_White, PropsAndSets::OnApplySettings, 70 - WindowHeapSize, -20 - WindowHeapSize, 30, 10, 1, 0x3F7FFF3F, 0xFFFFFFEF, 0x7FFF3FFF, 0x7FFF3F1F, 0x7FFF3FFF, NULL, " ");
 
 	(*WH)["OTHER_SETS"] = T; // Other settings
 
@@ -2342,6 +2344,7 @@ void mDisplay()
 	glRotatef(-dumb_rotation_angle, 0, 0, 1);
 
 	glutSwapBuffers();
+	++TimerV;
 }
 
 void mInit(
