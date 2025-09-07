@@ -1,0 +1,1 @@
+boost:x86-windows-static boost:x64-windows-static freeglut:x86-windows-static freeglut:x64-windows-static libarchive:x86-windows-static libarchive:x64-windows-static
