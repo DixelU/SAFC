@@ -28,30 +28,12 @@ target("SAFC")
         "../externals/btree"
     )
 
-    --if is_plat("windows") then
-    --    add_includedirs("../externals/imgui_backend/win32")
-    --end
-
-    --if is_plat("linux") then
-    --    add_includedirs("../externals/imgui_backend/linux")
-    --end
-
     add_files(
         "../externals/sfd/*.c",
         "../externals/log_c/*.c"
     )
 
-    --if is_plat("windows") then
-    --    add_files("../externals/imgui_backend/win32/*.cpp")
-    --end
-
-    --if is_plat("linux") then
-    --    add_files("../externals/imgui_backend/linux/*.cpp")
-    --end
-
     add_files(
         "*.cpp",
         "ui/*.cpp"
     )
---add_includedirs("include")
---add_links("nlohmann_json", "imgui", "implot")
