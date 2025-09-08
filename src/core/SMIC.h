@@ -6,8 +6,8 @@
 #include <string>
 #include <array>
 
-#include "../bbb_ffio.h"
-#include "../btree/btree_map.h"
+#include "bbb_ffio.h"
+#include <btree/btree_map.h>
 
 #define MTrk 1297379947
 #define MThd 1297377380

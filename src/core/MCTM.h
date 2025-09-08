@@ -1,6 +1,11 @@
 #pragma once
 #ifndef SAF_MCTM
-#define SAF_MCTM 
+#define SAF_MCTM
+
+
+#ifndef MTrk
+#define MTrk 1297379947
+#endif
 
 void ThrowAlert_Error(std::string&& AlertText);
 void ThrowAlert_Warning(std::string&& AlertText);

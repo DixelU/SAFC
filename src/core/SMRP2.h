@@ -13,17 +13,20 @@
 #include <stack>
 #include <array>
 #include <atomic>
+#include <iostream>
 #include <ostream>
+#include <cstring>
+#include <algorithm>
 
 //#include <syncstream>
 
-#include "../bbb_ffio.h"
-#include "../SAFGUIF/header_utils.h"
+#include "bbb_ffio.h"
+#include "header_utils.h"
 
 #include "PLC.h"
 #include "CAT.h"
 
-#include "../function_wrapper.h"
+#include "function_wrapper.h"
 
 struct logger_base
 {

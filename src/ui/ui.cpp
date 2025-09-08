@@ -1,6 +1,8 @@
 #include <string>
 #include <vector>
 #include <algorithm>
+#include <mutex>
+
 
 
 #include <imgui.h>
@@ -9,12 +11,34 @@
 #include "ui.hpp"
 
 
+#include "../core/SMRP2.h"
+#include "../core/MCTM.h"
+
+
 
 
 static ImGuiSelectionBasicStorage midi_selection;
 static ImGuiMultiSelectIO* ms_io;
 
 static int midi_settings_modes = 0;
+static char it_ppq[256] = "1920";
+static char it_offset[380] = "0";
+static char it_tempo[380] = "120";
+
+static bool temp = false;
+
+
+
+
+// Ohh god that's weird
+
+std::pair<MIDICollectionThreadedMerger::proc_data_ptr, MIDICollectionThreadedMerger::message_buffer_ptr> SMRP;
+		
+void SetSMRP(std::pair< MIDICollectionThreadedMerger::proc_data_ptr, MIDICollectionThreadedMerger::message_buffer_ptr>& smrp)
+{
+	std::lock_guard<std::recursive_mutex> locker(Lock);
+	SMRP = smrp;
+}
 
 
 // Stolen from NVi-PFA :madman:
@@ -71,13 +95,14 @@ void RenderMainWindow()
             {
                 const char *filename = sfd_save_dialog(&midi_sfd_opts);
                 
-                if (filename) {
+                if(filename)
+                {
                   log_info("save file: '%s'", filename);
-                } else {
+                }
+                else
+                {
                   log_info("Open canceled");
                 }
-                log_info("add midi");
-                log_info("save midi");
             }
             
             ImGui::Separator();
@@ -95,6 +120,11 @@ void RenderMainWindow()
             {
                 midi_settings_window = true;
                 log_info("midi settings");
+            }
+            
+            if(ImGui::MenuItem("temp"))
+            {
+                temp = true;
             }
             ImGui::EndMenu();   
         }
@@ -140,7 +170,7 @@ void RenderMainWindow()
         ImGui::RadioButton("Individually", &midi_settings_modes, 0);
         ImGui::SameLine();
         ImGui::TextDisabled("(?)");
-        if (ImGui::BeginItemTooltip())
+        if(ImGui::BeginItemTooltip())
         {
             ImGui::PushTextWrapPos(ImGui::GetFontSize() * 50.0f);
             ImGui::Text("MIDI Settings only apply for the selected ones");
@@ -150,7 +180,7 @@ void RenderMainWindow()
         ImGui::RadioButton("Globally", &midi_settings_modes, 1);
         ImGui::SameLine();
         ImGui::TextDisabled("(?)");
-        if (ImGui::BeginItemTooltip())
+        if(ImGui::BeginItemTooltip())
         {
             ImGui::PushTextWrapPos(ImGui::GetFontSize() * 50.0f);
             ImGui::Text("MIDI Settings apply globally to all midis in the list");
@@ -158,6 +188,9 @@ void RenderMainWindow()
             ImGui::EndTooltip();
         }
         ImGui::Separator();
+        ImGui::InputText("PPQN", it_ppq, IM_ARRAYSIZE(it_ppq), ImGuiInputTextFlags_CharsDecimal);
+        ImGui::InputText("Tempo", it_tempo, IM_ARRAYSIZE(it_tempo), ImGuiInputTextFlags_CharsDecimal);
+        ImGui::InputText("Offset", it_offset, IM_ARRAYSIZE(it_offset), ImGuiInputTextFlags_CharsDecimal);
         ImGui::Checkbox("Remove Empty Tracks", &cb_rm_empty_tracks);
         ImGui::Checkbox("Remove Merge Remnants", &cb_rm_merge_remnants);
         ImGui::Checkbox("All Instruments to Piano", &cb_all_instruments_2_piano);
@@ -173,5 +206,25 @@ void RenderMainWindow()
         ImGui::Checkbox("Allow SysEx Events", &cb_allow_sysex_events);
         
         ImGui::End();
+    }
+    
+    std::lock_guard<std::recursive_mutex> locker(Lock);
+    
+    // Causes segfault involving atomic_bool loading
+    //if(SMRP.second->processing)
+    //    ImGui::OpenPopup("Procesing Progress");
+    
+    if(ImGui::BeginPopupModal("Procesing Progress", NULL, ImGuiWindowFlags_AlwaysAutoResize))
+    {
+        // HELP ME...
+        // IDFK What I'm doing
+        //SetSMRP(GlobalMCTM->currently_processed[ID]);
+        static float progress = 0.0f, progress_dir = 1.0f;
+        progress += progress_dir * 0.4f * ImGui::GetIO().DeltaTime;
+        float progress_saturated = IM_CLAMP(progress, 0.0f, 1.0f);
+        char buf[32];
+        sprintf(buf, "%d/%d", (int)(progress_saturated * 1753), 1753);
+        ImGui::ProgressBar(progress, ImVec2(0.f, 0.f), buf);
+        ImGui::EndPopup();
     }
 }

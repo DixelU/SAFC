@@ -3,11 +3,18 @@
 
 #include <string>
 #include <vector>
+#include <mutex>
 
 extern "C"
 {
     #include <sfd/sfd.h>
 }
+
+
+
+
+
+#define IM_CLAMP(V, MN, MX)     ((V) < (MN) ? (MN) : (V) > (MX) ? (MX) : (V))
 
 
 
@@ -46,6 +53,9 @@ inline bool cb_apply_offset_after_ppq_change = false;
 inline bool cb_collapse_trk_into_1           = false;
 inline bool cb_allow_sysex_events            = false;
 inline int thread_count = 5;
+
+inline bool proc_popup = false;
+inline std::recursive_mutex Lock;
 
 
 void RenderMainWindow();
