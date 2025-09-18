@@ -14,6 +14,8 @@
 #include <string>
 #include <vector>
 
+
+
 constexpr int base_internal_range = 200;
 
 float internal_range = base_internal_range, mouse_x_position = 0.f, mouse_y_position = 0.f;
@@ -46,8 +48,8 @@ bool is_fonted =
 
 //float dumb_rotation_angle = 0.f; // wtf
 //#define RANGE 200
-constexpr int window_base_width = 720;
-constexpr int window_base_height = 720;
+//constexpr int window_base_width = 720;
+//constexpr int window_base_height = 720;
 
 #ifdef _MSC_VER
 #define FORCEDINLINE __forceinline
