@@ -3,6 +3,13 @@
 ##
 ## Get latest from https://github.com/github/gitignore/blob/master/VisualStudio.gitignore
 
+
+# xmake related cache files
+src/.xmake/
+src/build/
+src/.cache/
+src/compile_commands.json
+
 # User-specific files
 *.rsuser
 *.suo
