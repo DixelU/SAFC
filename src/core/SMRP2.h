@@ -363,6 +363,7 @@ struct single_midi_processor_2
 
 		struct legacy_midi_standard
 		{
+			bool enable_zero_velocity = false;
 			bool ignore_meta_rsb = false;
 			bool rsb_compression = false;
 		};
@@ -750,7 +751,10 @@ struct single_midi_processor_2
 				base_type vel = file_input.get();
 				tick_type reference = disable_tick;
 
-				com ^= ((!bool(vel) & bool(com & 0x10)) << 4);
+				if (!settings.legacy.enable_zero_velocity) [[likely]]
+					com ^= ((!bool(vel) & bool(com & 0x10)) << 4);
+				else if (!vel && bool(com & 0x10))
+					vel = 1;
 
 				std::uint16_t key_polyindex = (com & 0xF) | (((std::uint16_t)key) << 4);
 				bool polyphony_error = false;
@@ -949,7 +953,7 @@ struct single_midi_processor_2
 
 	inline static bool process_buffer(
 		std::vector<base_type>& data_buffer,
-		std::array<filters_iterators, 16>& filters,
+		const std::array<filters_iterators, 16>& filters,
 		single_track_data& std_ref,
 		message_buffers& buffers)
 	{
@@ -1278,7 +1282,7 @@ struct single_midi_processor_2
 			auto& tick = get_value<tick_type>(cur, tick_position);
 			const auto& type = get_value<base_type>(cur, event_type);
 
-			if (!filtering.pass_notes)
+			if (!filtering.pass_notes) [[unlikely]]
 			{
 				auto& reference_event_pair = get_value<tick_type>(cur, event_param3);
 				auto& reference_event_tick = get_value<tick_type>(begin, reference_event_pair);
@@ -1288,7 +1292,7 @@ struct single_midi_processor_2
 				return false;
 			}
 
-			if (cat)
+			if (cat) [[unlikely]]
 			{
 				auto& key = get_value<base_type>(cur, event_param1);
 				auto optkey = (*cat).process(key);
@@ -1306,7 +1310,7 @@ struct single_midi_processor_2
 				key = *optkey;
 			}
 
-			if (vm && (type & 0x10)) // only for note-on events
+			if (vm && (type & 0x10)) [[unlikely]] // only for note-on events
 			{
 				auto& velocity = get_value<base_type>(cur, event_param2);
 				velocity = (*vm)[velocity];
@@ -1422,16 +1426,52 @@ struct single_midi_processor_2
 			return (tick = new_tick), true;
 		};
 
+		const event_transforming_filter rsb_compression_note_switchup = []
+		(const data_iterator& begin, const data_iterator& end, const data_iterator& cur, single_track_data& std_ref) -> bool
+		{
+			auto& type = get_value<base_type>(cur, event_type);
+
+			if ((type & 0xF0) == 0x80)
+			{
+				type = 0x90 | (type & 0x0F);
+
+				auto& velocity = get_value<base_type>(cur, event_param2);
+				velocity = 0;
+			}
+
+			return true;
+		};
+
+
 		filters.emplace( 0, selection_filter );
 		filters.emplace( 0, tick_positive_linear_transform );
-		filters.emplace( 0x80, key_transform );
-		filters.emplace( 0x90, key_transform );
-		filters.emplace( 0xA0, others_transform );
-		filters.emplace( 0xB0, others_transform );
-		filters.emplace( 0xC0, program_transform );
-		filters.emplace( 0xD0, others_transform );
-		filters.emplace( 0xE0, pitch_transform );
-		filters.emplace( 0xF0, meta_transform );
+
+		if (settings.key_converter || settings.volume_map || !settings.filter.pass_notes)
+		{
+			filters.emplace(0x80, key_transform);
+			filters.emplace(0x90, key_transform);
+		}
+
+		if (settings.legacy.rsb_compression)
+			filters.emplace(0x80, rsb_compression_note_switchup);
+
+		if (!settings.filter.pass_other)
+		{
+			filters.emplace(0xA0, others_transform);
+			filters.emplace(0xB0, others_transform);
+		}
+
+		if (!settings.filter.pass_other || settings.filter.piano_only)
+		{
+			filters.emplace(0xC0, program_transform);
+			filters.emplace(0xD0, others_transform);
+		}
+
+		if (settings.pitch_map || !settings.filter.pass_pitch)
+			filters.emplace(0xE0, pitch_transform);
+
+		filters.emplace(0xF0, meta_transform);
+
 
 		return filters;
 	}
@@ -1662,7 +1702,7 @@ struct single_midi_processor_2
 		bool first_tick = settings_data.settings.selection_data.enable_selection_front;
 
 		auto write_selection_front_wrap = [&]() {
-			if (first_tick)
+			if (first_tick) [[unlikely]]
 			{
 				auto original_front_tick = 
 					sgtick_type(settings_data.settings.selection_data.begin) + settings_data.settings.offset;
@@ -1777,6 +1817,7 @@ struct single_midi_processor_2
 
 		for (auto& el : polyphony_stacks)
 			el.reserve(1000);
+
 		track_buffers.data_buffer.reserve(1ull << 26);
 		write_buffer.reserve(1ull << (24 - 4 * channels_split));
 		track_buffers.meta_buffer.reserve(1ull << 10);
