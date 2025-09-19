@@ -248,7 +248,7 @@ struct MIDICollectionThreadedMerger
 			[](mpd_t::value_type& el) { return el.first->settings.details.inplace_mergable; });
 		
 		IITrackCount = 0;
-		std::thread([](mpd_t IMC, std::uint16_t PPQN, std_unicode_string _SaveTo, 
+		std::thread([](mpd_t IMC, std::uint16_t PPQN, std_unicode_string _SaveTo,
 				std::reference_wrapper<std::atomic_bool> FinishedFlag,
 				std::reference_wrapper<std::atomic_uint64_t> TrackCount)
 		{
@@ -311,7 +311,7 @@ struct MIDICollectionThreadedMerger
 					else
 						ddt = -1;
 				}
-				
+
 				for (std::uint64_t Tick = 0; ActiveTrackReading; Tick++, InTrackDelta++)
 				{
 					std::uint8_t IO = 0, EVENTTYPE = 0;///yas
@@ -548,14 +548,17 @@ struct MIDICollectionThreadedMerger
 
 		if (regular_merge_candidates.size() == 1)
 		{
-			auto filename = 
-				regular_merge_candidates.front().first->filename + 
+			auto& current_merge_candidate = regular_merge_candidates.front();
+			auto filename =
+				current_merge_candidate.first->filename +
+				current_merge_candidate.first->postfix;
+				regular_merge_candidates.front().first->filename +
 				regular_merge_candidates.front().first->postfix;
-			auto save_to_with_postfix = SaveTo + 
+			auto save_to_with_postfix = SaveTo +
 #ifdef WINDOWS
-				L".R.mid";
+	L".R.mid";
 #else
-				".R.mid";
+		".R.mid";
 #endif
 
 			auto remove_functor =
@@ -565,7 +568,7 @@ struct MIDICollectionThreadedMerger
 					remove;
 #endif
 
-			auto rename_functor = 
+			auto rename_functor =
 #ifdef WINDOWS
 					_wrename;
 #else
@@ -575,6 +578,7 @@ struct MIDICollectionThreadedMerger
 			remove_functor(save_to_with_postfix.c_str());
 			auto result = rename_functor(filename.c_str(), save_to_with_postfix.c_str());
 
+			IRTrackCount += current_merge_candidate.first->tracks_count;
 			IntermediateRegularFlag = true; /// Will this work?
 		}
 		else
@@ -582,7 +586,7 @@ struct MIDICollectionThreadedMerger
 		std::thread([](mpd_t RMC, std::uint16_t PPQN, std_unicode_string _SaveTo,
 			std::reference_wrapper<std::atomic_bool> FinishedFlag, std::reference_wrapper<std::atomic_uint64_t> TrackCount)
 		{
-			if (RMC.empty()) 
+			if (RMC.empty())
 			{
 				FinishedFlag.get() = true;
 				return;
@@ -604,7 +608,7 @@ struct MIDICollectionThreadedMerger
 			file_output->put(0);
 			file_output->put(PPQN >> 8);
 			file_output->put(PPQN);
-			for (auto Y = RMC.begin(); Y != RMC.end(); Y++) 
+			for (auto Y = RMC.begin(); Y != RMC.end(); Y++)
 			{
 				filename = Y->first->filename + Y->first->postfix;
 				if (Y != RMC.begin())
@@ -628,7 +632,7 @@ struct MIDICollectionThreadedMerger
 			file_output->put(TrackCount.get());
 			FinishedFlag.get() = true; /// Will this work?
 			file_output->flush();
-			//file_output->close(); 
+			//file_output->close();
 			fclose(fo_ptr);
 			delete[] buffer;
 			delete file_output;
@@ -717,9 +721,12 @@ struct MIDICollectionThreadedMerger
 				FinishedFlag.get() = true;
 				return;
 			}
+
 			printf("Active merging at last stage (untested)\n");
+
 			std::uint16_t T = 0;
 			std::uint8_t A = 0, B = 0;
+
 			F->put('M');
 			F->put('T');
 			F->put('h');
@@ -770,4 +777,4 @@ struct MIDICollectionThreadedMerger
 	}
 };
 
-#endif 
+#endif
