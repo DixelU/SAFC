@@ -950,7 +950,7 @@ struct single_midi_processor_2
 
 	inline static bool process_buffer(
 		std::vector<base_type>& data_buffer,
-		std::array<filters_iterators, 16>& filters,
+		const std::array<filters_iterators, 16>& filters,
 		single_track_data& std_ref,
 		message_buffers& buffers)
 	{
@@ -1423,16 +1423,52 @@ struct single_midi_processor_2
 			return (tick = new_tick), true;
 		};
 
+		const event_transforming_filter rsb_compression_note_switchup = []
+		(const data_iterator& begin, const data_iterator& end, const data_iterator& cur, single_track_data& std_ref) -> bool
+		{
+			auto& type = get_value<base_type>(cur, event_type);
+
+			if ((type & 0xF0) == 0x80)
+			{
+				type = 0x90 | (type & 0x0F);
+
+				auto& velocity = get_value<base_type>(cur, event_param2);
+				velocity = 0;
+			}
+
+			return true;
+		};
+
+
 		filters.emplace( 0, selection_filter );
 		filters.emplace( 0, tick_positive_linear_transform );
-		filters.emplace( 0x80, key_transform );
-		filters.emplace( 0x90, key_transform );
-		filters.emplace( 0xA0, others_transform );
-		filters.emplace( 0xB0, others_transform );
-		filters.emplace( 0xC0, program_transform );
-		filters.emplace( 0xD0, others_transform );
-		filters.emplace( 0xE0, pitch_transform );
-		filters.emplace( 0xF0, meta_transform );
+		
+		if (settings.key_converter || settings.volume_map || !settings.filter.pass_notes)
+		{
+			filters.emplace(0x80, key_transform);
+			filters.emplace(0x90, key_transform);
+		}
+
+		if (settings.legacy.rsb_compression)
+			filters.emplace(0x80, rsb_compression_note_switchup);
+
+		if (!settings.filter.pass_other)
+		{
+			filters.emplace(0xA0, others_transform);
+			filters.emplace(0xB0, others_transform);
+		}
+
+		if (!settings.filter.pass_other || settings.filter.piano_only)
+		{
+			filters.emplace(0xC0, program_transform);
+			filters.emplace(0xD0, others_transform);
+		}
+
+		if (settings.pitch_map || !settings.filter.pass_pitch)
+			filters.emplace(0xE0, pitch_transform);
+
+		filters.emplace(0xF0, meta_transform);
+
 
 		return filters;
 	}
@@ -1663,7 +1699,7 @@ struct single_midi_processor_2
 		bool first_tick = settings_data.settings.selection_data.enable_selection_front;
 
 		auto write_selection_front_wrap = [&]() {
-			if (first_tick)
+			if (first_tick) [[unlikely]]
 			{
 				auto original_front_tick = 
 					sgtick_type(settings_data.settings.selection_data.begin) + settings_data.settings.offset;
