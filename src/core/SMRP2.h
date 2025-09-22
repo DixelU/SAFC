@@ -91,7 +91,7 @@ public:
 namespace 
 {
 	using base_type = std::uint8_t;
-	FORCEDINLINE inline static void ostream_write(std::vector<base_type>& vec, std::ostream& out)
+	FORCEDINLINE static void ostream_write(std::vector<base_type>& vec, std::ostream& out)
 	{
 		out.write(((char*)vec.data()), vec.size());;
 	}
@@ -1827,7 +1827,7 @@ struct single_midi_processor_2
 
 		bbb_ffr file_input(data.filename.c_str());
 		auto [file_output_ptr, fo_ptr] = open_wide_stream<std::ostream>(data.filename + data.postfix,
-#ifdef WINDOWS
+#ifdef _WIN32
 			L"wb");
 #else
 			"wb");

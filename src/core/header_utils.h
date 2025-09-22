@@ -8,20 +8,16 @@
 //#include "consts.h"
 #include <chrono>
 
-#ifdef WINDOWS
+#ifdef _WIN32
 #include <Windows.h>
 #endif
 #include <string>
 #include <vector>
 
-
-
 constexpr int base_internal_range = 200;
-
 float internal_range = base_internal_range, mouse_x_position = 0.f, mouse_y_position = 0.f;
 
-
-#ifdef WINDOWS
+#ifdef _WIN32
 using std_unicode_string = std::wstring;
 #else
 using std_unicode_string = std::string;
@@ -29,7 +25,7 @@ using std_unicode_string = std::string;
 
 const char* window_title = "SAFC\0";
 std_unicode_string default_reg_path =
-#ifdef WINDOWS
+#ifdef _WIN32
 	L"Software\\SAFC\\";
 #else
 	"";
@@ -37,7 +33,7 @@ std_unicode_string default_reg_path =
 
 std::string default_font_name = "Arial";
 bool is_fonted = 
-#ifdef WINDOWS
+#ifdef _WIN32
 	true;
 #else
 	false;
@@ -105,7 +101,7 @@ std::uint32_t TimerV = 0;
 std::int16_t YearsOld = -1;
 */
 
-#ifdef WINDOWS
+#ifdef _WIN32
 HWND hWnd;
 HDC hDc;
 auto HandCursor = ::LoadCursor(NULL, IDC_HAND), AllDirectCursor = ::LoadCursor(NULL, IDC_CROSS), NWSECursor = ::LoadCursor(NULL, IDC_SIZENWSE);///AAAAAAAAAAA

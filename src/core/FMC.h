@@ -20,7 +20,7 @@ struct FastMIDIChecker
 	{
 		this->File = File;
 		auto [f, fo_ptr] = open_wide_stream<std::istream, std::ios::in>(File,
-#ifdef WINDOWS
+#ifdef _WIN32
 			L"rb");
 #else
 			"rb");
@@ -36,7 +36,7 @@ struct FastMIDIChecker
 
 	void Collect() {
 		auto [f, fo_ptr] = open_wide_stream<std::istream, std::ios::in>(File,
-#ifdef WINDOWS
+#ifdef _WIN32
 			L"rb");
 #else
 			"rb");

@@ -6,6 +6,8 @@
 #include <imgui.h>
 #include <log_c/log.h>
 
+#include <windows.h>
+
 #include "ui.hpp"
 
 #include "../core/SMRP2.h"

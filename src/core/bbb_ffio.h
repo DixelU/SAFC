@@ -3,23 +3,21 @@
 #define BBB_FFIO
 
 #include <stdio.h>
-#ifdef WINDOWS
+#ifdef _WIN32
 #include <fileapi.h>
 #endif
 
 #include <istream>
 #include <ostream>
 
-#include <ext/stdio_filebuf.h>
-
-inline decltype(errno) fopen_wrap(FILE* &file,
-#ifdef WINDOWS
-									const wchar_t* filename, const wchar_t parameter)
+inline errno_t fopen_wrap(FILE* file,
+#ifdef _WIN32
+	const wchar_t* filename, const wchar_t* parameter)
 #else
-								  	const char* filename, const char* parameter)
+	const char* filename, const char* parameter)
 #endif
 {
-#ifdef WINDOWS
+#ifdef _WIN32
 	return _wfopen_s(&file, filename, parameter);
 #else
 	file = fopen(filename, parameter);
@@ -30,7 +28,7 @@ inline decltype(errno) fopen_wrap(FILE* &file,
 template<typename __inner_stream_type, decltype(std::ios_base::out) stream_io_type = std::ios_base::out>
 std::pair<__inner_stream_type*, FILE*> open_wide_stream(
 
-#ifdef WINDOWS
+#ifdef _WIN32
 	std::wstring file, const wchar_t* parameter)
 #else
 	std::string file, const char* parameter)
@@ -89,7 +87,7 @@ private:
 	}
 public:
 	byte_by_byte_fast_file_reader(
-#ifdef WINDOWS
+#ifdef _WIN32
 		const wchar_t* filename,
 #else
 		const char* filename,
@@ -98,7 +96,7 @@ public:
 			true_buffer_size(default_buffer_size)
 	{
 		auto err_no =
-#ifdef WINDOWS
+#ifdef _WIN32
 			fopen_wrap(file, filename, L"rb");
 #else
 			fopen_wrap(file, filename, "rb");
@@ -130,7 +128,7 @@ public:
 		buffer = nullptr;
 	}
 	inline void reopen_next_file(
-#ifdef WINDOWS
+#ifdef _WIN32
 		const wchar_t* filename)
 #else
 		const char* filename)
@@ -138,7 +136,7 @@ public:
 	{
 		close();
 		auto err_no =
-#ifdef WINDOWS
+#ifdef _WIN32
 			fopen_wrap(file, filename, L"rb");
 #else
 			fopen_wrap(file, filename, "rb");
@@ -183,7 +181,7 @@ public:
 		}
 		else
 		{
-#ifdef WINDOWS
+#ifdef _WIN32
 			_fseeki64_nolock
 #else
 			fseeko64

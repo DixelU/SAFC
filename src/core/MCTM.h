@@ -277,7 +277,7 @@ struct MIDICollectionThreadedMerger
 
 			bbb_ffr* fi;
 			auto [file_output, fo_ptr] = open_wide_stream<std::ostream>
-#ifdef WINDOWS
+#ifdef _WIN32
 				(_SaveTo + L".I.mid", L"wb");
 #else
 				(_SaveTo + ".I.mid", "wb");
@@ -525,7 +525,7 @@ struct MIDICollectionThreadedMerger
 				pfiv.close();
 				auto& imc_i = IMC[i];
 				if (imc_i.first->settings.proc_details.remove_remnants)
-#ifdef WINDOWS
+#ifdef _WIN32
 					_wremove
 #else
 					remove
@@ -557,21 +557,21 @@ struct MIDICollectionThreadedMerger
 				regular_merge_candidates.front().first->filename + 
 				regular_merge_candidates.front().first->postfix;
 			auto save_to_with_postfix = SaveTo +
-#ifdef WINDOWS
+#ifdef _WIN32
 				L".R.mid";
 #else
 				".R.mid";
 #endif
 
 			auto remove_functor =
-#ifdef WINDOWS
+#ifdef _WIN32
 					_wremove;
 #else
 					remove;
 #endif
 
 			auto rename_functor =
-#ifdef WINDOWS
+#ifdef _WIN32
 					_wrename;
 #else
 					rename;
@@ -580,7 +580,7 @@ struct MIDICollectionThreadedMerger
 			remove_functor(save_to_with_postfix.c_str());
 			auto result = rename_functor(filename.c_str(), save_to_with_postfix.c_str());
 
-			IRTrackCount += current_merge_candidate.first->tracks_count;
+			IRTrackCount += regular_merge_candidates.front().first->tracks_count;
 			IntermediateRegularFlag = true; /// Will this work?
 		}
 		else
@@ -597,7 +597,7 @@ struct MIDICollectionThreadedMerger
 			const size_t buffer_size = 20000000;
 			std::uint8_t* buffer = new std::uint8_t[buffer_size];
 			auto [file_output, fo_ptr] = open_wide_stream<std::ostream>
-#ifdef WINDOWS
+#ifdef _WIN32
 				(_SaveTo + L".R.mid", L"wb");
 #else
 				(_SaveTo + ".R.mid", "wb");
@@ -622,7 +622,7 @@ struct MIDICollectionThreadedMerger
 				int t;
 				if (Y->first->settings.proc_details.remove_remnants)
 					t =
-#ifdef WINDOWS
+#ifdef _WIN32
 					_wremove
 #else
 					remove
@@ -653,7 +653,7 @@ struct MIDICollectionThreadedMerger
 		std::thread([this](std::reference_wrapper<std::atomic_bool> FinishedFlag, std_unicode_string _SaveTo)
 		{
 			bbb_ffr
-#ifdef WINDOWS
+#ifdef _WIN32
 				*IM = new bbb_ffr((_SaveTo + L".I.mid").c_str()),
 				*RM = new bbb_ffr((_SaveTo + L".R.mid").c_str());
 #else
@@ -661,7 +661,7 @@ struct MIDICollectionThreadedMerger
 				*RM = new bbb_ffr((_SaveTo + ".R.mid").c_str());
 #endif
 			auto [F, fo_ptr] = open_wide_stream<std::ostream>
-#ifdef WINDOWS
+#ifdef _WIN32
 						(_SaveTo, L"wb");
 #else
 						(_SaveTo, "wb");
@@ -683,7 +683,7 @@ struct MIDICollectionThreadedMerger
 				//F.close();
 				fclose(fo_ptr);
 
-#ifdef WINDOWS
+#ifdef _WIN32
 				auto inplaceFilename = _SaveTo + L".I.mid";
 				auto regularFilename = _SaveTo + L".R.mid";
 #else
@@ -692,7 +692,7 @@ struct MIDICollectionThreadedMerger
 #endif
 
 				auto remove_orig =
-#ifdef WINDOWS
+#ifdef _WIN32
 					_wremove
 #else
 					remove
@@ -700,7 +700,7 @@ struct MIDICollectionThreadedMerger
 				 		(_SaveTo.c_str());
 
 				auto remove_i =
-#ifdef WINDOWS
+#ifdef _WIN32
 					_wrename
 #else
 					rename
@@ -708,7 +708,7 @@ struct MIDICollectionThreadedMerger
 						(inplaceFilename.c_str(), _SaveTo.c_str());
 
 				auto remove_r =
-#ifdef WINDOWS
+#ifdef _WIN32
 					_wrename
 #else
 					rename
@@ -767,7 +767,7 @@ struct MIDICollectionThreadedMerger
 			FinishedFlag.get() = true;
 			if (RemnantsRemove)
 			{
-#ifdef WINDOWS
+#ifdef _WIN32
 				_wremove((_SaveTo + L".I.mid").c_str());
 				_wremove((_SaveTo + L".R.mid").c_str());
 #else

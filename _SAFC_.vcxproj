@@ -165,7 +165,7 @@
     <ClCompile>
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <Optimization>Disabled</Optimization>
-      <PreprocessorDefinitions>__X64;;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>__X64;WIN32;;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>false</ConformanceMode>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
       <AdditionalUsingDirectories>
@@ -249,7 +249,7 @@
       <Optimization>MaxSpeed</Optimization>
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
-      <PreprocessorDefinitions>__X64;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>__X64;WIN32;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>false</ConformanceMode>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
       <InlineFunctionExpansion>AnySuitable</InlineFunctionExpansion>
@@ -290,6 +290,19 @@
     </ResourceCompile>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClInclude Include="src\core\bbb_ffio.h" />
+    <ClInclude Include="src\core\BS.h" />
+    <ClInclude Include="src\core\CAT.h" />
+    <ClInclude Include="src\core\FMC.h" />
+    <ClInclude Include="src\core\function_wrapper.h" />
+    <ClInclude Include="src\core\header_utils.h" />
+    <ClInclude Include="src\core\HTDBR.h" />
+    <ClInclude Include="src\core\MCTM.h" />
+    <ClInclude Include="src\core\PLC.h" />
+    <ClInclude Include="src\core\SAFC_IM.h" />
+    <ClInclude Include="src\core\SMIC.h" />
+    <ClInclude Include="src\core\SMRP.h" />
+    <ClInclude Include="src\core\SMRP2.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="externals\**\*.cpp">

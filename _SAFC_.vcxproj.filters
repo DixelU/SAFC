@@ -1,0 +1,64 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <ClCompile Include="externals\**\*.cpp" />
+    <ClCompile Include="externals\**\*.cpp" />
+    <ClCompile Include="externals\**\*.c" />
+    <ClCompile Include="externals\**\*.c" />
+    <ClCompile Include="src\main.cpp" />
+    <ClCompile Include="src\ui\ui.cpp" />
+    <ClCompile Include="src\ui_entry.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="resource\safc.rc" />
+  </ItemGroup>
+  <ItemGroup>
+    <Image Include="resource\safc.ico" />
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="core">
+      <UniqueIdentifier>{6b7b3ee3-fe55-46e9-ad9a-b859d6d14d58}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="src\core\bbb_ffio.h">
+      <Filter>core</Filter>
+    </ClInclude>
+    <ClInclude Include="src\core\BS.h">
+      <Filter>core</Filter>
+    </ClInclude>
+    <ClInclude Include="src\core\CAT.h">
+      <Filter>core</Filter>
+    </ClInclude>
+    <ClInclude Include="src\core\FMC.h">
+      <Filter>core</Filter>
+    </ClInclude>
+    <ClInclude Include="src\core\function_wrapper.h">
+      <Filter>core</Filter>
+    </ClInclude>
+    <ClInclude Include="src\core\header_utils.h">
+      <Filter>core</Filter>
+    </ClInclude>
+    <ClInclude Include="src\core\HTDBR.h">
+      <Filter>core</Filter>
+    </ClInclude>
+    <ClInclude Include="src\core\MCTM.h">
+      <Filter>core</Filter>
+    </ClInclude>
+    <ClInclude Include="src\core\PLC.h">
+      <Filter>core</Filter>
+    </ClInclude>
+    <ClInclude Include="src\core\SMIC.h">
+      <Filter>core</Filter>
+    </ClInclude>
+    <ClInclude Include="src\core\SMRP.h">
+      <Filter>core</Filter>
+    </ClInclude>
+    <ClInclude Include="src\core\SMRP2.h">
+      <Filter>core</Filter>
+    </ClInclude>
+    <ClInclude Include="src\core\SAFC_IM.h">
+      <Filter>core</Filter>
+    </ClInclude>
+  </ItemGroup>
+</Project>
