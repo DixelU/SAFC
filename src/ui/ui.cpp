@@ -55,12 +55,12 @@ void RenderMainWindow()
 				
 				if(!midi_filename.empty())
 				{
-				  log_info("Got file: '%s'", midi_filename.c_str());
-				  midi_list.emplace_back(midi_filename);
+					log_info("Got file: '%s'", midi_filename.c_str());
+					midi_list.emplace_back(midi_filename);
 				}
 				else
 				{
-				  log_info("Open canceled");
+					log_info("Open canceled");
 				}
 				log_info("add midi");
 			}
@@ -90,11 +90,11 @@ void RenderMainWindow()
 				
 				if(filename)
 				{
-				  log_info("save file: '%s'", filename);
+					log_info("save file: '%s'", filename);
 				}
 				else
 				{
-				  log_info("Open canceled");
+					log_info("Open canceled");
 				}
 			}
 			
