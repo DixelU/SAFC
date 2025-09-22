@@ -535,14 +535,21 @@ struct MIDICollectionThreadedMerger
 			file_output->seekp(10, std::ios::beg);
 			file_output->put((TrackCount.get()) >> 8);
 			file_output->put((TrackCount.get()) & 0xff);
-			//file_output->close();
-			fclose(fo_ptr);
+
+			if (fo_ptr)
+				fclose(fo_ptr);
+			else
+				file_output->flush();
+
 			for (auto& t : fiv)
 				delete t;
+
 			delete file_output;
 			printf("Inplace: finished\n");
 			FinishedFlag.get() = true;
-		}, inplace_merge_candidates, FinalPPQN, SaveTo, std::ref(IntermediateInplaceFlag), std::ref(IITrackCount)).detach();
+
+		},
+		inplace_merge_candidates, FinalPPQN, SaveTo, std::ref(IntermediateInplaceFlag), std::ref(IITrackCount)).detach();
 	}
 	void RegularMerge()
 	{
@@ -602,6 +609,7 @@ struct MIDICollectionThreadedMerger
 #else
 				(_SaveTo + ".R.mid", "wb");
 #endif
+
 			std_unicode_string filename = RMC.front().first->filename + RMC.front().first->postfix;
 			bbb_ffr file_input(filename.c_str());
 			file_output->rdbuf()->pubsetbuf((char*)buffer, buffer_size);
@@ -634,8 +642,10 @@ struct MIDICollectionThreadedMerger
 			file_output->put(TrackCount.get());
 			FinishedFlag.get() = true; /// Will this work?
 			file_output->flush();
-			//file_output->close();
-			fclose(fo_ptr);
+
+			if (fo_ptr)
+				fclose(fo_ptr);
+
 			delete[] buffer;
 			delete file_output;
 			}, regular_merge_candidates, FinalPPQN, SaveTo, std::ref(IntermediateRegularFlag), std::ref(IRTrackCount)).detach();
@@ -680,8 +690,10 @@ struct MIDICollectionThreadedMerger
 			{
 				IM->close();
 				RM->close();
-				//F.close();
-				fclose(fo_ptr);
+				F->flush();
+
+				if (fo_ptr)
+					fclose(fo_ptr);
 
 #ifdef _WIN32
 				auto inplaceFilename = _SaveTo + L".I.mid";
@@ -719,8 +731,11 @@ struct MIDICollectionThreadedMerger
 
 				delete IM;
 				delete RM;
+				delete F;
+
 				printf("Escaped last stage\n");
 				FinishedFlag.get() = true;
+
 				return;
 			}
 
@@ -759,7 +774,11 @@ struct MIDICollectionThreadedMerger
 
 			IM->close();
 			RM->close();
-			fclose(fo_ptr);
+			F->flush();
+
+			if (fo_ptr)
+				fclose(fo_ptr);
+
 			delete F;
 			delete IM;
 			delete RM;

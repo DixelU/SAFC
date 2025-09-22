@@ -2,37 +2,52 @@
 #ifndef BBB_FFIO
 #define BBB_FFIO
 
-#include <stdio.h>
+
 #ifdef _WIN32
-#include <fileapi.h>
+#include <fstream>
+#else
+#include <stdio.h>
 #endif
 
 #include <istream>
 #include <ostream>
 
+#ifdef _WIN32
 inline errno_t fopen_wrap(FILE* file,
-#ifdef _WIN32
 	const wchar_t* filename, const wchar_t* parameter)
-#else
-	const char* filename, const char* parameter)
-#endif
 {
-#ifdef _WIN32
-	return _wfopen_s(&file, filename, parameter);
-#else
-	file = fopen(filename, parameter);
-	return errno;
-#endif
+	return _wfopen_s(&file, filename, L"rb");
 }
 
+inline size_t fread_wrap(void* ptr, size_t size, size_t count, FILE* file)
+{
+	return _fread_nolock_s(ptr, size * count, size, count, file);
+}
+#else
+inline errno_t fopen_wrap(FILE* file,
+	const char* filename, const char* parameter)
+{
+	file = fopen(filename, parameter);
+	return errno;
+}
+
+inline size_t fread_wrap(void* ptr, size_t size, size_t count, FILE* file)
+{
+	return fread(ptr, size, count, file);
+}
+#endif
+
+// is only needed for MinGW/GCC 
 template<typename __inner_stream_type, decltype(std::ios_base::out) stream_io_type = std::ios_base::out>
 std::pair<__inner_stream_type*, FILE*> open_wide_stream(
-
 #ifdef _WIN32
 	std::wstring file, const wchar_t* parameter)
+{
+	__inner_stream_type* ostream = new std::ofstream(file, parameter);
+	return { ostream, nullptr }; // IN c++26 there will be native_handle() call, for now just return nullptr
+}
 #else
 	std::string file, const char* parameter)
-#endif
 {
 	FILE* c_file;
 	fopen_wrap(c_file, file.c_str(), parameter);
@@ -41,6 +56,7 @@ std::pair<__inner_stream_type*, FILE*> open_wide_stream(
 	
 	return {new __inner_stream_type(buffer), c_file};
 }
+#endif
 
 typedef struct byte_by_byte_fast_file_reader {
 private:
@@ -53,9 +69,12 @@ private:
 	bool is_eof;
 	bool next_chunk_is_unavailable;
 	const size_t true_buffer_size;
-	inline void __read_next_chunk() {
-		if (!next_chunk_is_unavailable) {
-			size_t new_buffer_len = fread(buffer, 1, buffer_size, file);
+
+	inline void __read_next_chunk()
+	{
+		if (!next_chunk_is_unavailable)
+		{
+			size_t new_buffer_len = fread_wrap(buffer, 1, buffer_size, file);
 			//printf("%lli\n", new_buffer_len);
 			if (new_buffer_len != buffer_size) {
 				buffer_size = new_buffer_len;
@@ -68,6 +87,7 @@ private:
 			is_eof = true;
 		}
 	}
+
 	inline unsigned char __get()
 	{
 		unsigned char buf_ch = buffer[inner_buffer_pos];
@@ -75,6 +95,7 @@ private:
 		file_pos++;
 		return buf_ch;
 	}
+
 	inline void zero_buffer()
 	{
 		auto end = buffer + buffer_size;
@@ -85,6 +106,7 @@ private:
 			current++;
 		}
 	}
+
 public:
 	byte_by_byte_fast_file_reader(
 #ifdef _WIN32
@@ -120,6 +142,7 @@ public:
 			__read_next_chunk();
 		}
 	}
+
 	~byte_by_byte_fast_file_reader()
 	{
 		if (is_open)
@@ -127,6 +150,7 @@ public:
 		delete[] buffer;
 		buffer = nullptr;
 	}
+
 	inline void reopen_next_file(
 #ifdef _WIN32
 		const wchar_t* filename)
@@ -158,6 +182,7 @@ public:
 			__read_next_chunk();
 		}
 	}
+
 	//rdbuf analogue
 	inline void put_into_ostream(std::ostream& out)
 	{
@@ -170,6 +195,7 @@ public:
 		}
 		close();
 	}
+
 	inline void seekg(unsigned long long int abs_pos)
 	{
 		auto chunk_begining = file_pos - inner_buffer_pos;
@@ -191,6 +217,7 @@ public:
 			__read_next_chunk();
 		}
 	}
+
 	inline unsigned char get()
 	{
 		if (is_open && !is_eof)
@@ -202,6 +229,7 @@ public:
 		else
 			return 0;
 	}
+
 	inline void close()
 	{
 		if (is_open)
@@ -209,18 +237,22 @@ public:
 		is_eof = true;
 		is_open = false;
 	}
+
 	inline signed long long int tellg() const
 	{
 		return file_pos;
 	}
+
 	inline bool good() const
 	{
 		return is_open && !is_eof; // hot smh
 	}
+
 	inline bool eof() const
 	{
 		return is_eof;
 	}
+
 } bbb_ffr;
 
 #endif
