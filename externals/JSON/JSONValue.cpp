@@ -676,7 +676,7 @@ bool JSONValue::HasChild(std::size_t index) const
  * @access public
  *
  * @return JSONValue* Returns JSONValue at the given index or NULL
- *                    if it doesn't exist.
+ *					if it doesn't exist.
  */
 JSONValue *JSONValue::Child(std::size_t index)
 {
@@ -717,7 +717,7 @@ bool JSONValue::HasChild(const wchar_t* name) const
  * @access public
  *
  * @return JSONValue* Returns JSONValue for the given key in the object
- *                    or NULL if it doesn't exist.
+ *					or NULL if it doesn't exist.
  */
 JSONValue* JSONValue::Child(const wchar_t* name)
 {

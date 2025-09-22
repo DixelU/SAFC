@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//	 http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -22,8 +22,8 @@
 //
 // BEGIN INCORRECT EXAMPLE
 //   for (auto i = safe_set->begin(); i != safe_set->end(); ++i) {
-//     const T &value = *i;  // DO NOT DO THIS
-//     [code that modifies safe_set and uses value];
+//	 const T &value = *i;  // DO NOT DO THIS
+//	 [code that modifies safe_set and uses value];
 //   }
 // END INCORRECT EXAMPLE
 
@@ -41,9 +41,9 @@ namespace btree {
 
 // The safe_btree_set class is needed mainly for its constructors.
 template <typename Key,
-          typename Compare = std::less<Key>,
-          typename Alloc = std::allocator<Key>,
-          int TargetNodeSize = 256>
+		  typename Compare = std::less<Key>,
+		  typename Alloc = std::allocator<Key>,
+		  int TargetNodeSize = 256>
 class safe_btree_set : public btree_unique_container<
   safe_btree<btree_set_params<Key, Compare, Alloc, TargetNodeSize> > > {
 
@@ -59,27 +59,27 @@ class safe_btree_set : public btree_unique_container<
  public:
   // Default constructor.
   safe_btree_set(const key_compare &comp = key_compare(),
-                 const allocator_type &alloc = allocator_type())
-      : super_type(comp, alloc) {
+				 const allocator_type &alloc = allocator_type())
+	  : super_type(comp, alloc) {
   }
 
   // Copy constructor.
   safe_btree_set(const self_type &x)
-      : super_type(x) {
+	  : super_type(x) {
   }
 
   // Range constructor.
   template <class InputIterator>
   safe_btree_set(InputIterator b, InputIterator e,
-                 const key_compare &comp = key_compare(),
-                 const allocator_type &alloc = allocator_type())
-      : super_type(b, e, comp, alloc) {
+				 const key_compare &comp = key_compare(),
+				 const allocator_type &alloc = allocator_type())
+	  : super_type(b, e, comp, alloc) {
   }
 };
 
 template <typename K, typename C, typename A, int N>
 inline void swap(safe_btree_set<K, C, A, N> &x,
-                 safe_btree_set<K, C, A, N> &y) {
+				 safe_btree_set<K, C, A, N> &y) {
   x.swap(y);
 }
 

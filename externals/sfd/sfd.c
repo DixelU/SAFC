@@ -43,7 +43,7 @@ static int next_filter(char *dst, const char **p) {
 
   *p += strspn(*p, "|");
   if (**p == '\0') {
-    return 0;
+	return 0;
   }
 
   len = strcspn(*p, "|");
@@ -75,11 +75,11 @@ static int find_main_window_callback(HWND handle, LPARAM lParam) {
   unsigned long process_id = 0;
   GetWindowThreadProcessId(handle, &process_id);
   if (info->process_id == process_id) {
-    info->handle_first = handle;
-    if (GetWindow(handle, GW_OWNER) == 0 && IsWindowVisible(handle)) {
-      info->handle_root = handle;
-      return 0;
-    }
+	info->handle_first = handle;
+	if (GetWindow(handle, GW_OWNER) == 0 && IsWindowVisible(handle)) {
+	  info->handle_root = handle;
+	  return 0;
+	}
   }
   return 1;
 }
@@ -87,7 +87,7 @@ static int find_main_window_callback(HWND handle, LPARAM lParam) {
 
 static HWND find_main_window() {
   FindMainWindowInfo info = {
-    .process_id = GetCurrentProcessId()
+	.process_id = GetCurrentProcessId()
   };
   EnumWindows(find_main_window_callback, (LPARAM)&info);
   return info.handle_root;
@@ -102,17 +102,17 @@ static const char* make_filter_str(sfd_Options *opt) {
   n = 0;
 
   if (opt->filter) {
-    const char *p;
-    char b[32];
-    const char *name = opt->filter_name ? opt->filter_name : opt->filter;
-    n += sprintf(buf + n, "%s", name) + 1;
+	const char *p;
+	char b[32];
+	const char *name = opt->filter_name ? opt->filter_name : opt->filter;
+	n += sprintf(buf + n, "%s", name) + 1;
 
-    p = opt->filter;
-    while (next_filter(b, &p)) {
-      n += sprintf(buf + n, "%s;", b);
-    }
+	p = opt->filter;
+	while (next_filter(b, &p)) {
+	  n += sprintf(buf + n, "%s;", b);
+	}
 
-    buf[++n] = '\0';
+	buf[++n] = '\0';
   }
 
   n += sprintf(buf + n, "All Files") + 1;
@@ -128,16 +128,16 @@ static void init_ofn(OPENFILENAME *ofn, sfd_Options *opt) {
   result_buf[0] = '\0';
 
   memset(ofn, 0, sizeof(*ofn));
-  ofn->hwndOwner        = find_main_window();
-  ofn->lStructSize      = sizeof(*ofn);
-  ofn->lpstrFilter      = make_filter_str(opt);
-  ofn->nFilterIndex     = 1;
-  ofn->lpstrFile        = result_buf;
-  ofn->Flags            = OFN_HIDEREADONLY | OFN_OVERWRITEPROMPT;
-  ofn->nMaxFile         = sizeof(result_buf) - 1;
+  ofn->hwndOwner		= find_main_window();
+  ofn->lStructSize	  = sizeof(*ofn);
+  ofn->lpstrFilter	  = make_filter_str(opt);
+  ofn->nFilterIndex	 = 1;
+  ofn->lpstrFile		= result_buf;
+  ofn->Flags			= OFN_HIDEREADONLY | OFN_OVERWRITEPROMPT;
+  ofn->nMaxFile		 = sizeof(result_buf) - 1;
   ofn->lpstrInitialDir  = opt->path;
-  ofn->lpstrTitle       = opt->title;
-  ofn->lpstrDefExt      = opt->extension;
+  ofn->lpstrTitle	   = opt->title;
+  ofn->lpstrDefExt	  = opt->extension;
 }
 
 
@@ -182,52 +182,52 @@ static const char* file_dialog(sfd_Options *opt, int save) {
 
   fp = popen("zenity --version", "r");
   if (fp == NULL || pclose(fp) != 0) {
-    last_error = "could not open zenity";
-    return NULL;
+	last_error = "could not open zenity";
+	return NULL;
   }
 
 
   n = sprintf(buf, "zenity --file-selection");
 
   if (save) {
-    n += sprintf(buf + n, " --save --confirm-overwrite");
+	n += sprintf(buf + n, " --save --confirm-overwrite");
   }
 
   if (opt->title) {
-    title = opt->title;
+	title = opt->title;
   } else {
-    title = save ? "Save File" : "Open File";
+	title = save ? "Save File" : "Open File";
   }
 
   n += sprintf(buf + n, " --title=\"%s\"", title);
 
   if (opt->path && opt->path[0] != '\0') {
-    n += sprintf(buf + n, " --filename=\"");
-    p = realpath(opt->path, buf + n);
-    if (p == NULL) {
-      last_error = "call to realpath() failed";
-      return NULL;
-    }
-    n += strlen(buf + n);
-    n += sprintf(buf + n, "/\"");
+	n += sprintf(buf + n, " --filename=\"");
+	p = realpath(opt->path, buf + n);
+	if (p == NULL) {
+	  last_error = "call to realpath() failed";
+	  return NULL;
+	}
+	n += strlen(buf + n);
+	n += sprintf(buf + n, "/\"");
   }
 
   if (opt->filter) {
-    char b[64];
-    const char *p;
-    n += sprintf(buf + n, " --file-filter=\"");
+	char b[64];
+	const char *p;
+	n += sprintf(buf + n, " --file-filter=\"");
 
-    if (opt->filter_name) {
-      n += sprintf(buf + n, "%s | ", opt->filter_name);
-    }
+	if (opt->filter_name) {
+	  n += sprintf(buf + n, "%s | ", opt->filter_name);
+	}
 
-    p = opt->filter;
-    while (next_filter(b, &p)) {
-      //n += sprintf(buf + n, "\"%s\" ", b); // Prevents the file dialog from showing up. Don't nest file extensions in double quotes
-      n += sprintf(buf + n, " %s", b);
-    }
+	p = opt->filter;
+	while (next_filter(b, &p)) {
+	  //n += sprintf(buf + n, "\"%s\" ", b); // Prevents the file dialog from showing up. Don't nest file extensions in double quotes
+	  n += sprintf(buf + n, " %s", b);
+	}
 
-    n += sprintf(buf + n, "\"");
+	n += sprintf(buf + n, "\"");
   }
 
   n += sprintf(buf + n, " --file-filter=\"All Files | *\"");
@@ -236,11 +236,11 @@ static const char* file_dialog(sfd_Options *opt, int save) {
   pclose(fp);
 
   if (len > 0) {
-    result_buf[len - 1] = '\0';
-    if (save && opt->extension && !strstr(result_buf, opt->extension)) {
-      sprintf(&result_buf[len - 1], ".%s", opt->extension);
-    }
-    return result_buf;
+	result_buf[len - 1] = '\0';
+	if (save && opt->extension && !strstr(result_buf, opt->extension)) {
+	  sprintf(&result_buf[len - 1], ".%s", opt->extension);
+	}
+	return result_buf;
   }
   
 

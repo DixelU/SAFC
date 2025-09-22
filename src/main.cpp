@@ -11,11 +11,11 @@
 
 int main(int argc, char* argv[])
 {
-    std::cout << "Hellooo From SAFC V2 :D\n";
+	std::cout << "Hellooo From SAFC V2 :D\n";
 #ifdef DEV_TEST
-    // Test your stuff here
+	// Test your stuff here
 #else
-    ui_entry();
+	ui_entry();
 #endif
-    return 0;
+	return 0;
 }
