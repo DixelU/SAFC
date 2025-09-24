@@ -1,6 +1,5 @@
 #include <iostream>
 
-
 #include "ui_entry.hpp"
 
 #ifdef DEV_TEST

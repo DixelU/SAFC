@@ -897,7 +897,7 @@ struct single_midi_processor_2
 	inline static constexpr int gapped_size_legnth = 2 * (1) + 1;
 
 	template<bool ready_for_write = false>
-	FORCEDINLINE inline static typename std::enable_if<!ready_for_write, std::ptrdiff_t>::type expected_size(const data_iterator& cur)
+	FORCEDINLINE static typename std::enable_if<!ready_for_write, std::ptrdiff_t>::type expected_size(const data_iterator& cur)
 	{
 		const auto& type = cur[event_type];
 		auto size = expected_size<ready_for_write>(type);
@@ -912,7 +912,7 @@ struct single_midi_processor_2
 	}
 
 	template<bool ready_for_write = false>
-	FORCEDINLINE inline static typename std::enable_if<ready_for_write, std::array<std::ptrdiff_t, gapped_size_legnth>>::type
+	FORCEDINLINE static typename std::enable_if<ready_for_write, std::array<std::ptrdiff_t, gapped_size_legnth>>::type
 		expected_size(const data_iterator& cur)
 	{
 		const auto& type = cur[event_type];

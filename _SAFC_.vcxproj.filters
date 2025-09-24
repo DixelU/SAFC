@@ -10,6 +10,8 @@
     <ClCompile Include="src\ui_entry.cpp" />
     <ClCompile Include="externals\**\*.cpp" />
     <ClCompile Include="externals\**\*.c" />
+    <ClCompile Include="externals\**\*.cpp" />
+    <ClCompile Include="externals\**\*.c" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="resource\safc.rc" />
@@ -62,5 +64,8 @@
     <ClInclude Include="src\core\SAFC_IM.h">
       <Filter>core</Filter>
     </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="src\xmake.lua" />
   </ItemGroup>
 </Project>
