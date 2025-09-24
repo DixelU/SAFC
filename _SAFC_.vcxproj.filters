@@ -8,6 +8,8 @@
     <ClCompile Include="src\main.cpp" />
     <ClCompile Include="src\ui\ui.cpp" />
     <ClCompile Include="src\ui_entry.cpp" />
+    <ClCompile Include="externals\**\*.cpp" />
+    <ClCompile Include="externals\**\*.c" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="resource\safc.rc" />

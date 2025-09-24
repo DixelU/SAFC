@@ -2,8 +2,7 @@
 #ifndef BBB_FFIO
 #define BBB_FFIO
 
-
-#ifdef _WIN32
+#ifdef _MSC_VER
 #include <fstream>
 #else
 #include <stdio.h>
@@ -12,19 +11,22 @@
 #include <istream>
 #include <ostream>
 
-#ifdef _WIN32
-inline errno_t fopen_wrap(FILE* file,
+#ifdef _MSC_VER
+
+inline errno_t fopen_wrap(FILE* file_ptr,
 	const wchar_t* filename, const wchar_t* parameter)
 {
-	return _wfopen_s(&file, filename, L"rb");
+	return _wfopen_s(&file_ptr, filename, L"rb");
 }
 
-inline size_t fread_wrap(void* ptr, size_t size, size_t count, FILE* file)
+inline size_t fread_wrap(void* ptr, size_t size, size_t count, FILE* filename)
 {
-	return _fread_nolock_s(ptr, size * count, size, count, file);
+	return _fread_nolock_s(ptr, size * count, size, count, filename);
 }
+
 #else
-inline errno_t fopen_wrap(FILE* file,
+
+inline decltype(errno) fopen_wrap(FILE* file,
 	const char* filename, const char* parameter)
 {
 	file = fopen(filename, parameter);
@@ -35,18 +37,35 @@ inline size_t fread_wrap(void* ptr, size_t size, size_t count, FILE* file)
 {
 	return fread(ptr, size, count, file);
 }
+
 #endif
 
 // is only needed for MinGW/GCC 
+#ifdef _MSC_VER
+
 template<typename __inner_stream_type, decltype(std::ios_base::out) stream_io_type = std::ios_base::out>
-std::pair<__inner_stream_type*, FILE*> open_wide_stream(
-#ifdef _WIN32
-	std::wstring file, const wchar_t* parameter)
+std::pair<__inner_stream_type*, FILE*> open_wide_stream(std::wstring filename, const wchar_t* parameter);
+
+template<>
+std::pair<std::ostream*, FILE*> open_wide_stream<std::ostream, std::ios_base::out>(
+	std::wstring filename, const wchar_t* parameter)
 {
-	__inner_stream_type* ostream = new std::ofstream(file, parameter);
+	std::ostream* ostream = new std::ofstream(filename, std::ios_base::out | std::ios_base::binary);
 	return { ostream, nullptr }; // IN c++26 there will be native_handle() call, for now just return nullptr
 }
+
+template<>
+std::pair<std::istream*, FILE*> open_wide_stream<std::istream, std::ios_base::in>(
+	std::wstring filename, const wchar_t* parameter)
+{
+	std::istream* istream = new std::ifstream(filename, std::ios_base::in | std::ios_base::binary);
+	return { istream, nullptr }; // IN c++26 there will be native_handle() call, for now just return nullptr
+}
+
 #else
+
+template<typename __inner_stream_type, decltype(std::ios_base::out) stream_io_type = std::ios_base::out>
+std::pair<__inner_stream_type*, FILE*> open_wide_stream(
 	std::string file, const char* parameter)
 {
 	FILE* c_file;
@@ -56,11 +75,13 @@ std::pair<__inner_stream_type*, FILE*> open_wide_stream(
 	
 	return {new __inner_stream_type(buffer), c_file};
 }
+
 #endif
 
-typedef struct byte_by_byte_fast_file_reader {
+typedef struct byte_by_byte_fast_file_reader
+{
 private:
-	FILE* file;
+	FILE* file_ptr;
 	unsigned char* buffer;
 	size_t buffer_size;
 	size_t inner_buffer_pos;
@@ -74,7 +95,7 @@ private:
 	{
 		if (!next_chunk_is_unavailable)
 		{
-			size_t new_buffer_len = fread_wrap(buffer, 1, buffer_size, file);
+			size_t new_buffer_len = fread_wrap(buffer, 1, buffer_size, file_ptr);
 			//printf("%lli\n", new_buffer_len);
 			if (new_buffer_len != buffer_size) {
 				buffer_size = new_buffer_len;
@@ -109,7 +130,7 @@ private:
 
 public:
 	byte_by_byte_fast_file_reader(
-#ifdef _WIN32
+#ifdef _MSC_VER
 		const wchar_t* filename,
 #else
 		const char* filename,
@@ -118,14 +139,14 @@ public:
 			true_buffer_size(default_buffer_size)
 	{
 		auto err_no =
-#ifdef _WIN32
-			fopen_wrap(file, filename, L"rb");
+#ifdef _MSC_VER
+			fopen_wrap(file_ptr, filename, L"rb");
 #else
-			fopen_wrap(file, filename, "rb");
+			fopen_wrap(file_ptr, filename, "rb");
 #endif
 
 		is_open = !(err_no);
-		next_chunk_is_unavailable = (is_eof = (file) ? feof(file) : true);
+		next_chunk_is_unavailable = (is_eof = (filename) ? feof(file_ptr) : true);
 		if (err_no || is_eof)
 		{
 			file_pos = 0;
@@ -146,13 +167,13 @@ public:
 	~byte_by_byte_fast_file_reader()
 	{
 		if (is_open)
-			fclose(file);
+			fclose(file_ptr);
 		delete[] buffer;
 		buffer = nullptr;
 	}
 
 	inline void reopen_next_file(
-#ifdef _WIN32
+#ifdef _MSC_VER
 		const wchar_t* filename)
 #else
 		const char* filename)
@@ -160,14 +181,14 @@ public:
 	{
 		close();
 		auto err_no =
-#ifdef _WIN32
-			fopen_wrap(file, filename, L"rb");
+#ifdef _MSC_VER
+			fopen_wrap(file_ptr, filename, L"rb");
 #else
-			fopen_wrap(file, filename, "rb");
+			fopen_wrap(file_ptr, filename, "rb");
 #endif
 
 		is_open = !(err_no);
-		next_chunk_is_unavailable = (is_eof = (file) ? feof(file) : true);
+		next_chunk_is_unavailable = (is_eof = (filename) ? feof(file_ptr) : true);
 		if ((err_no || is_eof) && buffer_size)
 		{
 			file_pos = 0;
@@ -207,12 +228,12 @@ public:
 		}
 		else
 		{
-#ifdef _WIN32
+#ifdef _MSC_VER
 			_fseeki64_nolock
 #else
 			fseeko64
 #endif
-				(file, file_pos = abs_pos, SEEK_SET);
+				(file_ptr, file_pos = abs_pos, SEEK_SET);
 
 			__read_next_chunk();
 		}
@@ -233,7 +254,7 @@ public:
 	inline void close()
 	{
 		if (is_open)
-			fclose(file);
+			fclose(file_ptr);
 		is_eof = true;
 		is_open = false;
 	}

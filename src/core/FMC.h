@@ -12,67 +12,76 @@
 
 struct FastMIDIChecker
 {
-	std_unicode_string File;
-	bool IsAcssessable, IsMIDI;
-	std::uint16_t PPQN, ExpectedTrackNumber;
-	std::uint64_t FileSize;
-	FastMIDIChecker(std_unicode_string File)
+	std_unicode_string filename;
+	bool is_accessible, is_midi;
+	std::uint16_t ppqn, expected_track_number;
+	std::uint64_t file_size;
+
+	FastMIDIChecker(std_unicode_string filename)
 	{
-		this->File = File;
-		auto [f, fo_ptr] = open_wide_stream<std::istream, std::ios::in>(File,
-#ifdef _WIN32
+		this->file_size = this->ppqn = this->expected_track_number = this->is_midi = 0;
+		this->filename = std::move(filename);
+
+		auto [f, fo_ptr] = open_wide_stream<std::istream, std::ios::in>(this->filename,
+#ifdef _MSC_VER
 			L"rb");
 #else
 			"rb");
 #endif
-		if (*f) IsAcssessable = 1;
-		else IsAcssessable = 0;
-		FileSize = PPQN = ExpectedTrackNumber = IsMIDI = 0;
+
+
+		if (*f) 
+			this->is_accessible = 1;
+		else 
+			this->is_accessible = 0;
+
 		if (!fo_ptr)
 			fclose(fo_ptr);
 		delete f;
-		Collect();
+		collect();
 	}
 
-	void Collect() {
-		auto [f, fo_ptr] = open_wide_stream<std::istream, std::ios::in>(File,
-#ifdef _WIN32
+	void collect()
+	{
+		auto [f, fo_ptr] = open_wide_stream<std::istream, std::ios::in>(filename,
+#ifdef _MSC_VER
 			L"rb");
 #else
 			"rb");
 #endif
-		std::uint32_t MTHD = 0;
+
+		std::uint32_t header = 0;
 
 		for(int i = 0; i < 4; ++i)
-			MTHD = (MTHD << 8) | (f->get());
+			header = (header << 8) | (f->get());
 
-		if (MTHD == MThd && f->good())
+		if (header == MThd && f->good())
 		{
-			IsMIDI = 1;
+			is_midi = 1;
 			f->seekg(10, std::ios::beg);
-			ExpectedTrackNumber = (ExpectedTrackNumber << 8) | (f->get());
-			ExpectedTrackNumber = (ExpectedTrackNumber << 8) | (f->get());
-			PPQN = (PPQN << 8) | (f->get());
-			PPQN = (PPQN << 8) | (f->get());
+			expected_track_number = (expected_track_number << 8) | (f->get());
+			expected_track_number = (expected_track_number << 8) | (f->get());
+			ppqn = (ppqn << 8) | (f->get());
+			ppqn = (ppqn << 8) | (f->get());
 
 			if (!fo_ptr)
 				fclose(fo_ptr);
 
 			std::error_code ec;
-			auto size = std::filesystem::file_size(File, ec);
-			if (ec) {
-	            std::cout << ec.message() << std::endl;
-	        }
-	        else {
-	        	std::uintmax_t t;
-	        	std::cout << size << std::endl;
-	        	std::cout << (FileSize = size) << std::endl;
+			auto size = std::filesystem::file_size(filename, ec);
+			if (ec)
+				std::cout << ec.message() << std::endl;
+			else
+			{
+				std::uintmax_t t;
+				std::cout << size << std::endl;
+				std::cout << (file_size = size) << std::endl;
 			}
 			//cout << FileSize;
 		}
 		else
 		{
-			IsMIDI = 0;
+			is_midi = 0;
 			ThrowAlert_Error("Error accured while getting the MIDI file info!");
 			if (!fo_ptr)
 				fclose(fo_ptr);

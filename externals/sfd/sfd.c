@@ -59,7 +59,7 @@ static int next_filter(char *dst, const char **p) {
 ** Windows
 *******************************************************************************/
 
-#ifdef _WIN32
+#ifdef _MSC_VER
 
 #include <windows.h>
 

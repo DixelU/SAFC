@@ -1827,7 +1827,7 @@ struct single_midi_processor_2
 
 		bbb_ffr file_input(data.filename.c_str());
 		auto [file_output_ptr, fo_ptr] = open_wide_stream<std::ostream>(data.filename + data.postfix,
-#ifdef _WIN32
+#ifdef _MSC_VER
 			L"wb");
 #else
 			"wb");

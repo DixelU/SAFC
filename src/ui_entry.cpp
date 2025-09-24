@@ -3,12 +3,10 @@
 #include <GL/gl.h>
 #include <GLFW/glfw3.h>
 
-
-
 #include "imgui.h"
+
+#ifndef _MSC_VER
 #include <imgui_impl_opengl3.h>
-
-
 
 #ifdef __linux__
 	#include <imgui_impl_glfw.h>
@@ -17,25 +15,14 @@
 #if defined(_WIN32) || defined(_WIN64)
 	#include <imgui_impl_win32.h>
 #endif
+#endif
 
 #include <log_c/log.h>
-
-
-
-
-
-
-
-
 
 #include "ui_entry.hpp"
 
 #include "ui/fonts.h"
 #include "ui/ui.hpp"
-
-
-
-
 
 void SetDefaultTheme()
 {

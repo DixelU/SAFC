@@ -2,16 +2,15 @@
 #ifndef SAF_SMIC
 #define SAF_SMIC
 
-//#include <Windows.h>
 #include <string>
 #include <array>
 
 #include "bbb_ffio.h"
 #include <btree/btree_map.h>
 
-#define MTrk 1297379947
-#define MThd 1297377380
-#define STRICT_WARNINGS true
+constexpr uint32_t MTrk = 1297379947;
+constexpr uint32_t MThd = 1297377380;
+constexpr bool STRICT_WARNINGS = true;
 
 struct SingleMIDIInfoCollector 
 {

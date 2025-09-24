@@ -253,7 +253,7 @@ struct MIDICollectionThreadedMerger
 			[](mpd_t::value_type& el) { return el.first->settings.details.inplace_mergable; });
 		
 		IITrackCount = 0;
-		std::thread([](mpd_t IMC, std::uint16_t PPQN, std_unicode_string _SaveTo,
+		std::thread([](mpd_t IMC, std::uint16_t ppqn, std_unicode_string _SaveTo,
 				std::reference_wrapper<std::atomic_bool> FinishedFlag,
 				std::reference_wrapper<std::atomic_uint64_t> TrackCount)
 		{
@@ -277,7 +277,7 @@ struct MIDICollectionThreadedMerger
 
 			bbb_ffr* fi;
 			auto [file_output, fo_ptr] = open_wide_stream<std::ostream>
-#ifdef _WIN32
+#ifdef _MSC_VER
 				(_SaveTo + L".I.mid", L"wb");
 #else
 				(_SaveTo + ".I.mid", "wb");
@@ -288,14 +288,15 @@ struct MIDICollectionThreadedMerger
 				fi = new bbb_ffr((Y->first->filename + Y->first->postfix).c_str());///
 				for (int i = 0; i < 14; i++)
 					fi->get();
+
 				DecayingDeltaTimes.push_back(0);
 				fiv.push_back(fi);
 			}
 
 			file_output->put(TrackCount.get() >> 8);
 			file_output->put(TrackCount.get());
-			file_output->put(PPQN >> 8);
-			file_output->put(PPQN);
+			file_output->put(ppqn >> 8);
+			file_output->put(ppqn);
 
 			while (ActiveStreamFlag) 
 			{
@@ -524,8 +525,9 @@ struct MIDICollectionThreadedMerger
 			{
 				pfiv.close();
 				auto& imc_i = IMC[i];
+
 				if (imc_i.first->settings.proc_details.remove_remnants)
-#ifdef _WIN32
+#ifdef _MSC_VER
 					_wremove
 #else
 					remove
@@ -564,21 +566,21 @@ struct MIDICollectionThreadedMerger
 				regular_merge_candidates.front().first->filename + 
 				regular_merge_candidates.front().first->postfix;
 			auto save_to_with_postfix = SaveTo +
-#ifdef _WIN32
+#ifdef _MSC_VER
 				L".R.mid";
 #else
 				".R.mid";
 #endif
 
 			auto remove_functor =
-#ifdef _WIN32
+#ifdef _MSC_VER
 					_wremove;
 #else
 					remove;
 #endif
 
 			auto rename_functor =
-#ifdef _WIN32
+#ifdef _MSC_VER
 					_wrename;
 #else
 					rename;
@@ -592,7 +594,7 @@ struct MIDICollectionThreadedMerger
 		}
 		else
 		{
-		std::thread([](mpd_t RMC, std::uint16_t PPQN, std_unicode_string _SaveTo,
+		std::thread([](mpd_t RMC, std::uint16_t ppqn, std_unicode_string _SaveTo,
 			std::reference_wrapper<std::atomic_bool> FinishedFlag, std::reference_wrapper<std::atomic_uint64_t> TrackCount)
 		{
 			if (RMC.empty())
@@ -604,7 +606,7 @@ struct MIDICollectionThreadedMerger
 			const size_t buffer_size = 20000000;
 			std::uint8_t* buffer = new std::uint8_t[buffer_size];
 			auto [file_output, fo_ptr] = open_wide_stream<std::ostream>
-#ifdef _WIN32
+#ifdef _MSC_VER
 				(_SaveTo + L".R.mid", L"wb");
 #else
 				(_SaveTo + ".R.mid", "wb");
@@ -616,8 +618,8 @@ struct MIDICollectionThreadedMerger
 			*file_output << "MThd" << '\0' << '\0' << '\0' << (char)6 << '\0' << (char)1;
 			file_output->put(0);
 			file_output->put(0);
-			file_output->put(PPQN >> 8);
-			file_output->put(PPQN);
+			file_output->put(ppqn >> 8);
+			file_output->put(ppqn);
 			for (auto Y = RMC.begin(); Y != RMC.end(); Y++)
 			{
 				filename = Y->first->filename + Y->first->postfix;
@@ -630,7 +632,7 @@ struct MIDICollectionThreadedMerger
 				int t;
 				if (Y->first->settings.proc_details.remove_remnants)
 					t =
-#ifdef _WIN32
+#ifdef _MSC_VER
 					_wremove
 #else
 					remove
@@ -663,7 +665,7 @@ struct MIDICollectionThreadedMerger
 		std::thread([this](std::reference_wrapper<std::atomic_bool> FinishedFlag, std_unicode_string _SaveTo)
 		{
 			bbb_ffr
-#ifdef _WIN32
+#ifdef _MSC_VER
 				*IM = new bbb_ffr((_SaveTo + L".I.mid").c_str()),
 				*RM = new bbb_ffr((_SaveTo + L".R.mid").c_str());
 #else
@@ -671,7 +673,7 @@ struct MIDICollectionThreadedMerger
 				*RM = new bbb_ffr((_SaveTo + ".R.mid").c_str());
 #endif
 			auto [F, fo_ptr] = open_wide_stream<std::ostream>
-#ifdef _WIN32
+#ifdef _MSC_VER
 						(_SaveTo, L"wb");
 #else
 						(_SaveTo, "wb");
@@ -695,7 +697,7 @@ struct MIDICollectionThreadedMerger
 				if (fo_ptr)
 					fclose(fo_ptr);
 
-#ifdef _WIN32
+#ifdef _MSC_VER
 				auto inplaceFilename = _SaveTo + L".I.mid";
 				auto regularFilename = _SaveTo + L".R.mid";
 #else
@@ -704,7 +706,7 @@ struct MIDICollectionThreadedMerger
 #endif
 
 				auto remove_orig =
-#ifdef _WIN32
+#ifdef _MSC_VER
 					_wremove
 #else
 					remove
@@ -712,7 +714,7 @@ struct MIDICollectionThreadedMerger
 				 		(_SaveTo.c_str());
 
 				auto remove_i =
-#ifdef _WIN32
+#ifdef _MSC_VER
 					_wrename
 #else
 					rename
@@ -720,7 +722,7 @@ struct MIDICollectionThreadedMerger
 						(inplaceFilename.c_str(), _SaveTo.c_str());
 
 				auto remove_r =
-#ifdef _WIN32
+#ifdef _MSC_VER
 					_wrename
 #else
 					rename
@@ -786,7 +788,7 @@ struct MIDICollectionThreadedMerger
 			FinishedFlag.get() = true;
 			if (RemnantsRemove)
 			{
-#ifdef _WIN32
+#ifdef _MSC_VER
 				_wremove((_SaveTo + L".I.mid").c_str());
 				_wremove((_SaveTo + L".R.mid").c_str());
 #else
