@@ -80,7 +80,7 @@ static void stdout_callback(log_Event *ev)
 #ifndef LOGC__STDOUT_NO_FILEINFO
 	fprintf(
 		ev->stream, "%s:%d: ",
-		ev->filename, ev->line);
+		ev->file, ev->line);
 #endif
 #endif
 	vfprintf(ev->stream, ev->fmt, ev->ap);
@@ -99,7 +99,7 @@ static void file_callback(log_Event *ev)
 #endif
 	fprintf(
 		ev->stream, "%-5s %s:%d: ",
-		level_strings[ev->level], ev->filename, ev->line);
+		level_strings[ev->level], ev->file, ev->line);
 	vfprintf(ev->stream, ev->fmt, ev->ap);
 	fprintf(ev->stream, "\n");
 	fflush(ev->stream);
@@ -167,12 +167,12 @@ static void init_event(log_Event *ev, void *stream)
 	ev->stream = stream;
 }
 
-void log_log(log_LogLevel level, const char *filename, int line, const char *fmt, ...)
+void log_log(log_LogLevel level, const char *file, int line, const char *fmt, ...)
 {
 	// Make an event struct from the specified data
 	log_Event ev = {
 		.fmt = fmt,
-		.filename = filename,
+		.file = file,
 		.line = line,
 		.level = level,
 	};

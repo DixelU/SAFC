@@ -36,7 +36,7 @@ typedef struct
 {
 	va_list ap;		 /// @var Variable arguments sent to the log_log functions
 	const char *fmt;	/// @var printf-style format string
-	const char *filename;   /// @var The file in which the log event was raised
+	const char *file;   /// @var The file in which the log event was raised
 	time_t time;		/// @var Time of the log event
 	void *stream;	   /// @var Stream to log to
 	int line;		   /// @var Line in the source file where the log event was raised
@@ -115,7 +115,7 @@ int log_add_fp(void *fp, log_LogLevel level);
 /// @param line	 Line in the file where the log is raised
 /// @param fmt	  printf-style format
 /// @param va	   Variable arguments
-void log_log(log_LogLevel level, const char *filename, int line, const char *fmt, ...);
+void log_log(log_LogLevel level, const char *file, int line, const char *fmt, ...);
 
 #ifdef __cplusplus
 }
