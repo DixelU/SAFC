@@ -1,5 +1,8 @@
 #include <stdlib.h>
+
+#ifdef _MSC_VER
 #include <Windows.h> // something somewhere defines WIN32_LEAN_AND_MEAN
+#endif
 
 #include <GL/gl.h>
 #include <GLFW/glfw3.h>
