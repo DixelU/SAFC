@@ -6,7 +6,6 @@
 #include <vector>
 #include <mutex>
 
-// uh ??? 
 #define IM_CLAMP(V, MN, MX) ((V) < (MN) ? (MN) : (V) > (MX) ? (MX) : (V))
 
 inline std::vector<midi_file_meta> global_midi_list;
@@ -30,7 +29,7 @@ inline bool cb_allow_sysex_events            = false;
 inline int thread_count = 1;
 
 inline bool proc_popup = false;
-inline std::recursive_mutex Lock; // global lock; why is it needed here tho? 
+inline std::recursive_mutex Lock; // global lock; why is it needed here tho?
 
 void RenderMainWindow();
 
