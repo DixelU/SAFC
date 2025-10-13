@@ -6,12 +6,12 @@
 #include <imgui.h>
 #include <log_c/log.h>
 
-#include <windows.h>
-
 #include "ui.hpp"
 
 #include "../core/SMRP2.h"
 #include "../core/MCTM.h"
+
+#include "../ui/ofd.h"
 
 static ImGuiSelectionBasicStorage midi_selection;
 static ImGuiMultiSelectIO* ms_io;
@@ -24,51 +24,42 @@ static char it_tempo[380] = "120";
 static bool temp = false;
 
 // Ohh god that's weird
-
 std::pair<MIDICollectionThreadedMerger::proc_data_ptr, MIDICollectionThreadedMerger::message_buffer_ptr> SMRP;
-		
 void SetSMRP(std::pair< MIDICollectionThreadedMerger::proc_data_ptr, MIDICollectionThreadedMerger::message_buffer_ptr>& smrp)
 {
 	std::lock_guard<std::recursive_mutex> locker(Lock);
 	SMRP = smrp;
 }
 
-
-// Stolen from NVi-PFA :madman:
-std::string FilenameOnly(const std::string& path) 
-{
-	size_t slash = path.find_last_of("/\\");
-	return (slash == std::string::npos) ? path : path.substr(slash + 1);
-}
-
 void RenderMainWindow()
-{	 
+{
 	ImGui::SetNextWindowSizeConstraints(ImVec2(700, 700), ImVec2(FLT_MAX, FLT_MAX));
-	ImGui::Begin("SAFC Window", nullptr, ImGuiWindowFlags_MenuBar);
+	ImGui::Begin("Main Window", nullptr, ImGuiWindowFlags_MenuBar);
 	if(ImGui::BeginMenuBar())
 	{
 		if(ImGui::BeginMenu("File"))
 		{
 			if(ImGui::MenuItem("Add MIDIs"))
 			{
-				std::string midi_filename = sfd_open_dialog(&midi_ofd_opts);
+				auto midis = MOFD(L"Add MIDI Files");
 				
-				if(!midi_filename.empty())
+				for (auto& file : midis)
 				{
-					log_info("Got file: '%s'", midi_filename.c_str());
-					midi_list.emplace_back(midi_filename);
+					midi_file_meta meta;
+					meta.set(std::move(file));
+
+					log_info("File: %s", meta.visible_path.c_str());
+
+					global_midi_list.emplace_back(std::move(meta));
 				}
-				else
-				{
-					log_info("Open canceled");
-				}
+				
 				log_info("add midi");
 			}
 			
 			if(ImGui::MenuItem("Remove MIDIs"))
 			{
 				std::vector<int> selected_indices;
-				for(int i = 0; i < midi_list.size(); ++i)
+				for(int i = 0; i < global_midi_list.size(); ++i)
 				{
 					if(midi_selection.Contains((ImGuiID)i))
 						selected_indices.push_back(i);
@@ -78,7 +69,7 @@ void RenderMainWindow()
 				std::sort(selected_indices.rbegin(), selected_indices.rend());
 				for(int idx : selected_indices)
 				{
-					midi_list.erase(midi_list.begin() + idx);
+					global_midi_list.erase(global_midi_list.begin() + idx);
 				}
 				
 				midi_selection.Clear();
@@ -86,15 +77,16 @@ void RenderMainWindow()
 			
 			if(ImGui::MenuItem("Save & Merge"))
 			{
-				const char *filename = sfd_save_dialog(&midi_sfd_opts);
-				
-				if(filename)
+				std_unicode_string save_to = SOFD(L"Save file");
+
+				if(!save_to.empty())
 				{
-					log_info("save file: '%s'", filename);
+					save_to_file.set(std::move(save_to));
+					log_info("Save file: '%s'", save_to_file.visible_path.c_str()); // todo: log visible filename only
 				}
 				else
 				{
-					log_info("Open canceled");
+					log_info("Save canceled");
 				}
 			}
 			
@@ -102,7 +94,7 @@ void RenderMainWindow()
 			
 			if(ImGui::MenuItem("Clear MIDI List"))
 			{
-				midi_list.clear();
+				global_midi_list.clear();
 			}
 			ImGui::EndMenu();
 		}
@@ -132,7 +124,7 @@ void RenderMainWindow()
 		midi_selection.ApplyRequests(ms_io);
 		
 		ImGuiListClipper clipper;
-		clipper.Begin(midi_list.size());
+		clipper.Begin(global_midi_list.size());
 		if(ms_io->RangeSrcItem != -1)
 			clipper.IncludeItemByIndex((int)ms_io->RangeSrcItem); // Ensure RangeSrc item is not clipped.
 		
@@ -141,11 +133,9 @@ void RenderMainWindow()
 			for(int n = clipper.DisplayStart; n < clipper.DisplayEnd; n++)
 			{
 				ImGui::PushID(n);
-				char label[500];
-				snprintf(label, sizeof(label), "%s", FilenameOnly(midi_list[n]).c_str());
 				bool item_is_selected = midi_selection.Contains((ImGuiID)n);
 				ImGui::SetNextItemSelectionUserData(n);
-				ImGui::Selectable(label, item_is_selected);
+				ImGui::Selectable(global_midi_list[n].visible_name.c_str(), item_is_selected);
 				ImGui::PopID();
 			}
 		}

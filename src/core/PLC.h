@@ -4,7 +4,6 @@
 
 #include <map>
 #include <vector>
-//#include <Windows.h>
 
 template<typename typekey, typename typevalue>
 struct PLC 

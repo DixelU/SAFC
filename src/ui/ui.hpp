@@ -1,41 +1,16 @@
 #ifndef UI_HPP
 #define UI_HPP
 
-#include <string>
+#include "../core/midi_file_meta.h"
+
 #include <vector>
 #include <mutex>
 
-extern "C"
-{
-    #include <sfd/sfd.h>
-}
+// uh ??? 
+#define IM_CLAMP(V, MN, MX) ((V) < (MN) ? (MN) : (V) > (MX) ? (MX) : (V))
 
-
-
-
-
-#define IM_CLAMP(V, MN, MX)     ((V) < (MN) ? (MN) : (V) > (MX) ? (MX) : (V))
-
-
-
-
-static sfd_Options midi_ofd_opts =
-{
-    .title        = "Add MIDIs to the List",
-    .filter_name  = "MIDI File",
-    .filter       = "*.mid|*.midi|*.MID|*.MIDI",
-};
-
-static sfd_Options midi_sfd_opts =
-{
-    .title        = "Save output MIDI",
-    .filter_name  = "MIDI File",
-    .filter       = "*.mid|*.midi|*.MID|*.MIDI",
-};
-
-
-
-inline std::vector<std::string> midi_list;
+inline std::vector<midi_file_meta> global_midi_list;
+inline midi_file_meta save_to_file;
 
 inline bool midi_settings_window = false;
 
@@ -52,11 +27,11 @@ inline bool cb_implace_merge                 = true;
 inline bool cb_apply_offset_after_ppq_change = false;
 inline bool cb_collapse_trk_into_1           = false;
 inline bool cb_allow_sysex_events            = false;
-inline int thread_count = 5;
+inline int thread_count = 1;
 
 inline bool proc_popup = false;
-inline std::recursive_mutex Lock;
-
+inline std::recursive_mutex Lock; // global lock; why is it needed here tho? 
 
 void RenderMainWindow();
+
 #endif

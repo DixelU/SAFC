@@ -12,6 +12,12 @@
     <ClCompile Include="externals\**\*.c" />
     <ClCompile Include="externals\**\*.cpp" />
     <ClCompile Include="externals\**\*.c" />
+    <ClCompile Include="externals\**\*.cpp" />
+    <ClCompile Include="externals\**\*.c" />
+    <ClCompile Include="src\core\midi_file_meta.cpp" />
+    <ClCompile Include="src\core\mocs.cpp">
+      <Filter>core</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="resource\safc.rc" />
@@ -62,6 +68,10 @@
       <Filter>core</Filter>
     </ClInclude>
     <ClInclude Include="src\core\SAFC_IM.h">
+      <Filter>core</Filter>
+    </ClInclude>
+    <ClInclude Include="resource.h" />
+    <ClInclude Include="src\core\midi_file_meta.h">
       <Filter>core</Filter>
     </ClInclude>
   </ItemGroup>
