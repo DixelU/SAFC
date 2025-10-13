@@ -26,9 +26,9 @@ LANGUAGE LANG_RUSSIAN, SUBLANG_DEFAULT
 
 // Icon with lowest ID value placed first to ensure application icon
 // remains consistent on all systems.
-GLUT_ICON			   ICON					"_SAFC_.ico"
+GLUT_ICON	ICON	"safc.ico"
 
-MAINICON				ICON					"_SAFC_.ico"
+MAINICON	ICON	"safc.ico"
 
 
 #ifdef APSTUDIO_INVOKED
@@ -63,8 +63,8 @@ END
 //
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 1,4,5,0
- PRODUCTVERSION 1,4,5,0
+ FILEVERSION 2,0,0,0
+ PRODUCTVERSION 2,0,0,0
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
  FILEFLAGS 0x1L
@@ -81,12 +81,12 @@ BEGIN
 		BEGIN
 			VALUE "CompanyName", "SAF"
 			VALUE "FileDescription", "SAF Converter"
-			VALUE "FileVersion", "1.4.5.0"
-			VALUE "InternalName", "SAFC v1"
+			VALUE "FileVersion", "2.0.0.0"
+			VALUE "InternalName", "SAFC v2"
 			VALUE "LegalCopyright", "Copyright (C) 2025"
 			VALUE "OriginalFilename", "Simple AF Converter"
 			VALUE "ProductName", "SAFC"
-			VALUE "ProductVersion", "1.4.5.0"
+			VALUE "ProductVersion", "2.0.0.0"
 		END
 	END
 	BLOCK "VarFileInfo"

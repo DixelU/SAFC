@@ -24,15 +24,12 @@ static char it_tempo[380] = "120";
 static bool temp = false;
 
 // Ohh god that's weird
-
 std::pair<MIDICollectionThreadedMerger::proc_data_ptr, MIDICollectionThreadedMerger::message_buffer_ptr> SMRP;
-		
 void SetSMRP(std::pair< MIDICollectionThreadedMerger::proc_data_ptr, MIDICollectionThreadedMerger::message_buffer_ptr>& smrp)
 {
 	std::lock_guard<std::recursive_mutex> locker(Lock);
 	SMRP = smrp;
 }
-
 
 // Stolen from NVi-PFA :madman:
 std::string FilenameOnly(const std::string& path) 
@@ -42,9 +39,9 @@ std::string FilenameOnly(const std::string& path)
 }
 
 void RenderMainWindow()
-{	 
+{
 	ImGui::SetNextWindowSizeConstraints(ImVec2(700, 700), ImVec2(FLT_MAX, FLT_MAX));
-	ImGui::Begin("SAFC Window", nullptr, ImGuiWindowFlags_MenuBar);
+	ImGui::Begin("Main Window", nullptr, ImGuiWindowFlags_MenuBar);
 	if(ImGui::BeginMenuBar())
 	{
 		if(ImGui::BeginMenu("File"))
