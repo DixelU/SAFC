@@ -196,13 +196,7 @@ void ui_entry()
 		ImGui_ImplOpenGL3_NewFrame();
 		ImGui_ImplGlfw_NewFrame();
 		ImGui::NewFrame();
-
-
-
-
-
 		// MARK: Samples
-
 
 		if(show_demo_window)
 			ImGui::ShowDemoWindow(&show_demo_window);
