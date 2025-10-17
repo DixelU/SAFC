@@ -6,8 +6,6 @@
 #include <optional>
 #include <cstdint>
 
-//#include <Windows.h>
-
 struct cut_and_transpose
 {
 	std::uint8_t min, max;
