@@ -46,8 +46,6 @@ inline std_unicode_string default_reg_path = to_cchar_t("Software\\SAFC\\");
 
 inline std::string default_font_name = "Arial";
 
-#define TRY_CATCH(code,msg) try{code}catch(...){std::cout<<msg<<std::endl;}
-
 #ifdef _MSC_VER
 #define FORCEDINLINE __forceinline
 #else
