@@ -752,7 +752,7 @@ struct single_midi_processor_2
 				tick_type reference = disable_tick;
 
 				if (!settings.legacy.enable_zero_velocity) [[likely]]
-					com ^= ((!bool(vel) & bool(com & 0x10)) << 4);
+					com ^= ((!bool(vel) && bool(com & 0x10)) << 4);
 				else if (!vel && bool(com & 0x10))
 					vel = 1;
 
@@ -1372,6 +1372,7 @@ struct single_midi_processor_2
 				case 0xF7:
 					if (!filtering.pass_sysex)
 						tick = disable_tick;
+				[[fallthrough]];
 				case 0xFF:
 				default: 
 					if (!filtering.pass_other)
