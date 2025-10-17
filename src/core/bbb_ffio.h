@@ -1,6 +1,9 @@
 #pragma once
+
 #ifndef BBB_FFIO
 #define BBB_FFIO
+
+#include "header_utils.h"
 
 #ifdef _MSC_VER
 #include <fstream>
@@ -14,7 +17,7 @@
 #ifdef _MSC_VER
 
 inline errno_t fopen_wrap(FILE* file_ptr,
-	const wchar_t* filename, const wchar_t* parameter)
+	const cchar_t* filename, const cchar_t* parameter)
 {
 	return _wfopen_s(&file_ptr, filename, L"rb");
 }
@@ -27,7 +30,7 @@ inline size_t fread_wrap(void* ptr, size_t size, size_t count, FILE* filename)
 #else
 
 inline decltype(errno) fopen_wrap(FILE* file,
-	const char* filename, const char* parameter)
+	const cchar_t* filename, const cchar_t* parameter)
 {
 	file = fopen(filename, parameter);
 	return errno;
@@ -41,14 +44,14 @@ inline size_t fread_wrap(void* ptr, size_t size, size_t count, FILE* file)
 #endif
 
 // is only needed for MinGW/GCC 
-#ifdef _MSC_VER
+#if !defined(__MINGW32__)
 
 template<typename __inner_stream_type, decltype(std::ios_base::out) stream_io_type = std::ios_base::out>
-std::pair<__inner_stream_type*, FILE*> open_wide_stream(std::wstring filename, const wchar_t* parameter);
+std::pair<__inner_stream_type*, FILE*> open_wide_stream(std::wstring filename, const cchar_t* parameter);
 
 template<>
 std::pair<std::ostream*, FILE*> open_wide_stream<std::ostream, std::ios_base::out>(
-	std::wstring filename, const wchar_t* parameter)
+	std::wstring filename, const cchar_t* parameter)
 {
 	std::ostream* ostream = new std::ofstream(filename, std::ios_base::out | std::ios_base::binary);
 	return { ostream, nullptr }; // IN c++26 there will be native_handle() call, for now just return nullptr
@@ -56,22 +59,24 @@ std::pair<std::ostream*, FILE*> open_wide_stream<std::ostream, std::ios_base::ou
 
 template<>
 std::pair<std::istream*, FILE*> open_wide_stream<std::istream, std::ios_base::in>(
-	std::wstring filename, const wchar_t* parameter)
+	std::wstring filename, const cchar_t* parameter)
 {
 	std::istream* istream = new std::ifstream(filename, std::ios_base::in | std::ios_base::binary);
 	return { istream, nullptr }; // IN c++26 there will be native_handle() call, for now just return nullptr
 }
 
-#else
+#endif
+
+#if defined(__MINGW32__)
 
 template<typename __inner_stream_type, decltype(std::ios_base::out) stream_io_type = std::ios_base::out>
 std::pair<__inner_stream_type*, FILE*> open_wide_stream(
-	std::string file, const char* parameter)
+	std::string file, const cchar_t* parameter)
 {
 	FILE* c_file;
 	fopen_wrap(c_file, file.c_str(), parameter);
 
-	auto buffer = new __gnu_cxx::stdio_filebuf<char>(c_file, stream_io_type, 100000);
+	auto buffer = new __gnu_cxx::stdio_filebuf<cchar_t>(c_file, stream_io_type, 100000);
 	
 	return {new __inner_stream_type(buffer), c_file};
 }
@@ -97,10 +102,12 @@ private:
 		{
 			size_t new_buffer_len = fread_wrap(buffer, 1, buffer_size, file_ptr);
 			//printf("%lli\n", new_buffer_len);
-			if (new_buffer_len != buffer_size) {
+			if (new_buffer_len != buffer_size)
+			{
 				buffer_size = new_buffer_len;
 				next_chunk_is_unavailable = true;
 			}
+
 			inner_buffer_pos = 0;
 		}
 		else
@@ -130,20 +137,12 @@ private:
 
 public:
 	byte_by_byte_fast_file_reader(
-#ifdef _MSC_VER
-		const wchar_t* filename,
-#else
-		const char* filename,
-#endif
+		const cchar_t* filename,
 		int default_buffer_size = 20000000) :
 			true_buffer_size(default_buffer_size)
 	{
 		auto err_no =
-#ifdef _MSC_VER
-			fopen_wrap(file_ptr, filename, L"rb");
-#else
-			fopen_wrap(file_ptr, filename, "rb");
-#endif
+			fopen_wrap(file_ptr, filename, to_cchar_t("rb"));
 
 		is_open = !(err_no);
 		next_chunk_is_unavailable = (is_eof = (filename) ? feof(file_ptr) : true);
@@ -173,19 +172,11 @@ public:
 	}
 
 	inline void reopen_next_file(
-#ifdef _MSC_VER
-		const wchar_t* filename)
-#else
-		const char* filename)
-#endif
+		const cchar_t* filename)
 	{
 		close();
 		auto err_no =
-#ifdef _MSC_VER
-			fopen_wrap(file_ptr, filename, L"rb");
-#else
-			fopen_wrap(file_ptr, filename, "rb");
-#endif
+			fopen_wrap(file_ptr, filename, to_cchar_t("rb"));
 
 		is_open = !(err_no);
 		next_chunk_is_unavailable = (is_eof = (filename) ? feof(file_ptr) : true);

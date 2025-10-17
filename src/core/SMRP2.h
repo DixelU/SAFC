@@ -252,8 +252,10 @@ struct single_midi_processor_2
 				bool field2_is_set = false;
 			};
 
-			std::unordered_map<std::uint16_t, base_type> key_events_at_selection_front;
-			std::unordered_map<base_type, event_data_fixed_size_2> channel_events_at_selection_front;
+			// todo verify if map is faster than unordered_map
+			std::map<std::uint16_t, base_type> key_events_at_selection_front;
+			std::map<base_type, event_data_fixed_size_2> channel_events_at_selection_front;
+
 			std::uint32_t frontal_tempo = default_tempo;
 			color_event frontal_color_event{};
 
@@ -392,9 +394,9 @@ struct single_midi_processor_2
 		tempo_override tempo;
 		selection selection_data;
 
-		std::shared_ptr<BYTE_PLC_Core> volume_map;
-		std::shared_ptr<_14BIT_PLC_Core> pitch_map;
-		std::shared_ptr<CutAndTransposeKeys> key_converter;
+		std::shared_ptr<byte_plc_core> volume_map;
+		std::shared_ptr<_14bit_plc_core> pitch_map;
+		std::shared_ptr<cut_and_transpose> key_converter;
 		details_data details;
 		processing_details proc_details;
 	};
@@ -1824,12 +1826,9 @@ struct single_midi_processor_2
 		auto filter_iters = make_filter_bounding_iters(filters);
 
 		bbb_ffr file_input(data.filename.c_str());
-		auto [file_output_ptr, fo_ptr] = open_wide_stream<std::ostream>(data.filename + data.postfix,
-#ifdef _MSC_VER
-			L"wb");
-#else
-			"wb");
-#endif
+		auto [file_output_ptr, fo_ptr] = 
+			open_wide_stream<std::ostream>(data.filename + data.postfix, to_cchar_t("wb"));
+		
 		auto& file_output = *file_output_ptr;
 		
 		for (int i = 0; i < 12 && file_input.good(); i++)

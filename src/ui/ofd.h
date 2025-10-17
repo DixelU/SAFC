@@ -2,6 +2,8 @@
 
 #include <vector>
 #include <string>
+
+#ifdef _MSC_VER
 #include <commdlg.h>
 
 std::vector<std_unicode_string> MOFD(const wchar_t* Title)
@@ -114,3 +116,9 @@ std::wstring SOFD(const wchar_t* Title)
 		return L"";
 	}
 }
+#else
+
+std::vector<std_unicode_string> MOFD(const wchar_t* Title) { /* todo implement */ };
+std::wstring SOFD(const wchar_t* Title) { /* todo implement */ }
+
+#endif

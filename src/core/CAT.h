@@ -1,33 +1,33 @@
 #pragma once
+
 #ifndef SAF_CAT 
 #define SAF_CAT 
 
 #include <optional>
+#include <cstdint>
+
 //#include <Windows.h>
 
-struct CutAndTransposeKeys
+struct cut_and_transpose
 {
-	std::uint8_t Min, Max;
-	std::int16_t TransposeVal;
-	CutAndTransposeKeys(std::uint8_t Min, std::uint8_t Max, std::int16_t TransposeVal = 0)
+	std::uint8_t min, max;
+	std::int16_t transpose_val;
+
+	cut_and_transpose(std::uint8_t min, std::uint8_t max, std::int16_t transpose_val = 0) noexcept:
+		min(min), max(max), transpose_val(transpose_val) {}
+
+	inline std::optional<std::uint8_t> process(std::uint8_t value) noexcept
 	{
-		this->Min = Min;
-		this->Max = Max;
-		this->TransposeVal = TransposeVal;
-	}
-	inline std::optional<std::uint8_t> process(std::uint8_t Value)
-	{
-		if (Value <= Max && Value >= Min)
+		if (value <= max && value >= min)
 		{
-			std::int16_t SValue = (std::int16_t)Value + TransposeVal;
-			if (SValue < 0 || SValue>255)return {};
-			Value = SValue;
-			return Value;
+			std::int16_t svalue = (std::int16_t)value + transpose_val;
+			if (svalue < 0 || svalue>255)
+				return std::nullopt;
+			value = svalue;
+			return value;
 		}
-		else
-		{
-			return {};
-		}
+		
+		return std::nullopt;
 	}
 };
 
