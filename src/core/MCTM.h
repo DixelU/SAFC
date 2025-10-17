@@ -313,6 +313,7 @@ struct midi_collection_threaded_merger
 			file_output_ptr->put(ppqn >> 8);
 			file_output_ptr->put(ppqn);
 
+			// TODO refactor this clusterfuck 
 			while (active_stream_flag) 
 			{
 				///reading tracks
@@ -333,16 +334,16 @@ struct midi_collection_threaded_merger
 						decaying_delta_times[i] = -1;
 				}
 				
-				// TODO refactor this clusterfuck 
 				for (std::uint64_t Tick = 0; active_track_reading; Tick++, InTrackDelta++)
 				{
-					std::uint8_t IO = 0, EVENTTYPE = 0;///yas
+					std::uint8_t IO = 0, EVENTTYPE = 0;
 					active_track_reading = 0;
 					active_stream_flag = 0;
 					for (int i = 0; i < file_inputs.size(); i++)
 					{
 						///every stream
-						if (decaying_delta_times[i] == 0) {///there will be parser...
+						if (decaying_delta_times[i] == 0)
+						{
 							if (Tick)
 								goto eventevalution;
 
@@ -354,8 +355,10 @@ struct midi_collection_threaded_merger
 								IO = file_inputs[i]->get();
 								DIO = (DIO << 7) | (IO & 0x7F);
 							} while (IO & 0x80);
+
 							if (file_inputs[i]->eof())
 								goto trackending;
+							
 							if ((decaying_delta_times[i] = DIO))
 								goto escape;
 
@@ -539,7 +542,7 @@ struct midi_collection_threaded_merger
 				}
 				track.clear();
 			}
-			for (int i = 0; i < fiv.size(); i++)
+			for (int i = 0; i < file_inputs.size(); i++)
 			{
 				file_inputs[i]->close();
 				auto& imc_i = inplace_merge_candidates[i];
