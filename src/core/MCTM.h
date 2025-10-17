@@ -1,14 +1,7 @@
 #pragma once
+#include "header_utils.h"
 #ifndef SAF_MCTM
 #define SAF_MCTM
-
-
-#ifndef MTrk
-#define MTrk 1297379947
-#endif
-
-void ThrowAlert_Error(std::string&& AlertText);
-void ThrowAlert_Warning(std::string&& AlertText);
 
 #include <set>
 #include <thread>
@@ -16,317 +9,340 @@ void ThrowAlert_Warning(std::string&& AlertText);
 
 #include "SMRP2.h"
 
-struct MIDICollectionThreadedMerger
+struct midi_collection_threaded_merger
 {
-	std_unicode_string SaveTo;
-	std::atomic_bool FirstStageComplete;
-	std::atomic_bool IntermediateRegularFlag;
-	std::atomic_bool IntermediateInplaceFlag;
-	std::atomic_bool CompleteFlag;
-	std::atomic_bool RemnantsRemove;
-	std::uint16_t FinalPPQN;
-	std::atomic_uint64_t IRTrackCount;
-	std::atomic_uint64_t IITrackCount;
+	std_unicode_string save_to;
+	std::atomic_bool first_stage_complete;
+	std::atomic_bool intermediate_regular_flag;
+	std::atomic_bool intermediate_inplace_flag;
+	std::atomic_bool complete_flag;
+	std::atomic_bool remnants_remove;
+	std::uint16_t final_ppqn;
+	std::atomic_uint64_t ir_track_count;
+	std::atomic_uint64_t ii_track_count;
 
 	using proc_data_ptr = 
 		std::shared_ptr<single_midi_processor_2::processing_data>;
 	using message_buffer_ptr =
 		std::shared_ptr<single_midi_processor_2::message_buffers>;
-	std::vector<std::pair<proc_data_ptr, message_buffer_ptr>> midi_processing_data;
+	std::vector<std::pair<proc_data_ptr, message_buffer_ptr>> processing_data;
 
 	std::mutex currently_processed_locker;
-	std::vector<std::pair<proc_data_ptr, message_buffer_ptr>> currently_processed;
+	std::vector<std::pair<proc_data_ptr, message_buffer_ptr>> currently_processing;
 
-	struct DegeneratedTrackIterator
+	struct normalised_track_iterator
 	{
-		std::int64_t CurPosition;
-		std::int64_t CurTick;
-		std::uint8_t* TrackData;
-		std::uint64_t TrackSize;
-		std::array<std::int64_t, 4096> Holded;
-		bool Processing;
-		DegeneratedTrackIterator(std::vector<std::uint8_t>& Vec) 
+		std::int64_t current_position;
+		std::int64_t current_tick;
+
+		std::uint8_t* track_data;
+		std::uint64_t track_size;
+
+		std::array<std::int64_t, 4096> held;
+		bool processing;
+
+		normalised_track_iterator(std::vector<std::uint8_t>& track_data) :
+			current_position(0),
+			current_tick(0),
+			track_data(track_data.data()),
+			track_size(track_data.size()),
+			held(),
+			processing(true)
 		{
-			TrackData = Vec.data();
-			TrackSize = Vec.size();
-			CurTick = 0;
-			CurPosition = 0;
-			Processing = true;
-			for (auto& a : Holded)
-				a = 0;
+			for (auto& voices : this->held)
+				voices = 0;
 		}
-		std::int64_t TellPoliphony()
+
+		std::int64_t tell_polyphony()
 		{
-			std::int64_t T = 0;
-			for (auto& q : Holded)
+			std::int64_t total = 0;
+			for (auto& voices : this->held)
+				total += voices;
+			return total;
+		}
+
+		void single_event_advance()
+		{
+			if (!(this->processing && this->current_position < this->track_size)) 
 			{
-				T += q;
+				this->processing = false;
+				return;
 			}
-			return T;
-		}
-		void SingleEventAdvance()
-		{
-			if (Processing && CurPosition < TrackSize) 
+
+			std::uint32_t vlv = 0, io = 0;
+			do 
 			{
-				std::uint32_t VLV = 0, IO = 0;
-				do 
+				io = this->track_data[this->current_position];
+				this->current_position++;
+				vlv = (vlv << 7) | (io & 0x7F);
+			} while (io & 0x80);
+			
+			this->current_tick += vlv;
+
+			if (this->track_data[this->current_position] == 0xFF) 
+			{
+				current_position++;
+				if (this->track_data[this->current_position] == 0x2F)
 				{
-					IO = TrackData[CurPosition];
-					CurPosition++;
-					VLV = (VLV << 7) | (IO & 0x7F);
-				} while (IO & 0x80);
-				CurTick += VLV;
-				if (TrackData[CurPosition] == 0xFF) 
-				{
-					CurPosition++;
-					if (TrackData[CurPosition] == 0x2F)
-					{
-						Processing = false;
-						CurPosition += 2;
-					}
-					else
-					{
-						IO = 0;
-						CurPosition++;
-						do
-						{
-							IO = TrackData[CurPosition];
-							CurPosition++;
-							VLV = (VLV << 7) | (IO & 0x7F);
-						} while (IO & 0x80);
-						for (int vlvsize = 0; vlvsize < IO; vlvsize++)
-							CurPosition++;
-					}
+					this->processing = false;
+					this->current_position += 2;
 				}
-				else if (TrackData[CurPosition] >= 0x80 && TrackData[CurPosition] <= 0x9F)
+				else
 				{
-					std::uint16_t FTD = TrackData[CurPosition];
-					CurPosition++;
-					std::uint16_t KEY = TrackData[CurPosition];
-					CurPosition++;
-					CurPosition++;//volume - meh;
-					std::uint16_t Argument = (KEY << 4) | (FTD & 0xF);
-					if (FTD & 0x10) //if noteon
-						Holded[Argument]++;
-					else if (Holded[Argument] > 0)
+					io = 0;
+					this->current_position++;
+
+					do
 					{
-						Holded[Argument]--;
+						io = this->track_data[this->current_position];
+						this->current_position++;
+						vlv = (vlv << 7) | (io & 0x7F);
 					}
+					while (io & 0x80);
+
+					for (std::uint32_t vlvsize = 0; vlvsize < io; vlvsize++)
+						this->current_position++;
 				}
-				else if ((TrackData[CurPosition] >= 0xA0 && TrackData[CurPosition] <= 0xBF) || (TrackData[CurPosition] >= 0xE0 && TrackData[CurPosition] <= 0xEF))
-					CurPosition += 3;
-				else if ((TrackData[CurPosition] >= 0xC0 && TrackData[CurPosition] <= 0xDF))
-					CurPosition += 2;
-				else if (true)
-					ThrowAlert_Error("DTI Failure at " + std::to_string(CurPosition) + ". Type: " + 
-						std::to_string(TrackData[CurPosition]) + ". Tell developer about it and give him source midi\n");
 			}
-			else Processing = false;
+			else if (this->track_data[this->current_position] >= 0x80 && this->track_data[this->current_position] <= 0x9F)
+			{
+				std::uint16_t ftd = this->track_data[this->current_position];
+				this->current_position++;
+				std::uint16_t key = this->track_data[this->current_position];
+				this->current_position++;
+				// volume is not used
+				this->current_position++;
+
+				std::uint16_t argument = (key << 4) | (ftd & 0xF);
+				if (ftd & 0x10) //if noteon
+					this->held[argument]++;
+				else if (this->held[argument] > 0)
+					this->held[argument]--;
+
+			}
+			else if ((this->track_data[this->current_position] >= 0xA0 && this->track_data[this->current_position] <= 0xBF) || (this->track_data[this->current_position] >= 0xE0 && this->track_data[this->current_position] <= 0xEF))
+				this->current_position += 3;
+			else if ((this->track_data[this->current_position] >= 0xC0 && this->track_data[this->current_position] <= 0xDF))
+				this->current_position += 2;
+			else if (true)
+				ThrowAlert_Error("NTI Failure at " + std::to_string(this->current_position) +
+						". Type: " + std::to_string(this->track_data[this->current_position]) +
+						". Tell developers about it and give them source midi\n");
 		}
-		bool AdvanceUntilReachingPositionOf(std::int64_t Position)
+
+		bool advance_until_reaching_position_of(std::int64_t position)
 		{
-			while (Processing && CurPosition < Position)
-				SingleEventAdvance();
-			return Processing;
+			while (this->processing && this->current_position < position)
+				this->single_event_advance();
+			return this->processing;
 		}
-		void PutCurrentHoldedNotes(std::vector<std::uint8_t>& out, bool output_noteon_wall)
+
+		void put_current_held_notes(std::vector<std::uint8_t>& out, bool output_noteon_wall)
 		{
-			constexpr std::uint32_t LocalDeltaTimeTrunkEdge = 0xF000000;//BC808000 in vlv
+			constexpr std::uint32_t delta_time_trunk_edge = 0xF000000;//BC808000 in vlv
 			//bool first_nonzero_delta_output = output_noteon_wall;
-			std::uint64_t LocalTick = CurTick;
-			std::uint8_t DeltaLen = 0;
-			while (output_noteon_wall && LocalTick > LocalDeltaTimeTrunkEdge) 
-			{//fillers
-				single_midi_processor_2::push_vlv_s(LocalDeltaTimeTrunkEdge, out);
+			std::uint64_t local_tick = this->current_tick;
+			std::uint8_t delta_len = 0;
+			while (output_noteon_wall && local_tick > delta_time_trunk_edge) 
+			{
+				//fillers
+				single_midi_processor_2::push_vlv_s(delta_time_trunk_edge, out);
 				out.push_back(0xFF);//empty text event
 				out.push_back(0x01);
 				out.push_back(0x00);
-				LocalTick -= LocalDeltaTimeTrunkEdge;
+				local_tick -= delta_time_trunk_edge;
 			}
+
 			if (output_noteon_wall)
-			{
-				DeltaLen = single_midi_processor_2::push_vlv_s(LocalTick, out);
-			}
+				delta_len = single_midi_processor_2::push_vlv_s(local_tick, out);
 			else
 				out.push_back(0);
-			for (int i = 0; i < 4096; i++)
+
+			for (std::uint32_t key = 0; key < 4096; key++)
 			{
-				std::int64_t key = Holded[i];
-				while (key)
+				std::int64_t voices = this->held[key];
+				while (voices)
 				{
-					out.push_back((0x10 * output_noteon_wall) | (i & 0xF) | 0x80);//note data;
-					out.push_back(i >> 4);//key;
-					out.push_back(1);//almost silent
-					out.push_back(0);//delta time
-					key--;
+					// todo: use copy back trait from smrp2
+					out.push_back((0x10 * output_noteon_wall) | (key & 0xF) | 0x80); //note data;
+					out.push_back(key >> 4);
+					out.push_back(1); //almost silent
+					out.push_back(0); //delta time (positioned inversely)
+					voices--;
 				}
 			}
-			if (out.size())
+
+			if (!out.empty())
 				out.pop_back();
 		}
 	};
-	~MIDICollectionThreadedMerger() = default;
-	MIDICollectionThreadedMerger(
+
+	~midi_collection_threaded_merger() = default;
+	midi_collection_threaded_merger(
 		std::vector<proc_data_ptr> processing_data, 
 		std::uint16_t FinalPPQN, 
 		std_unicode_string SaveTo,
 		bool is_console_oriented)
 	{
 		for (auto& single_midi_data : processing_data)
-			midi_processing_data.emplace_back( single_midi_data , std::make_shared<message_buffer_ptr::element_type>(is_console_oriented) );
-		this->SaveTo = std::move(SaveTo);
-		this->FirstStageComplete = false;
-		this->RemnantsRemove = true;
-		this->FinalPPQN = FinalPPQN;
-		IntermediateRegularFlag = IntermediateInplaceFlag = CompleteFlag = IRTrackCount = IITrackCount = 0;
+			this->processing_data.emplace_back( single_midi_data , std::make_shared<message_buffer_ptr::element_type>(is_console_oriented) );
+		this->save_to = std::move(SaveTo);
+		this->first_stage_complete = false;
+		this->remnants_remove = true;
+		this->final_ppqn = FinalPPQN;
+		this->intermediate_regular_flag = this->intermediate_inplace_flag = this->complete_flag = this->ir_track_count = this->ii_track_count = 0;
 	}
-	void ResetCurProcessing()
+
+	void reset_current_processing()
 	{
-		midi_processing_data.clear();
+		this->processing_data.clear();
 	}
-	bool CheckSMRPProcessing()
+
+	// this is like earliest attempt at threads synchronization
+	// todo DO THIS PROPERLY
+	bool check_smrp_processing()
 	{
-		for (auto& el : midi_processing_data)
+		for (auto& el : this->processing_data)
 			if (!el.second->finished || el.second->processing)
 				return 1;
 		return 0;
 	}
-	bool CheckSMRPProcessingAndStartNextStep()
+
+	bool check_smrp_processing_and_start_next_step()
 	{
-		if (CheckSMRPProcessing())
+		if (this->check_smrp_processing())
 			return 1;
 		//this->ResetCurProcessing();
-		this->Start_RI_Merge();
+		this->start_ri_merge();
 		return 0;
 	}
-	bool CheckRIMerge()
+
+	bool check_ri_merge()
 	{
-		if (IntermediateRegularFlag && IntermediateInplaceFlag)
-			FinalMerge();
+		if (this->intermediate_regular_flag && this->intermediate_inplace_flag)
+			this->final_merge();
 		else return 0;
 		//cout << "Final_Finished\n";
 		return 1;
 	}
-	void StartProcessingMIDIs() 
-	{//
+
+	void start_processing_midis() 
+	{
 		std::set<std::uint32_t> IDs;
 
-		for (auto& el: midi_processing_data) 
+		for (auto& el: this->processing_data) 
 			IDs.insert(el.first->settings.details.group_id);
 
-		currently_processed_locker.lock();
-		currently_processed.clear();
-		currently_processed.resize(IDs.size());
-		currently_processed_locker.unlock();
-		uint32_t thread_counter = 0;
+		this->currently_processed_locker.lock();
+		this->currently_processing.clear();
+		this->currently_processing.resize(IDs.size());
+		this->currently_processed_locker.unlock();
+
+		std::uint32_t thread_counter = 0;
 		
-		for (auto Y = IDs.begin(); Y != IDs.end(); Y++)
+		for (auto id : IDs)
 		{
 			std::thread([this](
 				std::vector<std::pair<proc_data_ptr, message_buffer_ptr>> processing_data,
-				std::uint32_t ID,
+				std::uint32_t id,
 				std::uint32_t thread_counter) 
 			{
 				for (auto& el : processing_data)
 				{
-					if (el.first->settings.details.group_id != ID)
+					if (el.first->settings.details.group_id != id)
 						continue;
 
-					currently_processed_locker.lock();
-					currently_processed[thread_counter] = el;
-					currently_processed_locker.unlock();
+					this->currently_processed_locker.lock();
+					this->currently_processing[thread_counter] = el;
+					this->currently_processed_locker.unlock();
 
 					if (el.first->settings.proc_details.channel_split)
 						single_midi_processor_2::sync_processing<true>(*el.first, *el.second);
 					else
 						single_midi_processor_2::sync_processing<false>(*el.first, *el.second);
 				}
-			}, midi_processing_data, *Y, thread_counter).detach();
+			}, this->processing_data, id, thread_counter).detach();
 			thread_counter++;
 		}
 	}
-	void InplaceMerge()
+	void inplace_merge()
 	{
-		using mpd_t = decltype(midi_processing_data);
+		using mpd_t = decltype(this->processing_data);
 		mpd_t inplace_merge_candidates;
-		std::copy_if(midi_processing_data.begin(), midi_processing_data.end(), std::back_inserter(inplace_merge_candidates),
+		std::copy_if(this->processing_data.begin(), this->processing_data.end(), std::back_inserter(inplace_merge_candidates),
 			[](mpd_t::value_type& el) { return el.first->settings.details.inplace_mergable; });
 		
-		IITrackCount = 0;
-		std::thread([](mpd_t IMC, std::uint16_t ppqn, std_unicode_string _SaveTo,
-				std::reference_wrapper<std::atomic_bool> FinishedFlag,
-				std::reference_wrapper<std::atomic_uint64_t> TrackCount)
+		this->ii_track_count = 0;
+		std::thread([](mpd_t inplace_merge_candidates, std::uint16_t ppqn, std_unicode_string _save_to,
+				std::reference_wrapper<std::atomic_bool> complete_flag,
+				std::reference_wrapper<std::atomic_uint64_t> track_count)
 		{
-			if (IMC.empty()) 
+			if (inplace_merge_candidates.empty()) 
 			{
-				FinishedFlag.get() = true; /// Will this work?
+				complete_flag.get() = true; /// Will this work?
 				return;
 			}
 
-			bool ActiveStreamFlag = true;
-			bool ActiveTrackReading = true;
-			std::vector<bbb_ffr*> fiv;
+			bool active_stream_flag = true;
+			bool active_track_reading = true;
+			std::vector<bbb_ffr*> file_inputs;
 
-#define pfiv (*fiv[i])
+			std::vector<std::int64_t> decaying_delta_times;
+			std::vector<std::uint8_t> track, front_edge, back_edge;
+			track.reserve(1000000);
 
-			std::vector<std::int64_t> DecayingDeltaTimes;
-#define ddt (DecayingDeltaTimes[i])
+			auto [file_output_ptr, file_output_fo_ptr] = open_wide_stream<std::ostream>
+				(_save_to + to_cchar_t(".I.mid").operator std_unicode_string(), to_cchar_t("wb"));
+			
+			*file_output_ptr << "MThd" << '\0' << '\0' << '\0' << (char)6 << '\0' << (char)1;
 
-			std::vector<std::uint8_t> Track, FrontEdge, BackEdge;
-			Track.reserve(1000000);
-
-			bbb_ffr* fi;
-			auto [file_output, fo_ptr] = open_wide_stream<std::ostream>
-#ifdef _MSC_VER
-				(_SaveTo + L".I.mid", L"wb");
-#else
-				(_SaveTo + ".I.mid", "wb");
-#endif
-			(*file_output) << "MThd" << '\0' << '\0' << '\0' << (char)6 << '\0' << (char)1;
-			for (auto Y = IMC.begin(); Y != IMC.end(); Y++) 
+			for (auto& el : inplace_merge_candidates) 
 			{
-				fi = new bbb_ffr((Y->first->filename + Y->first->postfix).c_str());///
-				for (int i = 0; i < 14; i++)
-					fi->get();
+				auto filename = el.first->filename + el.first->postfix;
+				auto file_input_ptr = new bbb_ffr(filename.c_str());
 
-				DecayingDeltaTimes.push_back(0);
-				fiv.push_back(fi);
+				for (int i = 0; i < 14; i++)
+					file_input_ptr->get();
+
+				decaying_delta_times.push_back(0);
+				file_inputs.push_back(file_input_ptr);
 			}
 
-			file_output->put(TrackCount.get() >> 8);
-			file_output->put(TrackCount.get());
-			file_output->put(ppqn >> 8);
-			file_output->put(ppqn);
+			file_output_ptr->put(track_count.get() >> 8);
+			file_output_ptr->put(track_count.get());
+			file_output_ptr->put(ppqn >> 8);
+			file_output_ptr->put(ppqn);
 
-			while (ActiveStreamFlag) 
+			while (active_stream_flag) 
 			{
 				///reading tracks
 				std::uint32_t Header = 0, DIO, DeltaLen = 0;
 				std::uint64_t InTrackDelta = 0;
 				bool ITD_Flag = 1 /*, NotNoteEvents_ProcessedFlag = 0*/;
-				for (int i = 0; i < fiv.size(); i++)
+				for (int i = 0; i < file_inputs.size(); i++)
 				{
-					while (pfiv.good() && Header != MTrk) 
-						Header = (Header << 8) | pfiv.get();
+					while (file_inputs[i]->good() && Header != single_midi_processor_2::MTrk_header) 
+						Header = (Header << 8) | file_inputs[i]->get();
 
 					for (int w = 0; w < 4; w++)
-						pfiv.get();
+						file_inputs[i]->get();
 					Header = 0;
-					if (pfiv.good())
-						ddt = 0;
+					if (file_inputs[i]->good())
+						decaying_delta_times[i] = 0;
 					else
-						ddt = -1;
+						decaying_delta_times[i] = -1;
 				}
 				
-				for (std::uint64_t Tick = 0; ActiveTrackReading; Tick++, InTrackDelta++)
+				// TODO refactor this clusterfuck 
+				for (std::uint64_t Tick = 0; active_track_reading; Tick++, InTrackDelta++)
 				{
 					std::uint8_t IO = 0, EVENTTYPE = 0;///yas
-					ActiveTrackReading = 0;
-					ActiveStreamFlag = 0;
-					for (int i = 0; i < fiv.size(); i++)
+					active_track_reading = 0;
+					active_stream_flag = 0;
+					for (int i = 0; i < file_inputs.size(); i++)
 					{
 						///every stream
-						if (ddt == 0) {///there will be parser...
+						if (decaying_delta_times[i] == 0) {///there will be parser...
 							if (Tick)
 								goto eventevalution;
 
@@ -335,30 +351,30 @@ struct MIDICollectionThreadedMerger
 							DIO = 0;
 							do 
 							{
-								IO = pfiv.get();
+								IO = file_inputs[i]->get();
 								DIO = (DIO << 7) | (IO & 0x7F);
 							} while (IO & 0x80);
-							if (pfiv.eof())
+							if (file_inputs[i]->eof())
 								goto trackending;
-							if ((ddt = DIO))
+							if ((decaying_delta_times[i] = DIO))
 								goto escape;
 
 						eventevalution:
 
-							EVENTTYPE = (pfiv.get());
+							EVENTTYPE = (file_inputs[i]->get());
 
-							DeltaLen = single_midi_processor_2::push_vlv(InTrackDelta, Track);
+							DeltaLen = single_midi_processor_2::push_vlv(InTrackDelta, track);
 							InTrackDelta = 0;
 
 							if (EVENTTYPE == 0xFF)
 							{///meta
-								Track.push_back(EVENTTYPE);
-								Track.push_back(pfiv.get());
-								if (Track.back() == 0x2F)
+								track.push_back(EVENTTYPE);
+								track.push_back(file_inputs[i]->get());
+								if (track.back() == 0x2F)
 								{
-									pfiv.get();
+									file_inputs[i]->get();
 									for (int l = 0; l < DeltaLen + 2; l++)
-										Track.pop_back();
+										track.pop_back();
 
 									goto trackending;
 								}
@@ -367,164 +383,166 @@ struct MIDICollectionThreadedMerger
 									DIO = 0;
 									do 
 									{
-										IO = pfiv.get();
-										Track.push_back(IO);
+										IO = file_inputs[i]->get();
+										track.push_back(IO);
 										DIO = (DIO << 7) | (IO & 0x7F);
 									} while (IO & 0x80);
 
 									for (int vlvsize = 0; vlvsize < DIO; vlvsize++)
-										Track.push_back(pfiv.get());
+										track.push_back(file_inputs[i]->get());
 								}
 							}
 							else if (EVENTTYPE == 0xF0 || EVENTTYPE == 0xF7)
 							{
-								Track.push_back(EVENTTYPE);
+								track.push_back(EVENTTYPE);
 								DIO = 0;
 								do 
 								{
-									IO = pfiv.get();
-									Track.push_back(IO);
+									IO = file_inputs[i]->get();
+									track.push_back(IO);
 									DIO = (DIO << 7) | (IO & 0x7F);
 								} while (IO & 0x80);
 
 								for (int vlvsize = 0; vlvsize < DIO; vlvsize++)
-									Track.push_back(pfiv.get());
+									track.push_back(file_inputs[i]->get());
 							}
 							else if ((EVENTTYPE >= 0x80 && EVENTTYPE <= 0xBF) || (EVENTTYPE >= 0xE0 && EVENTTYPE <= 0xEF))
 							{
-								Track.push_back(EVENTTYPE);
-								Track.push_back(pfiv.get());
-								Track.push_back(pfiv.get());
+								track.push_back(EVENTTYPE);
+								track.push_back(file_inputs[i]->get());
+								track.push_back(file_inputs[i]->get());
 							}
 							else if ((EVENTTYPE >= 0xC0 && EVENTTYPE <= 0xDF))
 							{
-								Track.push_back(EVENTTYPE);
-								Track.push_back(pfiv.get());
+								track.push_back(EVENTTYPE);
+								track.push_back(file_inputs[i]->get());
 							}
 							else 
-							{   ///RSB CANNOT APPEAR IN THIS STAGE
-								auto pos = pfiv.tellg();
+							{
+								///RSB CANNOT APPEAR IN THIS STAGE
+								auto pos = file_inputs[i]->tellg();
 								std::cout << "Inplace error @" << std::hex << pos << std::dec << std::endl;
 
 								ThrowAlert_Error("DTI Failure at " + std::to_string(pos) + ". Type: " +
 									std::to_string(EVENTTYPE) + ". Tell developer about it and give him source midis.\n");
 
-								Track.push_back(0xCA);
-								Track.push_back(0);
+								track.push_back(0xCA);
+								track.push_back(0);
 								goto trackending;
 							}
 							goto deltatime_reading;
 						trackending:
-							ddt = -1;
-							if (!pfiv.eof())
-								ActiveStreamFlag = 1;
+							decaying_delta_times[i] = -1;
+							if (!file_inputs[i]->eof())
+								active_stream_flag = 1;
 							continue;
 						escape:
-							ActiveTrackReading = 1;
-							ddt--;
+							active_track_reading = 1;
+							decaying_delta_times[i]--;
 							continue;
 						//file_eof:
-							ddt = -1;
+							decaying_delta_times[i] = -1;
 							continue;
 						}
-						else if (ddt > 0) 
+						else if (decaying_delta_times[i] > 0) 
 						{
-							ActiveTrackReading = 1;
-							ddt--;
+							active_track_reading = 1;
+							decaying_delta_times[i]--;
 							continue;
 						}
 						else 
 						{
-							if (pfiv.good())
+							if (file_inputs[i]->good())
 							{
-								ActiveStreamFlag = 1; 
+								active_stream_flag = 1; 
 							}
 							continue;
 						}
 						///while it's zero delta time
 					}
-					if (!ActiveTrackReading && !Track.empty()) 
+					if (!active_track_reading && !track.empty()) 
 					{
 
-						DeltaLen = single_midi_processor_2::push_vlv(InTrackDelta, Track);
+						DeltaLen = single_midi_processor_2::push_vlv(InTrackDelta, track);
 						InTrackDelta = 0;
 
-						Track.push_back(0xFF);
-						Track.push_back(0x2F);
-						Track.push_back(0x00);
+						track.push_back(0xFF);
+						track.push_back(0x2F);
+						track.push_back(0x00);
 					}
 				}
-				ActiveTrackReading = 1;
+				active_track_reading = 1;
 				constexpr std::uint32_t EDGE = 0x7F000000;
 
-				if (Track.size() > 0xFFFFFFFFu)
+				if (track.size() > 0xFFFFFFFFu)
 					std::cout << "TrackSize overflow!!!\n";
-				else if (Track.empty())
+				else if (track.empty())
 					continue;
 
-				if (Track.size() > EDGE * 2) 
+				if (track.size() > EDGE * 2) 
 				{
-					std::int64_t TotalShift = EDGE, PrevEdgePos = 0;
-					DegeneratedTrackIterator DTI(Track);
-					FrontEdge.clear();
-					while (DTI.AdvanceUntilReachingPositionOf(TotalShift))
+					std::int64_t total_shift = EDGE, prev_edge_pos = 0;
+					normalised_track_iterator iterator(track);
+					front_edge.clear();
+					while (iterator.advance_until_reaching_position_of(total_shift))
 					{
-						TotalShift = DTI.CurPosition + EDGE;
-						BackEdge.clear();
-						DTI.PutCurrentHoldedNotes(BackEdge, false);
-						std::uint64_t TotalSize = FrontEdge.size() + (DTI.CurPosition - PrevEdgePos) + BackEdge.size() + 4;
-						(*file_output) << "MTrk";
-						file_output->put(TotalSize >> 24);
-						file_output->put(TotalSize >> 16);
-						file_output->put(TotalSize >> 8);
-						file_output->put(TotalSize);
+						total_shift = iterator.current_position + EDGE;
+						back_edge.clear();
+						iterator.put_current_held_notes(back_edge, false);
+						std::uint64_t total_size = front_edge.size() + (iterator.current_position - prev_edge_pos) + back_edge.size() + 4;
+						(*file_output_ptr) << "MTrk";
+						file_output_ptr->put(total_size >> 24);
+						file_output_ptr->put(total_size >> 16);
+						file_output_ptr->put(total_size >> 8);
+						file_output_ptr->put(total_size);
 
-						single_midi_processor_2::ostream_write(FrontEdge, *file_output);
-						single_midi_processor_2::ostream_write(Track, Track.begin() + PrevEdgePos, Track.begin() + DTI.CurPosition, *file_output);
-						single_midi_processor_2::ostream_write(BackEdge, BackEdge.begin(), BackEdge.end(), *file_output);
+						single_midi_processor_2::ostream_write(front_edge, *file_output_ptr);
+						single_midi_processor_2::ostream_write(track, track.begin() + prev_edge_pos, track.begin() + iterator.current_position, *file_output_ptr);
+						single_midi_processor_2::ostream_write(back_edge, back_edge.begin(), back_edge.end(), *file_output_ptr);
 
-						file_output->put(0);//that's why +4
-						file_output->put(0xFF);
-						file_output->put(0x2F);
-						file_output->put(0);
-						(TrackCount.get())++;
-						PrevEdgePos = DTI.CurPosition;
-						FrontEdge.clear();
-						DTI.PutCurrentHoldedNotes(FrontEdge, true);
+						file_output_ptr->put(0); //that's why +4 // ???????
+						file_output_ptr->put(0xFF);
+						file_output_ptr->put(0x2F);
+						file_output_ptr->put(0);
+						(track_count.get())++;
+
+						prev_edge_pos = iterator.current_position;
+						front_edge.clear();
+						iterator.put_current_held_notes(front_edge, true);
 					}
-					(*file_output) << "MTrk";
-					std::uint64_t TotalSize = FrontEdge.size() + (DTI.CurPosition - PrevEdgePos);
+					(*file_output_ptr) << "MTrk";
+					std::uint64_t total_size = front_edge.size() + (iterator.current_position - prev_edge_pos);
 					//cout << "Outside:" << TotalSize << endl;
-					file_output->put(TotalSize >> 24);
-					file_output->put(TotalSize >> 16);
-					file_output->put(TotalSize >> 8);
-					file_output->put(TotalSize);
+					file_output_ptr->put(total_size >> 24);
+					file_output_ptr->put(total_size >> 16);
+					file_output_ptr->put(total_size >> 8);
+					file_output_ptr->put(total_size);
 
-					single_midi_processor_2::ostream_write(FrontEdge, *file_output);
-					single_midi_processor_2::ostream_write(Track, Track.begin() + PrevEdgePos, Track.end(), *file_output);
+					single_midi_processor_2::ostream_write(front_edge, *file_output_ptr);
+					single_midi_processor_2::ostream_write(track, track.begin() + prev_edge_pos, track.end(), *file_output_ptr);
 
-					FrontEdge.clear();
-					BackEdge.clear();
-					++(TrackCount.get());
+					front_edge.clear();
+					back_edge.clear();
+					++(track_count.get());
 				}
 				else
 				{
-					*file_output << "MTrk";
-					file_output->put(Track.size() >> 24);
-					file_output->put(Track.size() >> 16);
-					file_output->put(Track.size() >> 8);
-					file_output->put(Track.size());
+					*file_output_ptr << "MTrk";
+					file_output_ptr->put(track.size() >> 24);
+					file_output_ptr->put(track.size() >> 16);
+					file_output_ptr->put(track.size() >> 8);
+					file_output_ptr->put(track.size());
 
-					single_midi_processor_2::ostream_write(Track, *file_output);
+					single_midi_processor_2::ostream_write(track, *file_output_ptr);
 					//copy(Track.begin(), Track.end(), ostream_iterator<std::uint8_t>(file_output));
-					++(TrackCount.get());
+					++(track_count.get());
 				}
-				Track.clear();
+				track.clear();
 			}
 			for (int i = 0; i < fiv.size(); i++)
 			{
-				pfiv.close();
-				auto& imc_i = IMC[i];
+				file_inputs[i]->close();
+				auto& imc_i = inplace_merge_candidates[i];
 
 				if (imc_i.first->settings.proc_details.remove_remnants)
 #ifdef _MSC_VER
@@ -532,32 +550,33 @@ struct MIDICollectionThreadedMerger
 #else
 					remove
 #endif
-						((imc_i.first->filename + imc_i.first->postfix).c_str());
+						((inplace_merge_candidates[i].first->filename + inplace_merge_candidates[i].first->postfix).c_str());
 			}
-			file_output->seekp(10, std::ios::beg);
-			file_output->put((TrackCount.get()) >> 8);
-			file_output->put((TrackCount.get()) & 0xff);
+			file_output_ptr->seekp(10, std::ios::beg);
+			file_output_ptr->put((track_count.get()) >> 8);
+			file_output_ptr->put((track_count.get()) & 0xff);
 
-			if (fo_ptr)
-				fclose(fo_ptr);
+			if (file_output_fo_ptr)
+				fclose(file_output_fo_ptr);
 			else
-				file_output->flush();
+				file_output_ptr->flush();
 
-			for (auto& t : fiv)
+			for (auto& t : file_inputs)
 				delete t;
 
-			delete file_output;
+			delete file_output_ptr;
 			printf("Inplace: finished\n");
-			FinishedFlag.get() = true;
+			complete_flag.get() = true;
 
 		},
-		inplace_merge_candidates, FinalPPQN, SaveTo, std::ref(IntermediateInplaceFlag), std::ref(IITrackCount)).detach();
+		inplace_merge_candidates, final_ppqn, save_to, std::ref(complete_flag), std::ref(ii_track_count)).detach();
 	}
-	void RegularMerge()
+
+	void regular_merge()
 	{
-		using mpd_t = decltype(midi_processing_data);
+		using mpd_t = decltype(processing_data);
 		mpd_t regular_merge_candidates;
-		std::copy_if(midi_processing_data.begin(), midi_processing_data.end(), std::back_inserter(regular_merge_candidates),
+		std::copy_if(processing_data.begin(), processing_data.end(), std::back_inserter(regular_merge_candidates),
 			[](mpd_t::value_type& el) { return !el.first->settings.details.inplace_mergable; });
 
 		if (regular_merge_candidates.size() == 1)
@@ -565,12 +584,8 @@ struct MIDICollectionThreadedMerger
 			auto filename = 
 				regular_merge_candidates.front().first->filename + 
 				regular_merge_candidates.front().first->postfix;
-			auto save_to_with_postfix = SaveTo +
-#ifdef _MSC_VER
-				L".R.mid";
-#else
-				".R.mid";
-#endif
+			auto save_to_with_postfix = save_to + 
+				to_cchar_t(".R.mid").operator std_unicode_string();
 
 			auto remove_functor =
 #ifdef _MSC_VER
@@ -589,47 +604,48 @@ struct MIDICollectionThreadedMerger
 			remove_functor(save_to_with_postfix.c_str());
 			auto result = rename_functor(filename.c_str(), save_to_with_postfix.c_str());
 
-			IRTrackCount += regular_merge_candidates.front().first->tracks_count;
-			IntermediateRegularFlag = true; /// Will this work?
+			ir_track_count += regular_merge_candidates.front().first->tracks_count;
+			intermediate_regular_flag = true; /// Will this work?
 		}
 		else
 		{
-		std::thread([](mpd_t RMC, std::uint16_t ppqn, std_unicode_string _SaveTo,
-			std::reference_wrapper<std::atomic_bool> FinishedFlag, std::reference_wrapper<std::atomic_uint64_t> TrackCount)
+		std::thread([](mpd_t regular_merge_candidates, std::uint16_t ppqn, std_unicode_string save_to,
+			std::reference_wrapper<std::atomic_bool> complete_flag, std::reference_wrapper<std::atomic_uint64_t> track_count)
 		{
-			if (RMC.empty())
+			if (regular_merge_candidates.empty())
 			{
-				FinishedFlag.get() = true;
+				complete_flag.get() = true;
 				return;
 			}
 			//bool FirstFlag = 1;
 			const size_t buffer_size = 20000000;
 			std::uint8_t* buffer = new std::uint8_t[buffer_size];
-			auto [file_output, fo_ptr] = open_wide_stream<std::ostream>
-#ifdef _MSC_VER
-				(_SaveTo + L".R.mid", L"wb");
-#else
-				(_SaveTo + ".R.mid", "wb");
-#endif
+			auto [file_output_ptr, file_output_fo_ptr] = open_wide_stream<std::ostream>
+				(save_to + to_cchar_t(".R.mid").operator std_unicode_string(), to_cchar_t("wb"));
 
-			std_unicode_string filename = RMC.front().first->filename + RMC.front().first->postfix;
+			std_unicode_string filename = regular_merge_candidates.front().first->filename + regular_merge_candidates.front().first->postfix;
 			bbb_ffr file_input(filename.c_str());
-			file_output->rdbuf()->pubsetbuf((char*)buffer, buffer_size);
-			*file_output << "MThd" << '\0' << '\0' << '\0' << (char)6 << '\0' << (char)1;
-			file_output->put(0);
-			file_output->put(0);
-			file_output->put(ppqn >> 8);
-			file_output->put(ppqn);
-			for (auto Y = RMC.begin(); Y != RMC.end(); Y++)
+			file_output_ptr->rdbuf()->pubsetbuf((char*)buffer, buffer_size);
+
+			*file_output_ptr << "MThd" << '\0' << '\0' << '\0' << (char)6 << '\0' << (char)1;
+			file_output_ptr->put(0);
+			file_output_ptr->put(0);
+			file_output_ptr->put(ppqn >> 8);
+			file_output_ptr->put(ppqn);
+
+			for (auto Y = regular_merge_candidates.begin(); Y != regular_merge_candidates.end(); Y++)
 			{
 				filename = Y->first->filename + Y->first->postfix;
-				if (Y != RMC.begin())
+				if (Y != regular_merge_candidates.begin())
 					file_input.reopen_next_file(filename.c_str());
+
 				for (int i = 0; i < 14; i++)
 					file_input.get();
-				file_input.put_into_ostream(*file_output);
-				TrackCount.get() += Y->first->tracks_count;
-				int t;
+
+				file_input.put_into_ostream(*file_output_ptr);
+				track_count.get() += Y->first->tracks_count;
+				std::int32_t t;
+
 				if (Y->first->settings.proc_details.remove_remnants)
 					t =
 #ifdef _MSC_VER
@@ -639,71 +655,58 @@ struct MIDICollectionThreadedMerger
 #endif
 						(filename.c_str());
 			}
-			file_output->seekp(10, std::ios::beg);
-			file_output->put(TrackCount.get() >> 8);
-			file_output->put(TrackCount.get());
-			FinishedFlag.get() = true; /// Will this work?
-			file_output->flush();
 
-			if (fo_ptr)
-				fclose(fo_ptr);
+			file_output_ptr->seekp(10, std::ios::beg);
+			file_output_ptr->put(track_count.get() >> 8);
+			file_output_ptr->put(track_count.get());
+			complete_flag.get() = true; /// Will this work?
+			file_output_ptr->flush();
+
+			if (file_output_fo_ptr)
+				fclose(file_output_fo_ptr);
 
 			delete[] buffer;
-			delete file_output;
-			}, regular_merge_candidates, FinalPPQN, SaveTo, std::ref(IntermediateRegularFlag), std::ref(IRTrackCount)).detach();
-
+			delete file_output_ptr;
+			}, regular_merge_candidates, final_ppqn, save_to, std::ref(complete_flag), std::ref(ir_track_count)).detach();
 		}
+	}
 
-	}
-	void Start_RI_Merge() 
+	void start_ri_merge() 
 	{
-		RegularMerge();
-		InplaceMerge();
+		this->regular_merge();
+		this->inplace_merge();
 	}
-	void FinalMerge() 
+
+	void final_merge() 
 	{
-		std::thread([this](std::reference_wrapper<std::atomic_bool> FinishedFlag, std_unicode_string _SaveTo)
+		std::thread([this](std::reference_wrapper<std::atomic_bool> complete_flag, std_unicode_string save_to)
 		{
-			bbb_ffr
-#ifdef _MSC_VER
-				*IM = new bbb_ffr((_SaveTo + L".I.mid").c_str()),
-				*RM = new bbb_ffr((_SaveTo + L".R.mid").c_str());
-#else
-				*IM = new bbb_ffr((_SaveTo + ".I.mid").c_str()),
-				*RM = new bbb_ffr((_SaveTo + ".R.mid").c_str());
-#endif
-			auto [F, fo_ptr] = open_wide_stream<std::ostream>
-#ifdef _MSC_VER
-						(_SaveTo, L"wb");
-#else
-						(_SaveTo, "wb");
-#endif
+			bbb_ffr* im_ptr = new bbb_ffr((save_to + to_cchar_t(".I.mid").operator std_unicode_string()).c_str());
+			bbb_ffr* rm_ptr = new bbb_ffr((save_to + to_cchar_t(".R.mid").operator std_unicode_string()).c_str());
 
-			bool IMgood = !IM->eof(), RMgood = !RM->eof();
+			auto [file_output_ptr, file_output_fo_ptr] = open_wide_stream<std::ostream>
+				(save_to + to_cchar_t(".F.mid").operator std_unicode_string(), to_cchar_t("wb"));
 
-			auto TotalTracks = IITrackCount.load() + IRTrackCount.load();
-			if ((~0xFFFFULL) & TotalTracks)
+			bool im_good = !im_ptr->eof(), rm_good = !rm_ptr->eof();
+
+			auto total_tracks = ii_track_count.load() + ir_track_count.load();
+			if ((~0xFFFFULL) & total_tracks)
 			{
-				printf("Track count overflow: %llu\n", TotalTracks);
-				TotalTracks = 0xFFFF;
+				printf("Track count overflow: %llu\n", total_tracks);
+				total_tracks = 0xFFFF;
 			}
 
-			if (!IMgood || !RMgood)
+			if (!im_good || !rm_good)
 			{
-				IM->close();
-				RM->close();
-				F->flush();
+				im_ptr->close();
+				rm_ptr->close();
+				file_output_ptr->flush();
 
-				if (fo_ptr)
-					fclose(fo_ptr);
+				if (file_output_fo_ptr)
+					fclose(file_output_fo_ptr);
 
-#ifdef _MSC_VER
-				auto inplaceFilename = _SaveTo + L".I.mid";
-				auto regularFilename = _SaveTo + L".R.mid";
-#else
-				auto inplaceFilename = _SaveTo + ".I.mid";
-				auto regularFilename = _SaveTo + ".R.mid";
-#endif
+				auto inplace_filename = save_to + to_cchar_t(".I.mid").operator std_unicode_string();
+				auto regular_filename = save_to + to_cchar_t(".R.mid").operator std_unicode_string();
 
 				auto remove_orig =
 #ifdef _MSC_VER
@@ -711,7 +714,7 @@ struct MIDICollectionThreadedMerger
 #else
 					remove
 #endif
-				 		(_SaveTo.c_str());
+				 		(save_to.c_str());
 
 				auto remove_i =
 #ifdef _MSC_VER
@@ -719,7 +722,7 @@ struct MIDICollectionThreadedMerger
 #else
 					rename
 #endif
-						(inplaceFilename.c_str(), _SaveTo.c_str());
+						(inplace_filename.c_str(), save_to.c_str());
 
 				auto remove_r =
 #ifdef _MSC_VER
@@ -727,16 +730,16 @@ struct MIDICollectionThreadedMerger
 #else
 					rename
 #endif
-						(regularFilename.c_str(), _SaveTo.c_str());//one of these will not work
+						(regular_filename.c_str(), save_to.c_str());//one of these will not work
 
 				printf("S2 status: %i\nI status: %i\nR status: %i\n", remove_orig, remove_i, remove_r);
 
-				delete IM;
-				delete RM;
-				delete F;
+				delete im_ptr;
+				delete rm_ptr;
+				delete file_output_ptr;
 
 				printf("Escaped last stage\n");
-				FinishedFlag.get() = true;
+				complete_flag.get() = true;
 
 				return;
 			}
@@ -746,57 +749,61 @@ struct MIDICollectionThreadedMerger
 			std::uint16_t T = 0;
 			std::uint8_t A = 0, B = 0;
 
-			F->put('M');
-			F->put('T');
-			F->put('h');
-			F->put('d');
-			F->put(0);
-			F->put(0);
-			F->put(0);
-			F->put(6);
-			F->put(0);
-			F->put(1);
+			file_output_ptr->put('M');
+			file_output_ptr->put('T');
+			file_output_ptr->put('h');
+			file_output_ptr->put('d');
+			file_output_ptr->put(0);
+			file_output_ptr->put(0);
+			file_output_ptr->put(0);
+			file_output_ptr->put(6);
+			file_output_ptr->put(0);
+			file_output_ptr->put(1);
 			for (int i = 0; i < 12; i++)
-				IM->get();
+				im_ptr->get();
 			for (int i = 0; i < 12; i++)
-				RM->get();
-			T = TotalTracks;
+				rm_ptr->get();
+			T = total_tracks;
 			A = T >> 8;
 			B = T;
-			F->put(A);
-			F->put(B);
+			file_output_ptr->put(A);
+			file_output_ptr->put(B);
 
-			IM->get();
-			IM->get();
-			F->put(RM->get());
-			F->put(RM->get());
+			im_ptr->get();
+			im_ptr->get();
+			file_output_ptr->put(rm_ptr->get());
+			file_output_ptr->put(rm_ptr->get());
 
-			IM->put_into_ostream(*F);
-			RM->put_into_ostream(*F);
+			im_ptr->put_into_ostream(*file_output_ptr);
+			rm_ptr->put_into_ostream(*file_output_ptr);
 
-			IM->close();
-			RM->close();
-			F->flush();
+			im_ptr->close();
+			rm_ptr->close();
+			file_output_ptr->flush();
 
-			if (fo_ptr)
-				fclose(fo_ptr);
+			if (file_output_fo_ptr)
+				fclose(file_output_fo_ptr);
 
-			delete F;
-			delete IM;
-			delete RM;
+			delete im_ptr;
+			delete rm_ptr;
+			delete file_output_ptr;
 
-			FinishedFlag.get() = true;
-			if (RemnantsRemove)
+			complete_flag.get() = true;
+			if (remnants_remove)
 			{
+				auto inplace_filename = save_to + to_cchar_t(".I.mid").operator std_unicode_string();
+				auto regular_filename = save_to + to_cchar_t(".R.mid").operator std_unicode_string();
+				auto remove_functor =
 #ifdef _MSC_VER
-				_wremove((_SaveTo + L".I.mid").c_str());
-				_wremove((_SaveTo + L".R.mid").c_str());
+					_wremove;
 #else
-				remove((_SaveTo + ".I.mid").c_str());
-				remove((_SaveTo + ".R.mid").c_str());
+					remove;
 #endif
+
+				remove_functor(inplace_filename.c_str());
+				remove_functor(regular_filename.c_str());
 			}
-		}, std::ref(CompleteFlag), SaveTo).detach();
+		}, std::ref(complete_flag), save_to).detach();
 	}
 };
 

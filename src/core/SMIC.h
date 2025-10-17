@@ -8,172 +8,174 @@
 #include "bbb_ffio.h"
 #include <btree/btree_map.h>
 
-constexpr uint32_t MTrk = 1297379947;
-constexpr uint32_t MThd = 1297377380;
 constexpr bool STRICT_WARNINGS = true;
 
-struct SingleMIDIInfoCollector 
+struct single_midi_info_collector 
 {
-	struct TempoEvent
+	static constexpr uint32_t MTrk_header = 1297379947;
+	static constexpr uint32_t MThd_header = 1297377380;
+
+	struct tempo_event
 	{
 		std::uint8_t A;
 		std::uint8_t B;
 		std::uint8_t C;
-		TempoEvent(std::uint8_t A, std::uint8_t B, std::uint8_t C) : A(A), B(B), C(C) {	}
-		TempoEvent() :TempoEvent(0x7, 0xA1, 0x20) {}
-		inline static double get_bpm(std::uint8_t A, std::uint8_t B, std::uint8_t C)
+
+		constexpr tempo_event(std::uint8_t A, std::uint8_t B, std::uint8_t C) : A(A), B(B), C(C) {	}
+		constexpr tempo_event() : tempo_event(0x7, 0xA1, 0x20) {}
+
+		constexpr double get_bpm() const noexcept
 		{
-			std::uint32_t L = (A << 16) | (B << 8) | (C);
-			return 60000000. / L;
+			return 60000000. / ((this->A << 16) | (this->B << 8) | (this->C));
 		}
-		inline operator double() const
+
+		constexpr operator double() const noexcept
 		{
-			return get_bpm(A, B, C);
-		}
-		inline bool operator<(const TempoEvent& TE) const
-		{
-			return double(*this) < (double)TE;
+			return get_bpm();
 		}
 	};
-	struct NoteOnOffCounter
+
+	struct note_on_off_counter
 	{
-		std::int64_t NoteOn;
-		std::int64_t NoteOff;
-		NoteOnOffCounter() : NoteOn(0), NoteOff(0) {}
-		NoteOnOffCounter(std::int64_t Base) : NoteOnOffCounter()
+		std::int64_t note_on;
+		std::int64_t note_off;
+		note_on_off_counter() : note_on(0), note_off(0) {}
+		note_on_off_counter(std::int64_t Base) : note_on_off_counter()
 		{
 			if (Base > 0)
-				NoteOn += Base;
+				this->note_on += Base;
 			else
-				NoteOff -= Base;
+				this->note_off -= Base;
 		}
-		NoteOnOffCounter(std::int64_t NOn, std::int64_t NOff) : NoteOn(NOn), NoteOff(NOff) {}
+		note_on_off_counter(std::int64_t note_on, std::int64_t note_off) : note_on(note_on), note_off(note_off) {}
 		inline operator std::int64_t() const
 		{
-			return NoteOn - NoteOff;
+			return this->note_on - this->note_off;
 		}
-		NoteOnOffCounter inline operator +(std::int64_t offset)
+		note_on_off_counter inline operator +(std::int64_t offset)
 		{
 			if (offset > 0)
-				NoteOn += offset;
+				this->note_on += offset;
 			else
-				NoteOff -= offset;
+				this->note_off -= offset;
 			return *this;
 		}
-		NoteOnOffCounter inline operator +=(std::int64_t offset)
+		note_on_off_counter inline operator +=(std::int64_t offset)
 		{
 			return *this = (*this + (offset));
 		}
-		NoteOnOffCounter inline operator -(std::int64_t offset)
+		note_on_off_counter inline operator -(std::int64_t offset)
 		{
 			return *this + (-offset);
 		}
-		NoteOnOffCounter inline operator -=(std::int64_t offset)
+		note_on_off_counter inline operator -=(std::int64_t offset)
 		{
 			return *this = (*this + (-offset));
 		}
-		NoteOnOffCounter inline operator ++()
+		note_on_off_counter inline operator ++()
 		{
-			NoteOn++;
+			this->note_on++;
 			return *this;
 		}
-		NoteOnOffCounter inline operator --()
+		note_on_off_counter inline operator --()
 		{
-			NoteOff++;
+			this->note_off++;
 			return *this;
 		}
 	};
-	struct TrackData 
+
+	struct track_data 
 	{
 		std::int64_t MTrk_pos;
 	};
-	bool Processing, Finished;
+
+	bool processing, finished;
 	std_unicode_string FileName;
-	std::string LogLine;
-	std::string ErrorLine;
-	using tempo_graph = btree::btree_map<std::int64_t, TempoEvent>;
-	using der_polyphony_graph = btree::btree_map<std::int64_t, NoteOnOffCounter>;
+	std::string log_line;
+	std::string error_line;
+	using tempo_graph = btree::btree_map<std::int64_t, tempo_event>;
+	using der_polyphony_graph = btree::btree_map<std::int64_t, note_on_off_counter>;
 	using polyphony_graph = btree::btree_map<std::int64_t, std::int64_t>;
-	tempo_graph TempoMap;
-	//der_polyphony_graph PolyphonyFiniteDifference;
-	polyphony_graph Polyphony;
-	std::vector<TrackData> Tracks;
-	std::uint16_t PPQ;
-	bool AllowLegacyRunningStatusMetaIgnorance;
+	tempo_graph tempo_map;
+	polyphony_graph polyphony_map;
+	std::vector<track_data> tracks;
+	std::uint16_t ppq;
+	bool allow_legacy_meta_running_status_behaviour;
 	//Locker<btree::btree_map<std::uint64_t, std::uint64_t>> Polyphony;
 	//Locker<btree::btree_map<>>
-	SingleMIDIInfoCollector(std_unicode_string filename, std::uint16_t PPQ, bool AllowLegacyRunningStatusMetaIgnorance = false) :
+	single_midi_info_collector(std_unicode_string filename, std::uint16_t ppq, bool allow_legacy_meta_running_status_behaviour = false) :
 		FileName(filename),
-		LogLine(" "),
-		Processing(0),
-		Finished(0),
-		PPQ(PPQ),
-		AllowLegacyRunningStatusMetaIgnorance(AllowLegacyRunningStatusMetaIgnorance)
-	{
+		log_line(" "),
+		processing(0),
+		finished(0),
+		ppq(ppq),
+		allow_legacy_meta_running_status_behaviour(allow_legacy_meta_running_status_behaviour)
+	{}
 
-	}
-	void Lookup() 
+	void lookup() 
 	{
-		der_polyphony_graph PolyphonyFiniteDifference;
-		Processing = true;
+		der_polyphony_graph polyphony_finite_difference;
+		processing = true;
 		bbb_ffr file_input(FileName.c_str());
-		ErrorLine = " ";
-		LogLine = " ";
+		error_line = " ";
+		log_line = " ";
 		//std::array<std::uint32_t, 4096> CurHolded;
-		std::uint32_t MTRK = 0, vlv = 0;
-		std::uint64_t LastTick = 0;
-		std::uint64_t CurTick = 0;
-		std::uint8_t IO = 0, RSB = 0;
-		TrackData TData;
-		TempoMap[0] = TempoEvent(0x7, 0xA1, 0x20);
-		PolyphonyFiniteDifference[-1] = NoteOnOffCounter();
+		std::uint32_t MTrk = 0, vlv = 0;
+		std::uint64_t last_tick = 0;
+		std::uint64_t cur_tick = 0;
+		std::uint8_t io = 0, rsb = 0;
+		track_data track_data;
+		tempo_map[0] = tempo_event(0x7, 0xA1, 0x20);
+		polyphony_finite_difference[-1] = note_on_off_counter();
 		while (file_input.good())
 		{
 			std::array<std::uint64_t, 4096> polyphony;
-			CurTick = 0;
-			MTRK = 0;
-			while (MTRK != MTrk && file_input.good())
-				MTRK = (MTRK << 8) | (file_input.get());
+			cur_tick = 0;
+			MTrk = 0;
+			while (MTrk != MTrk_header && file_input.good())
+				MTrk = (MTrk << 8) | (file_input.get());
+
 			for (int i = 0; i < 4; i++)
 				file_input.get();
-			IO = RSB = 0;
+
+			io = rsb = 0;
 			while (file_input.good())
 			{
-				TData.MTrk_pos = file_input.tellg() - 8;
+				track_data.MTrk_pos = file_input.tellg() - 8;
 				vlv = 0;
 				do 
 				{
-					IO = file_input.get();
-					vlv = (vlv << 7) | (IO & 0x7F);
-				} while (IO & 0x80 && !file_input.eof());
-				CurTick += vlv;
-				if (LastTick < CurTick)
-					LastTick = CurTick;
-				std::uint8_t EventType = file_input.get();
-				if (EventType == 0xFF)
+					io = file_input.get();
+					vlv = (vlv << 7) | (io & 0x7F);
+				} while (io & 0x80 && !file_input.eof());
+				cur_tick += vlv;
+				if (last_tick < cur_tick)
+					last_tick = cur_tick;
+				std::uint8_t event_type = file_input.get();
+				if (event_type == 0xFF)
 				{
-					if(AllowLegacyRunningStatusMetaIgnorance)
-						RSB = 0;
+					if(allow_legacy_meta_running_status_behaviour)
+						rsb = 0;
 					std::uint8_t type = file_input.get();
 					std::uint32_t meta_data_size = 0;
 					do 
 					{
-						IO = file_input.get();
-						meta_data_size = (meta_data_size << 7) | (IO & 0x7F);
-					} while (IO & 0x80 && !file_input.eof());
+						io = file_input.get();
+						meta_data_size = (meta_data_size << 7) | (io & 0x7F);
+					} while (io & 0x80 && !file_input.eof());
 					if (type == 0x2F)
 					{
-						Tracks.push_back(TData);
-						LogLine = "Passed " + std::to_string(Tracks.size()) + " tracks";
+						tracks.push_back(track_data);
+						log_line = "Passed " + std::to_string(tracks.size()) + " tracks";
 						break;
 					}
 					else if (type == 0x51)
 					{
-						TempoEvent TE;
-						TE.A = file_input.get();
-						TE.B = file_input.get();
-						TE.C = file_input.get();
-						TempoMap[CurTick] = TE;
+						tempo_event te;
+						te.A = file_input.get();
+						te.B = file_input.get();
+						te.C = file_input.get();
+						tempo_map[cur_tick] = te;
 					}
 					else
 					{
@@ -181,18 +183,18 @@ struct SingleMIDIInfoCollector
 							file_input.get();
 					}
 				}
-				else if (EventType >= 0x80 && EventType <= 0x9F)
+				else if (event_type >= 0x80 && event_type <= 0x9F)
 				{
-					RSB = EventType;
-					int change = (EventType & 0x10) ? 1 : -1;
-					auto it = PolyphonyFiniteDifference.find(CurTick);
+					rsb = event_type;
+					int change = (event_type & 0x10) ? 1 : -1;
+					auto it = polyphony_finite_difference.find(cur_tick);
 					auto key = file_input.get();
 					auto volume = file_input.get();
 
 					if (!volume && change == 1)
 						change = -1;
 
-					int index = (EventType & 0xF) | (key << 4);
+					int index = (event_type & 0xF) | (key << 4);
 					if (change == -1)
 					{
 						if (polyphony[index] == 0)
@@ -202,50 +204,50 @@ struct SingleMIDIInfoCollector
 					else 
 						polyphony[index] += 1;
 
-					if (it == PolyphonyFiniteDifference.end())
-						PolyphonyFiniteDifference[CurTick] = change;
+					if (it == polyphony_finite_difference.end())
+						polyphony_finite_difference[cur_tick] = change;
 					else
 						it->second += change;
 				}
-				else if ((EventType >= 0xA0 && EventType <= 0xBF) ||
-					(EventType >= 0xE0 && EventType <= 0xEF))
+				else if ((event_type >= 0xA0 && event_type <= 0xBF) ||
+					(event_type >= 0xE0 && event_type <= 0xEF))
 				{
-					RSB = EventType;
+					rsb = event_type;
 					file_input.get();
 					file_input.get();
 				}
-				else if (EventType >= 0xC0 && EventType <= 0xDF)
+				else if (event_type >= 0xC0 && event_type <= 0xDF)
 				{
-					RSB = EventType;
+					rsb = event_type;
 					file_input.get();
 				}
-				else if (EventType == 0xF0 || EventType == 0xF7)
+				else if (event_type == 0xF0 || event_type == 0xF7)
 				{
-					if(AllowLegacyRunningStatusMetaIgnorance)
-						RSB = 0;
+					if(allow_legacy_meta_running_status_behaviour)
+						rsb = 0;
 					std::uint32_t meta_data_size = 0;
 					do
 					{
-						IO = file_input.get();
-						meta_data_size = (meta_data_size << 7) | (IO & 0x7F);
-					} while (IO & 0x80 && !file_input.eof());
+						io = file_input.get();
+						meta_data_size = (meta_data_size << 7) | (io & 0x7F);
+					} while (io & 0x80 && !file_input.eof());
 					while (meta_data_size--)
 						file_input.get();
 				}
 				else 
 				{
-					std::uint8_t FirstParam = EventType;
-					EventType = RSB;
-					if (EventType >= 0x80 && EventType <= 0x9F)
+					std::uint8_t first_param = event_type;
+					rsb = event_type;
+					if (event_type >= 0x80 && event_type <= 0x9F)
 					{
-						int change = (EventType & 0x10) ? 1 : -1;
-						auto it = PolyphonyFiniteDifference.find(CurTick);
+						int change = (event_type & 0x10) ? 1 : -1;
+						auto it = polyphony_finite_difference.find(cur_tick);
 						auto volume = file_input.get();
 
 						if (!volume && change == 1)
 							change = -1;
 
-						int index = (EventType & 0xF) | (FirstParam << 4);
+						int index = (event_type & 0xF) | (first_param << 4);
 						if (change == -1) 
 						{
 							if (polyphony[index] == 0)
@@ -255,35 +257,35 @@ struct SingleMIDIInfoCollector
 						else
 							polyphony[index] += 1;
 
-						if (it == PolyphonyFiniteDifference.end())
-							PolyphonyFiniteDifference[CurTick] = change;
+						if (it == polyphony_finite_difference.end())
+							polyphony_finite_difference[cur_tick] = change;
 						else
 							it->second += change;
 					}
-					else if ((EventType >= 0xA0 && EventType <= 0xBF) ||
-						(EventType >= 0xE0 && EventType <= 0xEF))
+					else if ((event_type >= 0xA0 && event_type <= 0xBF) ||
+						(event_type >= 0xE0 && event_type <= 0xEF))
 					{
 						file_input.get();
 					}
-					else if (EventType >= 0xC0 && EventType <= 0xDF)
+					else if (event_type >= 0xC0 && event_type <= 0xDF)
 					{
 						//nothing
 					}
 					else
 					{ // here throw an error
-						ErrorLine = "Corruption detected at: " + std::to_string(file_input.tellg());
+						error_line = "Corruption detected at: " + std::to_string(file_input.tellg());
 						break;
 					}
 				}
 			}
 		}
-		TempoMap[LastTick] = TempoMap.rbegin()->second;
-		PolyphonyFiniteDifference[LastTick + 1] = 0;
-		std::int64_t CurPolyphony = 0;
-		for (auto cur_pair : PolyphonyFiniteDifference)
-			Polyphony[cur_pair.first] = (CurPolyphony += cur_pair.second);
-		Finished = true;
-		Processing = false;
+		tempo_map[last_tick] = tempo_map.rbegin()->second;
+		polyphony_finite_difference[last_tick + 1] = 0;
+		std::int64_t cur_polyphony = 0;
+		for (auto cur_pair : polyphony_finite_difference)
+			polyphony_map[cur_pair.first] = (cur_polyphony += cur_pair.second);
+		finished = true;
+		processing = false;
 		file_input.close();
 	}
 };
