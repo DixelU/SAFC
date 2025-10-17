@@ -24,8 +24,8 @@ static char it_tempo[380] = "120";
 static bool temp = false;
 
 // Ohh god that's weird
-std::pair<MIDICollectionThreadedMerger::proc_data_ptr, MIDICollectionThreadedMerger::message_buffer_ptr> SMRP;
-void SetSMRP(std::pair< MIDICollectionThreadedMerger::proc_data_ptr, MIDICollectionThreadedMerger::message_buffer_ptr>& smrp)
+std::pair<midi_collection_threaded_merger::proc_data_ptr, midi_collection_threaded_merger::message_buffer_ptr> SMRP;
+void SetSMRP(std::pair< midi_collection_threaded_merger::proc_data_ptr, midi_collection_threaded_merger::message_buffer_ptr>& smrp)
 {
 	std::lock_guard<std::recursive_mutex> locker(Lock);
 	SMRP = smrp;
@@ -41,7 +41,7 @@ void RenderMainWindow()
 		{
 			if(ImGui::MenuItem("Add MIDIs"))
 			{
-				auto midis = MOFD(L"Add MIDI Files");
+				auto midis = MOFD(to_cchar_t("Add MIDI Files"));
 				
 				for (auto& file : midis)
 				{
@@ -77,7 +77,7 @@ void RenderMainWindow()
 			
 			if(ImGui::MenuItem("Save & Merge"))
 			{
-				std_unicode_string save_to = SOFD(L"Save file");
+				std_unicode_string save_to = SOFD(to_cchar_t("Save file"));
 
 				if(!save_to.empty())
 				{

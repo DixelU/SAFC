@@ -5,14 +5,11 @@
 
 #include "header_utils.h"
 
-#ifdef _MSC_VER
 #include <fstream>
-#else
-#include <stdio.h>
-#endif
-
 #include <istream>
 #include <ostream>
+
+#include <stdio.h>
 
 #ifdef _MSC_VER
 
@@ -47,11 +44,12 @@ inline size_t fread_wrap(void* ptr, size_t size, size_t count, FILE* file)
 #if !defined(__MINGW32__)
 
 template<typename __inner_stream_type, decltype(std::ios_base::out) stream_io_type = std::ios_base::out>
-std::pair<__inner_stream_type*, FILE*> open_wide_stream(std::wstring filename, const cchar_t* parameter);
+std::pair<__inner_stream_type*, FILE*> open_wide_stream(
+	std_unicode_string filename, const cchar_t* parameter);
 
 template<>
 std::pair<std::ostream*, FILE*> open_wide_stream<std::ostream, std::ios_base::out>(
-	std::wstring filename, const cchar_t* parameter)
+	std_unicode_string filename, const cchar_t* parameter)
 {
 	std::ostream* ostream = new std::ofstream(filename, std::ios_base::out | std::ios_base::binary);
 	return { ostream, nullptr }; // IN c++26 there will be native_handle() call, for now just return nullptr
@@ -59,7 +57,7 @@ std::pair<std::ostream*, FILE*> open_wide_stream<std::ostream, std::ios_base::ou
 
 template<>
 std::pair<std::istream*, FILE*> open_wide_stream<std::istream, std::ios_base::in>(
-	std::wstring filename, const cchar_t* parameter)
+	std_unicode_string filename, const cchar_t* parameter)
 {
 	std::istream* istream = new std::ifstream(filename, std::ios_base::in | std::ios_base::binary);
 	return { istream, nullptr }; // IN c++26 there will be native_handle() call, for now just return nullptr

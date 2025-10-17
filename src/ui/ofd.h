@@ -1,24 +1,23 @@
 #pragma once
 
-#include <vector>
-#include <string>
+#include "../core/header_utils.h"
 
 #ifdef _MSC_VER
 #include <commdlg.h>
 
-std::vector<std_unicode_string> MOFD(const wchar_t* Title)
+std::vector<std_unicode_string> MOFD(const cchar_t* Title)
 {
 	OPENFILENAME ofn;
-	wchar_t szFile[50000];
-	std::vector<std::wstring> InpLinks;
+	cchar_t szFile[50000];
+	std::vector<std_unicode_string> InpLinks;
 	ZeroMemory(&ofn, sizeof(ofn));
-	ZeroMemory(szFile, 50000 * sizeof(wchar_t));
+	ZeroMemory(szFile, 50000 * sizeof(cchar_t));
 	ofn.lStructSize = sizeof(ofn);
 	ofn.hwndOwner = NULL;
 	ofn.lpstrFile = szFile;
 	ofn.lpstrFile[0] = '\0';
 	ofn.nMaxFile = sizeof(szFile);
-	ofn.lpstrFilter = L"MIDI Files(*.mid)\0*.mid\0";
+	ofn.lpstrFilter = to_cchar_t("MIDI Files(*.mid)\0*.mid\0");
 	ofn.nFilterIndex = 1;
 	ofn.lpstrFileTitle = NULL;
 	ofn.lpstrTitle = Title;
@@ -74,15 +73,15 @@ std::vector<std_unicode_string> MOFD(const wchar_t* Title)
 	}
 }
 
-std::wstring SOFD(const wchar_t* Title)
+std::wstring SOFD(const cchar_t* Title)
 {
-	wchar_t filename[MAX_PATH];
+	cchar_t filename[MAX_PATH];
 	OPENFILENAME ofn;
 	ZeroMemory(&filename, sizeof(filename));
 	ZeroMemory(&ofn, sizeof(ofn));
 	ofn.lStructSize = sizeof(ofn);
 	ofn.hwndOwner = NULL;  // If you have a window to center over, put its HANDLE here
-	ofn.lpstrFilter = L"MIDI Files(*.mid)\0*.mid\0";
+	ofn.lpstrFilter = to_cchar_t("MIDI Files(*.mid)\0*.mid\0");
 	ofn.lpstrFile = filename;
 	ofn.nMaxFile = MAX_PATH;
 	ofn.lpstrTitle = Title;
@@ -118,7 +117,7 @@ std::wstring SOFD(const wchar_t* Title)
 }
 #else
 
-std::vector<std_unicode_string> MOFD(const wchar_t* Title) { /* todo implement */ };
-std::wstring SOFD(const wchar_t* Title) { /* todo implement */ }
+std::vector<std_unicode_string> MOFD(const cchar_t* Title) { /* todo implement */ };
+std_unicode_string SOFD(const cchar_t* Title) { /* todo implement */ }
 
 #endif

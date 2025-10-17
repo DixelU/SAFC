@@ -263,8 +263,8 @@ struct single_midi_processor_2
 			{
 				key_events_at_selection_front.clear();
 				channel_events_at_selection_front.clear();
-				key_events_at_selection_front.reserve(1 << 16);
-				channel_events_at_selection_front.reserve(1 << 8);
+				//key_events_at_selection_front.reserve(1 << 16);
+				//channel_events_at_selection_front.reserve(1 << 8);
 
 				frontal_tempo = default_tempo;
 				frontal_color_event = {};
