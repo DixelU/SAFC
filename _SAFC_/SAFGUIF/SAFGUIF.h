@@ -17,6 +17,7 @@
 #include "special_signs.h"
 #include "wheel_variable_changer.h"
 #include "moveable_window.h"
+#include "moveable_fui_window.h"
 #include "stls_presets.h"
 #include "windows_handler.h"
 #include "editbox.h"

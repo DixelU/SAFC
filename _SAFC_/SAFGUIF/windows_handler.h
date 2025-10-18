@@ -30,9 +30,9 @@ struct WindowsHandler
 		(*ptr)["AlertSign"] = new SpecialSignHandler(SpecialSigns::DrawACircle, -78.5, -17, 12, 0x000000FF, 0x001FFFFF);
 
 		Map["PROMPT"] = ptr = new MoveableWindow("prompt", System_White, -50, 50, 100, 100, 0x3F3F3FCF, 0x7F7F7F7F);
-		(*ptr)["FLD"] = new InputField("", 0, 35 - WindowHeapSize, 10, 80, System_White, NULL, 0x007FFFFF, NULL, "", 0, _Align::center);
-		(*ptr)["TXT"] = new TextBox("_abc_", System_White, 0, 7.5 - WindowHeapSize, 10, 80, 7.5, 0, 0, 2, _Align::center, TextBox::VerticalOverflow::recalibrate);
-		(*ptr)["BUTT"] = new Button("Submit", System_White, NULL, -0, -20 - WindowHeapSize, 80, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFF7F00FF, 0xFFFFFFFF, 0xFF7F00FF, NULL, " ");
+		(*ptr)["FLD"] = new InputField("", 0, 35 - WindowHeaderSize, 10, 80, System_White, NULL, 0x007FFFFF, NULL, "", 0, _Align::center);
+		(*ptr)["TXT"] = new TextBox("_abc_", System_White, 0, 7.5 - WindowHeaderSize, 10, 80, 7.5, 0, 0, 2, _Align::center, TextBox::VerticalOverflow::recalibrate);
+		(*ptr)["BUTT"] = new Button("Submit", System_White, NULL, -0, -20 - WindowHeaderSize, 80, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFF7F00FF, 0xFFFFFFFF, 0xFF7F00FF, NULL, " ");
 	}
 	~WindowsHandler()
 	{
@@ -101,7 +101,7 @@ struct WindowsHandler
 		AlertWTptr->SafeStringReplace(AlertText);
 		/*
 			if (AlertWTptr->CalculatedTextHeight > AlertWTptr->Height) {
-				AlertWptr->_NotSafeResize_Centered(AlertWTptr->CalculatedTextHeight + WindowHeapSize, AlertWptr->Width);
+				AlertWptr->_NotSafeResize_Centered(AlertWTptr->CalculatedTextHeight + WindowHeaderSize, AlertWptr->Width);
 			}
 		*/
 		auto AlertWSptr = ((SpecialSignHandler*)(*AlertWptr)["AlertSign"]);

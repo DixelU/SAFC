@@ -156,6 +156,7 @@
       </DelayLoadDLLs>
       <AdditionalLibraryDirectories>
       </AdditionalLibraryDirectories>
+      <AdditionalDependencies>%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <ResourceCompile>
       <AdditionalIncludeDirectories>
@@ -192,6 +193,7 @@
       </DelayLoadDLLs>
       <AdditionalLibraryDirectories>C:\dev\vcpkg\installed</AdditionalLibraryDirectories>
       <Profile>true</Profile>
+      <AdditionalDependencies>%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <ResourceCompile>
       <AdditionalIncludeDirectories>
@@ -240,6 +242,7 @@
       </DelayLoadDLLs>
       <AdditionalLibraryDirectories>C:\dev\vcpkg\installed</AdditionalLibraryDirectories>
       <LinkTimeCodeGeneration>UseLinkTimeCodeGeneration</LinkTimeCodeGeneration>
+      <AdditionalDependencies>%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <ResourceCompile>
       <AdditionalIncludeDirectories>
@@ -287,6 +290,7 @@
       <AdditionalLibraryDirectories>C:\dev\vcpkg\installed</AdditionalLibraryDirectories>
       <LinkTimeCodeGeneration>UseLinkTimeCodeGeneration</LinkTimeCodeGeneration>
       <Profile>false</Profile>
+      <AdditionalDependencies>%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <ResourceCompile>
       <AdditionalIncludeDirectories>
@@ -326,6 +330,7 @@
     <ClInclude Include="SAFGUIF\header_utils.h" />
     <ClInclude Include="SAFGUIF\input_field.h" />
     <ClInclude Include="SAFGUIF\movable_resizeable_window.h" />
+    <ClInclude Include="SAFGUIF\moveable_fui_window.h" />
     <ClInclude Include="SAFGUIF\moveable_window.h" />
     <ClInclude Include="SAFGUIF\SAFGUIF.h" />
     <ClInclude Include="SAFGUIF\single_text_line.h" />
