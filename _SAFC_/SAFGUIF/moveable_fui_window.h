@@ -45,7 +45,7 @@ struct MoveableFuiWindow : public MoveableWindow
 			return;
 
 		// HEADER 
-		float FullHeaderHatWidth = HeadersHatWidth + HeadersHatHeight * 2 * BudgeSlope; // (half height at each side)
+		float FullHeaderHatWidth = HeadersHatWidth + HeadersHatHeight * 2 * BudgeSlope;
 		float HeadersHatBeginX = XWindowPos + 0.5 * (Width - FullHeaderHatWidth);
 
 		__glcolor(RGBAThemeColor);
@@ -55,12 +55,12 @@ struct MoveableFuiWindow : public MoveableWindow
 		glVertex2f(XWindowPos + Width, YWindowPos);
 		glVertex2f(XWindowPos + Width, YWindowPos - WindowHeaderSize);
 		glVertex2f(XWindowPos, YWindowPos - WindowHeaderSize);
-		
+
 		// header hat
 		glVertex2f(HeadersHatBeginX, YWindowPos);
-		glVertex2f(HeadersHatBeginX + 0.5f * HeadersHatHeight, YWindowPos + HeadersHatHeight);
-		glVertex2f(HeadersHatBeginX + 0.5f * HeadersHatHeight + HeadersHatWidth, YWindowPos + HeadersHatHeight);
-		glVertex2f(HeadersHatBeginX + HeadersHatHeight + HeadersHatWidth, YWindowPos);
+		glVertex2f(HeadersHatBeginX + BudgeSlope * HeadersHatHeight, YWindowPos + HeadersHatHeight);
+		glVertex2f(HeadersHatBeginX + BudgeSlope * HeadersHatHeight + HeadersHatWidth, YWindowPos + HeadersHatHeight);
+		glVertex2f(HeadersHatBeginX + FullHeaderHatWidth, YWindowPos);
 		glEnd();
 
 		// main body (background)
@@ -124,9 +124,9 @@ struct MoveableFuiWindow : public MoveableWindow
 			glVertex2f(XWindowPos, YWindowPos - WindowHeaderSize);
 			glVertex2f(XWindowPos, YWindowPos);
 			glVertex2f(HeadersHatBeginX, YWindowPos);
-			glVertex2f(HeadersHatBeginX + 0.5f * HeadersHatHeight, YWindowPos + HeadersHatHeight);
-			glVertex2f(HeadersHatBeginX + 0.5f * HeadersHatHeight + HeadersHatWidth, YWindowPos + HeadersHatHeight);
-			glVertex2f(HeadersHatBeginX + HeadersHatHeight + HeadersHatWidth, YWindowPos);
+			glVertex2f(HeadersHatBeginX + BudgeSlope * HeadersHatHeight, YWindowPos + HeadersHatHeight);
+			glVertex2f(HeadersHatBeginX + BudgeSlope * HeadersHatHeight + HeadersHatWidth, YWindowPos + HeadersHatHeight);
+			glVertex2f(HeadersHatBeginX + FullHeaderHatWidth, YWindowPos);
 			glVertex2f(XWindowPos + Width, YWindowPos);
 			glVertex2f(XWindowPos + Width, YWindowPos - WindowHeaderSize);
 			glEnd();
@@ -143,8 +143,8 @@ struct MoveableFuiWindow : public MoveableWindow
 			float XOffset = sinf(2 * std::numbers::pi_v<float> * i / float(CloseButtonSides)) * 0.35f * WindowHeaderSize;
 			float YOffset = cosf(2 * std::numbers::pi_v<float> * i / float(CloseButtonSides)) * 0.35f * WindowHeaderSize;
 
-			glVertex2f(XWindowPos + Width - WindowHeaderSize * 0.5f, YWindowPos - WindowHeaderSize * 0.4f);
-			glVertex2f(XWindowPos + Width - WindowHeaderSize * 0.5f + XOffset, YWindowPos - WindowHeaderSize * 0.4f - YOffset);
+			glVertex2f(XWindowPos + Width - WindowHeaderSize * 0.5f, YWindowPos - WindowHeaderSize * 0.45f);
+			glVertex2f(XWindowPos + Width - WindowHeaderSize * 0.5f + XOffset, YWindowPos - WindowHeaderSize * 0.45f - YOffset);
 		}
 		glEnd();
 
@@ -154,6 +154,150 @@ struct MoveableFuiWindow : public MoveableWindow
 		for (auto Y = WindowActivities.begin(); Y != WindowActivities.end(); Y++)
 			if (Y->second)
 				Y->second->Draw();
+	}
+
+	bool MouseHandler(float mx, float my, CHAR Button/*-1 left, 1 right, 0 move*/, CHAR State /*-1 down, 1 up*/) override
+	{
+		std::lock_guard<std::recursive_mutex> locker(Lock);
+
+		if (!Drawable)
+			return 0;
+
+		HoveredCloseButton = 0;
+
+		float CloseButtonX[] =
+		{ 
+			XWindowPos + Width - WindowHeaderSize, 
+			XWindowPos + Width,
+			XWindowPos + Width,
+			XWindowPos + Width - WindowHeaderSize
+		};
+		float CloseButtonY[] =
+		{
+			YWindowPos,
+			YWindowPos,
+			YWindowPos - WindowHeaderSize,
+			YWindowPos - WindowHeaderSize
+		};
+
+		float FullHeaderHatWidth = HeadersHatWidth + HeadersHatHeight * 2 * BudgeSlope;
+		float HeadersHatBeginX = XWindowPos + 0.5 * (Width - FullHeaderHatWidth);
+		float HeaderGeometryX[] = 
+		{
+			XWindowPos,
+			HeadersHatBeginX,
+			HeadersHatBeginX + BudgeSlope * HeadersHatHeight,
+			HeadersHatBeginX + BudgeSlope * HeadersHatHeight + HeadersHatWidth,
+			HeadersHatBeginX + FullHeaderHatWidth,
+			XWindowPos + Width,
+			XWindowPos + Width,
+			XWindowPos
+		};
+		float HeaderGeometryY[] = 
+		{
+			YWindowPos, 
+			YWindowPos,
+			YWindowPos + HeadersHatHeight,
+			YWindowPos + HeadersHatHeight,
+			YWindowPos,
+			YWindowPos,
+			YWindowPos - WindowHeaderSize,
+			YWindowPos - WindowHeaderSize
+		};
+
+		float WindowGeometryX[] = 
+		{
+			XWindowPos,
+			XWindowPos,
+			XWindowPos + HandlesBudgeDepth,
+			XWindowPos + HandlesBudgeDepth,
+			XWindowPos,
+			XWindowPos,
+			XWindowPos + Width,
+			XWindowPos + Width,
+			XWindowPos + Width - HandlesBudgeDepth,
+			XWindowPos + Width - HandlesBudgeDepth,
+			XWindowPos + Width,
+			XWindowPos + Width
+		};
+		float WindowGeometryY[] = 
+		{
+			YWindowPos - WindowHeaderSize,
+			YWindowPos - WindowHeaderSize - TopHandlesHeight,
+			YWindowPos - WindowHeaderSize - TopHandlesHeight - BudgeSlope * HandlesBudgeDepth,
+			YWindowPos - Height + BottomHandlesHeight + BudgeSlope * HandlesBudgeDepth,
+			YWindowPos - Height + BottomHandlesHeight,
+			YWindowPos - Height,
+			YWindowPos - Height,
+			YWindowPos - Height + BottomHandlesHeight,
+			YWindowPos - Height + BottomHandlesHeight + BudgeSlope * HandlesBudgeDepth,
+			YWindowPos - WindowHeaderSize - TopHandlesHeight - BudgeSlope * HandlesBudgeDepth,
+			YWindowPos - WindowHeaderSize - TopHandlesHeight,
+			YWindowPos - WindowHeaderSize
+		};
+
+		bool InHeader = false;
+
+		///close button
+		if (PointInPoly(CloseButtonX, CloseButtonY, mx, my))
+		{
+			if (Button && State == 1)
+			{
+				Drawable = 0;
+				CursorFollowMode = false;
+				return 1;
+			}
+			else if (!Button)
+				HoveredCloseButton = 1;
+		}
+		///window header
+		else if (InHeader = PointInPoly(HeaderGeometryX, HeaderGeometryY, mx, my))
+		{
+			if (Button == -1)
+			{
+				if (State == -1)
+				{
+					CursorFollowMode = !CursorFollowMode;
+					PCurX = mx;
+					PCurY = my;
+				}
+				else if (State == 1)
+					CursorFollowMode = !CursorFollowMode;
+			}
+		}
+		if (CursorFollowMode)
+		{
+			SafeMove(mx - PCurX, my - PCurY);
+			PCurX = mx;
+			PCurY = my;
+			return 1;
+		}
+
+		bool flag = 0;
+		auto Y = WindowActivities.begin();
+		while (Y != WindowActivities.end())
+		{
+			if (Y->second)
+				flag = Y->second->MouseHandler(mx, my, Button, State);
+			if (HUIP_MapWasChanged)
+			{
+				HUIP_MapWasChanged = false;
+				break;
+			}
+			Y++;
+		}
+
+		if (InHeader || PointInPoly(WindowGeometryX, WindowGeometryY, mx, my))
+		{
+			if (Button)
+				return 1;
+			else
+			{
+				return flag;
+			}
+		}
+		else
+			return flag;
 	}
 };
 

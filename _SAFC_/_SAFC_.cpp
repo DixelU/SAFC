@@ -2004,12 +2004,13 @@ void Init()
 
 	WH = std::make_shared<WindowsHandler>();
 
-	std::stringstream MainWindowName;
-
 	auto [maj, min, ver, build] = __versionTuple;
-	MainWindowName << "SAFC v" << maj << "." << min << "." << ver << "." << build << "";
 
-	SelectablePropertedList* SPL = new SelectablePropertedList(BS_List_Black_Small, NULL, PropsAndSets::OGPInMIDIList, -50, 172, 300, 12, 65, 30);
+	constexpr unsigned BACKGROUND = 0x070E16AF;
+	constexpr unsigned BORDER = 0xFFFFFF7F;
+	constexpr unsigned HEADER = 0x285685CF;
+	
+	/*SelectablePropertedList* SPL = new SelectablePropertedList(BS_List_Black_Small, NULL, PropsAndSets::OGPInMIDIList, -50, 172, 300, 12, 65, 30);
 	MoveableWindow* T = new MoveableResizeableWindow(MainWindowName.str(), System_White, -200, 200, 400, 400, 0x3F3F3FAF, 0x7F7F7F7F, 0, [SPL](float dH, float dW, float NewHeight, float NewWidth) {
 		constexpr float TopMargin = 200 - 172;
 		constexpr float BottomMargin = 12;
@@ -2022,10 +2023,11 @@ void Init()
 		"ADD_Butt", "REM_Butt", "REM_ALL_Butt", "GLOBAL_PPQN_Butt", "GLOBAL_OFFSET_Butt", "GLOBAL_TEMPO_Butt", "DELETE_ALL_VM", "DELETE_ALL_CAT", "DELETE_ALL_PITCHES",
 		"DELETE_ALL_MODULES", "SETTINGS", "SAVE_AS", "START"
 		}, MoveableResizeableWindow::PinSide::right);
-	((MoveableResizeableWindow*)T)->AssignPinnedActivities({ "SETTINGS", "SAVE_AS", "START" }, MoveableResizeableWindow::PinSide::bottom);
+	((MoveableResizeableWindow*)T)->AssignPinnedActivities({ "SETTINGS", "SAVE_AS", "START" }, MoveableResizeableWindow::PinSide::bottom);*/
+	MoveableWindow* T = new MoveableFuiWindow(std::format("SAFC v{}.{}.{}.{}", maj, min, ver, build), System_White, -200, 202.5f, 400, 402.5f, 300, 2.5f, 100, 100, 5, BACKGROUND, HEADER, BORDER);
 
 	Button* Butt;
-	(*T)["List"] = SPL;
+	(*T)["List"] = new SelectablePropertedList(BS_List_Black_Small, NULL, PropsAndSets::OGPInMIDIList, -50, 172, 300, 12, 65, 30);;
 
 	(*T)["ADD_Butt"] = new Button("Add MIDIs", System_White, OnAdd, 150, 172.5, 75, 12, 1, 0x00003FAF, 0xFFFFFFFF, 0x00003FFF, 0xFFFFFFFF, 0xF7F7F7FF, NULL, " ");
 	(*T)["REM_Butt"] = new Button("Remove selected", System_White, OnRem, 150, 160, 75, 12, 1, 0x3F0000AF, 0xFFFFFFFF, 0x3F0000FF, 0xFFFFFFFF, 0xF7F7F7FF, NULL, " ");
@@ -2052,7 +2054,7 @@ void Init()
 
 	(*WH)["MAIN"] = T;
 
-	T = new MoveableWindow("Props. and sets.", System_White, -100, 100, 200, 225, 0x3F3F3FCF, 0x7F7F7F7F);
+	T = new MoveableFuiWindow("Props. and sets.", System_White, -100, 100, 200, 225, 100, 2.5f, 75, 50, 3, BACKGROUND, HEADER, BORDER);
 	(*T)["FileName"] = new TextBox("_", System_White, 0, 88.5 - WindowHeaderSize, 6, 200 - 1.5 * WindowHeaderSize, 7.5, 0, 0, 0, _Align::left, TextBox::VerticalOverflow::cut);
 	(*T)["PPQN"] = new InputField(" ", -90 + WindowHeaderSize, 75 - WindowHeaderSize, 10, 25, System_White, PropsAndSets::PPQN, 0x007FFFFF, System_White, "PPQN is lesser than 65536.", 5, _Align::center, _Align::left, InputField::Type::NaturalNumbers);
 	(*T)["TEMPO"] = new InputField(" ", -50 + WindowHeaderSize, 75 - WindowHeaderSize, 10, 45, System_White, PropsAndSets::TEMPO, 0x007FFFFF, System_White, "Specific tempo override field", 8, _Align::center, _Align::left, InputField::Type::FP_PositiveNumbers);
@@ -2245,8 +2247,8 @@ void Init()
 	(*WH)["V1WT"] = T;
 
 	WH->EnableWindow("MAIN");
-	WH->EnableWindow("V1WT");
-	//WH->EnableWindow("COMPILEW");
+	//WH->EnableWindow("V1WT");
+	//WH->EnableWindow("COMPILEW"); // todo: someday fix the damn editbox...
 	//WH->EnableWindow("SMIC");
 	//WH->EnableWindow("OR");
 	//WH->EnableWindow("SMRP_CONTAINER");
@@ -2325,7 +2327,7 @@ void mDisplay()
 	else if (Settings::ShaderMode < 4)
 	{
 		glBegin(GL_QUADS);
-		glColor4f(0.05f, 0.05f, 0.05f, (DRAG_OVER) ? 0.25f : 1);
+		glColor4f(0.05f, 0.05f, 0.10f, (DRAG_OVER) ? 0.25f : 1);
 		glVertex2f(0 - internal_range * (WindX / window_base_width), 0 - internal_range * (WindY / window_base_height));
 		glVertex2f(0 - internal_range * (WindX / window_base_width), internal_range * (WindY / window_base_height));
 		glColor4f(0.05f, 0.1f, 0.25f, (DRAG_OVER) ? 0.25f : 1);
@@ -2348,15 +2350,16 @@ void mDisplay()
 	glRotatef(dumb_rotation_angle, 0, 0, 1);
 	if (WH)
 		WH->Draw();
-	if (DRAG_OVER)SpecialSigns::DrawFileSign(0, 0, 50, 0xFFFFFFFF, 0);
+	if (DRAG_OVER)
+		SpecialSigns::DrawFileSign(0, 0, 50, 0xFFFFFFFF, 0);
 	glRotatef(-dumb_rotation_angle, 0, 0, 1);
 
 	glutSwapBuffers();
 	++TimerV;
 }
 
-void mInit(
-) {
+void mInit()
+{
 	glMatrixMode(GL_PROJECTION);
 	glLoadIdentity();
 	gluOrtho2D((0 - internal_range) * (WindX / window_base_width), internal_range * (WindX / window_base_width), (0 - internal_range) * (WindY / window_base_height), internal_range * (WindY / window_base_height));

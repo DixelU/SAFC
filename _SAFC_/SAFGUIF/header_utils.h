@@ -101,6 +101,32 @@ int TIMESEED()
 	return t.wMilliseconds + (t.wSecond * 1000) + t.wMinute * 60000;
 }
 
+template<unsigned nx, unsigned ny>
+unsigned PointInPoly(float (&vertx)[nx], float (&verty)[ny], float testx, float testy) requires (nx == ny)
+{
+	constexpr unsigned nvert = (nx + ny) >> 1;
+	float minx = *vertx, miny = *verty, maxx = *vertx, maxy = *verty;
+	for (unsigned i = 0; i < nvert; ++i)
+	{
+		minx = (std::min)(minx, vertx[i]);
+		miny = (std::min)(miny, verty[i]);
+		maxx = (std::max)(maxx, vertx[i]);
+		maxy = (std::max)(maxy, verty[i]);
+	}
+
+	if (testx < minx || testx > maxx || testy < miny || testy > maxy)
+		return 0;
+
+	unsigned i, j, c = 0;
+	for (i = 0, j = nvert - 1; i < nvert; j = i++)
+	{
+		if (((verty[i] > testy) != (verty[j] > testy)) &&
+			(testx < (vertx[j] - vertx[i]) * (testy - verty[i]) / (verty[j] - verty[i]) + vertx[i]))
+			c ^= 1;
+	}
+	return c;
+}
+
 void ThrowAlert_Error(std::string&& AlertText);
 void ThrowAlert_Warning(std::string&& AlertText);
 void AddFiles(const std::vector<std::wstring>& Filenames);
