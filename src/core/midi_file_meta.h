@@ -1,7 +1,10 @@
 #pragma once
 
+#ifndef SAF_MIDI_FILE_META
+#define SAF_MIDI_FILE_META
+
 #include "header_utils.h"
-#include "SMRP2.h"
+#include "single_midi_processor_2.h"
 
 struct midi_file_meta
 {
@@ -16,3 +19,4 @@ struct midi_file_meta
 	// whatever, probably a bunch of settings
 };
 
+#endif // !SAF_MIDI_FILE_META

@@ -20,10 +20,12 @@
     </ClCompile>
     <ClCompile Include="externals\**\*.cpp" />
     <ClCompile Include="externals\**\*.c" />
-    <ClCompile Include="src\core\FMC.cpp">
+    <ClCompile Include="src\core\fast_midi_checker.cpp">
       <Filter>core</Filter>
     </ClCompile>
-    <ClCompile Include="src\core\CAT.cpp" />
+    <ClCompile Include="src\core\cut_and_transpose.cpp">
+      <Filter>core</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="resource\safc.rc" />
@@ -40,13 +42,10 @@
     <ClInclude Include="src\core\bbb_ffio.h">
       <Filter>core</Filter>
     </ClInclude>
-    <ClInclude Include="src\core\BS.h">
+    <ClInclude Include="src\core\cut_and_transpose.h">
       <Filter>core</Filter>
     </ClInclude>
-    <ClInclude Include="src\core\CAT.h">
-      <Filter>core</Filter>
-    </ClInclude>
-    <ClInclude Include="src\core\FMC.h">
+    <ClInclude Include="src\core\fast_midi_checker.h">
       <Filter>core</Filter>
     </ClInclude>
     <ClInclude Include="src\core\function_wrapper.h">
@@ -55,19 +54,16 @@
     <ClInclude Include="src\core\header_utils.h">
       <Filter>core</Filter>
     </ClInclude>
-    <ClInclude Include="src\core\MCTM.h">
+    <ClInclude Include="src\core\midi_collection_merger.h">
       <Filter>core</Filter>
     </ClInclude>
-    <ClInclude Include="src\core\PLC.h">
+    <ClInclude Include="src\core\polyline_converter.h">
       <Filter>core</Filter>
     </ClInclude>
-    <ClInclude Include="src\core\SMIC.h">
+    <ClInclude Include="src\core\single_midi_info_collector.h">
       <Filter>core</Filter>
     </ClInclude>
-    <ClInclude Include="src\core\SMRP2.h">
-      <Filter>core</Filter>
-    </ClInclude>
-    <ClInclude Include="src\core\SAFC_IM.h">
+    <ClInclude Include="src\core\single_midi_processor_2.h">
       <Filter>core</Filter>
     </ClInclude>
     <ClInclude Include="resource.h" />

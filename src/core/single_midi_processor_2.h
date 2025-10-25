@@ -21,8 +21,8 @@
 #include "bbb_ffio.h"
 #include "header_utils.h"
 
-#include "PLC.h"
-#include "CAT.h"
+#include "polyline_converter.h"
+#include "cut_and_transpose.h"
 
 #include "function_wrapper.h"
 

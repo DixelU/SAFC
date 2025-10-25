@@ -1,6 +1,6 @@
 #include "midi_file_meta.h"
 
-#include "FMC.h"
+#include "fast_midi_checker.h"
 #include "../globals.h"
 
 bool midi_file_meta::set(std_unicode_string file)

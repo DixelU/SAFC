@@ -8,8 +8,8 @@
 
 #include "ui.hpp"
 
-#include "../core/SMRP2.h"
-#include "../core/MCTM.h"
+#include "../core/single_midi_processor_2.h"
+#include "../core/midi_collection_merger.h"
 
 #include "../ui/ofd.h"
 

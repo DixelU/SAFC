@@ -1,10 +1,9 @@
-#include "FMC.h"
+#include "fast_midi_checker.h"
 
 #include <fstream>
 #include <filesystem>
 
-#include "BS.h"
-#include "MCTM.h"
+#include "midi_collection_merger.h"
 
 fast_midi_checker::fast_midi_checker(std_unicode_string filename)
 {
