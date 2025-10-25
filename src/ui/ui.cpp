@@ -70,8 +70,7 @@ void RenderMainWindow()
 		{
 			if(ImGui::MenuItem("Add MIDIs"))
 			{
-				auto midis = MOFD(to_cchar_t("Add MIDI Files"));
-				AddFiles(midis);
+				auto midis = OpenFileDlg(to_cchar_t("Add MIDI Files"));
 				
 				log_info("add midi");
 			}
@@ -98,7 +97,7 @@ void RenderMainWindow()
 			// todo: automatic save filename generation
 			if(ImGui::MenuItem("Save & Merge"))
 			{
-				std_unicode_string save_to = SOFD(to_cchar_t("Save file"));
+				std_unicode_string save_to = SaveFileDlg(to_cchar_t("Save file"));
 
 				if(!save_to.empty())
 				{
