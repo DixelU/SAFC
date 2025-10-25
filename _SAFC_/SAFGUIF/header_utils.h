@@ -68,11 +68,12 @@ inline void __glcolor(std::uint32_t uINT)
 
 float WindX = window_base_width, WindY = window_base_height;
 
-bool ANIMATION_IS_ACTIVE = 0, 
-	 FIRSTBOOT = 1,
-	 DRAG_OVER = 0, 
-	 APRIL_FOOL = 0,
-	 SHIFT_HELD = 0;
+bool ANIMATION_IS_ACTIVE = false, 
+	 FIRSTBOOT = true,
+	 DRAG_OVER = false, 
+	 APRIL_FOOL = false,
+	 SHIFT_HELD = false,
+	 MONTH_BEGINING = false;
 
 std::uint32_t TimerV = 0;
 std::int16_t YearsOld = -1;
@@ -92,13 +93,41 @@ int TIMESEED()
 {
 	SYSTEMTIME t;
 	GetLocalTime(&t);
+	
 	if (t.wMonth == 4 && t.wDay == 1)
-		APRIL_FOOL = 1;
+		APRIL_FOOL = true;
 	if (t.wMonth == 8 && t.wDay == 31)
-	{
 		YearsOld = t.wYear - 2018;
-	}
+	if (t.wDay == 1)
+		MONTH_BEGINING = true;
+
 	return t.wMilliseconds + (t.wSecond * 1000) + t.wMinute * 60000;
+}
+
+template<unsigned nx, unsigned ny>
+unsigned PointInPoly(float (&vertx)[nx], float (&verty)[ny], float testx, float testy) requires (nx == ny)
+{
+	constexpr unsigned nvert = (nx + ny) >> 1;
+	float minx = *vertx, miny = *verty, maxx = *vertx, maxy = *verty;
+	for (unsigned i = 0; i < nvert; ++i)
+	{
+		minx = (std::min)(minx, vertx[i]);
+		miny = (std::min)(miny, verty[i]);
+		maxx = (std::max)(maxx, vertx[i]);
+		maxy = (std::max)(maxy, verty[i]);
+	}
+
+	if (testx < minx || testx > maxx || testy < miny || testy > maxy)
+		return 0;
+
+	unsigned i, j, c = 0;
+	for (i = 0, j = nvert - 1; i < nvert; j = i++)
+	{
+		if (((verty[i] > testy) != (verty[j] > testy)) &&
+			(testx < (vertx[j] - vertx[i]) * (testy - verty[i]) / (verty[j] - verty[i]) + vertx[i]))
+			c ^= 1;
+	}
+	return c;
 }
 
 void ThrowAlert_Error(std::string&& AlertText);

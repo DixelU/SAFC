@@ -78,6 +78,9 @@ struct DragNDropHandler : IDropTarget
 			if (SUCCEEDED(hr))
 			{
 				PVOID data = GlobalLock(stgMedium.hGlobal);
+				if (!data)
+					return NOERROR;
+
 				for (int i = *((BYTE*)(data));; i += 2)
 				{
 					WC.back().push_back(((*((BYTE*)(data)+i + 1)) << 8) | (*((BYTE*)(data)+i)));

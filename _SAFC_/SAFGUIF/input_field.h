@@ -15,6 +15,7 @@ struct InputField : HandleableUIPart
 		PassFrontMinusSign = 0b100,
 		PassAll = 0xFF
 	};
+
 	enum Type
 	{
 		NaturalNumbers = PassCharsType::PassNumbers,
@@ -23,6 +24,7 @@ struct InputField : HandleableUIPart
 		FP_Any = PassCharsType::PassNumbers | PassCharsType::PassFirstPoint | PassCharsType::PassFrontMinusSign,
 		Text = PassCharsType::PassAll,
 	};
+
 	_Align InputAlign, TipAlign;
 	Type InputType;
 	std::string CurrentString, DefaultString;
@@ -32,6 +34,7 @@ struct InputField : HandleableUIPart
 	bool Focused, FirstInput;
 	SingleTextLine* STL;
 	SingleTextLine* Tip;
+
 	InputField(std::string DefaultString, float Xpos, float Ypos, float Height, float Width, SingleTextLineSettings* DefaultStringSettings, std::string* OutputSource, std::uint32_t BorderRGBAColor, SingleTextLineSettings* TipLineSettings = NULL, std::string TipLineText = " ", std::uint32_t MaxChars = 0, _Align InputAlign = _Align::left, _Align TipAlign = _Align::center, Type InputType = Type::Text)
 	{
 		this->DefaultString = DefaultString;
@@ -57,19 +60,24 @@ struct InputField : HandleableUIPart
 		this->FirstInput = this->Focused = false;
 		this->OutputSource = OutputSource;
 	}
+
 	~InputField() override
 	{
 		delete STL;
 		delete Tip;
 	}
+
 	bool MouseHandler(float mx, float my, CHAR Button/*-1 left, 1 right, 0 move*/, CHAR State /*-1 down, 1 up*/) override
 	{
+		if (!Enabled)
+			return false;
+
 		if (abs(mx - Xpos) < 0.5 * Width && abs(my - Ypos) < 0.5 * Height)
 		{
 			if (!Focused)
 				FocusChange();
-			if (Button)return 1;
-			else return 0;
+			
+			return Button;
 		}
 		else
 		{
@@ -78,6 +86,7 @@ struct InputField : HandleableUIPart
 			return 0;
 		}
 	}
+
 	inline static bool CheckStringOnType(const std::string& String, InputField::Type CheckType) 
 	{
 		bool first_symb = true;
@@ -129,6 +138,7 @@ struct InputField : HandleableUIPart
 		}
 		return !first_symb;
 	}
+
 	void SafeMove(float dx, float dy) 
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
@@ -137,6 +147,7 @@ struct InputField : HandleableUIPart
 		Xpos += dx;
 		Ypos += dy;
 	}
+
 	void SafeChangePosition(float NewX, float NewY)
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
@@ -144,12 +155,14 @@ struct InputField : HandleableUIPart
 		NewY = Ypos - NewY;
 		SafeMove(NewX, NewY);
 	}
+
 	void FocusChange() 
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		this->Focused = !this->Focused;
 		BorderRGBAColor = (((~(BorderRGBAColor >> 8)) << 8) | (BorderRGBAColor & 0xFF));
 	}
+
 	void UpdateInputString(const std::string& NewString = "")
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
@@ -159,6 +172,7 @@ struct InputField : HandleableUIPart
 		this->STL->SafeStringReplace((NewString.size()) ? NewString.substr(0, this->MaxChars) : CurrentString);
 		this->STL->SafeChangePosition_Argumented(InputAlign, x, Ypos);
 	}
+
 	void BackSpace()
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
@@ -171,11 +185,13 @@ struct InputField : HandleableUIPart
 		else 
 			this->STL->SafeStringReplace(" ");
 	}
+
 	void FlushCurrentStringWithoutGUIUpdate(bool SetDefault = false)
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		this->CurrentString = (SetDefault) ? this->DefaultString : "";
 	}
+
 	void PutIntoSource(std::string* AnotherSource = NULL)
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
@@ -188,6 +204,7 @@ struct InputField : HandleableUIPart
 			if (CurrentString.size())
 				*AnotherSource = CurrentString;
 	}
+
 	void ProcessFirstInput() 
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
@@ -197,6 +214,7 @@ struct InputField : HandleableUIPart
 			CurrentString.clear();
 		}
 	}
+
 	std::string GetCurrentInput(const std::string& Replacement)
 	{
 		if (InputField::CheckStringOnType(CurrentString, InputType))
@@ -208,45 +226,53 @@ struct InputField : HandleableUIPart
 		else
 			return "0";
 	}
+
 	void KeyboardHandler(char CH) 
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
-		if (Focused)
-		{
-			if (CH >= 32)
-			{
-				if (InputType & PassCharsType::PassNumbers)
-				{
-					if (CH >= '0' && CH <= '9')
-					{
-						Input(CH);
-						return;
-					}
-				}
-				if (InputType & PassCharsType::PassFrontMinusSign)
-				{
-					if (CH == '-' && CurrentString.empty())
-					{
-						Input(CH);
-						return;
-					}
-				}
-				if (InputType & PassCharsType::PassFirstPoint)
-				{
-					if (CH == '.' && CurrentString.find('.') >= CurrentString.size())
-					{
-						Input(CH);
-						return;
-					}
-				}
 
-				if ((InputType & PassCharsType::PassAll) == InputType)
+		if (!Enabled)
+			return;
+
+		if (!Focused)
+			return;
+
+		if (CH >= 32)
+		{
+			if (InputType & PassCharsType::PassNumbers)
+			{
+				if (CH >= '0' && CH <= '9')
+				{
 					Input(CH);
+					return;
+				}
 			}
-			else if (CH == 13)PutIntoSource();
-			else if (CH == 8)BackSpace();
+			if (InputType & PassCharsType::PassFrontMinusSign)
+			{
+				if (CH == '-' && CurrentString.empty())
+				{
+					Input(CH);
+					return;
+				}
+			}
+			if (InputType & PassCharsType::PassFirstPoint)
+			{
+				if (CH == '.' && CurrentString.find('.') >= CurrentString.size())
+				{
+					Input(CH);
+					return;
+				}
+			}
+
+			if ((InputType & PassCharsType::PassAll) == PassCharsType::PassAll)
+				Input(CH);
 		}
+		else if (CH == 13)
+			PutIntoSource();
+		else if (CH == 8)
+			BackSpace();
 	}
+
 	void Input(char CH) 
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
@@ -257,6 +283,7 @@ struct InputField : HandleableUIPart
 			UpdateInputString();
 		}
 	}
+
 	void SafeChangePosition_Argumented(std::uint8_t Arg, float NewX, float NewY)
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
@@ -270,6 +297,7 @@ struct InputField : HandleableUIPart
 				) * Height;
 		SafeChangePosition(NewX + CW, NewY + CH);
 	}
+
 	void SafeStringReplace(std::string NewString) override 
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
@@ -277,9 +305,14 @@ struct InputField : HandleableUIPart
 		UpdateInputString(NewString);
 		FirstInput = true;
 	}
+
 	void Draw() override
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
+
+		if (!Enabled)
+			return;
+
 		__glcolor(BorderRGBAColor);
 		glLineWidth(1);
 		glBegin(GL_LINE_LOOP);
@@ -292,6 +325,7 @@ struct InputField : HandleableUIPart
 		if (Focused && Tip)
 			Tip->Draw();
 	}
+
 	inline std::uint32_t TellType() override
 	{
 		return TT_INPUT_FIELD;

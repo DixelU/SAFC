@@ -1,4 +1,5 @@
 ﻿#define NOMINMAX
+
 #include <algorithm>
 #include <cstdlib>
 #include <wchar.h>
@@ -37,6 +38,7 @@
 #pragma comment (lib, "Ws2_32.Lib")
 #pragma comment (lib, "Wldap32.Lib")
 #pragma comment (lib, "Crypt32.Lib")
+#pragma comment (lib, "XmlLite.lib")
 
 #include "allocator.h"
 #include "WinReg.h"
@@ -398,7 +400,7 @@ struct FileSettings
 	bool
 		IsMIDI,
 		InplaceMergeEnabled,
-		AllowLegacyRunningStatusMetaIgnorance,
+		AllowLegacyRunningStatusMetaBehaviour,
 		RSBCompression,
 		ChannelsSplit,
 		CollapseMIDI,
@@ -438,19 +440,26 @@ struct FileSettings
 		WFileNamePostfix = L"_.mid";
 		RSBCompression = ChannelsSplit = false;
 		CollapseMIDI = true;
-		AllowLegacyRunningStatusMetaIgnorance = false;
+		AllowLegacyRunningStatusMetaBehaviour = false;
 		ApplyOffsetAfter = true;
 	}
+
 	inline void SwitchBoolSetting(std::uint32_t SMP_BoolSetting) 
 	{
 		BoolSettings ^= SMP_BoolSetting;
 	}
+
 	inline void SetBoolSetting(std::uint32_t SMP_BoolSetting, bool NewState) 
 	{
-		if (BoolSettings & SMP_BoolSetting && NewState)return;
-		if (!(BoolSettings & SMP_BoolSetting) && !NewState)return;
+		if (BoolSettings & SMP_BoolSetting && NewState)
+			return;
+		
+		if (!(BoolSettings & SMP_BoolSetting) && !NewState)
+			return;
+
 		SwitchBoolSetting(SMP_BoolSetting);
 	}
+
 	std::shared_ptr<single_midi_processor_2::processing_data> BuildSMRPProcessingData() 
 	{
 		auto smrp_data = std::make_shared<single_midi_processor_2::processing_data>();
@@ -464,6 +473,12 @@ struct FileSettings
 		settings.key_converter = KeyMap;
 		settings.new_ppqn = NewPPQN;
 		settings.old_ppqn = OldPPQN;
+		settings.enable_imp_events_filter = (BoolSettings & _BoolSettings::enable_important_filter);
+		settings.imp_events_filter.pass_instument_cnage = settings.enable_imp_events_filter && (BoolSettings & _BoolSettings::imp_filter_allow_progc);
+		settings.imp_events_filter.pass_notes = settings.enable_imp_events_filter && (BoolSettings & _BoolSettings::imp_filter_allow_notes);
+		settings.imp_events_filter.pass_pitch = settings.enable_imp_events_filter && (BoolSettings & _BoolSettings::imp_filter_allow_pitch);
+		settings.imp_events_filter.pass_tempo = settings.enable_imp_events_filter && (BoolSettings & _BoolSettings::imp_filter_allow_tempo);
+		settings.imp_events_filter.pass_other = settings.enable_imp_events_filter && (BoolSettings & _BoolSettings::imp_filter_allow_other);
 		settings.filter.pass_notes = !(BoolSettings & _BoolSettings::ignore_notes);
 		settings.filter.pass_pitch = !(BoolSettings & _BoolSettings::ignore_pitches);
 		settings.filter.pass_tempo = !(BoolSettings & _BoolSettings::ignore_tempos);
@@ -475,7 +490,7 @@ struct FileSettings
 		settings.proc_details.whole_midi_collapse = CollapseMIDI;
 		settings.proc_details.apply_offset_after = ApplyOffsetAfter;
 		settings.legacy.enable_zero_velocity = EnableZeroVelocity;
-		settings.legacy.ignore_meta_rsb = AllowLegacyRunningStatusMetaIgnorance;
+		settings.legacy.ignore_meta_rsb = AllowLegacyRunningStatusMetaBehaviour;
 		settings.legacy.rsb_compression = RSBCompression;
 		settings.filter.pass_sysex = AllowSysex;
 		InplaceMergeEnabled = 
@@ -564,7 +579,7 @@ struct SAFCData
 			Sizes.emplace_back(i, Files[i].FileSize);
 		}
 
-		sort(Sizes.begin(), Sizes.end());
+		std::sort(Sizes.begin(), Sizes.end());
 
 		for (int i = 0; i < Sizes.size(); i++)
 		{
@@ -629,13 +644,13 @@ std::shared_ptr<MIDICollectionThreadedMerger> GlobalMCTM;
 void ThrowAlert_Error(std::string&& AlertText) 
 {
 	if (WH)
-		WH->ThrowAlert(AlertText, "ERROR!", SpecialSigns::DrawExTriangle, 1, 0xFFAF00FF, 0xFF);
+		WH->ThrowAlert(AlertText, "ERROR!", SpecialSigns::DrawExTriangle, true, 0xFFAF00FF, 0xFF);
 }
 
 void ThrowAlert_Warning(std::string&& AlertText)
 {
 	if (WH)
-		WH->ThrowAlert(AlertText, "Warning!", SpecialSigns::DrawExTriangle, 1, 0x7F7F7FFF, 0xFFFFFFAF);
+		WH->ThrowAlert(AlertText, "Warning!", SpecialSigns::DrawExTriangle, true, 0x7F7F7FFF, 0xFFFFFFAF);
 }
 
 std::vector<std::wstring> MOFD(const wchar_t* Title)
@@ -812,6 +827,8 @@ namespace PropsAndSets
 		{
 			currentID = ID;
 			auto PASWptr = (*WH)["SMPAS"];
+			auto OSptr = (*WH)["OTHER_SETS"];
+
 			((TextBox*)((*PASWptr)["FileName"]))->SafeStringReplace("..." + _Data[ID].AppearanceFilename);
 			((InputField*)((*PASWptr)["PPQN"]))->UpdateInputString();
 			((InputField*)((*PASWptr)["PPQN"]))->SafeStringReplace(std::to_string((_Data[ID].NewPPQN) ? _Data[ID].NewPPQN : _Data[ID].OldPPQN));
@@ -824,18 +841,28 @@ namespace PropsAndSets
 
 			((CheckBox*)((*PASWptr)["BOOL_REM_TRCKS"]))->State = _Data[ID].BoolSettings & _BoolSettings::remove_empty_tracks;
 			((CheckBox*)((*PASWptr)["BOOL_REM_REM"]))->State = _Data[ID].BoolSettings & _BoolSettings::remove_remnants;
-			((CheckBox*)((*PASWptr)["BOOL_PIANO_ONLY"]))->State = _Data[ID].BoolSettings & _BoolSettings::all_instruments_to_piano;
-			((CheckBox*)((*PASWptr)["BOOL_IGN_TEMPO"]))->State = _Data[ID].BoolSettings & _BoolSettings::ignore_tempos;
-			((CheckBox*)((*PASWptr)["BOOL_IGN_PITCH"]))->State = _Data[ID].BoolSettings & _BoolSettings::ignore_pitches;
-			((CheckBox*)((*PASWptr)["BOOL_IGN_NOTES"]))->State = _Data[ID].BoolSettings & _BoolSettings::ignore_notes;
-			((CheckBox*)((*PASWptr)["BOOL_IGN_ALL_EX_TPS"]))->State = _Data[ID].BoolSettings & _BoolSettings::ignore_all_but_tempos_notes_and_pitch;
+
+			((CheckBox*)((*OSptr)["BOOL_PIANO_ONLY"]))->State = _Data[ID].BoolSettings & _BoolSettings::all_instruments_to_piano;
+			((CheckBox*)((*OSptr)["BOOL_IGN_TEMPO"]))->State = _Data[ID].BoolSettings & _BoolSettings::ignore_tempos;
+			((CheckBox*)((*OSptr)["BOOL_IGN_PITCH"]))->State = _Data[ID].BoolSettings & _BoolSettings::ignore_pitches;
+			((CheckBox*)((*OSptr)["BOOL_IGN_NOTES"]))->State = _Data[ID].BoolSettings & _BoolSettings::ignore_notes;
+			((CheckBox*)((*OSptr)["BOOL_IGN_ALL_EX_TPS"]))->State = _Data[ID].BoolSettings & _BoolSettings::ignore_all_but_tempos_notes_and_pitch;
+
+			((CheckBox*)((*OSptr)["IMP_FLT_ENABLE"]))->State = _Data[ID].BoolSettings & _BoolSettings::enable_important_filter;
+			((CheckBox*)((*OSptr)["IMP_FLT_NOTES"]))->State = _Data[ID].BoolSettings & _BoolSettings::imp_filter_allow_notes;
+			((CheckBox*)((*OSptr)["IMP_FLT_TEMPO"]))->State = _Data[ID].BoolSettings & _BoolSettings::imp_filter_allow_tempo;
+			((CheckBox*)((*OSptr)["IMP_FLT_PITCH"]))->State = _Data[ID].BoolSettings & _BoolSettings::imp_filter_allow_pitch;
+			((CheckBox*)((*OSptr)["IMP_FLT_PROGC"]))->State = _Data[ID].BoolSettings & _BoolSettings::imp_filter_allow_progc;
+			((CheckBox*)((*OSptr)["IMP_FLT_OTHER"]))->State = _Data[ID].BoolSettings & _BoolSettings::imp_filter_allow_other;
+
+			((CheckBox*)((*OSptr)["LEGACY_META_RSB_BEHAVIOR"]))->State = _Data[ID].AllowLegacyRunningStatusMetaBehaviour;
+			((CheckBox*)((*OSptr)["ALLOW_SYSEX"]))->State = _Data[ID].AllowSysex;
+			((CheckBox*)((*OSptr)["ENABLE_ZERO_VELOCITY"]))->State = _Data[ID].EnableZeroVelocity;
+
 			((CheckBox*)((*PASWptr)["SPLIT_TRACKS"]))->State = _Data[ID].ChannelsSplit;
 			((CheckBox*)((*PASWptr)["RSB_COMPRESS"]))->State = _Data[ID].RSBCompression;
 
 			((CheckBox*)((*PASWptr)["INPLACE_MERGE"]))->State = _Data[ID].InplaceMergeEnabled;
-			((CheckBox*)((*PASWptr)["LEGACY_META_RSB_BEHAVIOR"]))->State = _Data[ID].AllowLegacyRunningStatusMetaIgnorance;
-			((CheckBox*)((*PASWptr)["ALLOW_SYSEX"]))->State = _Data[ID].AllowSysex;
-			((CheckBox*)((*PASWptr)["ENABLE_ZERO_VELOCITY"]))->State = _Data[ID].EnableZeroVelocity;
 
 			((CheckBox*)((*PASWptr)["COLLAPSE_MIDI"]))->State = _Data[ID].CollapseMIDI;
 			((CheckBox*)((*PASWptr)["APPLY_OFFSET_AFTER"]))->State = _Data[ID].ApplyOffsetAfter;
@@ -859,7 +886,7 @@ namespace PropsAndSets
 		//ThrowAlert_Warning("Still testing :)");
 		if (currentID < 0 && currentID >= _Data.Files.size()) 
 		{
-			ThrowAlert_Error("How you've managed to select the midi beyond the list? O.o\n" + std::to_string(currentID));
+			ThrowAlert_Error("How you have managed to select the midi beyond the list? O.o\n" + std::to_string(currentID));
 			return;
 		}
 		auto UIElement = (Graphing<SingleMIDIInfoCollector::tempo_graph>*)(*(*WH)["SMIC"])["TEMPO_GRAPH"];
@@ -868,7 +895,7 @@ namespace PropsAndSets
 			{ std::lock_guard<std::recursive_mutex> locker(UIElement->Lock); }
 			UIElement->Graph = nullptr;
 		}
-		SMICptr = new SingleMIDIInfoCollector(_Data.Files[currentID].Filename, _Data.Files[currentID].OldPPQN, _Data.Files[currentID].AllowLegacyRunningStatusMetaIgnorance);
+		SMICptr = new SingleMIDIInfoCollector(_Data.Files[currentID].Filename, _Data.Files[currentID].OldPPQN, _Data.Files[currentID].AllowLegacyRunningStatusMetaBehaviour);
 		std::thread th([]()
 		{
 			WH->MainWindow_ID = "SMIC";
@@ -1205,12 +1232,13 @@ namespace PropsAndSets
 	{
 		if (currentID < 0 && currentID >= _Data.Files.size())
 		{
-			ThrowAlert_Error("You cannot apply current settings to file with ID " + std::to_string(currentID));
+			ThrowAlert_Warning("You cannot apply current settings to file with ID " + std::to_string(currentID));
 			return;
 		}
 		std::int32_t T;
 		std::string CurStr = "";
 		auto SMPASptr = (*WH)["SMPAS"];
+		auto OSptr = (*WH)["OTHER_SETS"];
 
 		CurStr = ((InputField*)(*SMPASptr)["PPQN"])->GetCurrentInput("0");
 		if (CurStr.size())
@@ -1241,7 +1269,7 @@ namespace PropsAndSets
 			if (T != _Data[currentID].GroupID)
 			{
 				_Data[currentID].GroupID = T;
-				ThrowAlert_Error("Manual GroupID editing might cause significant drop of processing perfomance!");
+				ThrowAlert_Warning("Manual GroupID editing might cause significant drop of processing perfomance!");
 			}
 		}
 
@@ -1259,21 +1287,30 @@ namespace PropsAndSets
 			_Data[currentID].SelectionLength = T;
 		}
 
-		_Data[currentID].AllowLegacyRunningStatusMetaIgnorance = (((CheckBox*)(*SMPASptr)["LEGACY_META_RSB_BEHAVIOR"])->State);
+		_Data[currentID].AllowLegacyRunningStatusMetaBehaviour = (((CheckBox*)(*OSptr)["LEGACY_META_RSB_BEHAVIOR"])->State);
 
-		if (_Data[currentID].AllowLegacyRunningStatusMetaIgnorance)
+		if (_Data[currentID].AllowLegacyRunningStatusMetaBehaviour)
 			std::cout << "WARNING: Legacy way of treating running status events can also allow major corruptions of midi structure!" << std::endl;
 
 		_Data[currentID].SetBoolSetting(_BoolSettings::remove_empty_tracks, (((CheckBox*)(*SMPASptr)["BOOL_REM_TRCKS"])->State));
 		_Data[currentID].SetBoolSetting(_BoolSettings::remove_remnants, (((CheckBox*)(*SMPASptr)["BOOL_REM_REM"])->State));
-		_Data[currentID].SetBoolSetting(_BoolSettings::all_instruments_to_piano, (((CheckBox*)(*SMPASptr)["BOOL_PIANO_ONLY"])->State));
-		_Data[currentID].SetBoolSetting(_BoolSettings::ignore_tempos, (((CheckBox*)(*SMPASptr)["BOOL_IGN_TEMPO"])->State));
-		_Data[currentID].SetBoolSetting(_BoolSettings::ignore_pitches, (((CheckBox*)(*SMPASptr)["BOOL_IGN_PITCH"])->State));
-		_Data[currentID].SetBoolSetting(_BoolSettings::ignore_notes, (((CheckBox*)(*SMPASptr)["BOOL_IGN_NOTES"])->State));
-		_Data[currentID].SetBoolSetting(_BoolSettings::ignore_all_but_tempos_notes_and_pitch, (((CheckBox*)(*SMPASptr)["BOOL_IGN_ALL_EX_TPS"])->State));
 
-		_Data[currentID].EnableZeroVelocity = (((CheckBox*)(*SMPASptr)["ENABLE_ZERO_VELOCITY"])->State);
-		_Data[currentID].AllowSysex = (((CheckBox*)(*SMPASptr)["ALLOW_SYSEX"])->State);
+		_Data[currentID].SetBoolSetting(_BoolSettings::all_instruments_to_piano, (((CheckBox*)(*OSptr)["BOOL_PIANO_ONLY"])->State));
+		_Data[currentID].SetBoolSetting(_BoolSettings::ignore_tempos, (((CheckBox*)(*OSptr)["BOOL_IGN_TEMPO"])->State));
+		_Data[currentID].SetBoolSetting(_BoolSettings::ignore_pitches, (((CheckBox*)(*OSptr)["BOOL_IGN_PITCH"])->State));
+		_Data[currentID].SetBoolSetting(_BoolSettings::ignore_notes, (((CheckBox*)(*OSptr)["BOOL_IGN_NOTES"])->State));
+		_Data[currentID].SetBoolSetting(_BoolSettings::ignore_all_but_tempos_notes_and_pitch, (((CheckBox*)(*OSptr)["BOOL_IGN_ALL_EX_TPS"])->State));
+
+		_Data[currentID].SetBoolSetting(_BoolSettings::enable_important_filter, (((CheckBox*)(*OSptr)["IMP_FLT_ENABLE"])->State));
+		_Data[currentID].SetBoolSetting(_BoolSettings::imp_filter_allow_notes, (((CheckBox*)(*OSptr)["IMP_FLT_NOTES"])->State));
+		_Data[currentID].SetBoolSetting(_BoolSettings::imp_filter_allow_tempo, (((CheckBox*)(*OSptr)["IMP_FLT_TEMPO"])->State));
+		_Data[currentID].SetBoolSetting(_BoolSettings::imp_filter_allow_pitch, (((CheckBox*)(*OSptr)["IMP_FLT_PITCH"])->State));
+		_Data[currentID].SetBoolSetting(_BoolSettings::imp_filter_allow_progc, (((CheckBox*)(*OSptr)["IMP_FLT_PROGC"])->State));
+		_Data[currentID].SetBoolSetting(_BoolSettings::imp_filter_allow_other, (((CheckBox*)(*OSptr)["IMP_FLT_OTHER"])->State));
+
+		_Data[currentID].EnableZeroVelocity = (((CheckBox*)(*OSptr)["ENABLE_ZERO_VELOCITY"])->State);
+		_Data[currentID].AllowSysex = (((CheckBox*)(*OSptr)["ALLOW_SYSEX"])->State);
+
 		_Data[currentID].RSBCompression = ((CheckBox*)(*SMPASptr)["RSB_COMPRESS"])->State;
 		_Data[currentID].ChannelsSplit = ((CheckBox*)(*SMPASptr)["SPLIT_TRACKS"])->State;
 		_Data[currentID].CollapseMIDI = ((CheckBox*)(*SMPASptr)["COLLAPSE_MIDI"])->State;
@@ -1287,15 +1324,17 @@ namespace PropsAndSets
 	{
 		if (currentID < 0 && currentID >= _Data.Files.size())
 		{
-			ThrowAlert_Error("You cannot apply current settings to file with ID " + std::to_string(currentID));
+			ThrowAlert_Warning("You cannot apply current settings to file with ID " + std::to_string(currentID));
 			return;
 		}
+
 		OnApplySettings();
+
 		for (auto Y = _Data.Files.begin(); Y != _Data.Files.end(); ++Y)
 		{
 			DefaultBoolSettings = Y->BoolSettings = _Data[currentID].BoolSettings;
 			_Data.InplaceMergeFlag = Y->InplaceMergeEnabled = _Data[currentID].InplaceMergeEnabled;
-			Y->AllowLegacyRunningStatusMetaIgnorance = _Data[currentID].AllowLegacyRunningStatusMetaIgnorance;
+			Y->AllowLegacyRunningStatusMetaBehaviour = _Data[currentID].AllowLegacyRunningStatusMetaBehaviour;
 			Y->CollapseMIDI = _Data[currentID].CollapseMIDI;
 			Y->ApplyOffsetAfter = _Data[currentID].ApplyOffsetAfter;
 			Y->AllowSysex = _Data[currentID].AllowSysex;
@@ -1557,7 +1596,7 @@ void OnRemCATs()
 void OnRemPitchMaps()
 {
 	//WH->DisableWindow("CAT");
-	ThrowAlert_Error("Currently pitch maps can not be created and/or deleted :D");
+	ThrowAlert_Warning("Currently pitch maps can not be created and/or deleted :D");
 	for (int i = 0; i < _Data.Files.size(); i++)
 		_Data[i].PitchBendMap = nullptr;
 }
@@ -1596,7 +1635,6 @@ namespace Settings
 		
 		((CheckBox*)((*pptr)["INPLACE_MERGE"]))->State = _Data.InplaceMergeFlag;
 		((CheckBox*)((*pptr)["AUTOUPDATECHECK"]))->State = check_autoupdates;
-
 	}
 	void OnSetApply()
 	{
@@ -1942,6 +1980,11 @@ void RestoreRegSettings()
 	}
 }
 
+void OnOtherSettings()
+{
+	WH->EnableWindow("OTHER_SETS");
+}
+
 void Init()
 {
 	lFontSymbolsInfo::InitialiseFont(default_font_name, true);
@@ -1961,12 +2004,14 @@ void Init()
 
 	WH = std::make_shared<WindowsHandler>();
 
-	std::stringstream MainWindowName;
-
 	auto [maj, min, ver, build] = __versionTuple;
-	MainWindowName << "SAFC v" << maj << "." << min << "." << ver << "." << build << "";
 
-	SelectablePropertedList* SPL = new SelectablePropertedList(BS_List_Black_Small, NULL, PropsAndSets::OGPInMIDIList, -50, 172, 300, 12, 65, 30);
+	constexpr unsigned BACKGROUND = 0x070E16AF;
+	constexpr unsigned BACKGROUND_OPQ = 0x070E16DF;
+	constexpr unsigned BORDER = 0xFFFFFF7F;
+	constexpr unsigned HEADER = 0x285685CF;
+	
+	/*SelectablePropertedList* SPL = new SelectablePropertedList(BS_List_Black_Small, NULL, PropsAndSets::OGPInMIDIList, -50, 172, 300, 12, 65, 30);
 	MoveableWindow* T = new MoveableResizeableWindow(MainWindowName.str(), System_White, -200, 200, 400, 400, 0x3F3F3FAF, 0x7F7F7F7F, 0, [SPL](float dH, float dW, float NewHeight, float NewWidth) {
 		constexpr float TopMargin = 200 - 172;
 		constexpr float BottomMargin = 12;
@@ -1979,25 +2024,26 @@ void Init()
 		"ADD_Butt", "REM_Butt", "REM_ALL_Butt", "GLOBAL_PPQN_Butt", "GLOBAL_OFFSET_Butt", "GLOBAL_TEMPO_Butt", "DELETE_ALL_VM", "DELETE_ALL_CAT", "DELETE_ALL_PITCHES",
 		"DELETE_ALL_MODULES", "SETTINGS", "SAVE_AS", "START"
 		}, MoveableResizeableWindow::PinSide::right);
-	((MoveableResizeableWindow*)T)->AssignPinnedActivities({ "SETTINGS", "SAVE_AS", "START" }, MoveableResizeableWindow::PinSide::bottom);
+	((MoveableResizeableWindow*)T)->AssignPinnedActivities({ "SETTINGS", "SAVE_AS", "START" }, MoveableResizeableWindow::PinSide::bottom);*/
+	MoveableWindow* T = new MoveableFuiWindow(std::format("SAFC v{}.{}.{}.{}", maj, min, ver, build), System_White, -200, 197.5f, 400, 397.5f, 300, 2.5f, 100, 100, 5, BACKGROUND, HEADER, BORDER);
 
 	Button* Butt;
-	(*T)["List"] = SPL;
+	(*T)["List"] = new SelectablePropertedList(BS_List_Black_Small, NULL, PropsAndSets::OGPInMIDIList, -50, 172, 300, 12, 65, 30);;
 
-	(*T)["ADD_Butt"] = new Button("Add MIDIs", System_White, OnAdd, 150, 172.5, 75, 12, 1, 0x00003FAF, 0xFFFFFFFF, 0x00003FFF, 0xFFFFFFFF, 0xF7F7F7FF, NULL, " ");
-	(*T)["REM_Butt"] = new Button("Remove selected", System_White, OnRem, 150, 160, 75, 12, 1, 0x3F0000AF, 0xFFFFFFFF, 0x3F0000FF, 0xFFFFFFFF, 0xF7F7F7FF, NULL, " ");
-	(*T)["REM_ALL_Butt"] = new Button("Remove all", System_White, OnRemAll, 150, 147.5, 75, 12, 1, 0xAF0000AF, 0xFFFFFFFF, 0xAF0000AF, 0xFFFFFFFF, 0xF7F7F7FF, System_White, "May cause lag");
-	(*T)["GLOBAL_PPQN_Butt"] = new Button("Global PPQN", System_White, OnGlobalPPQN, 150, 122.5, 75, 12, 1, 0xFF3F00AF, 0xFFFFFFFF, 0xFF3F00AF, 0xFFFFFFFF, 0xF7F7F7FF, NULL, " ");
-	(*T)["GLOBAL_OFFSET_Butt"] = new Button("Global offset", System_White, OnGlobalOffset, 150, 110, 75, 12, 1, 0xFF7F00AF, 0xFFFFFFFF, 0xFF7F00FF, 0xFFFFFFFF, 0xF7F7F7FF, NULL, " ");
-	(*T)["GLOBAL_TEMPO_Butt"] = new Button("Global tempo", System_White, OnGlobalTempo, 150, 97.5, 75, 12, 1, 0xFFAF00AF, 0xFFFFFFFF, 0xFFAF00AF, 0xFFFFFFFF, 0xF7F7F7FF, NULL, " ");
+	(*T)["ADD_Butt"] = new Button("Add MIDIs", System_White, OnAdd, 150, 167.5, 75, 12, 1, 0x00003FAF, 0xFFFFFFFF, 0x00003FFF, 0xFFFFFFFF, 0xF7F7F7FF, NULL, " ");
+	(*T)["REM_Butt"] = new Button("Remove selected", System_White, OnRem, 150, 155, 75, 12, 1, 0x3F0000AF, 0xFFFFFFFF, 0x3F0000FF, 0xFFFFFFFF, 0xF7F7F7FF, NULL, " ");
+	(*T)["REM_ALL_Butt"] = new Button("Remove all", System_White, OnRemAll, 150, 142.5, 75, 12, 1, 0xAF0000AF, 0xFFFFFFFF, 0xAF0000AF, 0xFFFFFFFF, 0xF7F7F7FF, System_White, "May cause lag");
+	(*T)["GLOBAL_PPQN_Butt"] = new Button("Global PPQN", System_White, OnGlobalPPQN, 150, 117.5, 75, 12, 1, 0xFF3F00AF, 0xFFFFFFFF, 0xFF3F00AF, 0xFFFFFFFF, 0xF7F7F7FF, NULL, " ");
+	(*T)["GLOBAL_OFFSET_Butt"] = new Button("Global offset", System_White, OnGlobalOffset, 150, 105, 75, 12, 1, 0xFF7F00AF, 0xFFFFFFFF, 0xFF7F00FF, 0xFFFFFFFF, 0xF7F7F7FF, NULL, " ");
+	(*T)["GLOBAL_TEMPO_Butt"] = new Button("Global tempo", System_White, OnGlobalTempo, 150, 92.5, 75, 12, 1, 0xFFAF00AF, 0xFFFFFFFF, 0xFFAF00AF, 0xFFFFFFFF, 0xF7F7F7FF, NULL, " ");
 	//(*T)["_FRESOLVE"] = new Button("_ForceResolve", System_White, _OnResolve, 150, 0, 75, 12, 1, 0x7F007F3F, 0xFFFFFF3F, 0x000000FF, 0xFFFFFF3F, 0xF7F7F73F, NULL, " ");
-	(*T)["DELETE_ALL_VM"] = new Button("Remove vol. maps", System_White, OnRemVolMaps, 150, 72.5, 75, 12, 1,
+	(*T)["DELETE_ALL_VM"] = new Button("Remove vol. maps", System_White, OnRemVolMaps, 150, 67.5, 75, 12, 1,
 		0x7F7F7FAF, 0xFFFFFFFF, 0x7F7F7FAF, 0xFFFFFFFF, 0xF7F7F7FF, NULL, " ");//0xFF007FAF
-	(*T)["DELETE_ALL_CAT"] = new Button("Remove C&Ts", System_White, OnRemCATs, 150, 60, 75, 12, 1,
+	(*T)["DELETE_ALL_CAT"] = new Button("Remove C&Ts", System_White, OnRemCATs, 150, 55, 75, 12, 1,
 		0x7F7F7FAF, 0xFFFFFFFF, 0x7F7F7FAF, 0xFFFFFFFF, 0xF7F7F7FF, NULL, " ");
-	(*T)["DELETE_ALL_PITCHES"] = new Button("Remove p. maps", System_White, OnRemPitchMaps, 150, 47.5, 75, 12, 1,
+	(*T)["DELETE_ALL_PITCHES"] = new Button("Remove p. maps", System_White, OnRemPitchMaps, 150, 42.5, 75, 12, 1,
 		0x7F7F7FAF, 0xFFFFFFFF, 0x7F7F7FAF, 0xFFFFFFFF, 0xF7F7F7FF, NULL, " ");
-	(*T)["DELETE_ALL_MODULES"] = new Button("Remove modules", System_White, OnRemAllModules, 150, 35, 75, 12, 1,
+	(*T)["DELETE_ALL_MODULES"] = new Button("Remove modules", System_White, OnRemAllModules, 150, 30, 75, 12, 1,
 		0x7F7F7FAF, 0xFFFFFFFF, 0x7F7F7FAF, 0xFFFFFFFF, 0xF7F7F7FF, NULL, " ");
 
 	(*T)["SETTINGS"] = new Button("Settings...", System_White, Settings::OnSettings, 150, -140, 75, 12, 1,
@@ -2009,121 +2055,144 @@ void Init()
 
 	(*WH)["MAIN"] = T;
 
-	T = new MoveableWindow("Props. and sets.", System_White, -100, 100, 200, 225, 0x3F3F3FCF, 0x7F7F7F7F);
-	(*T)["FileName"] = new TextBox("_", System_White, 0, 88.5 - WindowHeapSize, 6, 200 - 1.5 * WindowHeapSize, 7.5, 0, 0, 0, _Align::left, TextBox::VerticalOverflow::cut);
-	(*T)["PPQN"] = new InputField(" ", -90 + WindowHeapSize, 75 - WindowHeapSize, 10, 25, System_White, PropsAndSets::PPQN, 0x007FFFFF, System_White, "PPQN is lesser than 65536.", 5, _Align::center, _Align::left, InputField::Type::NaturalNumbers);
-	(*T)["TEMPO"] = new InputField(" ", -50 + WindowHeapSize, 75 - WindowHeapSize, 10, 45, System_White, PropsAndSets::TEMPO, 0x007FFFFF, System_White, "Specific tempo override field", 8, _Align::center, _Align::left, InputField::Type::FP_PositiveNumbers);
-	(*T)["OFFSET"] = new InputField(" ", 20 + WindowHeapSize, 75 - WindowHeapSize, 10, 55, System_White, PropsAndSets::OFFSET, 0x007FFFFF, System_White, "Offset from begining in ticks", 10, _Align::center, _Align::right, InputField::Type::WholeNumbers);
+	T = new MoveableFuiWindow("Props. and sets.", System_White, -100, 100, 200, 225, 100, 2.5f, 75, 50, 3, BACKGROUND_OPQ, HEADER, BORDER);
+	(*T)["FileName"] = new TextBox("_", System_White, 0, 88.5 - WindowHeaderSize, 6, 200 - 1.5 * WindowHeaderSize, 7.5, 0, 0, 0, _Align::left, TextBox::VerticalOverflow::cut);
+	(*T)["PPQN"] = new InputField(" ", -90 + WindowHeaderSize, 75 - WindowHeaderSize, 10, 25, System_White, PropsAndSets::PPQN, 0x007FFFFF, System_White, "PPQN is lesser than 65536.", 5, _Align::center, _Align::left, InputField::Type::NaturalNumbers);
+	(*T)["TEMPO"] = new InputField(" ", -50 + WindowHeaderSize, 75 - WindowHeaderSize, 10, 45, System_White, PropsAndSets::TEMPO, 0x007FFFFF, System_White, "Specific tempo override field", 8, _Align::center, _Align::left, InputField::Type::FP_PositiveNumbers);
+	(*T)["OFFSET"] = new InputField(" ", 20 + WindowHeaderSize, 75 - WindowHeaderSize, 10, 55, System_White, PropsAndSets::OFFSET, 0x007FFFFF, System_White, "Offset from begining in ticks", 10, _Align::center, _Align::right, InputField::Type::WholeNumbers);
 
-	(*T)["APPLY_OFFSET_AFTER"] = new CheckBox(12.5 - WindowHeapSize, 75 - WindowHeapSize, 10, 0x007FFFFF, 0xFF7F00AF, 0x7FFF00AF, 1, 0, System_White, _Align::center, "Apply offset after PPQ change");
+	(*T)["APPLY_OFFSET_AFTER"] = new CheckBox(12.5 - WindowHeaderSize, 75 - WindowHeaderSize, 10, 0x007FFFFF, 0xFF7F00AF, 0x7FFF00AF, 1, 0, System_White, _Align::center, "Apply offset after PPQ change");
 
-	(*T)["BOOL_REM_TRCKS"] = new CheckBox(-97.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, System_White, _Align::left, "Remove empty tracks");
-	(*T)["BOOL_REM_REM"] = new CheckBox(-82.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, System_White, _Align::left, "Remove merge \"remnants\"");
-	(*T)["BOOL_PIANO_ONLY"] = new CheckBox(-67.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, System_White, _Align::left, "Replace all instruments with piano");
-	(*T)["BOOL_IGN_TEMPO"] = new CheckBox(-52.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::left, "Ignore tempo events");
-	(*T)["BOOL_IGN_PITCH"] = new CheckBox(-37.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::center, "Ignore pitch bending events");
-	(*T)["BOOL_IGN_NOTES"] = new CheckBox(-22.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::center, "Ignore note events");
-	(*T)["BOOL_IGN_ALL_EX_TPS"] = new CheckBox(-7.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::center, "Ignore everything except specified");
-	(*T)["SPLIT_TRACKS"] = new CheckBox(7.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, 0, System_White, _Align::center, "Multichannel split");
-	(*T)["RSB_COMPRESS"] = new CheckBox(22.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, 0, System_White, _Align::center, "Enable RSB compression");
-	
-	(*T)["BOOL_APPLY_TO_ALL_MIDIS"] = Butt = new Button("A2A", System_White, PropsAndSets::OnApplyBS2A, 80 - WindowHeapSize, 55 - WindowHeapSize, 15, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, System_White, "Sets \"bool settings\" to all midis");
-	Butt->Tip->SafeChangePosition_Argumented(_Align::right, 87.5 - WindowHeapSize, Butt->Tip->CYpos);
+	(*T)["BOOL_REM_TRCKS"] = new CheckBox(-97.5 + WindowHeaderSize, 55 - WindowHeaderSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, System_White, _Align::left, "Remove empty tracks");
+	(*T)["BOOL_REM_REM"] = new CheckBox(-82.5 + WindowHeaderSize, 55 - WindowHeaderSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, System_White, _Align::left, "Remove merge \"remnants\"");
+	(*T)["OTHER_CHECKBOXES"] = new Button("Other settings", System_White, OnOtherSettings, -37.5 + WindowHeaderSize, 55 - WindowHeaderSize, 70, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, System_White, "Other MIDI processing settings");
 
-	(*T)["INPLACE_MERGE"] = new CheckBox(97.5 - WindowHeapSize, 55 - WindowHeapSize, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, 0, System_White, _Align::right, "Enables/disables inplace merge");
+	(*T)["SPLIT_TRACKS"] = new CheckBox(7.5 + WindowHeaderSize, 55 - WindowHeaderSize, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, 0, System_White, _Align::center, "Multichannel split");
+	(*T)["RSB_COMPRESS"] = new CheckBox(22.5 + WindowHeaderSize, 55 - WindowHeaderSize, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, 0, System_White, _Align::center, "Enable RSB compression");
 
-	(*T)["GROUPID"] = new InputField(" ", 92.5 - WindowHeapSize, 75 - WindowHeapSize, 10, 20, System_White, PropsAndSets::PPQN, 0x007FFFFF, System_White, "Group ID...", 2, _Align::center, _Align::right, InputField::Type::NaturalNumbers);
+	(*T)["COLLAPSE_MIDI"] = new CheckBox(97.5 - WindowHeaderSize, 35 - WindowHeaderSize, 10, 0x007FFFFF, 0xFF7F00AF, 0x7FFF00AF, 1, 0, System_White, _Align::right, "Collapse all tracks of a MIDI into one");
 
-	//(*T)["OR"] = Butt = new Button("OR", System_White, PropsAndSets::OR, 37.5, 15 - WindowHeapSize, 20, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, System_White, "Overlaps remover");
-	//(*T)["SR"] = new Button("SR", System_White, PropsAndSets::SR, 12.5, 15 - WindowHeapSize, 20, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, System_White, "Sustains remover");
+	(*T)["BOOL_APPLY_TO_ALL_MIDIS"] = Butt = new Button("A2A", System_White, PropsAndSets::OnApplyBS2A, 80 - WindowHeaderSize, 55 - WindowHeaderSize, 15, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, System_White, "Sets \"bool settings\" to all midis");
+	Butt->Tip->SafeChangePosition_Argumented(_Align::right, 87.5 - WindowHeaderSize, Butt->Tip->CYpos);
 
-	(*T)["MIDIINFO"] = Butt = new Button("Collect info", System_White, PropsAndSets::InitializeCollecting, 20, 15 - WindowHeapSize, 65, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, System_White, "Collects additional info about the midi");
+	(*T)["INPLACE_MERGE"] = new CheckBox(97.5 - WindowHeaderSize, 55 - WindowHeaderSize, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, 0, System_White, _Align::right, "Enables/disables inplace merge");
+
+	(*T)["GROUPID"] = new InputField(" ", 92.5 - WindowHeaderSize, 75 - WindowHeaderSize, 10, 20, System_White, PropsAndSets::PPQN, 0x007FFFFF, System_White, "Group ID...", 2, _Align::center, _Align::right, InputField::Type::NaturalNumbers);
+
+	(*T)["MIDIINFO"] = Butt = new Button("Collect info", System_White, PropsAndSets::InitializeCollecting, 20, 15 - WindowHeaderSize, 65, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, System_White, "Collects additional info about the midi");
 	Butt->Tip->SafeMove(-20, 0);
 
-	(*T)["APPLY"] = new Button("Apply", System_White, PropsAndSets::OnApplySettings, 87.5 - WindowHeapSize, 15 - WindowHeapSize, 30, 10, 1, 0x7FAFFF3F, 0xFFFFFFFF, 0xFFAF7FFF, 0xFFAF7F3F, 0xFFAF7FFF, NULL, " ");
+	(*T)["APPLY"] = new Button("Apply", System_White, PropsAndSets::OnApplySettings, 87.5 - WindowHeaderSize, 15 - WindowHeaderSize, 30, 10, 1, 0x7FAFFF3F, 0xFFFFFFFF, 0xFFAF7FFF, 0xFFAF7F3F, 0xFFAF7FFF, NULL, " ");
 
-	(*T)["CUT_AND_TRANSPOSE"] = (Butt = new Button("Cut & Transpose...", System_White, PropsAndSets::CutAndTranspose::OnCaT, 45 - WindowHeapSize, 35 - WindowHeapSize, 85, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, System_White, "Cut and Transpose tool"));
-	Butt->Tip->SafeChangePosition_Argumented(_Align::right, 100 - WindowHeapSize, Butt->Tip->CYpos);
-	(*T)["PITCH_MAP"] = (Butt = new Button("Pitch map ...", System_White, PropsAndSets::OnPitchMap, -37.5 - WindowHeapSize, 15 - WindowHeapSize, 70, 10, 1, 0x7F7F7F3F, 0x7F7F7FFF, 0xFFFFFFFF, 0xFFFFFF3F, 0xFFFFFFFF, System_White, "Allows to transform pitches"));
-	Butt->Tip->SafeChangePosition_Argumented(_Align::right, 100 - WindowHeapSize, Butt->Tip->CYpos);
-	(*T)["VOLUME_MAP"] = (Butt = new Button("Volume map ...", System_White, PropsAndSets::VolumeMap::OnVolMap, -37.5 - WindowHeapSize, 35 - WindowHeapSize, 70, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, System_White, "Allows to transform volumes of notes"));
-	Butt->Tip->SafeChangePosition_Argumented(_Align::right, 100 - WindowHeapSize, Butt->Tip->CYpos);
+	(*T)["CUT_AND_TRANSPOSE"] = (Butt = new Button("Cut & Transpose...", System_White, PropsAndSets::CutAndTranspose::OnCaT, 45 - WindowHeaderSize, 35 - WindowHeaderSize, 85, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, System_White, "Cut and Transpose tool"));
+	Butt->Tip->SafeChangePosition_Argumented(_Align::right, 100 - WindowHeaderSize, Butt->Tip->CYpos);
+	(*T)["PITCH_MAP"] = (Butt = new Button("Pitch map ...", System_White, PropsAndSets::OnPitchMap, -37.5 - WindowHeaderSize, 15 - WindowHeaderSize, 70, 10, 1, 0x7F7F7F3F, 0x7F7F7FFF, 0xFFFFFFFF, 0xFFFFFF3F, 0xFFFFFFFF, System_White, "Allows to transform pitches"));
+	Butt->Tip->SafeChangePosition_Argumented(_Align::right, 100 - WindowHeaderSize, Butt->Tip->CYpos);
+	(*T)["VOLUME_MAP"] = (Butt = new Button("Volume map ...", System_White, PropsAndSets::VolumeMap::OnVolMap, -37.5 - WindowHeaderSize, 35 - WindowHeaderSize, 70, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, System_White, "Allows to transform volumes of notes"));
+	Butt->Tip->SafeChangePosition_Argumented(_Align::right, 100 - WindowHeaderSize, Butt->Tip->CYpos);
 
-	(*T)["SELECT_START"] = new InputField(" ", -37.5 - WindowHeapSize, -5 - WindowHeapSize, 10, 70, System_White, NULL, 0x007FFFFF, System_White, "Selection start", 13, _Align::center, _Align::right, InputField::Type::NaturalNumbers);
-	(*T)["SELECT_LENGTH"] = new InputField(" ", -37.5 - WindowHeapSize, -25 - WindowHeapSize, 10, 70, System_White, NULL, 0x007FFFFF, System_White, "Selection length", 14, _Align::center, _Align::right, InputField::Type::WholeNumbers);
+	(*T)["SELECT_START"] = new InputField(" ", -37.5 - WindowHeaderSize, -5 - WindowHeaderSize, 10, 70, System_White, NULL, 0x007FFFFF, System_White, "Selection start", 13, _Align::center, _Align::right, InputField::Type::NaturalNumbers);
+	(*T)["SELECT_LENGTH"] = new InputField(" ", 37.5 - WindowHeaderSize, -5 - WindowHeaderSize, 10, 70, System_White, NULL, 0x007FFFFF, System_White, "Selection length", 14, _Align::center, _Align::right, InputField::Type::WholeNumbers);
 
-	(*T)["LEGACY_META_RSB_BEHAVIOR"] = new CheckBox(97.5 - WindowHeapSize, -5 - WindowHeapSize, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, false, System_White, _Align::right, "Enables legacy RSB/Meta behavior");
-	(*T)["ALLOW_SYSEX"] = new CheckBox(82.5 - WindowHeapSize, -5 - WindowHeapSize, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, 0, System_White, _Align::right, "Allow sysex events");
-	(*T)["ENABLE_ZERO_VELOCITY"] = new CheckBox(97.5 - WindowHeapSize, -25 - WindowHeapSize, 10, 0x007FFFFF, 0x00001F3F, 0xFF3F00FF, 1, 0, System_White, _Align::right, "\"Enable\" zero velocity notes");
-
-	(*T)["COLLAPSE_MIDI"] = new CheckBox(97.5 - WindowHeapSize, 35 - WindowHeapSize, 10, 0x007FFFFF, 0xFF7F00AF, 0x7FFF00AF, 1, 0, System_White, _Align::right, "Collapse all tracks of a MIDI into one");
-
-	(*T)["CONSTANT_PROPS"] = new TextBox("_Props text example_", System_White, 0, -75 - WindowHeapSize, 80 - WindowHeapSize, 200 - 1.5 * WindowHeapSize, 7.5, 0, 0, 1);
+	(*T)["CONSTANT_PROPS"] = new TextBox("_Props text example_", System_White, 0, -55 - WindowHeaderSize, 80 - WindowHeaderSize, 200 - 1.5 * WindowHeaderSize, 7.5, 0, 0, 1);
 
 	(*WH)["SMPAS"] = T;//Selected midi properties and settings
 
-	T = new MoveableWindow("Cut and Transpose.", System_White, -200, 50, 400, 100, 0x3F3F3FCF, 0x7F7F7F7F);
-	(*T)["CAT_ITSELF"] = new CAT_Piano(0, 25 - WindowHeapSize, 1, 10, NULL);
-	(*T)["CAT_SET_DEFAULT"] = new Button("Reset", System_White, PropsAndSets::CutAndTranspose::OnReset, -150, -10 - WindowHeapSize, 40, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, NULL, " ");
-	(*T)["CAT_+128"] = new Button("0-127 -> 128-255", System_White, PropsAndSets::CutAndTranspose::On0_127to128_255, -85, -10 - WindowHeapSize, 80, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, NULL, " ");
-	(*T)["CAT_CDT128"] = new Button("Cut down to 128", System_White, PropsAndSets::CutAndTranspose::OnCDT128, 0, -10 - WindowHeapSize, 80, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, NULL, " ");
-	(*T)["CAT_COPY"] = new Button("Copy", System_White, PropsAndSets::CutAndTranspose::OnCopy, 65, -10 - WindowHeapSize, 40, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, NULL, " ");
-	(*T)["CAT_PASTE"] = new Button("Paste", System_White, PropsAndSets::CutAndTranspose::OnPaste, 110, -10 - WindowHeapSize, 40, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, NULL, " ");
-	(*T)["CAT_DELETE"] = new Button("Delete", System_White, PropsAndSets::CutAndTranspose::OnDelete, 155, -10 - WindowHeapSize, 40, 10, 1, 0xFF00FF3F, 0xFF00FFFF, 0xFFFFFFFF, 0xFF003F3F, 0xFF003FFF, NULL, " ");
+	T = new MoveableFuiWindow("Other settings.", System_White, -75, 35, 150, 65 + WindowHeaderSize, 100, 2.5f, 17.5f, 17.5f, 3, BACKGROUND_OPQ, HEADER, BORDER);
+
+	CheckBox* Chk = nullptr;
+
+	(*T)["BOOL_PIANO_ONLY"] = new CheckBox(-65, 25 - WindowHeaderSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, System_White, _Align::left, "All instruments to piano");
+	(*T)["BOOL_IGN_TEMPO"] = new CheckBox(-50, 25 - WindowHeaderSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::left, "Remove tempo events");
+	(*T)["BOOL_IGN_PITCH"] = new CheckBox(-35, 25 - WindowHeaderSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::left, "Remove pitch events");
+	(*T)["BOOL_IGN_NOTES"] = new CheckBox(-20, 25 - WindowHeaderSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::center, "Remove notes");
+	(*T)["BOOL_IGN_ALL_EX_TPS"] = new CheckBox(-5, 25 - WindowHeaderSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::center, "Ignore other events");
+
+	(*T)["LEGACY_META_RSB_BEHAVIOR"] = Chk = new CheckBox(10, 25 - WindowHeaderSize, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, false, System_White, _Align::center, "En. legacy RSB/Meta behavior");
+	Chk->Tip->SafeChangePosition_Argumented(_Align::left, -70, 15 - WindowHeaderSize);
+	(*T)["ALLOW_SYSEX"] = new CheckBox(25, 25 - WindowHeaderSize, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, 0, System_White, _Align::right, "Allow sysex events");
+
+	(*T)["IMP_FLT_ENABLE"] = new CheckBox(65, 25 - WindowHeaderSize, 10, 0x007FFFFF, 0xFF7F1F7F, 0x5FFF007F, 1, 0, System_White, _Align::right, "Enable important event filter");
+
+	(*T)["0VERLAY"] = new TextBox("", System_White, -10, 2.5f - WindowHeaderSize, 23, 120, 0, 0xFFFFFF1F, 0x007FFF7F, 1);
+
+	(*T)["IMP_FLT_NOTES"] = new CheckBox(-60, 5 - WindowHeaderSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, System_White, _Align::left, "Important filter: piano");
+	(*T)["IMP_FLT_TEMPO"] = new CheckBox(-45, 5 - WindowHeaderSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::left, "Important filter: tempo");
+	(*T)["IMP_FLT_PITCH"] = new CheckBox(-30, 5 - WindowHeaderSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::left, "Important filter: pitch");
+	(*T)["IMP_FLT_PROGC"] = Chk = new CheckBox(-15, 5 - WindowHeaderSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::center, "Important filter: program change");
+	Chk->Tip->SafeChangePosition_Argumented(_Align::left, -70, -5 - WindowHeaderSize);
+	(*T)["IMP_FLT_OTHER"] = new CheckBox(0, 5 - WindowHeaderSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::center, "Important filter: other");
+
+	(*T)["ENABLE_ZERO_VELOCITY"] = new CheckBox(60, 5 - WindowHeaderSize, 10, 0x007FFFFF, 0x00001F3F, 0x00FF00FF, 1, 0, System_White, _Align::right, "\"Enable\" zero velocity notes");
+
+	(*T)["APPLY"] = new Button("Apply", System_White, PropsAndSets::OnApplySettings, 70 - WindowHeaderSize, -20 - WindowHeaderSize, 30, 10, 1, 0x3F7FFF3F, 0xFFFFFFEF, 0x7FFF3FFF, 0x7FFF3F1F, 0x7FFF3FFF, NULL, " ");
+
+	(*WH)["OTHER_SETS"] = T; // Other settings
+
+	T = new MoveableFuiWindow("Cut and Transpose.", System_White, -200, 50, 400, 100, 300, 2.5f, 15, 15, 2.5f, BACKGROUND_OPQ, HEADER, BORDER);
+	(*T)["CAT_ITSELF"] = new CAT_Piano(0, 20 - WindowHeaderSize, 1, 10, NULL);
+	(*T)["CAT_SET_DEFAULT"] = new Button("Reset", System_White, PropsAndSets::CutAndTranspose::OnReset, -150, -10 - WindowHeaderSize, 40, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, NULL, " ");
+	(*T)["CAT_+128"] = new Button("0-127 -> 128-255", System_White, PropsAndSets::CutAndTranspose::On0_127to128_255, -85, -10 - WindowHeaderSize, 80, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, NULL, " ");
+	(*T)["CAT_CDT128"] = new Button("Cut down to 128", System_White, PropsAndSets::CutAndTranspose::OnCDT128, 0, -10 - WindowHeaderSize, 80, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, NULL, " ");
+	(*T)["CAT_COPY"] = new Button("Copy", System_White, PropsAndSets::CutAndTranspose::OnCopy, 65, -10 - WindowHeaderSize, 40, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, NULL, " ");
+	(*T)["CAT_PASTE"] = new Button("Paste", System_White, PropsAndSets::CutAndTranspose::OnPaste, 110, -10 - WindowHeaderSize, 40, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, NULL, " ");
+	(*T)["CAT_DELETE"] = new Button("Delete", System_White, PropsAndSets::CutAndTranspose::OnDelete, 155, -10 - WindowHeaderSize, 40, 10, 1, 0xFF00FF3F, 0xFF00FFFF, 0xFFFFFFFF, 0xFF003F3F, 0xFF003FFF, NULL, " ");
 
 	(*WH)["CAT"] = T;
 
-	T = new MoveableWindow("Volume map.", System_White, -150, 150, 300, 350, 0x3F3F3FCF, 0x7F7F7F7F, 0x7F6F8FCF);
-	(*T)["VM_PLC"] = new PLC_VolumeWorker(0, 0 - WindowHeapSize, 300 - WindowHeapSize * 2, 300 - WindowHeapSize * 2, std::make_shared<PLC<std::uint8_t, std::uint8_t>>());///todo: interface
-	(*T)["VM_SSBDIIF"] = Butt = new Button("Shape alike x^y", System_White, PropsAndSets::VolumeMap::OnDegreeShape, -110 + WindowHeapSize, -150 - WindowHeapSize, 80, 10, 1, 0xFFFFFF3F, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFAFFF3F, 0xFFAFFFFF, System_White, "Where y is from frame bellow");///Set shape by degree in input field;
-	Butt->Tip->SafeChangePosition_Argumented(_Align::left, -150 + WindowHeapSize, -160 - WindowHeapSize);
-	(*T)["VM_DEGREE"] = new InputField("1", -140 + WindowHeapSize, -170 - WindowHeapSize, 10, 20, System_White, NULL, 0x007FFFFF, NULL, " ", 4, _Align::center, _Align::center, InputField::Type::FP_PositiveNumbers);
-	(*T)["VM_ERASE"] = Butt = new Button("Erase points", System_White, PropsAndSets::VolumeMap::OnErase, -35 + WindowHeapSize, -150 - WindowHeapSize, 60, 10, 1, 0xFFFFFF3F, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFAFFF3F, 0xFFAFFFFF, NULL, "_");
-	(*T)["VM_DELETE"] = new Button("Delete map", System_White, PropsAndSets::VolumeMap::OnDelete, 30 + WindowHeapSize, -150 - WindowHeapSize, 60, 10, 1, 0xFFAFAF3F, 0xFFAFAFFF, 0xFFEFEFFF, 0xFF7F3F7F, 0xFF1F1FFF, NULL, "_");
-	(*T)["VM_SIMP"] = Butt = new Button("Simplify map", System_White, PropsAndSets::VolumeMap::OnSimplify, -70 - WindowHeapSize, -170 - WindowHeapSize, 60, 10, 1, 0xFFFFFF3F, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFAFFF3F, 0xFFAFFFFF, System_White, "Reduces amount of \"repeating\" points");
-	Butt->Tip->SafeChangePosition_Argumented(_Align::left, -100 - WindowHeapSize, -160 - WindowHeapSize);
-	(*T)["VM_TRACE"] = Butt = new Button("Trace map", System_White, PropsAndSets::VolumeMap::OnTrace, -35 + WindowHeapSize, -170 - WindowHeapSize, 60, 10, 1, 0xFFFFFF3F, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFAFAF3F, 0xFFAFAFFF, System_White, "Puts every point onto map");
-	Butt->Tip->SafeChangePosition_Argumented(_Align::left, -65 + WindowHeapSize, -160 - WindowHeapSize);
-	(*T)["VM_SETMODE"] = Butt = new Button("Single", System_White, PropsAndSets::VolumeMap::OnSetModeChange, 30 + WindowHeapSize, -170 - WindowHeapSize, 40, 10, 1, 0xFFFFFF3F, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFAFAF3F, 0xFFAFAFFF, NULL, "_");
+	T = new MoveableFuiWindow("Volume map.", System_White, -150, 150, 300, 350, 200, 2.5f, 100, 100, 2.5f, BACKGROUND_OPQ, HEADER, BORDER);
+	(*T)["VM_PLC"] = new PLC_VolumeWorker(0, 0 - WindowHeaderSize, 300 - WindowHeaderSize * 2, 300 - WindowHeaderSize * 2, std::make_shared<PLC<std::uint8_t, std::uint8_t>>());///todo: interface
+	(*T)["VM_SSBDIIF"] = Butt = new Button("Shape alike x^y", System_White, PropsAndSets::VolumeMap::OnDegreeShape, -110 + WindowHeaderSize, -150 - WindowHeaderSize, 80, 10, 1, 0xFFFFFF3F, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFAFFF3F, 0xFFAFFFFF, System_White, "Where y is from frame bellow");///Set shape by degree in input field;
+	Butt->Tip->SafeChangePosition_Argumented(_Align::left, -150 + WindowHeaderSize, -160 - WindowHeaderSize);
+	(*T)["VM_DEGREE"] = new InputField("1", -140 + WindowHeaderSize, -170 - WindowHeaderSize, 10, 20, System_White, NULL, 0x007FFFFF, NULL, " ", 4, _Align::center, _Align::center, InputField::Type::FP_PositiveNumbers);
+	(*T)["VM_ERASE"] = Butt = new Button("Erase points", System_White, PropsAndSets::VolumeMap::OnErase, -35 + WindowHeaderSize, -150 - WindowHeaderSize, 60, 10, 1, 0xFFFFFF3F, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFAFFF3F, 0xFFAFFFFF, NULL, "_");
+	(*T)["VM_DELETE"] = new Button("Delete map", System_White, PropsAndSets::VolumeMap::OnDelete, 30 + WindowHeaderSize, -150 - WindowHeaderSize, 60, 10, 1, 0xFFAFAF3F, 0xFFAFAFFF, 0xFFEFEFFF, 0xFF7F3F7F, 0xFF1F1FFF, NULL, "_");
+	(*T)["VM_SIMP"] = Butt = new Button("Simplify map", System_White, PropsAndSets::VolumeMap::OnSimplify, -70 - WindowHeaderSize, -170 - WindowHeaderSize, 60, 10, 1, 0xFFFFFF3F, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFAFFF3F, 0xFFAFFFFF, System_White, "Reduces amount of \"repeating\" points");
+	Butt->Tip->SafeChangePosition_Argumented(_Align::left, -100 - WindowHeaderSize, -160 - WindowHeaderSize);
+	(*T)["VM_TRACE"] = Butt = new Button("Trace map", System_White, PropsAndSets::VolumeMap::OnTrace, -35 + WindowHeaderSize, -170 - WindowHeaderSize, 60, 10, 1, 0xFFFFFF3F, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFAFAF3F, 0xFFAFAFFF, System_White, "Puts every point onto map");
+	Butt->Tip->SafeChangePosition_Argumented(_Align::left, -65 + WindowHeaderSize, -160 - WindowHeaderSize);
+	(*T)["VM_SETMODE"] = Butt = new Button("Single", System_White, PropsAndSets::VolumeMap::OnSetModeChange, 30 + WindowHeaderSize, -170 - WindowHeaderSize, 40, 10, 1, 0xFFFFFF3F, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFAFAF3F, 0xFFAFAFFF, NULL, "_");
 
 	(*WH)["VM"] = T;
 
-	T = new MoveableWindow("App settings", System_White, -100, 110, 200, 240, 0x3F3F3FCF, 0x7F7F7F7F);
+	T = new MoveableFuiWindow("App settings", System_White, -100, 110, 200, 230, 125, 2.5f, 50, 50, 2.5f, BACKGROUND_OPQ, HEADER, BORDER);
 
-	(*T)["AS_BCKGID"] = new InputField(std::to_string(Settings::ShaderMode), -35, 55 - WindowHeapSize, 10, 30, System_White, NULL, 0x007FFFFF, System_White, "Background ID", 2, _Align::center, _Align::right, InputField::Type::NaturalNumbers);
+	(*T)["AS_BCKGID"] = new InputField(std::to_string(Settings::ShaderMode), -35, 55 - WindowHeaderSize, 10, 30, System_White, NULL, 0x007FFFFF, System_White, "Background ID", 2, _Align::center, _Align::right, InputField::Type::NaturalNumbers);
 
-	(*T)["AS_GLOBALSETTINGS"] = new TextBox("Global settings for new MIDIs", System_White, 0, 85 - WindowHeapSize, 50, 200, 12, 0x007FFF1F, 0x007FFF7F, 1, _Align::center);
-	(*T)["AS_APPLY"] = Butt = new Button("Apply", System_White, Settings::OnSetApply, 85 - WindowHeapSize, -87.5 - WindowHeapSize, 40, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, NULL, "_");
-	(*T)["AS_EN_FONT"] = Butt = new Button((is_fonted) ? "Disable fonts" : "Enable fonts", System_White, Settings::ChangeIsFontedVar, 72.5 - WindowHeapSize, -67.5 - WindowHeapSize, 65, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, System_White, " ");
-	(*T)["AS_ROT_ANGLE"] = new InputField(std::to_string(dumb_rotation_angle), -87.5 + WindowHeapSize, 55 - WindowHeapSize, 10, 30, System_White, NULL, 0x007FFFFF, System_White, "Rotation angle", 6, _Align::center, _Align::left, InputField::Type::FP_Any);
+	(*T)["AS_GLOBALSETTINGS"] = new TextBox("Global settings for new MIDIs", System_White, 0, 85 - WindowHeaderSize, 50, 200, 12, 0x007FFF1F, 0x007FFF7F, 1, _Align::center);
+	(*T)["AS_APPLY"] = Butt = new Button("Apply", System_White, Settings::OnSetApply, 85 - WindowHeaderSize, -87.5 - WindowHeaderSize, 40, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, NULL, "_");
+	(*T)["AS_EN_FONT"] = Butt = new Button((is_fonted) ? "Disable fonts" : "Enable fonts", System_White, Settings::ChangeIsFontedVar, 72.5 - WindowHeaderSize, -67.5 - WindowHeaderSize, 65, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, System_White, " ");
+
+	auto AngleInput = new InputField(std::to_string(dumb_rotation_angle), -87.5 + WindowHeaderSize, 55 - WindowHeaderSize, 10, 30, System_White, NULL, 0x007FFFFF, System_White, "Rotation angle", 6, _Align::center, _Align::left, InputField::Type::FP_Any);
+	AngleInput->Disable(); // hide // legacy
+	(*T)["AS_ROT_ANGLE"] = AngleInput;
 	(*T)["AS_FONT_SIZE"] = new WheelVariableChanger(Settings::ApplyFSWheel, -37.5, -82.5, lFontSymbolsInfo::Size, 1, System_White, "Font size", "Delta", WheelVariableChanger::Type::addictable);
 	(*T)["AS_FONT_P"] = new WheelVariableChanger(Settings::ApplyRelWheel, -37.5, -22.5, lFONT_HEIGHT_TO_WIDTH, 0.01, System_White, "Font rel.", "Delta", WheelVariableChanger::Type::addictable);
-	(*T)["AS_FONT_NAME"] = new InputField(default_font_name, 52.5 - WindowHeapSize, 55 - WindowHeapSize, 10, 100, _STLS_WhiteSmall, &default_font_name, 0x007FFFFF, System_White, "Font name", 32, _Align::center, _Align::left, InputField::Type::Text);
+	(*T)["AS_FONT_NAME"] = new InputField(default_font_name, 52.5 - WindowHeaderSize, 55 - WindowHeaderSize, 10, 100, _STLS_WhiteSmall, &default_font_name, 0x007FFFFF, System_White, "Font name", 32, _Align::center, _Align::left, InputField::Type::Text);
 
-	(*T)["BOOL_REM_TRCKS"] = new CheckBox(-97.5 + WindowHeapSize, 95 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, System_White, _Align::left, "Remove empty tracks");
-	(*T)["BOOL_REM_REM"] = new CheckBox(-82.5 + WindowHeapSize, 95 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, System_White, _Align::left, "Remove merge \"remnants\"");
-	(*T)["BOOL_PIANO_ONLY"] = new CheckBox(-67.5 + WindowHeapSize, 95 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, System_White, _Align::left, "All instuments to piano");
-	(*T)["BOOL_IGN_TEMPO"] = new CheckBox(-52.5 + WindowHeapSize, 95 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::left, "Ignore tempo events");
-	(*T)["BOOL_IGN_PITCH"] = new CheckBox(-37.5 + WindowHeapSize, 95 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::center, "Ignore pitch bending events");
-	(*T)["BOOL_IGN_NOTES"] = new CheckBox(-22.5 + WindowHeapSize, 95 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::center, "Ignore note events");
-	(*T)["BOOL_IGN_ALL_EX_TPS"] = new CheckBox(-7.5 + WindowHeapSize, 95 - WindowHeapSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::center, "Ignore everything except specified");
-	(*T)["SPLIT_TRACKS"] = new CheckBox(7.5 + WindowHeapSize, 95 - WindowHeapSize, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, 0, System_White, _Align::center, "Multichannel split");
-	(*T)["RSB_COMPRESS"] = new CheckBox(22.5 + WindowHeapSize, 95 - WindowHeapSize, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, 0, System_White, _Align::center, "Enable RSB compression");	
+	(*T)["BOOL_REM_TRCKS"] = new CheckBox(-97.5 + WindowHeaderSize, 95 - WindowHeaderSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, System_White, _Align::left, "Remove empty tracks");
+	(*T)["BOOL_REM_REM"] = new CheckBox(-82.5 + WindowHeaderSize, 95 - WindowHeaderSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, System_White, _Align::left, "Remove merge \"remnants\"");
+	(*T)["BOOL_PIANO_ONLY"] = new CheckBox(-67.5 + WindowHeaderSize, 95 - WindowHeaderSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, System_White, _Align::left, "All instuments to piano");
+	(*T)["BOOL_IGN_TEMPO"] = new CheckBox(-52.5 + WindowHeaderSize, 95 - WindowHeaderSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::left, "Ignore tempo events");
+	(*T)["BOOL_IGN_PITCH"] = new CheckBox(-37.5 + WindowHeaderSize, 95 - WindowHeaderSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::center, "Ignore pitch bending events");
+	(*T)["BOOL_IGN_NOTES"] = new CheckBox(-22.5 + WindowHeaderSize, 95 - WindowHeaderSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::center, "Ignore note events");
+	(*T)["BOOL_IGN_ALL_EX_TPS"] = new CheckBox(-7.5 + WindowHeaderSize, 95 - WindowHeaderSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::center, "Ignore everything except specified");
+	(*T)["SPLIT_TRACKS"] = new CheckBox(7.5 + WindowHeaderSize, 95 - WindowHeaderSize, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, 0, System_White, _Align::center, "Multichannel split");
+	(*T)["RSB_COMPRESS"] = new CheckBox(22.5 + WindowHeaderSize, 95 - WindowHeaderSize, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, 0, System_White, _Align::center, "Enable RSB compression");	
 
-	(*T)["ALLOW_SYSEX"] = new CheckBox(-97.5 + WindowHeapSize, 75 - WindowHeapSize, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, 0, System_White, _Align::left, "Allow sysex events");
+	(*T)["ALLOW_SYSEX"] = new CheckBox(-97.5 + WindowHeaderSize, 75 - WindowHeaderSize, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, 0, System_White, _Align::left, "Allow sysex events");
 
-	(*T)["BOOL_APPLY_TO_ALL_MIDIS"] = Butt = new Button("A2A", System_White, Settings::ApplyToAll, 80 - WindowHeapSize, 95 - WindowHeapSize, 15, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, System_White, "The same as A2A in MIDI's props.");
-	Butt->Tip->SafeChangePosition_Argumented(_Align::right, 87.5 - WindowHeapSize, Butt->Tip->CYpos);
+	(*T)["BOOL_APPLY_TO_ALL_MIDIS"] = Butt = new Button("A2A", System_White, Settings::ApplyToAll, 80 - WindowHeaderSize, 95 - WindowHeaderSize, 15, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, System_White, "The same as A2A in MIDI's props.");
+	Butt->Tip->SafeChangePosition_Argumented(_Align::right, 87.5 - WindowHeaderSize, Butt->Tip->CYpos);
 
-	(*T)["INPLACE_MERGE"] = new CheckBox(97.5 - WindowHeapSize, 95 - WindowHeapSize, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, 0, System_White, _Align::right, "Enable/disable inplace merge");
+	(*T)["INPLACE_MERGE"] = new CheckBox(97.5 - WindowHeaderSize, 95 - WindowHeaderSize, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, 0, System_White, _Align::right, "Enable/disable inplace merge");
 
-	(*T)["COLLAPSE_MIDI"] = new CheckBox(72.5 - WindowHeapSize, 75 - WindowHeapSize, 10, 0x007FFFFF, 0xFF7F00AF, 0x7FFF00AF, 1, 0, System_White, _Align::right, "Collapse tracks of a MIDI into one");
-	(*T)["APPLY_OFFSET_AFTER"] = new CheckBox(57.5 - WindowHeapSize, 75 - WindowHeapSize, 10, 0x007FFFFF, 0xFF7F00AF, 0x7FFF00AF, 1, 0, System_White, _Align::right, "Apply offset after PPQ change");
+	(*T)["COLLAPSE_MIDI"] = new CheckBox(72.5 - WindowHeaderSize, 75 - WindowHeaderSize, 10, 0x007FFFFF, 0xFF7F00AF, 0x7FFF00AF, 1, 0, System_White, _Align::right, "Collapse tracks of a MIDI into one");
+	(*T)["APPLY_OFFSET_AFTER"] = new CheckBox(57.5 - WindowHeaderSize, 75 - WindowHeaderSize, 10, 0x007FFFFF, 0xFF7F00AF, 0x7FFF00AF, 1, 0, System_White, _Align::right, "Apply offset after PPQ change");
 
-	(*T)["AS_THREADS_COUNT"] = new InputField(std::to_string(_Data.DetectedThreads), 92.5 - WindowHeapSize, 75 - WindowHeapSize, 10, 20, System_White, NULL, 0x007FFFFF, System_White, "Threads count", 2, _Align::center, _Align::right, InputField::Type::NaturalNumbers);
+	(*T)["AS_THREADS_COUNT"] = new InputField(std::to_string(_Data.DetectedThreads), 92.5 - WindowHeaderSize, 75 - WindowHeaderSize, 10, 20, System_White, NULL, 0x007FFFFF, System_White, "Threads count", 2, _Align::center, _Align::right, InputField::Type::NaturalNumbers);
 
-	(*T)["AUTOUPDATECHECK"] = new CheckBox(-97.5 + WindowHeapSize, 35 - WindowHeapSize, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, check_autoupdates, System_White, _Align::left, "Check for updates automatically"); 
-
+	(*T)["AUTOUPDATECHECK"] = new CheckBox(-97.5 + WindowHeaderSize, 35 - WindowHeaderSize, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, check_autoupdates, System_White, _Align::left, "Check for updates automatically"); 
 
 	(*WH)["APP_SETTINGS"] = T;
 
@@ -2133,31 +2202,31 @@ void Init()
 
 	(*WH)["SMRP_CONTAINER"] = T;
 
-	T = new MoveableWindow("MIDI Info Collector", System_White, -150, 200, 300, 400, 0x3F3F3FCF, 0x7F7F7F7F);
-	(*T)["FLL"] = new TextBox("--File log line--", System_White, 0, -WindowHeapSize + 185, 15, 285, 10, 0, 0, 0, _Align::left);
-	(*T)["FEL"] = new TextBox("--File error line--", System_Red, 0, -WindowHeapSize + 175, 15, 285, 10, 0, 0, 0, _Align::left);
+	T = new MoveableFuiWindow("MIDI Info Collector", System_White, -150, 200, 300, 400, 200, 1.25f, 100, 100, 5, BACKGROUND_OPQ, HEADER, BORDER);
+	(*T)["FLL"] = new TextBox("--File log line--", System_White, 0, -WindowHeaderSize + 185, 15, 285, 10, 0, 0, 0, _Align::left);
+	(*T)["FEL"] = new TextBox("--File error line--", System_Red, 0, -WindowHeaderSize + 175, 15, 285, 10, 0, 0, 0, _Align::left);
 	(*T)["TEMPO_GRAPH"] = new Graphing<SingleMIDIInfoCollector::tempo_graph>(
-		0, -WindowHeapSize + 145, 285, 50, (1. / 20000.), true, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F00FF, 0xFFFFFFFF, 0x7F7F7F7F, nullptr, System_White, false
+		0, -WindowHeaderSize + 145, 285, 50, (1. / 20000.), true, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F00FF, 0xFFFFFFFF, 0x7F7F7F7F, nullptr, System_White, false
 		);
 	(*T)["POLY_GRAPH"] = new Graphing<SingleMIDIInfoCollector::polyphony_graph>(
-		0, -WindowHeapSize + 95, 285, 50, (1. / 20000.), true, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F00FF, 0xFFFFFFFF, 0x7F7F7F7F, nullptr, System_White, false
+		0, -WindowHeaderSize + 95, 285, 50, (1. / 20000.), true, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F00FF, 0xFFFFFFFF, 0x7F7F7F7F, nullptr, System_White, false
 		);
-	(*T)["PG_SWITCH"] = new Button("Enable graph B", System_White, PropsAndSets::SMIC::EnablePG, 37.5, 60 - WindowHeapSize, 70, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, System_White, "Polyphony graph");
-	(*T)["TG_SWITCH"] = new Button("Enable graph A", System_White, PropsAndSets::SMIC::EnableTG, -37.5, 60 - WindowHeapSize, 70, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, System_White, "Tempo graph");
-	(*T)["ALL_EXP"] = new Button("Export all", System_White, PropsAndSets::SMIC::ExportAll, 110, 60 - WindowHeapSize, 65, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr);
-	(*T)["TG_EXP"] = new Button("Export Tempo", System_White, PropsAndSets::SMIC::ExportTG, -110, 60 - WindowHeapSize, 65, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr);
-	(*T)["TG_RESET"] = new Button("Reset graph A", System_White, PropsAndSets::SMIC::ResetTG, 45, 40 - WindowHeapSize, 65, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr);
-	(*T)["PG_RESET"] = new Button("Reset graph B", System_White, PropsAndSets::SMIC::ResetPG, 45, 20 - WindowHeapSize, 65, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr);
-	(*T)["PERSONALUSE"] = Butt = new Button(".csv", System_White, PropsAndSets::SMIC::SwitchPersonalUse, 105, 40 - WindowHeapSize, 45, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, System_White, "Switches output format for `export all`");
+	(*T)["PG_SWITCH"] = new Button("Enable graph B", System_White, PropsAndSets::SMIC::EnablePG, 37.5, 60 - WindowHeaderSize, 70, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, System_White, "Polyphony graph");
+	(*T)["TG_SWITCH"] = new Button("Enable graph A", System_White, PropsAndSets::SMIC::EnableTG, -37.5, 60 - WindowHeaderSize, 70, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, System_White, "Tempo graph");
+	(*T)["ALL_EXP"] = new Button("Export all", System_White, PropsAndSets::SMIC::ExportAll, 110, 60 - WindowHeaderSize, 65, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr);
+	(*T)["TG_EXP"] = new Button("Export Tempo", System_White, PropsAndSets::SMIC::ExportTG, -110, 60 - WindowHeaderSize, 65, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr);
+	(*T)["TG_RESET"] = new Button("Reset graph A", System_White, PropsAndSets::SMIC::ResetTG, 45, 40 - WindowHeaderSize, 65, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr);
+	(*T)["PG_RESET"] = new Button("Reset graph B", System_White, PropsAndSets::SMIC::ResetPG, 45, 20 - WindowHeaderSize, 65, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr);
+	(*T)["PERSONALUSE"] = Butt = new Button(".csv", System_White, PropsAndSets::SMIC::SwitchPersonalUse, 105, 40 - WindowHeaderSize, 45, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, System_White, "Switches output format for `export all`");
 	Butt->Tip->SafeChangePosition_Argumented(_Align::right, Butt->Xpos + Butt->Width * 0.5, Butt->Tip->CYpos);
 	(*T)["TOTAL_INFO"] = new TextBox("----", System_White, 0, -150, 35, 285, 10, 0, 0, 0, _Align::left);
-	(*T)["INT_MIN"] = new InputField("0", -132.5, 40 - WindowHeapSize, 10, 20, System_White, NULL, 0x007FFFFF, System_White, "Minutes", 3, _Align::center, _Align::left, InputField::Type::NaturalNumbers);
-	(*T)["INT_SEC"] = new InputField("0", -107.5, 40 - WindowHeapSize, 10, 20, System_White, NULL, 0x007FFFFF, System_White, "Seconds", 2, _Align::center, _Align::left, InputField::Type::NaturalNumbers);
-	(*T)["INT_MSC"] = new InputField("000", -80, 40 - WindowHeapSize, 10, 25, System_White, NULL, 0x007FFFFF, System_White, "Milliseconds", 3, _Align::center, _Align::left, InputField::Type::NaturalNumbers);
-	(*T)["INTEGRATE_TICKS"] = new Button("Integrate ticks", System_White, PropsAndSets::SMIC::IntegrateTime, -27.5, 40 - WindowHeapSize, 70, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, System_White, "Result is the closest tick to that time.");
-	(*T)["INT_TIC"] = new InputField("0", -105, 20 - WindowHeapSize, 10, 75, System_White, NULL, 0x007FFFFF, System_White, "Ticks", 17, _Align::center, _Align::left, InputField::Type::NaturalNumbers);
-	(*T)["INTEGRATE_TIME"] = new Button("Integrate time", System_White, PropsAndSets::SMIC::DiffirentiateTicks, -27.5, 20 - WindowHeapSize, 70, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, System_White, "Result is the time of that tick.");
-	(*T)["DELIM"] = new InputField(";", 137.5, 40 - WindowHeapSize, 10, 7.5, System_White, &(PropsAndSets::CSV_DELIM), 0x007FFFFF, System_White, "Delimiter", 1, _Align::center, _Align::right, InputField::Type::Text);
+	(*T)["INT_MIN"] = new InputField("0", -132.5, 40 - WindowHeaderSize, 10, 20, System_White, NULL, 0x007FFFFF, System_White, "Minutes", 3, _Align::center, _Align::left, InputField::Type::NaturalNumbers);
+	(*T)["INT_SEC"] = new InputField("0", -107.5, 40 - WindowHeaderSize, 10, 20, System_White, NULL, 0x007FFFFF, System_White, "Seconds", 2, _Align::center, _Align::left, InputField::Type::NaturalNumbers);
+	(*T)["INT_MSC"] = new InputField("000", -80, 40 - WindowHeaderSize, 10, 25, System_White, NULL, 0x007FFFFF, System_White, "Milliseconds", 3, _Align::center, _Align::left, InputField::Type::NaturalNumbers);
+	(*T)["INTEGRATE_TICKS"] = new Button("Integrate ticks", System_White, PropsAndSets::SMIC::IntegrateTime, -27.5, 40 - WindowHeaderSize, 70, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, System_White, "Result is the closest tick to that time.");
+	(*T)["INT_TIC"] = new InputField("0", -105, 20 - WindowHeaderSize, 10, 75, System_White, NULL, 0x007FFFFF, System_White, "Ticks", 17, _Align::center, _Align::left, InputField::Type::NaturalNumbers);
+	(*T)["INTEGRATE_TIME"] = new Button("Integrate time", System_White, PropsAndSets::SMIC::DiffirentiateTicks, -27.5, 20 - WindowHeaderSize, 70, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, System_White, "Result is the time of that tick.");
+	(*T)["DELIM"] = new InputField(";", 137.5, 40 - WindowHeaderSize, 10, 7.5, System_White, &(PropsAndSets::CSV_DELIM), 0x007FFFFF, System_White, "Delimiter", 1, _Align::center, _Align::right, InputField::Type::Text);
 	(*T)["ANSWER"] = new TextBox("----", System_White, -66.25, -30, 25, 152.5, 10, 0, 0, 0, _Align::center, TextBox::VerticalOverflow::recalibrate);
 
 	(*WH)["SMIC"] = T;
@@ -2176,8 +2245,14 @@ void Init()
 
 	(*WH)["COMPILEW"] = T;
 
+	auto FuiWindow = new MoveableFuiWindow("TEST", System_White, -150, 100, 300, 200, 150, 2.5f, 50, 50, 5, 0x070E16CF, 0x285685CF, 0xFFFFFF7F);
+	T = FuiWindow;
+
+	(*WH)["V1WT"] = T;
+
 	WH->EnableWindow("MAIN");
-	//WH->EnableWindow("COMPILEW");
+	//WH->EnableWindow("V1WT");
+	//WH->EnableWindow("COMPILEW"); // todo: someday fix the damn editbox...
 	//WH->EnableWindow("SMIC");
 	//WH->EnableWindow("OR");
 	//WH->EnableWindow("SMRP_CONTAINER");
@@ -2186,9 +2261,11 @@ void Init()
 	//WH->EnableWindow("CAT");
 	//WH->EnableWindow("SMPAS");//Debug line
 	//WH->EnableWindow("PROMPT");////DEBUUUUG
+	//WH->EnableWindow("OTHER_SETS");
 
 	DragAcceptFiles(hWnd, TRUE);
 	OleInitialize(NULL);
+
 	std::cout << "Registering Drag&Drop: " << (RegisterDragDrop(hWnd, &DNDH_Global)) << std::endl;
 
 	SAFC_VersionCheck();
@@ -2252,7 +2329,7 @@ void mDisplay()
 		glVertex2f(internal_range * (WindX / window_base_width), 0 - internal_range * (WindY / window_base_height));
 		glEnd();
 	}
-	else if (Settings::ShaderMode < 4)
+	else if (MONTH_BEGINING || Settings::ShaderMode == 42)
 	{
 		glBegin(GL_QUADS);
 		glColor4f(1, 0.5f, 0, (DRAG_OVER) ? 0.25f : 1);
@@ -2263,29 +2340,41 @@ void mDisplay()
 		glVertex2f(internal_range * (WindX / window_base_width), 0 - internal_range * (WindY / window_base_height));
 		glEnd();
 	}
+	else if (Settings::ShaderMode < 4)
+	{
+		glBegin(GL_QUADS);
+		glColor4f(0.05f, 0.05f, 0.10f, (DRAG_OVER) ? 0.25f : 1);
+		glVertex2f(0 - internal_range * (WindX / window_base_width), 0 - internal_range * (WindY / window_base_height));
+		glVertex2f(0 - internal_range * (WindX / window_base_width), internal_range * (WindY / window_base_height));
+		glColor4f(0.05f, 0.1f, 0.25f, (DRAG_OVER) ? 0.25f : 1);
+		glVertex2f(internal_range * (WindX / window_base_width), internal_range * (WindY / window_base_height));
+		glVertex2f(internal_range * (WindX / window_base_width), 0 - internal_range * (WindY / window_base_height));
+		glEnd();
+	}
 	else
 	{
 		glBegin(GL_QUADS);
-		glColor4f(0.25f, 0.25f, 0.25f, (DRAG_OVER) ? 0.25f : 1);
+		glColor4f(0.00f, 0.2f, 0.4f, (DRAG_OVER) ? 0.25f : 1);
 		glVertex2f(0 - internal_range * (WindX / window_base_width), 0 - internal_range * (WindY / window_base_height));
 		glVertex2f(0 - internal_range * (WindX / window_base_width), internal_range * (WindY / window_base_height));
 		glVertex2f(internal_range * (WindX / window_base_width), internal_range * (WindY / window_base_height));
 		glVertex2f(internal_range * (WindX / window_base_width), 0 - internal_range * (WindY / window_base_height));
 		glEnd();
 	}
-	//ROT_ANGLE += 0.02;
 
 	glRotatef(dumb_rotation_angle, 0, 0, 1);
 	if (WH)
 		WH->Draw();
-	if (DRAG_OVER)SpecialSigns::DrawFileSign(0, 0, 50, 0xFFFFFFFF, 0);
+	if (DRAG_OVER)
+		SpecialSigns::DrawFileSign(0, 0, 50, 0xFFFFFFFF, 0);
 	glRotatef(-dumb_rotation_angle, 0, 0, 1);
 
 	glutSwapBuffers();
+	++TimerV;
 }
 
-void mInit(
-) {
+void mInit()
+{
 	glMatrixMode(GL_PROJECTION);
 	glLoadIdentity();
 	gluOrtho2D((0 - internal_range) * (WindX / window_base_width), internal_range * (WindX / window_base_width), (0 - internal_range) * (WindY / window_base_height), internal_range * (WindY / window_base_height));
@@ -2311,7 +2400,7 @@ void OnResize(int x, int y)
 	{
 		auto SMRP = (*WH)["SMRP_CONTAINER"];
 		SMRP->SafeChangePosition_Argumented(0, 0, 0);
-		SMRP->_NotSafeResize_Centered(internal_range * 3 * (WindY / window_base_height) + 2 * WindowHeapSize, internal_range * 3 * (WindX / window_base_width));
+		SMRP->_NotSafeResize_Centered(internal_range * 3 * (WindY / window_base_height) + 2 * WindowHeaderSize, internal_range * 3 * (WindX / window_base_width));
 	}
 }
 void inline rotate(float& x, float& y)
@@ -2601,7 +2690,7 @@ struct SafcCliRuntime:
 		{
 			auto& object = singleEntry->AsObject();
 			auto& filename = object.at(L"filename")->AsString();
-			filenames.push_back(std::move(filename));
+			filenames.push_back(filename);
 		}
 
 		AddFiles(filenames);
@@ -2677,7 +2766,7 @@ struct SafcCliRuntime:
 
 			auto ignore_meta_rsb = object.find(L"ignore_meta_rsb");
 			if (ignore_meta_rsb != object.end())
-				_Data.Files[index].AllowLegacyRunningStatusMetaIgnorance = ignore_meta_rsb->second->AsBool();
+				_Data.Files[index].AllowLegacyRunningStatusMetaBehaviour = ignore_meta_rsb->second->AsBool();
 
 			auto inplace_mergable = object.find(L"inplace_mergable");
 			if (inplace_mergable != object.end())

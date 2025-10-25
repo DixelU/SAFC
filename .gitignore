@@ -350,3 +350,6 @@ MigrationBackup/
 
 # SAFC archives
 SAFC*.7z
+
+cmake-build-*
+.idea/

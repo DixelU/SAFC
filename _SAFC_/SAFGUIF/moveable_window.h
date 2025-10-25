@@ -7,7 +7,7 @@
 #include "handleable_ui_part.h"
 #include "single_text_line_settings.h"
 
-constexpr int WindowHeapSize = 15;
+constexpr int WindowHeaderSize = 15;
 struct MoveableWindow : HandleableUIPart
 {
 	float XWindowPos, YWindowPos;//leftup corner coordinates
@@ -34,7 +34,7 @@ struct MoveableWindow : HandleableUIPart
 		{
 			WindowNameSettings->SetNewPos(XPos, YPos);
 			this->WindowName = WindowNameSettings->CreateOne(WindowName);
-			this->WindowName->SafeMove(this->WindowName->CalculatedWidth * 0.5 + WindowHeapSize * 0.5f, 0 - WindowHeapSize * 0.5f);
+			this->WindowName->SafeMove(this->WindowName->CalculatedWidth * 0.5 + WindowHeaderSize * 0.5f, 0 - WindowHeaderSize * 0.5f);
 		}
 		else
 			this->WindowName = nullptr;
@@ -42,7 +42,7 @@ struct MoveableWindow : HandleableUIPart
 		this->XWindowPos = XPos;
 		this->YWindowPos = YPos;
 		this->Width = Width;
-		this->Height = (Height < WindowHeapSize) ? WindowHeapSize : Height;
+		this->Height = (Height < WindowHeaderSize) ? WindowHeaderSize : Height;
 		this->RGBABackground = RGBABackground;
 		this->RGBAThemeColor = RGBAThemeColor;
 		this->RGBAGradBackground = RGBAGradBackground;
@@ -55,9 +55,11 @@ struct MoveableWindow : HandleableUIPart
 	void KeyboardHandler(char CH)
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
-		for (auto i = WindowActivities.begin(); i != WindowActivities.end(); i++) {
+		for (auto i = WindowActivities.begin(); i != WindowActivities.end(); i++)
+		{
 			i->second->KeyboardHandler(CH);
-			if (HUIP_MapWasChanged) {
+			if (HUIP_MapWasChanged)
+			{
 				HUIP_MapWasChanged = false;
 				break;
 			}
@@ -69,7 +71,7 @@ struct MoveableWindow : HandleableUIPart
 		if (!Drawable) 
 			return 0;
 		HoveredCloseButton = 0;
-		if (mx > XWindowPos + Width - WindowHeapSize && mx < XWindowPos + Width && my < YWindowPos && my > YWindowPos - WindowHeapSize)
+		if (mx > XWindowPos + Width - WindowHeaderSize && mx < XWindowPos + Width && my < YWindowPos && my > YWindowPos - WindowHeaderSize)
 		{///close button
 			if (Button && State == 1)
 			{
@@ -82,7 +84,7 @@ struct MoveableWindow : HandleableUIPart
 				HoveredCloseButton = 1;
 			}
 		}
-		else if (mx - XWindowPos < Width && mx - XWindowPos>0 && my<YWindowPos && my>YWindowPos - WindowHeapSize)
+		else if (mx - XWindowPos < Width && mx - XWindowPos>0 && my<YWindowPos && my>YWindowPos - WindowHeaderSize)
 		{
 			if (Button == -1)
 			{///window header
@@ -203,13 +205,13 @@ struct MoveableWindow : HandleableUIPart
 		glBegin(GL_QUADS);
 		glVertex2f(XWindowPos, YWindowPos);
 		glVertex2f(XWindowPos + Width, YWindowPos);
-		glVertex2f(XWindowPos + Width, YWindowPos - WindowHeapSize);
-		glVertex2f(XWindowPos, YWindowPos - WindowHeapSize);
+		glVertex2f(XWindowPos + Width, YWindowPos - WindowHeaderSize);
+		glVertex2f(XWindowPos, YWindowPos - WindowHeaderSize);
 		glColor4ub(255, 32 + 32 * HoveredCloseButton, 32 + 32 * HoveredCloseButton, 255);
 		glVertex2f(XWindowPos + Width, YWindowPos);
-		glVertex2f(XWindowPos + Width, YWindowPos + 1 - WindowHeapSize);
-		glVertex2f(XWindowPos + Width - WindowHeapSize, YWindowPos + 1 - WindowHeapSize);
-		glVertex2f(XWindowPos + Width - WindowHeapSize, YWindowPos);
+		glVertex2f(XWindowPos + Width, YWindowPos + 1 - WindowHeaderSize);
+		glVertex2f(XWindowPos + Width - WindowHeaderSize, YWindowPos + 1 - WindowHeaderSize);
+		glVertex2f(XWindowPos + Width - WindowHeaderSize, YWindowPos);
 		glEnd();
 
 		if (WindowName)
@@ -240,13 +242,17 @@ struct MoveableWindow : HandleableUIPart
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		SafeWindowRename(NewWindowTitle);
 	}
-	void SafeWindowRename(const std::string& NewWindowTitle)
+	void SafeWindowRename(const std::string& NewWindowTitle, bool ForceNoShift = false)
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
-		if (WindowName) {
-			WindowName->SafeStringReplace(NewWindowTitle);
-			WindowName->SafeChangePosition_Argumented(GLOBAL_LEFT, XWindowPos + WindowHeapSize * 0.5f, WindowName->CYpos);
-		}
+		if (!WindowName)
+			return;
+		
+		WindowName->SafeStringReplace(NewWindowTitle);	
+		if (ForceNoShift)
+			return;
+
+		WindowName->SafeChangePosition_Argumented(GLOBAL_LEFT, XWindowPos + WindowHeaderSize * 0.5f, WindowName->CYpos);
 	}
 	HandleableUIPart*& operator[](const std::string& ID)
 	{
