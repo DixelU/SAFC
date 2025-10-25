@@ -90,6 +90,7 @@ OnDestroyExecutor<OnDestroyFunctor> makeOnDestroyExecutor(OnDestroyFunctor&& fun
 
 void ThrowAlert_Error(std::string&& AlertText);
 void ThrowAlert_Warning(std::string&& AlertText);
+void ThrowAlert_Info(std::string&& AlertText);
 void AddFiles(const std::vector<std_unicode_string>& Filenames);
 #pragma warning(disable : 4996)
 

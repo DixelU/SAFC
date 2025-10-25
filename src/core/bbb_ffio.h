@@ -44,11 +44,11 @@ inline size_t fread_wrap(void* ptr, size_t size, size_t count, FILE* file)
 #if !defined(__MINGW32__)
 
 template<typename __inner_stream_type, decltype(std::ios_base::out) stream_io_type = std::ios_base::out>
-std::pair<__inner_stream_type*, FILE*> open_wide_stream(
+inline std::pair<__inner_stream_type*, FILE*> open_wide_stream(
 	std_unicode_string filename, const cchar_t* parameter);
 
 template<>
-std::pair<std::ostream*, FILE*> open_wide_stream<std::ostream, std::ios_base::out>(
+inline std::pair<std::ostream*, FILE*> open_wide_stream<std::ostream, std::ios_base::out>(
 	std_unicode_string filename, const cchar_t* parameter)
 {
 	std::ostream* ostream = new std::ofstream(filename, std::ios_base::out | std::ios_base::binary);
@@ -56,7 +56,7 @@ std::pair<std::ostream*, FILE*> open_wide_stream<std::ostream, std::ios_base::ou
 }
 
 template<>
-std::pair<std::istream*, FILE*> open_wide_stream<std::istream, std::ios_base::in>(
+inline std::pair<std::istream*, FILE*> open_wide_stream<std::istream, std::ios_base::in>(
 	std_unicode_string filename, const cchar_t* parameter)
 {
 	std::istream* istream = new std::ifstream(filename, std::ios_base::in | std::ios_base::binary);
@@ -68,7 +68,7 @@ std::pair<std::istream*, FILE*> open_wide_stream<std::istream, std::ios_base::in
 #if defined(__MINGW32__)
 
 template<typename __inner_stream_type, decltype(std::ios_base::out) stream_io_type = std::ios_base::out>
-std::pair<__inner_stream_type*, FILE*> open_wide_stream(
+inline std::pair<__inner_stream_type*, FILE*> open_wide_stream(
 	std::string file, const cchar_t* parameter)
 {
 	FILE* c_file;

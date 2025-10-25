@@ -103,6 +103,7 @@ struct single_midi_info_collector
 	bool allow_legacy_meta_running_status_behaviour;
 	//Locker<btree::btree_map<std::uint64_t, std::uint64_t>> Polyphony;
 	//Locker<btree::btree_map<>>
+
 	single_midi_info_collector(std_unicode_string filename, std::uint16_t ppq, bool allow_legacy_meta_running_status_behaviour = false) :
 		FileName(filename),
 		log_line(" "),

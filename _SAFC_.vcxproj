@@ -297,14 +297,13 @@
     <ClInclude Include="src\core\FMC.h" />
     <ClInclude Include="src\core\function_wrapper.h" />
     <ClInclude Include="src\core\header_utils.h" />
-    <ClInclude Include="src\core\HTDBR.h" />
     <ClInclude Include="src\core\MCTM.h" />
     <ClInclude Include="src\core\midi_file_meta.h" />
     <ClInclude Include="src\core\PLC.h" />
     <ClInclude Include="src\core\SAFC_IM.h" />
     <ClInclude Include="src\core\SMIC.h" />
-    <ClInclude Include="src\core\SMRP.h" />
     <ClInclude Include="src\core\SMRP2.h" />
+    <ClInclude Include="src\globals.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="externals\**\*.cpp">
@@ -313,6 +312,8 @@
     <ClCompile Include="externals\**\*.c">
       <Filter>External Sources</Filter>
     </ClCompile>
+    <ClCompile Include="src\core\CAT.cpp" />
+    <ClCompile Include="src\core\FMC.cpp" />
     <ClCompile Include="src\core\mocs.cpp" />
     <ClCompile Include="src\core\midi_file_meta.cpp" />
     <ClCompile Include="src\main.cpp" />

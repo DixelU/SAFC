@@ -180,16 +180,16 @@ struct midi_collection_threaded_merger
 	~midi_collection_threaded_merger() = default;
 	midi_collection_threaded_merger(
 		std::vector<proc_data_ptr> processing_data, 
-		std::uint16_t FinalPPQN, 
-		std_unicode_string SaveTo,
+		std::uint16_t final_ppq, 
+		std_unicode_string save_to,
 		bool is_console_oriented)
 	{
 		for (auto& single_midi_data : processing_data)
 			this->processing_data.emplace_back( single_midi_data , std::make_shared<message_buffer_ptr::element_type>(is_console_oriented) );
-		this->save_to = std::move(SaveTo);
+		this->save_to = std::move(save_to);
 		this->first_stage_complete = false;
 		this->remnants_remove = true;
-		this->final_ppqn = FinalPPQN;
+		this->final_ppqn = final_ppq;
 		this->intermediate_regular_flag = this->intermediate_inplace_flag = this->complete_flag = this->ir_track_count = this->ii_track_count = 0;
 	}
 

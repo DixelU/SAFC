@@ -18,6 +18,12 @@
     <ClCompile Include="src\core\mocs.cpp">
       <Filter>core</Filter>
     </ClCompile>
+    <ClCompile Include="externals\**\*.cpp" />
+    <ClCompile Include="externals\**\*.c" />
+    <ClCompile Include="src\core\FMC.cpp">
+      <Filter>core</Filter>
+    </ClCompile>
+    <ClCompile Include="src\core\CAT.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="resource\safc.rc" />
@@ -49,9 +55,6 @@
     <ClInclude Include="src\core\header_utils.h">
       <Filter>core</Filter>
     </ClInclude>
-    <ClInclude Include="src\core\HTDBR.h">
-      <Filter>core</Filter>
-    </ClInclude>
     <ClInclude Include="src\core\MCTM.h">
       <Filter>core</Filter>
     </ClInclude>
@@ -59,9 +62,6 @@
       <Filter>core</Filter>
     </ClInclude>
     <ClInclude Include="src\core\SMIC.h">
-      <Filter>core</Filter>
-    </ClInclude>
-    <ClInclude Include="src\core\SMRP.h">
       <Filter>core</Filter>
     </ClInclude>
     <ClInclude Include="src\core\SMRP2.h">
@@ -74,6 +74,7 @@
     <ClInclude Include="src\core\midi_file_meta.h">
       <Filter>core</Filter>
     </ClInclude>
+    <ClInclude Include="src\globals.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="src\xmake.lua" />

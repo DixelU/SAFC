@@ -346,7 +346,7 @@ struct single_midi_processor_2
 			double tempo_multiplier;
 			metasize_type tempo_override_value;
 			tempo_override():
-				tempo_override_value(single_track_data::selection::default_tempo), tempo_multiplier(1)
+				tempo_override_value(~0U), tempo_multiplier(1)
 			{
 			}
 			inline void set_override_value(double tempo)
@@ -355,9 +355,11 @@ struct single_midi_processor_2
 			}
 			inline metasize_type process(metasize_type a) const 
 			{
-				if (tempo_override_value != single_track_data::selection::default_tempo)
+				if (tempo_multiplier != 1)
+					return (std::min)((metasize_type)(a / tempo_multiplier), 0xFFFF7Fu);
+				if (tempo_override_value != ~0U)
 					return tempo_override_value;
-				return (std::min)((metasize_type)(a / tempo_multiplier), 0xFFFF7Fu);
+				return single_track_data::selection::default_tempo;
 			}
 		};
 
