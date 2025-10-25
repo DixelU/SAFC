@@ -10,6 +10,7 @@
 
 #include "single_midi_processor_2.h"
 
+// will be rafactored later? 
 struct midi_collection_threaded_merger
 {
 	std_unicode_string save_to;
@@ -222,7 +223,8 @@ struct midi_collection_threaded_merger
 	{
 		if (this->intermediate_regular_flag && this->intermediate_inplace_flag)
 			this->final_merge();
-		else return 0;
+		else
+			return 0;
 		//cout << "Final_Finished\n";
 		return 1;
 	}

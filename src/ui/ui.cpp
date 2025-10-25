@@ -2,6 +2,7 @@
 #include <vector>
 #include <algorithm>
 #include <mutex>
+#include <format>
 
 #include <imgui.h>
 #include <log_c/log.h>
@@ -10,6 +11,7 @@
 
 #include "../core/single_midi_processor_2.h"
 #include "../core/midi_collection_merger.h"
+#include "../core/background_worker.h"
 
 #include "../ui/ofd.h"
 
@@ -23,54 +25,53 @@ static char it_tempo[380] = "120";
 
 static bool temp = false;
 
+static std::shared_ptr<midi_collection_threaded_merger> current_merger;
+
 void ThrowAlert_Error(std::string&& AlertText)
 {
-	safc_globals::global_alert_queue.push_back({ std::move(AlertText), "Error", safc_globals::alert_queue_item::alert_type::error });
+	safc_globals::alert_queue.push_back({ std::move(AlertText), "Error", safc_globals::alert_queue_item::alert_type::error });
 }
 
 void ThrowAlert_Warning(std::string&& AlertText)
 {
-	safc_globals::global_alert_queue.push_back({ std::move(AlertText), "Warning", safc_globals::alert_queue_item::alert_type::warning });
+	safc_globals::alert_queue.push_back({ std::move(AlertText), "Warning", safc_globals::alert_queue_item::alert_type::warning });
 }
 
 void ThrowAlert_Info(std::string&& AlertText)
 {
-	safc_globals::global_alert_queue.push_back({ std::move(AlertText), "Info", safc_globals::alert_queue_item::alert_type::info });
+	safc_globals::alert_queue.push_back({ std::move(AlertText), "Info", safc_globals::alert_queue_item::alert_type::info });
 }
 
 void AddFiles(const std::vector<std_unicode_string>& filenames) 
 {
+	std::unique_lock lock(safc_globals::global_lock);
+
 	for (auto& file : filenames)
 	{
 		midi_file_meta meta;
-		meta.set(std::move(file));
+		meta.set(file);
 
 		log_info("File: %s", meta.visible_path.c_str());
 
-		safc_globals::global_midi_list.emplace_back(std::move(meta));
+		safc_globals::midi_list.emplace_back(std::move(meta));
 	}
-}
-
-// Ohh god that's weird
-std::pair<midi_collection_threaded_merger::proc_data_ptr, midi_collection_threaded_merger::message_buffer_ptr> SMRP;
-void SetSMRP(std::pair< midi_collection_threaded_merger::proc_data_ptr, midi_collection_threaded_merger::message_buffer_ptr>& smrp)
-{
-	std::lock_guard<std::recursive_mutex> locker(safc_globals::global_lock);
-	SMRP = smrp;
-
 }
 
 void RenderMainWindow()
 {
+	std::unique_lock lock(safc_globals::global_lock);
+
 	ImGui::SetNextWindowSizeConstraints(ImVec2(700, 700), ImVec2(FLT_MAX, FLT_MAX));
 	ImGui::Begin("Main Window", nullptr, ImGuiWindowFlags_MenuBar);
+
 	if(ImGui::BeginMenuBar())
 	{
 		if(ImGui::BeginMenu("File"))
 		{
 			if(ImGui::MenuItem("Add MIDIs"))
 			{
-				auto midis = OpenFileDlg(to_cchar_t("Add MIDI Files"));
+				worker_singleton<struct file_meta_scanner>::instance().push(
+					[](){ AddFiles(OpenFileDlg(to_cchar_t("Add MIDI Files"))); });
 				
 				log_info("add midi");
 			}
@@ -78,18 +79,22 @@ void RenderMainWindow()
 			if(ImGui::MenuItem("Remove MIDIs"))
 			{
 				std::vector<int> selected_indices;
-				for(int i = 0; i < safc_globals::global_midi_list.size(); ++i)
+				for (int i = 0; i < safc_globals::midi_list.size(); ++i)
 				{
-					if(midi_selection.Contains((ImGuiID)i))
+					if (midi_selection.Contains((ImGuiID)i))
 						selected_indices.push_back(i);
 				}
-				
-				// Erase in reverse order to avoid shifting indices
-				std::sort(selected_indices.rbegin(), selected_indices.rend());
-				for(int idx : selected_indices)
-				{
-					safc_globals::global_midi_list.erase(safc_globals::global_midi_list.begin() + idx);
-				}
+
+				worker_singleton<struct file_meta_scanner>::instance().push(
+					[selected_indices = std::move(selected_indices)]() mutable 
+					{
+						// Erase in reverse order to avoid shifting indices
+						std::sort(selected_indices.rbegin(), selected_indices.rend());
+						for (int idx : selected_indices)
+							safc_globals::midi_list.erase(safc_globals::midi_list.begin() + idx);
+
+						// call thread id reassign procedure here
+					});
 				
 				midi_selection.Clear();
 			}
@@ -101,13 +106,39 @@ void RenderMainWindow()
 
 				if(!save_to.empty())
 				{
-					safc_globals::save_to_file.set(std::move(save_to));
-					log_info("Save file: '%s'", safc_globals::save_to_file.visible_path.c_str()); // todo: log visible filename only
+					safc_globals::save_file = std::move(save_to);
+					safc_globals::visible_save_file = 
+						std::string(
+							safc_globals::save_file.begin(),
+							safc_globals::save_file.end()); // wstring to string conversion for windows
+
+					log_info("Save file: '%s'", safc_globals::visible_save_file.c_str()); // todo: log visible filename only
+
+					std::vector<midi_file_meta::processing_data_ptr_t> data;
+					for (auto & el: safc_globals::midi_list)
+						data.push_back(el.processing_data);
+
+					current_merger = 
+						std::make_shared<midi_collection_threaded_merger>(
+							data,
+							safc_globals::global_ppq,
+							safc_globals::save_file,
+							false /* if headless -> set to true */);
+
+					worker_singleton<struct merge_watcher>::instance().push([local_merger = current_merger]
+					{
+						local_merger->start_processing_midis();
+
+						while (local_merger->check_smrp_processing_and_start_next_step())
+							std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+						while (!local_merger->check_ri_merge())
+							std::this_thread::sleep_for(std::chrono::milliseconds(66));
+					});
 				}
 				else
 				{
-					// todo replace with log_info
-					ThrowAlert_Error("Save canceled");
+					log_trace("Save canceled");
 				}
 			}
 			
@@ -115,7 +146,7 @@ void RenderMainWindow()
 			
 			if(ImGui::MenuItem("Clear MIDI List"))
 			{
-				safc_globals::global_midi_list.clear();
+				safc_globals::midi_list.clear();
 			}
 			ImGui::EndMenu();
 		}
@@ -136,7 +167,7 @@ void RenderMainWindow()
 		}
 		ImGui::EndMenuBar();
 	}
-	
+
 	const int ITEMS_COUNT = 30;
 	if(ImGui::BeginChild("##MIDI_LS", ImVec2(0, 0), ImGuiChildFlags_FrameStyle))
 	{
@@ -145,7 +176,7 @@ void RenderMainWindow()
 		midi_selection.ApplyRequests(ms_io);
 		
 		ImGuiListClipper clipper;
-		clipper.Begin(safc_globals::global_midi_list.size());
+		clipper.Begin(safc_globals::midi_list.size());
 		if(ms_io->RangeSrcItem != -1)
 			clipper.IncludeItemByIndex((int)ms_io->RangeSrcItem); // Ensure RangeSrc item is not clipped.
 		
@@ -156,7 +187,7 @@ void RenderMainWindow()
 				ImGui::PushID(n);
 				bool item_is_selected = midi_selection.Contains((ImGuiID)n);
 				ImGui::SetNextItemSelectionUserData(n);
-				ImGui::Selectable(safc_globals::global_midi_list[n].visible_name.c_str(), item_is_selected);
+				ImGui::Selectable(safc_globals::midi_list[n].visible_name.c_str(), item_is_selected);
 				ImGui::PopID();
 			}
 		}
@@ -166,7 +197,7 @@ void RenderMainWindow()
 		ImGui::EndChild();
 	}
 	ImGui::End();
-	
+
 	if(midi_settings_window)
 	{
 		ImGui::SetNextWindowSizeConstraints(ImVec2(500, 500), ImVec2(FLT_MAX, FLT_MAX));
@@ -212,9 +243,9 @@ void RenderMainWindow()
 		ImGui::End();
 	}
 
-	if (!safc_globals::global_alert_queue.empty())
+	if (!safc_globals::alert_queue.empty())
 	{
-		auto& alert = safc_globals::global_alert_queue.front();
+		auto& alert = safc_globals::alert_queue.front();
 		ImGui::PushStyleColor(ImGuiCol_TitleBgActive,
 			alert.type == safc_globals::alert_queue_item::alert_type::error ? ImVec4(0.5f, 0.2f, 0.2f, 1.0f) :
 			alert.type == safc_globals::alert_queue_item::alert_type::warning ? ImVec4(0.5f, 0.5f, 0.2f, 1.0f) :
@@ -229,7 +260,7 @@ void RenderMainWindow()
 			if (ImGui::Button("OK", ImVec2(120, 0)))
 			{
 				ImGui::CloseCurrentPopup();
-				safc_globals::global_alert_queue.pop_front();
+				safc_globals::alert_queue.pop_front();
 			}
 			ImGui::SetItemDefaultFocus();
 			ImGui::EndPopup();
@@ -237,22 +268,45 @@ void RenderMainWindow()
 
 		ImGui::PopStyleColor();
 	}
-	
-	std::lock_guard<std::recursive_mutex> locker(safc_globals::global_lock);
-	
-	// Causes segfault involving atomic_bool loading
-	//if(SMRP.second->processing)
-	//	ImGui::OpenPopup("Procesing Progress");
+
+	if (current_merger == nullptr)
+		return;
+
+	ImGui::OpenPopup("Procesing Progress");
 	
 	if(ImGui::BeginPopupModal("Procesing Progress", NULL, ImGuiWindowFlags_AlwaysAutoResize))
 	{
-		// HELP ME...
-		// IDFK What I'm doing
-		//SetSMRP(GlobalMCTM->currently_processed[ID]);
+		for (auto& single_thread_data : current_merger->currently_processing)
+		{
+			auto thread_data_copy = single_thread_data;
+			if (!thread_data_copy.first || !thread_data_copy.second)
+			{
+				ImGui::Text("Starting thread ...");
+				ImGui::Separator();
+				continue;
+			}
 
-		float progress = 0;
-		std::string proc;
-		ImGui::ProgressBar(progress, ImVec2(0.f, 0.f), proc.c_str());
-		ImGui::EndPopup();
+			if (thread_data_copy.second->finished)
+			{
+				ImGui::Separator();
+				continue;
+			}
+
+			auto progress = float(thread_data_copy.second->last_input_position) / thread_data_copy.first->settings.details.initial_filesize;
+			auto progress_bar_string = std::format("{:.3}%", progress * 100);
+			auto last_text = thread_data_copy.second->log->get_last();
+			auto last_warning = thread_data_copy.second->warning->get_last();
+			auto last_error = thread_data_copy.second->error->get_last();
+
+			ImGui::Text("%s", thread_data_copy.first->visible_filename.c_str());
+			ImGui::SameLine();
+			ImGui::ProgressBar(0.5f, {}, progress_bar_string.c_str());
+			ImGui::Text("%s", last_text.c_str());
+			if (!last_warning.empty())
+				ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.5f, 1.0f), "%s", last_warning.c_str());
+			if (!last_error.empty())
+				ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.5f, 1.0f), "%s", last_error.c_str());
+			ImGui::Separator();
+		}
 	}
 }

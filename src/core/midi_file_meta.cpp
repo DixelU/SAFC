@@ -19,7 +19,8 @@ bool midi_file_meta::set(std_unicode_string file)
 
 	processing_data->filename = this->file;
 	processing_data->tracks_count = checker.expected_track_number;
-	processing_data->appearance_filename = this->visible_name;
+	processing_data->visible_filename = this->visible_name;
+	processing_data->postfix = to_cchar_t("_sp.mid").operator std_unicode_string(); // no postfix by default
 
 	auto& settings = processing_data->settings;
 	settings.old_ppqn = checker.ppqn;

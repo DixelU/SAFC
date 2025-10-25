@@ -30,7 +30,7 @@ struct logger_base
 {
 	virtual ~logger_base() = default;
 	virtual void operator<<(std::string&& message) {};
-	virtual std::string getLast() const { return ""; };
+	virtual std::string get_last() const { return ""; };
 };
 
 struct logger :
@@ -46,7 +46,7 @@ public:
 		std::lock_guard locker(mtx);
 		messages.push_back(std::move(message));
 	}
-	std::string getLast() const override
+	std::string get_last() const override
 	{
 		std::lock_guard locker(mtx);
 		return (messages.size()) ? messages.back() : "";
@@ -66,7 +66,7 @@ public:
 		std::lock_guard locker(mtx);
 		this->message = std::move(message);
 	}
-	std::string getLast() const override
+	std::string get_last() const override
 	{
 		std::lock_guard locker(mtx);
 		return message;
@@ -409,7 +409,7 @@ struct single_midi_processor_2
 		std_unicode_string filename;
 		std_unicode_string postfix;
 
-		std::string appearance_filename;
+		std::string visible_filename;
 		std::atomic_uint64_t tracks_count;
 	};
 

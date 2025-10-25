@@ -6,15 +6,12 @@
     <ClCompile Include="externals\**\*.c" />
     <ClCompile Include="externals\**\*.c" />
     <ClCompile Include="src\main.cpp" />
-    <ClCompile Include="src\ui\ui.cpp" />
-    <ClCompile Include="src\ui_entry.cpp" />
     <ClCompile Include="externals\**\*.cpp" />
     <ClCompile Include="externals\**\*.c" />
     <ClCompile Include="externals\**\*.cpp" />
     <ClCompile Include="externals\**\*.c" />
     <ClCompile Include="externals\**\*.cpp" />
     <ClCompile Include="externals\**\*.c" />
-    <ClCompile Include="src\core\midi_file_meta.cpp" />
     <ClCompile Include="src\core\mocs.cpp">
       <Filter>core</Filter>
     </ClCompile>
@@ -26,6 +23,18 @@
     <ClCompile Include="src\core\cut_and_transpose.cpp">
       <Filter>core</Filter>
     </ClCompile>
+    <ClCompile Include="src\core\background_worker.cpp">
+      <Filter>core</Filter>
+    </ClCompile>
+    <ClCompile Include="src\core\midi_file_meta.cpp">
+      <Filter>core</Filter>
+    </ClCompile>
+    <ClCompile Include="src\ui\ui.cpp">
+      <Filter>ui</Filter>
+    </ClCompile>
+    <ClCompile Include="src\ui_entry.cpp">
+      <Filter>ui</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="resource\safc.rc" />
@@ -36,6 +45,9 @@
   <ItemGroup>
     <Filter Include="core">
       <UniqueIdentifier>{6b7b3ee3-fe55-46e9-ad9a-b859d6d14d58}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="ui">
+      <UniqueIdentifier>{cc4cfd86-42cb-47a8-854f-83e604c857e1}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
   <ItemGroup>
@@ -71,6 +83,18 @@
       <Filter>core</Filter>
     </ClInclude>
     <ClInclude Include="src\globals.h" />
+    <ClInclude Include="src\core\background_worker.h">
+      <Filter>core</Filter>
+    </ClInclude>
+    <ClInclude Include="src\ui\fonts.h">
+      <Filter>ui</Filter>
+    </ClInclude>
+    <ClInclude Include="src\ui\ofd.h">
+      <Filter>ui</Filter>
+    </ClInclude>
+    <ClInclude Include="src\ui\ui.hpp">
+      <Filter>ui</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <None Include="src\xmake.lua" />

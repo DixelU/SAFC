@@ -24,9 +24,11 @@ struct alert_queue_item
 	alert_type type;
 };
 
-inline std::deque<alert_queue_item> global_alert_queue;
-inline std::deque<midi_file_meta> global_midi_list;
-inline midi_file_meta save_to_file;
+inline std::deque<alert_queue_item> alert_queue;
+inline std::deque<midi_file_meta> midi_list;
+
+inline std_unicode_string save_file;
+inline std::string visible_save_file;
 
 inline bool cb_rm_empty_tracks = true;
 inline bool cb_rm_merge_remnants = true;
@@ -44,7 +46,7 @@ inline bool cb_allow_sysex_events = false;
 inline std::uint16_t thread_count = 1;
 inline std::uint16_t global_ppq = 96;
 
-inline std::recursive_mutex global_lock; // why is it needed here tho?
+inline std::mutex global_lock; // why is it needed here tho?
 
 }
 
