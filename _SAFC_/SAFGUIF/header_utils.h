@@ -68,11 +68,12 @@ inline void __glcolor(std::uint32_t uINT)
 
 float WindX = window_base_width, WindY = window_base_height;
 
-bool ANIMATION_IS_ACTIVE = 0, 
-	 FIRSTBOOT = 1,
-	 DRAG_OVER = 0, 
-	 APRIL_FOOL = 0,
-	 SHIFT_HELD = 0;
+bool ANIMATION_IS_ACTIVE = false, 
+	 FIRSTBOOT = true,
+	 DRAG_OVER = false, 
+	 APRIL_FOOL = false,
+	 SHIFT_HELD = false,
+	 MONTH_BEGINING = false;
 
 std::uint32_t TimerV = 0;
 std::int16_t YearsOld = -1;
@@ -92,12 +93,14 @@ int TIMESEED()
 {
 	SYSTEMTIME t;
 	GetLocalTime(&t);
+	
 	if (t.wMonth == 4 && t.wDay == 1)
-		APRIL_FOOL = 1;
+		APRIL_FOOL = true;
 	if (t.wMonth == 8 && t.wDay == 31)
-	{
 		YearsOld = t.wYear - 2018;
-	}
+	if (t.wDay == 1)
+		MONTH_BEGINING = true;
+
 	return t.wMilliseconds + (t.wSecond * 1000) + t.wMinute * 60000;
 }
 

@@ -2098,7 +2098,7 @@ void Init()
 
 	(*WH)["SMPAS"] = T;//Selected midi properties and settings
 
-	T = new MoveableFuiWindow("Other settings.", System_White, -75, 35, 150, 65 + WindowHeaderSize, 100, 1.25f, 17.5f, 17.5f, 3, BACKGROUND_OPQ, HEADER, BORDER);
+	T = new MoveableFuiWindow("Other settings.", System_White, -75, 35, 150, 65 + WindowHeaderSize, 100, 2.5f, 17.5f, 17.5f, 3, BACKGROUND_OPQ, HEADER, BORDER);
 
 	CheckBox* Chk = nullptr;
 
@@ -2108,7 +2108,7 @@ void Init()
 	(*T)["BOOL_IGN_NOTES"] = new CheckBox(-20, 25 - WindowHeaderSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::center, "Remove notes");
 	(*T)["BOOL_IGN_ALL_EX_TPS"] = new CheckBox(-5, 25 - WindowHeaderSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, System_White, _Align::center, "Ignore other events");
 
-	(*T)["LEGACY_META_RSB_BEHAVIOR"] = Chk = new CheckBox(10, 25 - WindowHeaderSize, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, false, System_White, _Align::center, "Enables legacy RSB/Meta behavior");
+	(*T)["LEGACY_META_RSB_BEHAVIOR"] = Chk = new CheckBox(10, 25 - WindowHeaderSize, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, false, System_White, _Align::center, "En. legacy RSB/Meta behavior");
 	Chk->Tip->SafeChangePosition_Argumented(_Align::left, -70, 15 - WindowHeaderSize);
 	(*T)["ALLOW_SYSEX"] = new CheckBox(25, 25 - WindowHeaderSize, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, 0, System_White, _Align::right, "Allow sysex events");
 
@@ -2162,7 +2162,10 @@ void Init()
 	(*T)["AS_GLOBALSETTINGS"] = new TextBox("Global settings for new MIDIs", System_White, 0, 85 - WindowHeaderSize, 50, 200, 12, 0x007FFF1F, 0x007FFF7F, 1, _Align::center);
 	(*T)["AS_APPLY"] = Butt = new Button("Apply", System_White, Settings::OnSetApply, 85 - WindowHeaderSize, -87.5 - WindowHeaderSize, 40, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, NULL, "_");
 	(*T)["AS_EN_FONT"] = Butt = new Button((is_fonted) ? "Disable fonts" : "Enable fonts", System_White, Settings::ChangeIsFontedVar, 72.5 - WindowHeaderSize, -67.5 - WindowHeaderSize, 65, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, System_White, " ");
-	(*T)["AS_ROT_ANGLE"] = new InputField(std::to_string(dumb_rotation_angle), -87.5 + WindowHeaderSize, 55 - WindowHeaderSize, 10, 30, System_White, NULL, 0x007FFFFF, System_White, "Rotation angle", 6, _Align::center, _Align::left, InputField::Type::FP_Any);
+
+	auto AngleInput = new InputField(std::to_string(dumb_rotation_angle), -87.5 + WindowHeaderSize, 55 - WindowHeaderSize, 10, 30, System_White, NULL, 0x007FFFFF, System_White, "Rotation angle", 6, _Align::center, _Align::left, InputField::Type::FP_Any);
+	AngleInput->Disable(); // hide // legacy
+	(*T)["AS_ROT_ANGLE"] = AngleInput;
 	(*T)["AS_FONT_SIZE"] = new WheelVariableChanger(Settings::ApplyFSWheel, -37.5, -82.5, lFontSymbolsInfo::Size, 1, System_White, "Font size", "Delta", WheelVariableChanger::Type::addictable);
 	(*T)["AS_FONT_P"] = new WheelVariableChanger(Settings::ApplyRelWheel, -37.5, -22.5, lFONT_HEIGHT_TO_WIDTH, 0.01, System_White, "Font rel.", "Delta", WheelVariableChanger::Type::addictable);
 	(*T)["AS_FONT_NAME"] = new InputField(default_font_name, 52.5 - WindowHeaderSize, 55 - WindowHeaderSize, 10, 100, _STLS_WhiteSmall, &default_font_name, 0x007FFFFF, System_White, "Font name", 32, _Align::center, _Align::left, InputField::Type::Text);
@@ -2326,7 +2329,7 @@ void mDisplay()
 		glVertex2f(internal_range * (WindX / window_base_width), 0 - internal_range * (WindY / window_base_height));
 		glEnd();
 	}
-	else if (Settings::ShaderMode == 42)
+	else if (MONTH_BEGINING || Settings::ShaderMode == 42)
 	{
 		glBegin(GL_QUADS);
 		glColor4f(1, 0.5f, 0, (DRAG_OVER) ? 0.25f : 1);
@@ -2351,14 +2354,13 @@ void mDisplay()
 	else
 	{
 		glBegin(GL_QUADS);
-		glColor4f(0.05f, 0.15f, 0.30f, (DRAG_OVER) ? 0.25f : 1);
+		glColor4f(0.00f, 0.2f, 0.4f, (DRAG_OVER) ? 0.25f : 1);
 		glVertex2f(0 - internal_range * (WindX / window_base_width), 0 - internal_range * (WindY / window_base_height));
 		glVertex2f(0 - internal_range * (WindX / window_base_width), internal_range * (WindY / window_base_height));
 		glVertex2f(internal_range * (WindX / window_base_width), internal_range * (WindY / window_base_height));
 		glVertex2f(internal_range * (WindX / window_base_width), 0 - internal_range * (WindY / window_base_height));
 		glEnd();
 	}
-	//ROT_ANGLE += 0.02;
 
 	glRotatef(dumb_rotation_angle, 0, 0, 1);
 	if (WH)

@@ -69,12 +69,15 @@ struct InputField : HandleableUIPart
 
 	bool MouseHandler(float mx, float my, CHAR Button/*-1 left, 1 right, 0 move*/, CHAR State /*-1 down, 1 up*/) override
 	{
+		if (!Enabled)
+			return false;
+
 		if (abs(mx - Xpos) < 0.5 * Width && abs(my - Ypos) < 0.5 * Height)
 		{
 			if (!Focused)
 				FocusChange();
-			if (Button)return 1;
-			else return 0;
+			
+			return Button;
 		}
 		else
 		{
@@ -227,7 +230,10 @@ struct InputField : HandleableUIPart
 	void KeyboardHandler(char CH) 
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
-		
+
+		if (!Enabled)
+			return;
+
 		if (!Focused)
 			return;
 
@@ -303,6 +309,10 @@ struct InputField : HandleableUIPart
 	void Draw() override
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
+
+		if (!Enabled)
+			return;
+
 		__glcolor(BorderRGBAColor);
 		glLineWidth(1);
 		glBegin(GL_LINE_LOOP);
