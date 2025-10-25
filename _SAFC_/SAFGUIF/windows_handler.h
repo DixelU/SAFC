@@ -21,18 +21,25 @@ struct WindowsHandler
 	static constexpr float alerttext_vert_pos = -7.5, alertheight = 65;
 	WindowsHandler()
 	{
+		constexpr unsigned BACKGROUND = 0x070E16AF;
+		constexpr unsigned BORDER = 0xFFFFFF7F;
+		constexpr unsigned HEADER_ALERT = 0x855628CF;
+		constexpr unsigned HEADER_PROMPT = 0x288556CF;
+
 		MW_ID_Holder.clear();
 		MainWindow_ID = "MAIN";
 		WindowWasDisabledDuringMouseHandling = 0;
 		MoveableWindow* ptr;
-		Map["ALERT"] = ptr = new MoveableWindow("Alert window", System_White, -100, alertheight / 2, 200, alertheight, 0x3F3F3FCF, 0x7F7F7F7F);
+		Map["ALERT"] = ptr = new MoveableFuiWindow("Alert window", System_White, -100, alertheight / 2, 200, alertheight, 150, 2.5f, alertheight / 8, alertheight / 8, 1.25f, BACKGROUND, HEADER_ALERT, BORDER);
 		(*ptr)["AlertText"] = new TextBox("_", System_White, 20, alerttext_vert_pos, alertheight - 12.5, 155, 7.5, 0, 0, 0, _Align::left, TextBox::VerticalOverflow::recalibrate);
 		(*ptr)["AlertSign"] = new SpecialSignHandler(SpecialSigns::DrawACircle, -78.5, -17, 12, 0x000000FF, 0x001FFFFF);
+		ptr->WindowName->SafeMove(0, 2.5f);
 
-		Map["PROMPT"] = ptr = new MoveableWindow("prompt", System_White, -50, 50, 100, 100, 0x3F3F3FCF, 0x7F7F7F7F);
+		Map["PROMPT"] = ptr = new MoveableFuiWindow("prompt", System_White, -50, 50, 100, 100, 50, 2.5, 25, 25, 2.5f, BACKGROUND, HEADER_PROMPT, BORDER);
 		(*ptr)["FLD"] = new InputField("", 0, 35 - WindowHeaderSize, 10, 80, System_White, NULL, 0x007FFFFF, NULL, "", 0, _Align::center);
 		(*ptr)["TXT"] = new TextBox("_abc_", System_White, 0, 7.5 - WindowHeaderSize, 10, 80, 7.5, 0, 0, 2, _Align::center, TextBox::VerticalOverflow::recalibrate);
 		(*ptr)["BUTT"] = new Button("Submit", System_White, NULL, -0, -20 - WindowHeaderSize, 80, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFF7F00FF, 0xFFFFFFFF, 0xFF7F00FF, NULL, " ");
+		ptr->WindowName->SafeMove(0, 2.5f);
 	}
 	~WindowsHandler()
 	{
@@ -73,7 +80,8 @@ struct WindowsHandler
 		auto wptr = Map["PROMPT"];
 		auto ifptr = ((InputField*)(*wptr)["FLD"]);
 		auto tbptr = ((TextBox*)(*wptr)["TXT"]);
-		wptr->SafeWindowRename(WindowTitle);
+		wptr->SafeWindowRename(WindowTitle, true);
+		//wptr->WindowName->SafeChangePosition(0, (alertheight - WindowHeaderSize) * 0.5f);
 		ifptr->InputType = InputType;
 		ifptr->MaxChars = MaxChars;
 		ifptr->UpdateInputString(DefaultString);
@@ -94,7 +102,8 @@ struct WindowsHandler
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		auto AlertWptr = Map["ALERT"];
-		AlertWptr->SafeWindowRename(AlertHeader);
+		AlertWptr->SafeWindowRename(AlertHeader, true);
+		//AlertWptr->WindowName->SafeChangePosition(0, alertheight / 2);
 		AlertWptr->SafeChangePosition_Argumented(0, 0, 0);
 		AlertWptr->_NotSafeResize_Centered(alertheight, 200);
 		TextBox* AlertWTptr = (TextBox*)((*AlertWptr)["AlertText"]);

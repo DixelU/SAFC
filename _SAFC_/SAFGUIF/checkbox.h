@@ -33,7 +33,7 @@ struct CheckBox : HandleableUIPart
 		if (TipSettings)
 		{
 			this->Tip = TipSettings->CreateOne(TipText);
-			this->Tip->SafeChangePosition_Argumented(TipAlign, Xpos - ((TipAlign == _Align::left) ? 0.5f : ((TipAlign == _Align::right) ? -0.5f : 0)) * SideSize, Ypos - SideSize);
+			this->Tip->SafeChangePosition_Argumented(TipAlign, Xpos - ((TipAlign & _Align::left) ? 0.5f : ((TipAlign & _Align::right) ? -0.5f : 0)) * SideSize, Ypos - SideSize);
 		}
 	}
 	void Draw() override 

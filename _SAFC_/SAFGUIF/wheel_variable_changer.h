@@ -35,30 +35,30 @@ struct WheelVariableChanger :HandleableUIPart
 		this->type = type;
 		this->Sen = Sensitivity::on_wheel;
 		var_if = new InputField(std::to_string(default_var).substr(0, 8), Xpos - 25., Ypos + 15, 10, 40, STLS, nullptr, 0x007FFFFF, STLS, var_string, 8, _Align::center, _Align::center, InputField::Type::FP_PositiveNumbers);
-		fac_if = new InputField(std::to_string(default_fact).substr(0, 8), Xpos - 25., Ypos - 5, 10, 40, STLS, nullptr, 0x007FFFFF, STLS, fac_string, 8, _Align::center, _Align::center, InputField::Type::FP_PositiveNumbers);
+		fac_if = new InputField(std::to_string(default_fact).substr(0, 8), Xpos - 25., Ypos - 10, 10, 40, STLS, nullptr, 0x007FFFFF, STLS, fac_string, 8, _Align::center, _Align::center, InputField::Type::FP_PositiveNumbers);
 	}
 	void Draw() override
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		__glcolor(0xFFFFFF3F + WheelFieldHovered * 0x3F);
 		glBegin(GL_QUADS);
-		glVertex2f(Xpos, Ypos + 25);
-		glVertex2f(Xpos, Ypos - 25);
-		glVertex2f(Xpos + 50, Ypos - 25);
-		glVertex2f(Xpos + 50, Ypos + 25);
+		glVertex2f(Xpos, Ypos + Height * 0.5f);
+		glVertex2f(Xpos, Ypos - Height * 0.5f);
+		glVertex2f(Xpos + Width * 0.5f, Ypos - Height * 0.5f);
+		glVertex2f(Xpos + Width * 0.5f, Ypos + Height * 0.5f);
 		glEnd();
 		__glcolor(0x007FFF3F + WheelFieldHovered * 0x3F);
 		glBegin(GL_LINE_LOOP);
-		glVertex2f(Xpos, Ypos + 25);
-		glVertex2f(Xpos, Ypos - 25);
-		glVertex2f(Xpos + 50, Ypos - 25);
-		glVertex2f(Xpos + 50, Ypos + 25);
+		glVertex2f(Xpos, Ypos + Height * 0.5f);
+		glVertex2f(Xpos, Ypos - Height * 0.5f);
+		glVertex2f(Xpos + Width * 0.5f, Ypos - Height * 0.5f);
+		glVertex2f(Xpos + Width * 0.5f, Ypos + Height * 0.5f);
 		glEnd();
 		glBegin(GL_LINE_LOOP);
-		glVertex2f(Xpos - 50, Ypos + 25);
-		glVertex2f(Xpos - 50, Ypos - 25);
-		glVertex2f(Xpos + 50, Ypos - 25);
-		glVertex2f(Xpos + 50, Ypos + 25);
+		glVertex2f(Xpos - Width * 0.5f, Ypos + Height * 0.5f);
+		glVertex2f(Xpos - Width * 0.5f, Ypos - Height * 0.5f);
+		glVertex2f(Xpos + Width * 0.5f, Ypos - Height * 0.5f);
+		glVertex2f(Xpos + Width * 0.5f, Ypos + Height * 0.5f);
 		glEnd();
 		var_if->Draw();
 		fac_if->Draw();

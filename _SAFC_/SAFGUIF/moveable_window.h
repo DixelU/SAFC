@@ -55,9 +55,11 @@ struct MoveableWindow : HandleableUIPart
 	void KeyboardHandler(char CH)
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
-		for (auto i = WindowActivities.begin(); i != WindowActivities.end(); i++) {
+		for (auto i = WindowActivities.begin(); i != WindowActivities.end(); i++)
+		{
 			i->second->KeyboardHandler(CH);
-			if (HUIP_MapWasChanged) {
+			if (HUIP_MapWasChanged)
+			{
 				HUIP_MapWasChanged = false;
 				break;
 			}
@@ -240,13 +242,17 @@ struct MoveableWindow : HandleableUIPart
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		SafeWindowRename(NewWindowTitle);
 	}
-	void SafeWindowRename(const std::string& NewWindowTitle)
+	void SafeWindowRename(const std::string& NewWindowTitle, bool ForceNoShift = false)
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
-		if (WindowName) {
-			WindowName->SafeStringReplace(NewWindowTitle);
-			WindowName->SafeChangePosition_Argumented(GLOBAL_LEFT, XWindowPos + WindowHeaderSize * 0.5f, WindowName->CYpos);
-		}
+		if (!WindowName)
+			return;
+		
+		WindowName->SafeStringReplace(NewWindowTitle);	
+		if (ForceNoShift)
+			return;
+
+		WindowName->SafeChangePosition_Argumented(GLOBAL_LEFT, XWindowPos + WindowHeaderSize * 0.5f, WindowName->CYpos);
 	}
 	HandleableUIPart*& operator[](const std::string& ID)
 	{

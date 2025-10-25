@@ -32,7 +32,7 @@ struct MoveableFuiWindow : public MoveableWindow
 		BottomHandlesHeight(BottomHandlesHeight),
 		HandlesBudgeDepth(HandlesBudgeDepth)
 	{
-		this->WindowName->SafeChangePosition_Argumented(_Align::center, XPos + Width * 0.5f, YPos - WindowHeaderSize * 0.5f);
+		this->WindowName->SafeChangePosition_Argumented(_Align::center, XPos + Width * 0.5f, YPos - (WindowHeaderSize - HeadersHatHeight) * 0.5f);
 	}
 
 	~MoveableFuiWindow() override = default;
@@ -161,9 +161,9 @@ struct MoveableFuiWindow : public MoveableWindow
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 
 		if (!Drawable)
-			return 0;
+			return false;
 
-		HoveredCloseButton = 0;
+		HoveredCloseButton = false;
 
 		float CloseButtonX[] =
 		{ 
@@ -239,19 +239,19 @@ struct MoveableFuiWindow : public MoveableWindow
 		bool InHeader = false;
 
 		///close button
-		if (PointInPoly(CloseButtonX, CloseButtonY, mx, my))
+		if (InHeader |= PointInPoly(CloseButtonX, CloseButtonY, mx, my))
 		{
 			if (Button && State == 1)
 			{
-				Drawable = 0;
+				Drawable = false;
 				CursorFollowMode = false;
-				return 1;
+				return true;
 			}
 			else if (!Button)
-				HoveredCloseButton = 1;
+				HoveredCloseButton = true;
 		}
 		///window header
-		else if (InHeader = PointInPoly(HeaderGeometryX, HeaderGeometryY, mx, my))
+		else if (InHeader |= PointInPoly(HeaderGeometryX, HeaderGeometryY, mx, my))
 		{
 			if (Button == -1)
 			{
@@ -270,10 +270,10 @@ struct MoveableFuiWindow : public MoveableWindow
 			SafeMove(mx - PCurX, my - PCurY);
 			PCurX = mx;
 			PCurY = my;
-			return 1;
+			return true;
 		}
 
-		bool flag = 0;
+		bool flag = false;
 		auto Y = WindowActivities.begin();
 		while (Y != WindowActivities.end())
 		{
@@ -290,7 +290,7 @@ struct MoveableFuiWindow : public MoveableWindow
 		if (InHeader || PointInPoly(WindowGeometryX, WindowGeometryY, mx, my))
 		{
 			if (Button)
-				return 1;
+				return true;
 			else
 			{
 				return flag;
