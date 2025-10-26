@@ -100,7 +100,7 @@ void RenderMainWindow()
 			}
 			
 			// todo: automatic save filename generation
-			if(ImGui::MenuItem("Save & Merge"))
+			if(ImGui::MenuItem("Save & Merge") && !safc_globals::midi_list.empty())
 			{
 				std_unicode_string save_to = SaveFileDlg(to_cchar_t("Save file"));
 
@@ -132,8 +132,12 @@ void RenderMainWindow()
 						while (local_merger->check_smrp_processing_and_start_next_step())
 							std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
+						log_info("SMRP stage completed!");
+
 						while (!local_merger->check_ri_merge())
 							std::this_thread::sleep_for(std::chrono::milliseconds(66));
+
+						log_info("RI Stage complete!");
 					});
 				}
 				else
@@ -269,7 +273,7 @@ void RenderMainWindow()
 		ImGui::PopStyleColor();
 	}
 
-	if (current_merger == nullptr)
+	if (current_merger == nullptr || current_merger->complete_flag)
 		return;
 
 	ImGui::OpenPopup("Procesing Progress");
@@ -308,5 +312,7 @@ void RenderMainWindow()
 				ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.5f, 1.0f), "%s", last_error.c_str());
 			ImGui::Separator();
 		}
+
+		ImGui::EndPopup();
 	}
 }

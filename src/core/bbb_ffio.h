@@ -13,7 +13,7 @@
 
 #ifdef _MSC_VER
 
-inline errno_t fopen_wrap(FILE* file_ptr,
+inline errno_t fopen_wrap(FILE*& file_ptr,
 	const cchar_t* filename, const cchar_t* parameter)
 {
 	return _wfopen_s(&file_ptr, filename, L"rb");
@@ -26,7 +26,7 @@ inline size_t fread_wrap(void* ptr, size_t size, size_t count, FILE* filename)
 
 #else
 
-inline decltype(errno) fopen_wrap(FILE* file,
+inline decltype(errno) fopen_wrap(FILE*& file,
 	const cchar_t* filename, const cchar_t* parameter)
 {
 	file = fopen(filename, parameter);
@@ -40,8 +40,7 @@ inline size_t fread_wrap(void* ptr, size_t size, size_t count, FILE* file)
 
 #endif
 
-// is only needed for MinGW/GCC 
-#if !defined(__MINGW32__)
+#if defined(_MSC_VER) // todo: fit for linux build
 
 template<typename __inner_stream_type, decltype(std::ios_base::out) stream_io_type = std::ios_base::out>
 inline std::pair<__inner_stream_type*, FILE*> open_wide_stream(
@@ -51,21 +50,27 @@ template<>
 inline std::pair<std::ostream*, FILE*> open_wide_stream<std::ostream, std::ios_base::out>(
 	std_unicode_string filename, const cchar_t* parameter)
 {
-	std::ostream* ostream = new std::ofstream(filename, std::ios_base::out | std::ios_base::binary);
-	return { ostream, nullptr }; // IN c++26 there will be native_handle() call, for now just return nullptr
+	FILE* file_ptr = nullptr;
+	_wfopen_s(&file_ptr, filename.c_str(), to_cchar_t("wb"));
+	return { new std::ofstream(file_ptr), file_ptr };
+	
+	//std::ostream* ostream = new std::ofstream(filename, std::ios_base::out | std::ios_base::binary);
+	//return { ostream, nullptr }; // IN c++26 there will be native_handle() call, for now just return nullptr
 }
 
 template<>
 inline std::pair<std::istream*, FILE*> open_wide_stream<std::istream, std::ios_base::in>(
 	std_unicode_string filename, const cchar_t* parameter)
 {
-	std::istream* istream = new std::ifstream(filename, std::ios_base::in | std::ios_base::binary);
-	return { istream, nullptr }; // IN c++26 there will be native_handle() call, for now just return nullptr
+	FILE* file_ptr = nullptr;
+	_wfopen_s(&file_ptr, filename.c_str(), to_cchar_t("rb"));
+	return { new std::ifstream(file_ptr), file_ptr };
+
+	//std::istream* istream = new std::ifstream(filename, std::ios_base::in | std::ios_base::binary);
+	//return { istream, nullptr }; // IN c++26 there will be native_handle() call, for now just return nullptr
 }
-
-#endif
-
-#if defined(__MINGW32__)
+// is only needed for MinGW/GCC 
+#elif defined(__MINGW32__) 
 
 template<typename __inner_stream_type, decltype(std::ios_base::out) stream_io_type = std::ios_base::out>
 inline std::pair<__inner_stream_type*, FILE*> open_wide_stream(
@@ -78,6 +83,12 @@ inline std::pair<__inner_stream_type*, FILE*> open_wide_stream(
 	
 	return {new __inner_stream_type(buffer), c_file};
 }
+
+#else
+
+template<typename __inner_stream_type, decltype(std::ios_base::out) stream_io_type = std::ios_base::out>
+inline std::pair<__inner_stream_type*, FILE*> open_wide_stream(
+	std::string file, const cchar_t* parameter);
 
 #endif
 
@@ -143,7 +154,7 @@ public:
 			fopen_wrap(file_ptr, filename, to_cchar_t("rb"));
 
 		is_open = !(err_no);
-		next_chunk_is_unavailable = (is_eof = (filename) ? feof(file_ptr) : true);
+		next_chunk_is_unavailable = (is_eof = (file_ptr) ? feof(file_ptr) : true);
 		if (err_no || is_eof)
 		{
 			file_pos = 0;

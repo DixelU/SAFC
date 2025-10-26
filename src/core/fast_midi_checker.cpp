@@ -20,6 +20,7 @@ fast_midi_checker::fast_midi_checker(std_unicode_string filename)
 
 	if (fo_ptr)
 		fclose(fo_ptr);
+
 	delete f;
 
 	collect();

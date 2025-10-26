@@ -192,7 +192,7 @@ struct midi_collection_threaded_merger
 		this->first_stage_complete = false;
 		this->remnants_remove = true;
 		this->final_ppqn = final_ppq;
-		this->intermediate_regular_flag = this->intermediate_inplace_flag = this->complete_flag = this->ir_track_count = this->ii_track_count = 0;
+		this->intermediate_regular_flag = this->intermediate_inplace_flag = this->complete_flag = this->ir_track_count = this->ii_track_count = false;
 	}
 
 	void reset_current_processing()
@@ -206,27 +206,26 @@ struct midi_collection_threaded_merger
 	{
 		for (auto& el : this->processing_data)
 			if (!el.second->finished || el.second->processing)
-				return 1;
-		return 0;
+				return true;
+		return false;
 	}
 
 	bool check_smrp_processing_and_start_next_step()
 	{
 		if (this->check_smrp_processing())
-			return 1;
-		//this->ResetCurProcessing();
+			return true;
+
 		this->start_ri_merge();
-		return 0;
+		return false;
 	}
 
 	bool check_ri_merge()
 	{
-		if (this->intermediate_regular_flag && this->intermediate_inplace_flag)
-			this->final_merge();
-		else
-			return 0;
-		//cout << "Final_Finished\n";
-		return 1;
+		if (!this->intermediate_regular_flag || !this->intermediate_inplace_flag)
+			return false;
+
+		this->final_merge();
+		return true;
 	}
 
 	void start_processing_midis() 
@@ -564,8 +563,6 @@ struct midi_collection_threaded_merger
 
 			if (file_output_fo_ptr)
 				fclose(file_output_fo_ptr);
-			else
-				file_output_ptr->flush();
 
 			for (auto& t : file_inputs)
 				delete t;
@@ -573,9 +570,8 @@ struct midi_collection_threaded_merger
 			delete file_output_ptr;
 			printf("Inplace: finished\n");
 			complete_flag.get() = true;
-
 		},
-		inplace_merge_candidates, final_ppqn, save_to, std::ref(complete_flag), std::ref(ii_track_count)).detach();
+		inplace_merge_candidates, final_ppqn, save_to, std::ref(intermediate_inplace_flag), std::ref(ii_track_count)).detach();
 	}
 
 	void regular_merge()
@@ -623,6 +619,7 @@ struct midi_collection_threaded_merger
 				complete_flag.get() = true;
 				return;
 			}
+
 			//bool FirstFlag = 1;
 			const size_t buffer_size = 20000000;
 			std::uint8_t* buffer = new std::uint8_t[buffer_size];
@@ -665,7 +662,6 @@ struct midi_collection_threaded_merger
 			file_output_ptr->seekp(10, std::ios::beg);
 			file_output_ptr->put(track_count.get() >> 8);
 			file_output_ptr->put(track_count.get());
-			complete_flag.get() = true; /// Will this work?
 			file_output_ptr->flush();
 
 			if (file_output_fo_ptr)
@@ -673,7 +669,8 @@ struct midi_collection_threaded_merger
 
 			delete[] buffer;
 			delete file_output_ptr;
-			}, regular_merge_candidates, final_ppqn, save_to, std::ref(complete_flag), std::ref(ir_track_count)).detach();
+			complete_flag.get() = true; /// Will this work?
+			}, regular_merge_candidates, final_ppqn, save_to, std::ref(intermediate_regular_flag), std::ref(ir_track_count)).detach();
 		}
 	}
 
