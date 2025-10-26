@@ -22,6 +22,10 @@ if is_plat("windows") then
     add_syslinks("user32", "shell32", "comdlg32")
 end
 
+if is_plat("linux") then
+    add_syslinks("pthread", "GL")
+end
+
 target("SAFC")
     set_kind("binary")
 

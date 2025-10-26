@@ -6,7 +6,7 @@
 
 #include <set>
 #include <thread>
-//#include <ranges>
+#include <format>
 
 #include "single_midi_processor_2.h"
 
@@ -695,7 +695,7 @@ struct midi_collection_threaded_merger
 			auto total_tracks = ii_track_count.load() + ir_track_count.load();
 			if ((~0xFFFFULL) & total_tracks)
 			{
-				printf("Track count overflow: %llu\n", total_tracks);
+				std::cout << std::format("Track count overflow: {}\n", total_tracks); 
 				total_tracks = 0xFFFF;
 			}
 

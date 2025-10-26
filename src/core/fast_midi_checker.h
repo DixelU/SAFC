@@ -3,8 +3,7 @@
 #define SAF_FMC
 
 #include "header_utils.h"
-
-#include <string>
+#include <cstdint>
 
 struct fast_midi_checker
 {

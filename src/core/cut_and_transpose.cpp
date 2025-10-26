@@ -1,5 +1,7 @@
 #include "cut_and_transpose.h"
 
+#include <optional>
+
 cut_and_transpose::cut_and_transpose(std::uint8_t min, std::uint8_t max_val, std::int16_t transpose_val) noexcept :
 	min_val(min), max_val(max_val), transpose_val(transpose_val) {
 }

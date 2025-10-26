@@ -70,7 +70,9 @@ inline std::pair<std::istream*, FILE*> open_wide_stream<std::istream, std::ios_b
 	//return { istream, nullptr }; // IN c++26 there will be native_handle() call, for now just return nullptr
 }
 // is only needed for MinGW/GCC 
-#elif defined(__MINGW32__) 
+#elif defined(__MINGW32__) || defined(__GNUC__)
+
+#include <ext/stdio_filebuf.h>
 
 template<typename __inner_stream_type, decltype(std::ios_base::out) stream_io_type = std::ios_base::out>
 inline std::pair<__inner_stream_type*, FILE*> open_wide_stream(

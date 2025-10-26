@@ -304,7 +304,7 @@ void RenderMainWindow()
 
 			ImGui::Text("%s", thread_data_copy.first->visible_filename.c_str());
 			ImGui::SameLine();
-			ImGui::ProgressBar(0.5f, {}, progress_bar_string.c_str());
+			ImGui::ProgressBar(progress, {}, progress_bar_string.c_str());
 			ImGui::Text("%s", last_text.c_str());
 			if (!last_warning.empty())
 				ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.5f, 1.0f), "%s", last_warning.c_str());

@@ -2,6 +2,7 @@
 
 #include <fstream>
 #include <filesystem>
+#include <string>
 
 #include "midi_collection_merger.h"
 
