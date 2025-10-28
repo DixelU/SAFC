@@ -19,9 +19,9 @@ static ImGuiSelectionBasicStorage midi_selection;
 static ImGuiMultiSelectIO* ms_io;
 
 static int midi_settings_modes = 0;
-static char it_ppq[256] = "1920";
+static char it_ppq[256] = "1920"; // for later : set global ppq to max of all loaded midis
 static char it_offset[380] = "0";
-static char it_tempo[380] = "120";
+static char it_tempo[380] = "120"; // todo no tempo overrides by default
 
 static bool temp = false;
 
@@ -42,7 +42,7 @@ void ThrowAlert_Info(std::string&& AlertText)
 	safc_globals::alert_queue.push_back({ std::move(AlertText), "Info", safc_globals::alert_queue_item::alert_type::info });
 }
 
-void AddFiles(const std::vector<std_unicode_string>& filenames) 
+void AddFiles(std::vector<std_unicode_string> filenames) 
 {
 	std::unique_lock lock(safc_globals::global_lock);
 
@@ -55,6 +55,8 @@ void AddFiles(const std::vector<std_unicode_string>& filenames)
 
 		safc_globals::midi_list.emplace_back(std::move(meta));
 	}
+
+	subdivide_into_equal_groups(safc_globals::midi_list, safc_globals::thread_count);
 }
 
 void RenderMainWindow()
@@ -93,6 +95,7 @@ void RenderMainWindow()
 						for (int idx : selected_indices)
 							safc_globals::midi_list.erase(safc_globals::midi_list.begin() + idx);
 
+						subdivide_into_equal_groups(safc_globals::midi_list, safc_globals::thread_count);
 						// call thread id reassign procedure here
 					});
 				

@@ -66,7 +66,7 @@ std::vector<std_unicode_string> OpenFileDlg(const cchar_t* Title)
 			case CDERR_MEMALLOCFAILURE:	log_error("CDERR_MEMALLOCFAILURE\n"); break;
 			case CDERR_MEMLOCKFAILURE:	log_error("CDERR_MEMLOCKFAILURE\n"); break;
 			case CDERR_NOHINSTANCE:		log_error("CDERR_NOHINSTANCE\n"); break;
-			case CDERR_NOHOOK:		    log_error("CDERR_NOHOOK\n"); break;
+			case CDERR_NOHOOK:		log_error("CDERR_NOHOOK\n"); break;
 			case CDERR_NOTEMPLATE:		log_error("CDERR_NOTEMPLATE\n"); break;
 			case CDERR_STRUCTSIZE:		log_error("CDERR_STRUCTSIZE\n"); break;
 			case FNERR_BUFFERTOOSMALL:	log_error("FNERR_BUFFERTOOSMALL\n"); break;
@@ -109,7 +109,7 @@ std::wstring SaveFileDlg(const cchar_t* Title)
 			case CDERR_MEMALLOCFAILURE:	log_error("CDERR_MEMALLOCFAILURE\n"); break;
 			case CDERR_MEMLOCKFAILURE:	log_error("CDERR_MEMLOCKFAILURE\n"); break;
 			case CDERR_NOHINSTANCE:		log_error("CDERR_NOHINSTANCE\n"); break;
-			case CDERR_NOHOOK:		    log_error("CDERR_NOHOOK\n"); break;
+			case CDERR_NOHOOK:		log_error("CDERR_NOHOOK\n"); break;
 			case CDERR_NOTEMPLATE:		log_error("CDERR_NOTEMPLATE\n"); break;
 			case CDERR_STRUCTSIZE:		log_error("CDERR_STRUCTSIZE\n"); break;
 			case FNERR_BUFFERTOOSMALL:	log_error("FNERR_BUFFERTOOSMALL\n"); break;
@@ -124,57 +124,63 @@ std::wstring SaveFileDlg(const cchar_t* Title)
 // The stuff on linux
 std::vector<std_unicode_string> OpenFileDlg(const cchar_t* Title)
 {
-    std::ostringstream zenity_cmd;
-    std::vector<std_unicode_string> files;
-    zenity_cmd << "zenity --file-selection --multiple --file-filter='.mid' --title='" << Title << "'";
-    
-    FILE* pipe = popen(zenity_cmd.str().c_str(), "r");
-    if(!pipe)
-    {
-        log_error("popen() Failed\n");
-        return {};
-    }
-    
-    char buffer[256];
-    std::string files_raw_str;
-    while(fgets(buffer, sizeof(buffer), pipe) != nullptr)
-        files_raw_str += buffer;
-    
-    std::stringstream ss(files_raw_str);
-    std::string file_path;
-    
-    while(std::getline(ss, file_path, '|'))
-        files.push_back(file_path);
-    
-    pclose(pipe);
-    
-    
-    return files;
+	std::ostringstream zenity_cmd;
+	zenity_cmd << "zenity --file-selection --multiple --file-filter='MIDI files (mid, midi) | *.midi *.MID *.mid' --file-filter='All files | *' --title='" << Title << "'";
+	
+	FILE* pipe = popen(zenity_cmd.str().c_str(), "r");
+	if(!pipe)
+	{
+		log_error("popen() Failed\n");
+		return {};
+	}
+	
+	char buffer[256];
+	std::string files_raw_str;
+	while(fgets(buffer, sizeof(buffer), pipe) != nullptr)
+		files_raw_str += buffer;
+	
+	std::stringstream ss(files_raw_str);
+	std::string file_path;
+
+	std::vector<std_unicode_string> files;
+	while (std::getline(ss, file_path, '|'))
+	{
+		log_info("Selected file: %s", file_path.c_str());
+
+		if (!file_path.empty() && file_path.back() == '\n')
+			file_path.pop_back();
+
+		files.push_back(file_path);
+	}
+	
+	pclose(pipe);
+	
+	return files;
 };
 
 std_unicode_string SaveFileDlg(const cchar_t* Title)
 { 
-    std::ostringstream zenity_cmd;
-    zenity_cmd << "zenity --file-selection --save --file-filter='.mid' --title='" << Title << "'";
-    
-    FILE* pipe = popen(zenity_cmd.str().c_str(), "r");
-    if(!pipe)
-    {
-        log_error("popen() Failed\n");
-        return "";
-    }
-    
-    char buffer[256];
-    std::string save_file_path;
-    while(fgets(buffer, sizeof(buffer), pipe) != nullptr)
-    {
-        std::string line(buffer);
-        if(!line.empty() && line.back() == '\n')
-            line.pop_back();  // remove newline
-        save_file_path += line;
-    }
-    
-    return save_file_path;
+	std::ostringstream zenity_cmd;
+	zenity_cmd << "zenity --file-selection --save --file-filter='MIDI files (mid, midi) | *.mid' --title='" << Title << "'";
+	
+	FILE* pipe = popen(zenity_cmd.str().c_str(), "r");
+	if(!pipe)
+	{
+		log_error("popen() Failed\n");
+		return "";
+	}
+	
+	char buffer[256];
+	std::string save_file_path;
+	while(fgets(buffer, sizeof(buffer), pipe) != nullptr)
+	{
+		std::string line(buffer);
+		if(!line.empty() && line.back() == '\n')
+			line.pop_back();  // remove newline
+		save_file_path += line;
+	}
+	
+	return save_file_path;
 }
 
 #endif

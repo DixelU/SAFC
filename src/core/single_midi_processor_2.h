@@ -89,7 +89,7 @@ public:
 namespace 
 {
 	using base_type = std::uint8_t;
-	FORCEDINLINE static void ostream_write(std::vector<base_type>& vec, std::ostream& out)
+	static void ostream_write(std::vector<base_type>& vec, std::ostream& out)
 	{
 		out.write(((char*)vec.data()), vec.size());;
 	}

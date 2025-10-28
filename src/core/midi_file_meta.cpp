@@ -1,5 +1,7 @@
 #include "midi_file_meta.h"
 
+#include <cmath>
+
 #include "fast_midi_checker.h"
 #include "../globals.h"
 
@@ -50,4 +52,41 @@ bool midi_file_meta::set(std_unicode_string file)
 	settings.thread_id = 0;
 
 	return true;
+}
+
+void subdivide_into_equal_groups(std::deque<midi_file_meta>& midis, uint32_t threads_count)
+{
+	struct _SFD_RSP
+	{
+		std::uint32_t idx;
+		std::uint64_t size;
+
+		_SFD_RSP(std::uint32_t idx, std::uint64_t size): 
+			idx(idx), size(size) {}
+
+		inline bool operator<(const _SFD_RSP& a) const { return size < a.size || (size == a.size && idx < a.idx); }
+	};
+
+	if (midis.size() < 2)
+		return;
+
+	std::vector<_SFD_RSP> sizes;
+	std::vector<std::uint64_t> total_size;
+	std::uint64_t accumulator = 0;
+
+	for (int i = 0; i < midis.size(); i++)
+		sizes.emplace_back(i, midis[i].processing_data->settings.details.initial_filesize);
+
+	std::sort(sizes.begin(), sizes.end());
+
+	for (int i = 0; i < sizes.size(); i++)
+		total_size.push_back((accumulator += sizes[i].size));
+
+	for (int i = 0; i < total_size.size(); i++)
+	{
+		// basically rounds up fraction of cumulative midis size to total size up to this midi
+		// and assigns a group id just to that times number of threads // bruhst // legacy safc code but works good
+		midis[sizes[i].idx].processing_data->settings.details.group_id = 
+			(std::uint16_t)(std::ceil(((float)total_size[i] / ((float)total_size.back())) * threads_count) - 1.f);
+	}
 }

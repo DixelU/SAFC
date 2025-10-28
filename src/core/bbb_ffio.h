@@ -51,7 +51,7 @@ inline std::pair<std::ostream*, FILE*> open_wide_stream<std::ostream, std::ios_b
 	std_unicode_string filename, const cchar_t* parameter)
 {
 	FILE* file_ptr = nullptr;
-	_wfopen_s(&file_ptr, filename.c_str(), to_cchar_t("wb"));
+	fopen_wrap(file_ptr, filename.c_str(), to_cchar_t("wb"));
 	return { new std::ofstream(file_ptr), file_ptr };
 	
 	//std::ostream* ostream = new std::ofstream(filename, std::ios_base::out | std::ios_base::binary);
@@ -63,12 +63,13 @@ inline std::pair<std::istream*, FILE*> open_wide_stream<std::istream, std::ios_b
 	std_unicode_string filename, const cchar_t* parameter)
 {
 	FILE* file_ptr = nullptr;
-	_wfopen_s(&file_ptr, filename.c_str(), to_cchar_t("rb"));
+	fopen_wrap(file_ptr, filename.c_str(), to_cchar_t("rb"));
 	return { new std::ifstream(file_ptr), file_ptr };
 
 	//std::istream* istream = new std::ifstream(filename, std::ios_base::in | std::ios_base::binary);
 	//return { istream, nullptr }; // IN c++26 there will be native_handle() call, for now just return nullptr
 }
+
 // is only needed for MinGW/GCC 
 #elif defined(__MINGW32__) || defined(__GNUC__)
 
@@ -78,8 +79,8 @@ template<typename __inner_stream_type, decltype(std::ios_base::out) stream_io_ty
 inline std::pair<__inner_stream_type*, FILE*> open_wide_stream(
 	std::string file, const cchar_t* parameter)
 {
-	FILE* c_file;
-	fopen_wrap(c_file, file.c_str(), parameter);
+	FILE* c_file = nullptr;
+	auto cur_errno = fopen_wrap(c_file, file.c_str(), parameter);
 
 	auto buffer = new __gnu_cxx::stdio_filebuf<cchar_t>(c_file, stream_io_type, 100000);
 	

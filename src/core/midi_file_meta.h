@@ -21,4 +21,6 @@ struct midi_file_meta
 	// whatever, probably a bunch of settings
 };
 
+void subdivide_into_equal_groups(std::deque<midi_file_meta>& midis, uint32_t threads_count);
+
 #endif // !SAF_MIDI_FILE_META
