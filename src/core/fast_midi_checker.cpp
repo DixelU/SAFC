@@ -63,7 +63,6 @@ void fast_midi_checker::collect() noexcept
 	else
 	{
 		is_midi = false;
-		ThrowAlert_Error("Error accured while getting the MIDI file info!");
 		if (fo_ptr)
 			fclose(fo_ptr);
 	}

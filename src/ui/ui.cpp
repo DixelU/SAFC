@@ -46,15 +46,29 @@ void AddFiles(std::vector<std_unicode_string> filenames)
 {
 	std::unique_lock lock(safc_globals::global_lock);
 
+	bool changed = false;
 	for (auto& file : filenames)
 	{
+		if (file.empty())
+			continue;
+
 		midi_file_meta meta;
-		meta.set(file);
+		bool success = meta.set(file);
 
-		log_info("File: %s", meta.visible_path.c_str());
+		log_info("File: %s, status %i", meta.visible_path.c_str(), (int)success);
 
+		if (!success)
+		{
+			ThrowAlert_Warning(std::format("Failed to load MIDI file: '{}'", meta.visible_path));
+			continue;
+		}
+
+		changed = true;
 		safc_globals::midi_list.emplace_back(std::move(meta));
 	}
+
+	if(!changed)
+		return;
 
 	subdivide_into_equal_groups(safc_globals::midi_list, safc_globals::thread_count);
 }

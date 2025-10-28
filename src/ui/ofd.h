@@ -13,7 +13,6 @@ std::vector<std_unicode_string> OpenFileDlg(const cchar_t* Title)
 {
 	OPENFILENAME ofn;
 	cchar_t szFile[50000];
-	std::vector<std_unicode_string> InpLinks;
 	ZeroMemory(&ofn, sizeof(ofn));
 	ZeroMemory(szFile, 50000 * sizeof(cchar_t));
 	ofn.lStructSize = sizeof(ofn);
@@ -29,12 +28,14 @@ std::vector<std_unicode_string> OpenFileDlg(const cchar_t* Title)
 	ofn.lpstrInitialDir = NULL;
 	ofn.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST | OFN_ALLOWMULTISELECT | OFN_EXPLORER;
 
+	std::vector<std_unicode_string> paths;
+
 	if (GetOpenFileName(&ofn))
 	{
-		std::wstring Link = L"", Gen = L"";
+		std::wstring path = L"", Gen = L"";
 		int i = 0, counter = 0;
 		for (; i < 600 && szFile[i] != '\0'; i++)
-			Link.push_back(szFile[i]);
+			path.push_back(szFile[i]);
 
 		for (; i < 49998;)
 		{
@@ -45,13 +46,13 @@ std::vector<std_unicode_string> OpenFileDlg(const cchar_t* Title)
 			i++;
 			if (szFile[i] == '\0')
 			{
-				if (counter == 1) InpLinks.push_back(Link);
-				else InpLinks.push_back(Link + L"\\" + Gen);
+				if (counter == 1) paths.push_back(path);
+				else paths.push_back(path + L"\\" + Gen);
 				break;
 			}
-			else if (Gen != L"")InpLinks.push_back(Link + L"\\" + Gen);
+			else if (Gen != L"")paths.push_back(path + L"\\" + Gen);
 		}
-		return InpLinks;
+		return paths;
 	}
 	else
 	{
@@ -119,6 +120,7 @@ std::wstring SaveFileDlg(const cchar_t* Title)
 		return L"";
 	}
 }
+
 #else
 
 // The stuff on linux
