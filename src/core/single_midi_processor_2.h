@@ -21,8 +21,8 @@
 #include "bbb_ffio.h"
 #include "header_utils.h"
 
-#include "PLC.h"
-#include "CAT.h"
+#include "polyline_converter.h"
+#include "cut_and_transpose.h"
 
 #include "function_wrapper.h"
 
@@ -30,7 +30,7 @@ struct logger_base
 {
 	virtual ~logger_base() = default;
 	virtual void operator<<(std::string&& message) {};
-	virtual std::string getLast() const { return ""; };
+	virtual std::string get_last() const { return ""; };
 };
 
 struct logger :
@@ -46,7 +46,7 @@ public:
 		std::lock_guard locker(mtx);
 		messages.push_back(std::move(message));
 	}
-	std::string getLast() const override
+	std::string get_last() const override
 	{
 		std::lock_guard locker(mtx);
 		return (messages.size()) ? messages.back() : "";
@@ -66,7 +66,7 @@ public:
 		std::lock_guard locker(mtx);
 		this->message = std::move(message);
 	}
-	std::string getLast() const override
+	std::string get_last() const override
 	{
 		std::lock_guard locker(mtx);
 		return message;
@@ -89,7 +89,7 @@ public:
 namespace 
 {
 	using base_type = std::uint8_t;
-	FORCEDINLINE static void ostream_write(std::vector<base_type>& vec, std::ostream& out)
+	static void ostream_write(std::vector<base_type>& vec, std::ostream& out)
 	{
 		out.write(((char*)vec.data()), vec.size());;
 	}
@@ -346,7 +346,7 @@ struct single_midi_processor_2
 			double tempo_multiplier;
 			metasize_type tempo_override_value;
 			tempo_override():
-				tempo_override_value(single_track_data::selection::default_tempo), tempo_multiplier(1)
+				tempo_override_value(~0U), tempo_multiplier(1)
 			{
 			}
 			inline void set_override_value(double tempo)
@@ -355,9 +355,11 @@ struct single_midi_processor_2
 			}
 			inline metasize_type process(metasize_type a) const 
 			{
-				if (tempo_override_value != single_track_data::selection::default_tempo)
+				if (tempo_multiplier != 1)
+					return (std::min)((metasize_type)(a / tempo_multiplier), 0xFFFF7Fu);
+				if (tempo_override_value != ~0U)
 					return tempo_override_value;
-				return (std::min)((metasize_type)(a / tempo_multiplier), 0xFFFF7Fu);
+				return single_track_data::selection::default_tempo;
 			}
 		};
 
@@ -407,7 +409,7 @@ struct single_midi_processor_2
 		std_unicode_string filename;
 		std_unicode_string postfix;
 
-		std::string appearance_filename;
+		std::string visible_filename;
 		std::atomic_uint64_t tracks_count;
 	};
 

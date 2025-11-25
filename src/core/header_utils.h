@@ -46,8 +46,6 @@ inline std_unicode_string default_reg_path = to_cchar_t("Software\\SAFC\\");
 
 inline std::string default_font_name = "Arial";
 
-#define TRY_CATCH(code,msg) try{code}catch(...){std::cout<<msg<<std::endl;}
-
 #ifdef _MSC_VER
 #define FORCEDINLINE __forceinline
 #else
@@ -92,7 +90,8 @@ OnDestroyExecutor<OnDestroyFunctor> makeOnDestroyExecutor(OnDestroyFunctor&& fun
 
 void ThrowAlert_Error(std::string&& AlertText);
 void ThrowAlert_Warning(std::string&& AlertText);
-void AddFiles(const std::vector<std_unicode_string>& Filenames);
+void ThrowAlert_Info(std::string&& AlertText);
+void AddFiles(std::vector<std_unicode_string> Filenames);
 #pragma warning(disable : 4996)
 
 #define MD_CASE(value) case (value): case ((value|1))

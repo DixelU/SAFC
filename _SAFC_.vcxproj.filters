@@ -6,17 +6,34 @@
     <ClCompile Include="externals\**\*.c" />
     <ClCompile Include="externals\**\*.c" />
     <ClCompile Include="src\main.cpp" />
-    <ClCompile Include="src\ui\ui.cpp" />
-    <ClCompile Include="src\ui_entry.cpp" />
     <ClCompile Include="externals\**\*.cpp" />
     <ClCompile Include="externals\**\*.c" />
     <ClCompile Include="externals\**\*.cpp" />
     <ClCompile Include="externals\**\*.c" />
     <ClCompile Include="externals\**\*.cpp" />
     <ClCompile Include="externals\**\*.c" />
-    <ClCompile Include="src\core\midi_file_meta.cpp" />
     <ClCompile Include="src\core\mocs.cpp">
       <Filter>core</Filter>
+    </ClCompile>
+    <ClCompile Include="externals\**\*.cpp" />
+    <ClCompile Include="externals\**\*.c" />
+    <ClCompile Include="src\core\fast_midi_checker.cpp">
+      <Filter>core</Filter>
+    </ClCompile>
+    <ClCompile Include="src\core\cut_and_transpose.cpp">
+      <Filter>core</Filter>
+    </ClCompile>
+    <ClCompile Include="src\core\background_worker.cpp">
+      <Filter>core</Filter>
+    </ClCompile>
+    <ClCompile Include="src\core\midi_file_meta.cpp">
+      <Filter>core</Filter>
+    </ClCompile>
+    <ClCompile Include="src\ui\ui.cpp">
+      <Filter>ui</Filter>
+    </ClCompile>
+    <ClCompile Include="src\ui_entry.cpp">
+      <Filter>ui</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -29,18 +46,18 @@
     <Filter Include="core">
       <UniqueIdentifier>{6b7b3ee3-fe55-46e9-ad9a-b859d6d14d58}</UniqueIdentifier>
     </Filter>
+    <Filter Include="ui">
+      <UniqueIdentifier>{cc4cfd86-42cb-47a8-854f-83e604c857e1}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="src\core\bbb_ffio.h">
       <Filter>core</Filter>
     </ClInclude>
-    <ClInclude Include="src\core\BS.h">
+    <ClInclude Include="src\core\cut_and_transpose.h">
       <Filter>core</Filter>
     </ClInclude>
-    <ClInclude Include="src\core\CAT.h">
-      <Filter>core</Filter>
-    </ClInclude>
-    <ClInclude Include="src\core\FMC.h">
+    <ClInclude Include="src\core\fast_midi_checker.h">
       <Filter>core</Filter>
     </ClInclude>
     <ClInclude Include="src\core\function_wrapper.h">
@@ -49,30 +66,34 @@
     <ClInclude Include="src\core\header_utils.h">
       <Filter>core</Filter>
     </ClInclude>
-    <ClInclude Include="src\core\HTDBR.h">
+    <ClInclude Include="src\core\midi_collection_merger.h">
       <Filter>core</Filter>
     </ClInclude>
-    <ClInclude Include="src\core\MCTM.h">
+    <ClInclude Include="src\core\polyline_converter.h">
       <Filter>core</Filter>
     </ClInclude>
-    <ClInclude Include="src\core\PLC.h">
+    <ClInclude Include="src\core\single_midi_info_collector.h">
       <Filter>core</Filter>
     </ClInclude>
-    <ClInclude Include="src\core\SMIC.h">
-      <Filter>core</Filter>
-    </ClInclude>
-    <ClInclude Include="src\core\SMRP.h">
-      <Filter>core</Filter>
-    </ClInclude>
-    <ClInclude Include="src\core\SMRP2.h">
-      <Filter>core</Filter>
-    </ClInclude>
-    <ClInclude Include="src\core\SAFC_IM.h">
+    <ClInclude Include="src\core\single_midi_processor_2.h">
       <Filter>core</Filter>
     </ClInclude>
     <ClInclude Include="resource.h" />
     <ClInclude Include="src\core\midi_file_meta.h">
       <Filter>core</Filter>
+    </ClInclude>
+    <ClInclude Include="src\globals.h" />
+    <ClInclude Include="src\core\background_worker.h">
+      <Filter>core</Filter>
+    </ClInclude>
+    <ClInclude Include="src\ui\fonts.h">
+      <Filter>ui</Filter>
+    </ClInclude>
+    <ClInclude Include="src\ui\ofd.h">
+      <Filter>ui</Filter>
+    </ClInclude>
+    <ClInclude Include="src\ui\ui.hpp">
+      <Filter>ui</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
