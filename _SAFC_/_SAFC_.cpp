@@ -400,7 +400,7 @@ struct FileSettings
 	bool
 		IsMIDI,
 		InplaceMergeEnabled,
-		AllowLegacyRunningStatusMetaBehaviour,
+		allow_legacy_rsb_meta_interaction,
 		RSBCompression,
 		ChannelsSplit,
 		CollapseMIDI,
@@ -440,7 +440,7 @@ struct FileSettings
 		WFileNamePostfix = L"_.mid";
 		RSBCompression = ChannelsSplit = false;
 		CollapseMIDI = true;
-		AllowLegacyRunningStatusMetaBehaviour = false;
+		allow_legacy_rsb_meta_interaction = false;
 		ApplyOffsetAfter = true;
 	}
 
@@ -490,7 +490,7 @@ struct FileSettings
 		settings.proc_details.whole_midi_collapse = CollapseMIDI;
 		settings.proc_details.apply_offset_after = ApplyOffsetAfter;
 		settings.legacy.enable_zero_velocity = EnableZeroVelocity;
-		settings.legacy.ignore_meta_rsb = AllowLegacyRunningStatusMetaBehaviour;
+		settings.legacy.ignore_meta_rsb = allow_legacy_rsb_meta_interaction;
 		settings.legacy.rsb_compression = RSBCompression;
 		settings.filter.pass_sysex = AllowSysex;
 		InplaceMergeEnabled = 
@@ -819,7 +819,7 @@ namespace PropsAndSets
 	std::string* PPQN = new std::string(""), * OFFSET = new std::string(""), * TEMPO = new std::string("");
 	int currentID = -1, CaTID = -1, VMID = -1, PMID = -1;
 	bool ForPersonalUse = true;
-	SingleMIDIInfoCollector* SMICptr = nullptr;
+	single_midi_info_collector* SMICptr = nullptr;
 	std::string CSV_DELIM = ";";
 	void OGPInMIDIList(int ID)
 	{
@@ -855,7 +855,7 @@ namespace PropsAndSets
 			((CheckBox*)((*OSptr)["IMP_FLT_PROGC"]))->State = _Data[ID].BoolSettings & _BoolSettings::imp_filter_allow_progc;
 			((CheckBox*)((*OSptr)["IMP_FLT_OTHER"]))->State = _Data[ID].BoolSettings & _BoolSettings::imp_filter_allow_other;
 
-			((CheckBox*)((*OSptr)["LEGACY_META_RSB_BEHAVIOR"]))->State = _Data[ID].AllowLegacyRunningStatusMetaBehaviour;
+			((CheckBox*)((*OSptr)["LEGACY_META_RSB_BEHAVIOR"]))->State = _Data[ID].allow_legacy_rsb_meta_interaction;
 			((CheckBox*)((*OSptr)["ALLOW_SYSEX"]))->State = _Data[ID].AllowSysex;
 			((CheckBox*)((*OSptr)["ENABLE_ZERO_VELOCITY"]))->State = _Data[ID].EnableZeroVelocity;
 
@@ -889,13 +889,13 @@ namespace PropsAndSets
 			ThrowAlert_Error("How you have managed to select the midi beyond the list? O.o\n" + std::to_string(currentID));
 			return;
 		}
-		auto UIElement = (Graphing<SingleMIDIInfoCollector::tempo_graph>*)(*(*WH)["SMIC"])["TEMPO_GRAPH"];
+		auto UIElement = (Graphing<single_midi_info_collector::tempo_graph>*)(*(*WH)["SMIC"])["TEMPO_GRAPH"];
 		if (SMICptr)
 		{
 			{ std::lock_guard<std::recursive_mutex> locker(UIElement->Lock); }
 			UIElement->Graph = nullptr;
 		}
-		SMICptr = new SingleMIDIInfoCollector(_Data.Files[currentID].Filename, _Data.Files[currentID].OldPPQN, _Data.Files[currentID].AllowLegacyRunningStatusMetaBehaviour);
+		SMICptr = new single_midi_info_collector(_Data.Files[currentID].Filename, _Data.Files[currentID].OldPPQN, _Data.Files[currentID].allow_legacy_rsb_meta_interaction);
 		std::thread th([]()
 		{
 			WH->MainWindow_ID = "SMIC";
@@ -906,7 +906,7 @@ namespace PropsAndSets
 				auto TG_Exp = (*(*WH)["SMIC"])["TG_EXP"];
 				auto ITicks = (*(*WH)["SMIC"])["INTEGRATE_TICKS"];
 				auto ITime = (*(*WH)["SMIC"])["INTEGRATE_TIME"];
-				auto ErrorLine = (TextBox*)(*(*WH)["SMIC"])["FEL"];
+				auto error_line = (TextBox*)(*(*WH)["SMIC"])["FEL"];
 				auto InfoLine = (TextBox*)(*(*WH)["SMIC"])["FLL"];
 				auto Delim = (InputField*)(*(*WH)["SMIC"])["DELIM"];
 				auto UIMinutes = (InputField*)(*(*WH)["SMIC"])["INT_MIN"];
@@ -915,8 +915,8 @@ namespace PropsAndSets
 				auto UIP = (InputField*)(*(*WH)["SMIC"])["PG_SWITCH"];
 				auto UIMilliseconds = (InputField*)(*(*WH)["SMIC"])["INT_MSC"];
 				auto UITicks = (InputField*)(*(*WH)["SMIC"])["INT_TIC"];
-				auto UIElement_TG = (Graphing<SingleMIDIInfoCollector::tempo_graph>*)(*(*WH)["SMIC"])["TEMPO_GRAPH"];
-				auto UIElement_PG = (Graphing<SingleMIDIInfoCollector::polyphony_graph>*)(*(*WH)["SMIC"])["POLY_GRAPH"];
+				auto UIElement_TG = (Graphing<single_midi_info_collector::tempo_graph>*)(*(*WH)["SMIC"])["TEMPO_GRAPH"];
+				auto UIElement_PG = (Graphing<single_midi_info_collector::polyphony_graph>*)(*(*WH)["SMIC"])["POLY_GRAPH"];
 				UIElement_PG->Enabled = false;
 				UIElement_PG->Reset();
 				UIElement_TG->Enabled = false;
@@ -934,12 +934,12 @@ namespace PropsAndSets
 				TG_Exp->Disable();
 				ITicks->Disable();
 				ITime->Disable();
-				while (!SMICptr->Finished)
+				while (!SMICptr->finished)
 				{
-					if (ErrorLine->Text != SMICptr->ErrorLine)
-						ErrorLine->SafeStringReplace(SMICptr->ErrorLine);
-					if (InfoLine->Text != SMICptr->LogLine)
-						InfoLine->SafeStringReplace(SMICptr->LogLine);
+					if (error_line->Text != SMICptr->error_line)
+						error_line->SafeStringReplace(SMICptr->error_line);
+					if (InfoLine->Text != SMICptr->log_line)
+						InfoLine->SafeStringReplace(SMICptr->log_line);
 					Sleep(10);
 				}
 				InfoLine->SafeStringReplace("Finished");
@@ -950,15 +950,15 @@ namespace PropsAndSets
 			});
 			ith.detach();
 
-			SMICptr->Lookup();
-			auto UIElement_TG = (Graphing<SingleMIDIInfoCollector::tempo_graph>*)(*(*WH)["SMIC"])["TEMPO_GRAPH"];
-			UIElement_TG->Graph = &(SMICptr->TempoMap);
-			auto UIElement_PG = (Graphing<SingleMIDIInfoCollector::polyphony_graph>*)(*(*WH)["SMIC"])["POLY_GRAPH"];
-			UIElement_PG->Graph = &(SMICptr->Polyphony);
+			SMICptr->fetch_data();
+			auto UIElement_TG = (Graphing<single_midi_info_collector::tempo_graph>*)(*(*WH)["SMIC"])["TEMPO_GRAPH"];
+			UIElement_TG->Graph = &(SMICptr->tempo_map);
+			auto UIElement_PG = (Graphing<single_midi_info_collector::polyphony_graph>*)(*(*WH)["SMIC"])["POLY_GRAPH"];
+			UIElement_PG->Graph = &(SMICptr->polyphony);
 
 			auto UIElement_TB = (TextBox*)(*(*WH)["SMIC"])["TOTAL_INFO"];
 			UIElement_TB->SafeStringReplace(
-				"Total (real) tracks: " + std::to_string(SMICptr->Tracks.size()) + "; ... "
+				"Total (real) tracks: " + std::to_string(SMICptr->tracks.size()) + "; ... "
 			);
 
 			WH->MainWindow_ID = "MAIN";
@@ -972,7 +972,7 @@ namespace PropsAndSets
 	{
 		void EnablePG()
 		{
-			auto UIElement_PG = (Graphing<SingleMIDIInfoCollector::polyphony_graph>*)(*(*WH)["SMIC"])["POLY_GRAPH"];
+			auto UIElement_PG = (Graphing<single_midi_info_collector::polyphony_graph>*)(*(*WH)["SMIC"])["POLY_GRAPH"];
 			auto UIElement_Butt = (Button*)(*(*WH)["SMIC"])["PG_SWITCH"];
 			if (UIElement_PG->Enabled)
 				UIElement_Butt->SafeStringReplace("Enable graph B");
@@ -982,7 +982,7 @@ namespace PropsAndSets
 		}
 		void EnableTG()
 		{
-			auto UIElement_TG = (Graphing<SingleMIDIInfoCollector::tempo_graph>*)(*(*WH)["SMIC"])["TEMPO_GRAPH"];
+			auto UIElement_TG = (Graphing<single_midi_info_collector::tempo_graph>*)(*(*WH)["SMIC"])["TEMPO_GRAPH"];
 			auto UIElement_Butt = (Button*)(*(*WH)["SMIC"])["TG_SWITCH"];
 			if (UIElement_TG->Enabled)
 				UIElement_Butt->SafeStringReplace("Enable graph A");
@@ -992,12 +992,12 @@ namespace PropsAndSets
 		}
 		void ResetTG()
 		{//TEMPO_GRAPH
-			auto UIElement_TG = (Graphing<SingleMIDIInfoCollector::tempo_graph>*)(*(*WH)["SMIC"])["TEMPO_GRAPH"];
+			auto UIElement_TG = (Graphing<single_midi_info_collector::tempo_graph>*)(*(*WH)["SMIC"])["TEMPO_GRAPH"];
 			UIElement_TG->Reset();
 		}
 		void ResetPG()
 		{//TEMPO_GRAPH
-			auto UIElement_PG = (Graphing<SingleMIDIInfoCollector::tempo_graph>*)(*(*WH)["SMIC"])["POLY_GRAPH"];
+			auto UIElement_PG = (Graphing<single_midi_info_collector::tempo_graph>*)(*(*WH)["SMIC"])["POLY_GRAPH"];
 			UIElement_PG->Reset();
 		}
 		void SwitchPersonalUse()
@@ -1017,9 +1017,9 @@ namespace PropsAndSets
 				WH->DisableAllWindows();
 				auto InfoLine = (TextBox*)(*(*WH)["SMIC"])["FLL"];
 				InfoLine->SafeStringReplace("Graph A is exporting...");
-				std::ofstream out(SMICptr->FileName + L".tg.csv");
+				std::ofstream out(SMICptr->filename + L".tg.csv");
 				out << "tick" << CSV_DELIM << "tempo" << '\n';
-				for (auto& cur_pair : SMICptr->TempoMap)
+				for (auto& cur_pair : SMICptr->tempo_map)
 					out << cur_pair.first << CSV_DELIM << cur_pair.second << '\n';
 				out.close();
 				WH->MainWindow_ID = "MAIN";
@@ -1040,13 +1040,13 @@ namespace PropsAndSets
 
 				using line_data = struct
 				{
-					std::int64_t Polyphony;
+					std::int64_t polyphony;
 					double Seconds;
 					double Tempo;
 				};
 
-				std::int64_t Polyphony = 0;
-				std::uint16_t PPQ = SMICptr->PPQ;
+				std::int64_t polyphony = 0;
+				std::uint16_t ppq = SMICptr->ppq;
 				std::int64_t last_tick = 0;
 				std::string header = "";
 				double tempo = 0;
@@ -1059,19 +1059,19 @@ namespace PropsAndSets
 					+ "Tempo"
 					+ "\n");
 				btree::btree_map<std::int64_t, line_data> info;
-				for (auto& cur_pair : SMICptr->Polyphony)
+				for (auto& cur_pair : SMICptr->polyphony)
 					info[cur_pair.first] = line_data({
 						cur_pair.second, 0., 0.
 						});
-				auto it_ptree = SMICptr->Polyphony.begin();
-				for (auto cur_pair : SMICptr->TempoMap)
+				auto it_ptree = SMICptr->polyphony.begin();
+				for (auto cur_pair : SMICptr->tempo_map)
 				{
-					while (it_ptree != SMICptr->Polyphony.end() && it_ptree->first < cur_pair.first)
+					while (it_ptree != SMICptr->polyphony.end() && it_ptree->first < cur_pair.first)
 					{
 						seconds += seconds_per_tick * (it_ptree->first - last_tick);
 						last_tick = it_ptree->first;
 						auto& t = info[it_ptree->first];
-						Polyphony = t.Polyphony;
+						polyphony = t.polyphony;
 						t.Seconds = seconds;
 						t.Tempo = tempo;
 						++it_ptree;
@@ -1082,24 +1082,24 @@ namespace PropsAndSets
 					{
 						seconds += seconds_per_tick * (cur_pair.first - last_tick);
 						info[cur_pair.first] = line_data({
-							Polyphony, seconds, cur_pair.second
+							polyphony, seconds, cur_pair.second
 							});
 					}
 					last_tick = cur_pair.first;
 					tempo = cur_pair.second;
-					seconds_per_tick = (60 / (tempo * PPQ));
+					seconds_per_tick = (60 / (tempo * ppq));
 				}
-				while (it_ptree != SMICptr->Polyphony.end())
+				while (it_ptree != SMICptr->polyphony.end())
 				{
 					seconds += seconds_per_tick * (it_ptree->first - last_tick);
 					last_tick = it_ptree->first;
 					auto& t = info[it_ptree->first];
-					Polyphony = t.Polyphony;
+					polyphony = t.polyphony;
 					t.Seconds = seconds;
 					t.Tempo = tempo;
 					++it_ptree;
 				}
-				std::ofstream out(SMICptr->FileName + ((ForPersonalUse) ? L".a.csv" : L".atraw"),
+				std::ofstream out(SMICptr->filename + ((ForPersonalUse) ? L".a.csv" : L".atraw"),
 					((ForPersonalUse) ? (std::ios::out) : (std::ios::out | std::ios::binary))
 				);
 				if (ForPersonalUse)
@@ -1108,7 +1108,7 @@ namespace PropsAndSets
 					for (auto& cur_pair : info)
 					{
 						out << cur_pair.first << CSV_DELIM
-							<< cur_pair.second.Polyphony << CSV_DELIM
+							<< cur_pair.second.polyphony << CSV_DELIM
 							<< cur_pair.second.Seconds << CSV_DELIM
 							<< cur_pair.second.Tempo << std::endl;
 					}
@@ -1118,7 +1118,7 @@ namespace PropsAndSets
 					for (auto& cur_pair : info)
 					{
 						out.write((const char*)(&cur_pair.first), 8);
-						out.write((const char*)(&cur_pair.second.Polyphony), 8);
+						out.write((const char*)(&cur_pair.second.polyphony), 8);
 						out.write((const char*)(&cur_pair.second.Seconds), 8);
 						out.write((const char*)(&cur_pair.second.Tempo), 8);
 					}
@@ -1148,13 +1148,13 @@ namespace PropsAndSets
 				std::int64_t prev_tick = 0, cur_tick = 0;
 				double cur_seconds = 0;
 				double prev_second = 0;
-				double PPQ = SMICptr->PPQ;
+				double ppq = SMICptr->ppq;
 				double prev_tempo = 120;
-				std::int64_t last_tick = (*SMICptr->TempoMap.rbegin()).first;
-				for (auto& cur_pair : SMICptr->TempoMap/*; cur_pair != SMICptr->TempoMap.end(); cur_pair++*/)
+				std::int64_t last_tick = (*SMICptr->tempo_map.rbegin()).first;
+				for (auto& cur_pair : SMICptr->tempo_map/*; cur_pair != SMICptr->tempo_map.end(); cur_pair++*/)
 				{
 					cur_tick = cur_pair.first;
-					cur_seconds += (cur_tick - prev_tick) * (60 / (prev_tempo * PPQ));
+					cur_seconds += (cur_tick - prev_tick) * (60 / (prev_tempo * ppq));
 					if (cur_tick > ticks_limit || cur_tick == last_tick)
 						break;
 					prev_tempo = cur_pair.second;
@@ -1202,13 +1202,13 @@ namespace PropsAndSets
 			std::int64_t prev_tick = 0, cur_tick = 0;
 			double cur_seconds = 0;
 			double prev_second = 0;
-			double PPQ = SMICptr->PPQ;
+			double ppq = SMICptr->ppq;
 			double prev_tempo = 120;
-			std::int64_t last_tick = (*SMICptr->TempoMap.rbegin()).first;
-			for (auto& cur_pair : SMICptr->TempoMap/*; cur_pair != SMICptr->TempoMap.end(); cur_pair++*/)
+			std::int64_t last_tick = (*SMICptr->tempo_map.rbegin()).first;
+			for (auto& cur_pair : SMICptr->tempo_map/*; cur_pair != SMICptr->tempo_map.end(); cur_pair++*/)
 			{
 				cur_tick = cur_pair.first;
-				cur_seconds += (cur_tick - prev_tick) * (60 / (prev_tempo * PPQ));
+				cur_seconds += (cur_tick - prev_tick) * (60 / (prev_tempo * ppq));
 				if (cur_seconds > seconds_limit || cur_tick == last_tick)
 					break;
 				prev_tempo = cur_pair.second;
@@ -1287,9 +1287,9 @@ namespace PropsAndSets
 			_Data[currentID].SelectionLength = T;
 		}
 
-		_Data[currentID].AllowLegacyRunningStatusMetaBehaviour = (((CheckBox*)(*OSptr)["LEGACY_META_RSB_BEHAVIOR"])->State);
+		_Data[currentID].allow_legacy_rsb_meta_interaction = (((CheckBox*)(*OSptr)["LEGACY_META_RSB_BEHAVIOR"])->State);
 
-		if (_Data[currentID].AllowLegacyRunningStatusMetaBehaviour)
+		if (_Data[currentID].allow_legacy_rsb_meta_interaction)
 			std::cout << "WARNING: Legacy way of treating running status events can also allow major corruptions of midi structure!" << std::endl;
 
 		_Data[currentID].SetBoolSetting(_BoolSettings::remove_empty_tracks, (((CheckBox*)(*SMPASptr)["BOOL_REM_TRCKS"])->State));
@@ -1334,7 +1334,7 @@ namespace PropsAndSets
 		{
 			DefaultBoolSettings = Y->BoolSettings = _Data[currentID].BoolSettings;
 			_Data.InplaceMergeFlag = Y->InplaceMergeEnabled = _Data[currentID].InplaceMergeEnabled;
-			Y->AllowLegacyRunningStatusMetaBehaviour = _Data[currentID].AllowLegacyRunningStatusMetaBehaviour;
+			Y->allow_legacy_rsb_meta_interaction = _Data[currentID].allow_legacy_rsb_meta_interaction;
 			Y->CollapseMIDI = _Data[currentID].CollapseMIDI;
 			Y->ApplyOffsetAfter = _Data[currentID].ApplyOffsetAfter;
 			Y->AllowSysex = _Data[currentID].AllowSysex;
@@ -2205,10 +2205,10 @@ void Init()
 	T = new MoveableFuiWindow("MIDI Info Collector", System_White, -150, 200, 300, 400, 200, 1.25f, 100, 100, 5, BACKGROUND_OPQ, HEADER, BORDER);
 	(*T)["FLL"] = new TextBox("--File log line--", System_White, 0, -WindowHeaderSize + 185, 15, 285, 10, 0, 0, 0, _Align::left);
 	(*T)["FEL"] = new TextBox("--File error line--", System_Red, 0, -WindowHeaderSize + 175, 15, 285, 10, 0, 0, 0, _Align::left);
-	(*T)["TEMPO_GRAPH"] = new Graphing<SingleMIDIInfoCollector::tempo_graph>(
+	(*T)["TEMPO_GRAPH"] = new Graphing<single_midi_info_collector::tempo_graph>(
 		0, -WindowHeaderSize + 145, 285, 50, (1. / 20000.), true, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F00FF, 0xFFFFFFFF, 0x7F7F7F7F, nullptr, System_White, false
 		);
-	(*T)["POLY_GRAPH"] = new Graphing<SingleMIDIInfoCollector::polyphony_graph>(
+	(*T)["POLY_GRAPH"] = new Graphing<single_midi_info_collector::polyphony_graph>(
 		0, -WindowHeaderSize + 95, 285, 50, (1. / 20000.), true, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F00FF, 0xFFFFFFFF, 0x7F7F7F7F, nullptr, System_White, false
 		);
 	(*T)["PG_SWITCH"] = new Button("Enable graph B", System_White, PropsAndSets::SMIC::EnablePG, 37.5, 60 - WindowHeaderSize, 70, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, System_White, "Polyphony graph");
@@ -2766,7 +2766,7 @@ struct SafcCliRuntime:
 
 			auto ignore_meta_rsb = object.find(L"ignore_meta_rsb");
 			if (ignore_meta_rsb != object.end())
-				_Data.Files[index].AllowLegacyRunningStatusMetaBehaviour = ignore_meta_rsb->second->AsBool();
+				_Data.Files[index].allow_legacy_rsb_meta_interaction = ignore_meta_rsb->second->AsBool();
 
 			auto inplace_mergable = object.find(L"inplace_mergable");
 			if (inplace_mergable != object.end())

@@ -23,6 +23,8 @@
 #include "PLC.h"
 #include "CAT.h"
 
+#include "SMIC.h"
+
 #include "../function_wrapper.h"
 
 struct logger_base
@@ -277,6 +279,8 @@ struct single_midi_processor_2
 		sgtick_type offset;
 		ppq_type old_ppqn;
 		ppq_type new_ppqn;
+		bool flatten = false;
+		single_midi_info_collector::time_graph original_time_map;
 		std::uint32_t thread_id;
 
 		legacy_midi_standard legacy;
@@ -716,7 +720,7 @@ struct single_midi_processor_2
 					continue;
 				}
 
-				//if(com == 0xFF) // damn sysex broke it all >:C
+				//if(com == 0xFF) // damn sysex broke it all >:c
 					//push_back<base_type>(data_buffer, type);
 
 				// 8 tick  1 type  1 metatype (except when sysex)  1 vlv size  4 size  ...<raw meta>~vlv+data
@@ -1379,8 +1383,42 @@ struct single_midi_processor_2
 			return true;
 		};
 
+		const event_transforming_filter flatten_transform = 
+			[&time_map = settings.original_time_map,
+			target_tempo_val = settings.tempo.tempo_override_value]
+		(const data_iterator& begin, const data_iterator& end, const data_iterator& cur, single_track_data& std_ref) -> bool
+		{
+			auto& tick = get_value<tick_type>(cur, tick_position);
+			if (tick == disable_tick)
+				return false;
+
+			using uint128_t = dixelu::long_uint<0>;
+			using uint256_t = dixelu::long_uint<1>;
+			const auto upper_bound = time_map.upper_bound(tick);
+			const auto lhs = std::prev(upper_bound);
+			const auto rhs = (upper_bound == time_map.end()) ? lhs : upper_bound;
+
+			using long_time = decltype(lhs->second);
+
+			// a - coeficient of linear combination
+			uint256_t a_n = tick - lhs->first; // numerator
+			uint256_t a_d = (rhs->first == lhs->first) ? 1 : rhs->first - lhs->first; // denominator
+			// a_d >= a_n >= 0;
+			
+			auto time_numerator = a_n * uint256_t{rhs->second.numerator} + (a_d - a_n) * uint256_t{lhs->second.numerator};
+			auto time_denominator = a_d * target_tempo_val;
+
+			auto new_tick = time_numerator / time_denominator;
+			tick = new_tick.lo.lo; // omg ... 
+
+			return true;
+		};
+
 		filters.emplace( 0, selection_filter );
-		filters.emplace( 0, tick_positive_linear_transform );
+		
+		filters.emplace(0, tick_positive_linear_transform);
+		if (settings.flatten)
+			filters.emplace(0, flatten_transform);
 
 		if (settings.enable_imp_events_filter)
 			filters.emplace( 0, important_events_checker );
