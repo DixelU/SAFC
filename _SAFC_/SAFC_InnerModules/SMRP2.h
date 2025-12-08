@@ -1398,8 +1398,6 @@ struct single_midi_processor_2
 			const auto lhs = std::prev(upper_bound);
 			const auto rhs = (upper_bound == time_map.end()) ? lhs : upper_bound;
 
-			using long_time = decltype(lhs->second);
-
 			// a - coeficient of linear combination
 			uint256_t a_n = tick - lhs->first; // numerator
 			uint256_t a_d = (rhs->first == lhs->first) ? 1 : rhs->first - lhs->first; // denominator
