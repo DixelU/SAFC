@@ -1882,7 +1882,6 @@ void OnStart()
 		std::string temp = "";
 		MW->AddUIElement(temp = "SMRP_C" + std::to_string(ID), Vis);
 
-
 		std::thread([](std::shared_ptr<MIDICollectionThreadedMerger> pMCTM, SMRP_Vis* pVIS, std::uint32_t ID)
 		{
 			std::string SID = "SMRP_C" + std::to_string(ID);

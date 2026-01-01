@@ -274,6 +274,9 @@ struct single_midi_processor_2
 			bool remove_empty_tracks;
 			bool channel_split;
 			bool whole_midi_collapse;
+			bool force_delta_overflow_correction = true;
+
+			constexpr static std::array<base_type, 4> dummy_event = { 0xFF, 0x7F, 0x01, 0x00 };
 		};
 
 		sgtick_type offset;
@@ -1385,6 +1388,8 @@ struct single_midi_processor_2
 
 		const event_transforming_filter flatten_transform = 
 			[&time_map = settings.original_time_map,
+			old_ppqn = settings.old_ppqn,
+			new_ppqn = settings.new_ppqn,
 			target_tempo_val = settings.tempo.tempo_override_value]
 		(const data_iterator& begin, const data_iterator& end, const data_iterator& cur, single_track_data& std_ref) -> bool
 		{
@@ -1394,19 +1399,21 @@ struct single_midi_processor_2
 
 			using uint128_t = dixelu::long_uint<0>;
 			using uint256_t = dixelu::long_uint<1>;
-			const auto upper_bound = time_map.upper_bound(tick);
+			const auto target_tick = convert_ppq(tick, new_ppqn, old_ppqn);
+
+			const auto upper_bound = time_map.upper_bound(target_tick);
 			const auto lhs = std::prev(upper_bound);
 			const auto rhs = (upper_bound == time_map.end()) ? lhs : upper_bound;
 
 			// a - coeficient of linear combination
-			uint256_t a_n = tick - lhs->first; // numerator
+			uint256_t a_n = target_tick - lhs->first; // numerator
 			uint256_t a_d = (rhs->first == lhs->first) ? 1 : rhs->first - lhs->first; // denominator
 			// a_d >= a_n >= 0;
 			
 			auto time_numerator = a_n * uint256_t{rhs->second.numerator} + (a_d - a_n) * uint256_t{lhs->second.numerator};
 			auto time_denominator = a_d * target_tempo_val;
 
-			auto new_tick = time_numerator / time_denominator;
+			auto new_tick = (time_numerator * new_ppqn) / (time_denominator * old_ppqn);
 			tick = new_tick.lo.lo; // omg ... 
 
 			return true;
@@ -1663,6 +1670,7 @@ struct single_midi_processor_2
 		processing_data& settings_data,
 		track_data<channels_split>& out_buffer)
 	{
+		constexpr uint32_t deltatime_standard_limit = (1 << (7 * 4)) - 1;
 		out_buffer.clear();
 
 		auto db_begin = data_buffer.begin();
@@ -1733,6 +1741,27 @@ struct single_midi_processor_2
 				auto& prev_tick = out_buffer.get_tick(channel);
 				auto& track_data = out_buffer.get_vec(channel);
 				auto delta = tick - prev_tick;
+
+				if (settings_data.settings.proc_details.force_delta_overflow_correction)
+				{
+					while (delta > deltatime_standard_limit) [[unlikely]]
+					{
+						auto current_delta = (std::min<decltype(delta)>)(deltatime_standard_limit, delta);
+
+						push_vlv_s(current_delta, track_data);
+
+						copy_back_traits::copy_back(
+							track_data,
+							settings_obj::processing_details::dummy_event[0],
+							settings_obj::processing_details::dummy_event[1],
+							settings_obj::processing_details::dummy_event[2],
+							settings_obj::processing_details::dummy_event[3]);
+						rsb = settings_obj::processing_details::dummy_event[0];
+
+						delta -= current_delta;
+					}
+				}
+
 				prev_tick = tick;
 
 				push_vlv_s(delta, track_data);
