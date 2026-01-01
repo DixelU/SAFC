@@ -412,6 +412,9 @@ struct FileSettings
 	std::shared_ptr<PLC<std::uint16_t, std::uint16_t>> PitchBendMap;
 	std::uint32_t BoolSettings;
 	std::int64_t OffsetTicks;
+
+	single_midi_info_collector::time_graph TimeMap;
+
 	FileSettings(const std::wstring& Filename) 
 	{
 		this->Filename = Filename;
@@ -498,12 +501,20 @@ struct FileSettings
 		settings.details.group_id = GroupID;
 		settings.details.initial_filesize = FileSize;
 		settings.offset = OffsetTicks;
-		if(NewTempo > 3.)
+
+		if (NewTempo > 3.)
 			settings.tempo.set_override_value(NewTempo);
 		if (OffsetTicks < 0 && -OffsetTicks > SelectionStart)
 			SelectionStart = -OffsetTicks;
 		if (SelectionStart && (SelectionLength < 0))
 			SelectionLength -= SelectionStart;
+
+		if (NewTempo > 3. && !TimeMap.empty())
+		{
+			settings.original_time_map = TimeMap;
+			settings.flatten = true;
+		}
+
 		settings.selection_data = single_midi_processor_2::settings_obj::selection(SelectionStart, SelectionLength);
 
 		smrp_data->appearance_filename = AppearanceFilename;
@@ -527,7 +538,8 @@ struct _SFD_RSP
 };
 
 struct SAFCData 
-{ ////overall settings and storing perfile settings....
+{
+	////overall settings and storing perfile settings....
 	std::vector<FileSettings> Files;
 	std::wstring SavePath;
 	std::uint16_t GlobalPPQN;
@@ -541,6 +553,7 @@ struct SAFCData
 	bool ApplyOffsetAfter;
 	bool IsCLIMode;
 	std::uint16_t DetectedThreads;
+
 	SAFCData()
 	{
 		GlobalPPQN = GlobalOffset = GlobalNewTempo = 0;
@@ -553,6 +566,7 @@ struct SAFCData
 		ChannelsSplit = RSBCompression = false;
 		ApplyOffsetAfter = true;
 	}
+
 	void ResolveSubdivisionProblem_GroupIDAssign(std::uint16_t ThreadsCount = 0)
 	{
 		if (!ThreadsCount)
@@ -592,6 +606,7 @@ struct SAFCData
 			std::cout << "Thread " << Files[Sizes[i].ID].GroupID << ": " << Sizes[i].FileSize << ":\t" << Sizes[i].ID << std::endl;
 		}
 	}
+
 	void SetGlobalPPQN(std::uint16_t NewPPQN = 0, bool ForceGlobalPPQNOverride = false)
 	{
 		if (!NewPPQN && ForceGlobalPPQNOverride)
@@ -607,23 +622,27 @@ struct SAFCData
 			Files[i].NewPPQN = NewPPQN;
 		GlobalPPQN = NewPPQN;
 	}
+
 	void SetGlobalOffset(std::int32_t Offset)
 	{
 		for (int i = 0; i < Files.size(); i++)
 			Files[i].OffsetTicks = Offset;
 		GlobalOffset = Offset;
 	}
+
 	void SetGlobalTempo(float NewTempo)
 	{
 		for (int i = 0; i < Files.size(); i++)
 			Files[i].NewTempo = NewTempo;
 		GlobalNewTempo = NewTempo;
 	}
+
 	void RemoveByID(std::uint32_t ID)
 	{
 		if (ID < Files.size())
 			Files.erase(Files.begin() + ID);
 	}
+
 	std::shared_ptr<MIDICollectionThreadedMerger> MCTM_Constructor()
 	{
 		using proc_data_ptr = std::shared_ptr<single_midi_processor_2::processing_data>;
@@ -632,6 +651,7 @@ struct SAFCData
 			SMRPv.push_back(Files[i].BuildSMRPProcessingData());
 		return std::make_shared<MIDICollectionThreadedMerger>(SMRPv, GlobalPPQN, SavePath, IsCLIMode);
 	}
+
 	FileSettings& operator[](std::int32_t ID)
 	{
 		return Files[ID];
@@ -818,84 +838,88 @@ namespace PropsAndSets
 {
 	std::string* PPQN = new std::string(""), * OFFSET = new std::string(""), * TEMPO = new std::string("");
 	int currentID = -1, CaTID = -1, VMID = -1, PMID = -1;
-	bool ForPersonalUse = true;
+	bool ForPersonalUse = true; // tf is this
 	single_midi_info_collector* SMICptr = nullptr;
 	std::string CSV_DELIM = ";";
-	void OGPInMIDIList(int ID)
+
+	void OpenFileProperties(int ID)
 	{
-		if (ID < _Data.Files.size() && ID >= 0)
-		{
-			currentID = ID;
-			auto PASWptr = (*WH)["SMPAS"];
-			auto OSptr = (*WH)["OTHER_SETS"];
-
-			((TextBox*)((*PASWptr)["FileName"]))->SafeStringReplace("..." + _Data[ID].AppearanceFilename);
-			((InputField*)((*PASWptr)["PPQN"]))->UpdateInputString();
-			((InputField*)((*PASWptr)["PPQN"]))->SafeStringReplace(std::to_string((_Data[ID].NewPPQN) ? _Data[ID].NewPPQN : _Data[ID].OldPPQN));
-			((InputField*)((*PASWptr)["TEMPO"]))->SafeStringReplace(std::to_string(_Data[ID].NewTempo));
-			((InputField*)((*PASWptr)["OFFSET"]))->SafeStringReplace(std::to_string(_Data[ID].OffsetTicks));
-			((InputField*)((*PASWptr)["GROUPID"]))->SafeStringReplace(std::to_string(_Data[ID].GroupID));
-
-			((InputField*)((*PASWptr)["SELECT_START"]))->SafeStringReplace(std::to_string(_Data[ID].SelectionStart));
-			((InputField*)((*PASWptr)["SELECT_LENGTH"]))->SafeStringReplace(std::to_string(_Data[ID].SelectionLength));
-
-			((CheckBox*)((*PASWptr)["BOOL_REM_TRCKS"]))->State = _Data[ID].BoolSettings & _BoolSettings::remove_empty_tracks;
-			((CheckBox*)((*PASWptr)["BOOL_REM_REM"]))->State = _Data[ID].BoolSettings & _BoolSettings::remove_remnants;
-
-			((CheckBox*)((*OSptr)["BOOL_PIANO_ONLY"]))->State = _Data[ID].BoolSettings & _BoolSettings::all_instruments_to_piano;
-			((CheckBox*)((*OSptr)["BOOL_IGN_TEMPO"]))->State = _Data[ID].BoolSettings & _BoolSettings::ignore_tempos;
-			((CheckBox*)((*OSptr)["BOOL_IGN_PITCH"]))->State = _Data[ID].BoolSettings & _BoolSettings::ignore_pitches;
-			((CheckBox*)((*OSptr)["BOOL_IGN_NOTES"]))->State = _Data[ID].BoolSettings & _BoolSettings::ignore_notes;
-			((CheckBox*)((*OSptr)["BOOL_IGN_ALL_EX_TPS"]))->State = _Data[ID].BoolSettings & _BoolSettings::ignore_all_but_tempos_notes_and_pitch;
-
-			((CheckBox*)((*OSptr)["IMP_FLT_ENABLE"]))->State = _Data[ID].BoolSettings & _BoolSettings::enable_important_filter;
-			((CheckBox*)((*OSptr)["IMP_FLT_NOTES"]))->State = _Data[ID].BoolSettings & _BoolSettings::imp_filter_allow_notes;
-			((CheckBox*)((*OSptr)["IMP_FLT_TEMPO"]))->State = _Data[ID].BoolSettings & _BoolSettings::imp_filter_allow_tempo;
-			((CheckBox*)((*OSptr)["IMP_FLT_PITCH"]))->State = _Data[ID].BoolSettings & _BoolSettings::imp_filter_allow_pitch;
-			((CheckBox*)((*OSptr)["IMP_FLT_PROGC"]))->State = _Data[ID].BoolSettings & _BoolSettings::imp_filter_allow_progc;
-			((CheckBox*)((*OSptr)["IMP_FLT_OTHER"]))->State = _Data[ID].BoolSettings & _BoolSettings::imp_filter_allow_other;
-
-			((CheckBox*)((*OSptr)["LEGACY_META_RSB_BEHAVIOR"]))->State = _Data[ID].allow_legacy_rsb_meta_interaction;
-			((CheckBox*)((*OSptr)["ALLOW_SYSEX"]))->State = _Data[ID].AllowSysex;
-			((CheckBox*)((*OSptr)["ENABLE_ZERO_VELOCITY"]))->State = _Data[ID].EnableZeroVelocity;
-
-			((CheckBox*)((*PASWptr)["SPLIT_TRACKS"]))->State = _Data[ID].ChannelsSplit;
-			((CheckBox*)((*PASWptr)["RSB_COMPRESS"]))->State = _Data[ID].RSBCompression;
-
-			((CheckBox*)((*PASWptr)["INPLACE_MERGE"]))->State = _Data[ID].InplaceMergeEnabled;
-
-			((CheckBox*)((*PASWptr)["COLLAPSE_MIDI"]))->State = _Data[ID].CollapseMIDI;
-			((CheckBox*)((*PASWptr)["APPLY_OFFSET_AFTER"]))->State = _Data[ID].ApplyOffsetAfter;
-
-			((TextBox*)((*PASWptr)["CONSTANT_PROPS"]))->SafeStringReplace(
-				"File size: " + std::to_string(_Data[ID].FileSize) + "b\n" +
-				"Old PPQN: " + std::to_string(_Data[ID].OldPPQN) + "\n" +
-				"Track number (header info): " + std::to_string(_Data[ID].OldTrackNumber) + "\n" +
-				"\"Remnant\" file postfix: " + _Data[ID].FileNamePostfix
-			);
-
-			WH->EnableWindow("SMPAS");
-		}
-		else
+		if (!(ID < _Data.Files.size() && ID >= 0))
 		{
 			currentID = -1;
+			return;
 		}
+
+		currentID = ID;
+		auto PASWptr = (*WH)["SMPAS"];
+		auto OSptr = (*WH)["OTHER_SETS"];
+
+		((TextBox*)((*PASWptr)["FileName"]))->SafeStringReplace("..." + _Data[ID].AppearanceFilename);
+		((InputField*)((*PASWptr)["PPQN"]))->UpdateInputString();
+		((InputField*)((*PASWptr)["PPQN"]))->SafeStringReplace(std::to_string((_Data[ID].NewPPQN) ? _Data[ID].NewPPQN : _Data[ID].OldPPQN));
+		((InputField*)((*PASWptr)["TEMPO"]))->SafeStringReplace(std::to_string(_Data[ID].NewTempo));
+		((InputField*)((*PASWptr)["OFFSET"]))->SafeStringReplace(std::to_string(_Data[ID].OffsetTicks));
+		((InputField*)((*PASWptr)["GROUPID"]))->SafeStringReplace(std::to_string(_Data[ID].GroupID));
+
+		((InputField*)((*PASWptr)["SELECT_START"]))->SafeStringReplace(std::to_string(_Data[ID].SelectionStart));
+		((InputField*)((*PASWptr)["SELECT_LENGTH"]))->SafeStringReplace(std::to_string(_Data[ID].SelectionLength));
+
+		((CheckBox*)((*PASWptr)["BOOL_REM_TRCKS"]))->State = _Data[ID].BoolSettings & _BoolSettings::remove_empty_tracks;
+		((CheckBox*)((*PASWptr)["BOOL_REM_REM"]))->State = _Data[ID].BoolSettings & _BoolSettings::remove_remnants;
+
+		((CheckBox*)((*OSptr)["BOOL_PIANO_ONLY"]))->State = _Data[ID].BoolSettings & _BoolSettings::all_instruments_to_piano;
+		((CheckBox*)((*OSptr)["BOOL_IGN_TEMPO"]))->State = _Data[ID].BoolSettings & _BoolSettings::ignore_tempos;
+		((CheckBox*)((*OSptr)["BOOL_IGN_PITCH"]))->State = _Data[ID].BoolSettings & _BoolSettings::ignore_pitches;
+		((CheckBox*)((*OSptr)["BOOL_IGN_NOTES"]))->State = _Data[ID].BoolSettings & _BoolSettings::ignore_notes;
+		((CheckBox*)((*OSptr)["BOOL_IGN_ALL_EX_TPS"]))->State = _Data[ID].BoolSettings & _BoolSettings::ignore_all_but_tempos_notes_and_pitch;
+
+		((CheckBox*)((*OSptr)["IMP_FLT_ENABLE"]))->State = _Data[ID].BoolSettings & _BoolSettings::enable_important_filter;
+		((CheckBox*)((*OSptr)["IMP_FLT_NOTES"]))->State = _Data[ID].BoolSettings & _BoolSettings::imp_filter_allow_notes;
+		((CheckBox*)((*OSptr)["IMP_FLT_TEMPO"]))->State = _Data[ID].BoolSettings & _BoolSettings::imp_filter_allow_tempo;
+		((CheckBox*)((*OSptr)["IMP_FLT_PITCH"]))->State = _Data[ID].BoolSettings & _BoolSettings::imp_filter_allow_pitch;
+		((CheckBox*)((*OSptr)["IMP_FLT_PROGC"]))->State = _Data[ID].BoolSettings & _BoolSettings::imp_filter_allow_progc;
+		((CheckBox*)((*OSptr)["IMP_FLT_OTHER"]))->State = _Data[ID].BoolSettings & _BoolSettings::imp_filter_allow_other;
+
+		((CheckBox*)((*OSptr)["LEGACY_META_RSB_BEHAVIOR"]))->State = _Data[ID].allow_legacy_rsb_meta_interaction;
+		((CheckBox*)((*OSptr)["ALLOW_SYSEX"]))->State = _Data[ID].AllowSysex;
+		((CheckBox*)((*OSptr)["ENABLE_ZERO_VELOCITY"]))->State = _Data[ID].EnableZeroVelocity;
+
+		((CheckBox*)((*PASWptr)["SPLIT_TRACKS"]))->State = _Data[ID].ChannelsSplit;
+		((CheckBox*)((*PASWptr)["RSB_COMPRESS"]))->State = _Data[ID].RSBCompression;
+
+		((CheckBox*)((*PASWptr)["INPLACE_MERGE"]))->State = _Data[ID].InplaceMergeEnabled;
+
+		((CheckBox*)((*PASWptr)["COLLAPSE_MIDI"]))->State = _Data[ID].CollapseMIDI;
+		((CheckBox*)((*PASWptr)["APPLY_OFFSET_AFTER"]))->State = _Data[ID].ApplyOffsetAfter;
+
+		((TextBox*)((*PASWptr)["CONSTANT_PROPS"]))->SafeStringReplace(
+			"File size: " + std::to_string(_Data[ID].FileSize) + "b\n" +
+			"Old PPQN: " + std::to_string(_Data[ID].OldPPQN) + "\n" +
+			"Track number (header info): " + std::to_string(_Data[ID].OldTrackNumber) + "\n" +
+			"\"Remnant\" file postfix: " + _Data[ID].FileNamePostfix + "\n" +
+			"Time map status: " + ((_Data[ID].TimeMap.empty()) ? "Empty" : "Present")
+		);
+
+		WH->EnableWindow("SMPAS");
 	}
+
 	void InitializeCollecting()
 	{
-		//ThrowAlert_Warning("Still testing :)");
 		if (currentID < 0 && currentID >= _Data.Files.size()) 
 		{
 			ThrowAlert_Error("How you have managed to select the midi beyond the list? O.o\n" + std::to_string(currentID));
 			return;
 		}
+
 		auto UIElement = (Graphing<single_midi_info_collector::tempo_graph>*)(*(*WH)["SMIC"])["TEMPO_GRAPH"];
 		if (SMICptr)
 		{
 			{ std::lock_guard<std::recursive_mutex> locker(UIElement->Lock); }
 			UIElement->Graph = nullptr;
 		}
+
 		SMICptr = new single_midi_info_collector(_Data.Files[currentID].Filename, _Data.Files[currentID].OldPPQN, _Data.Files[currentID].allow_legacy_rsb_meta_interaction);
+
 		std::thread th([]()
 		{
 			WH->MainWindow_ID = "SMIC";
@@ -966,10 +990,37 @@ namespace PropsAndSets
 			WH->EnableWindow("SMIC");
 		});
 		th.detach();
+
 		WH->EnableWindow("SMIC");
 	}
+
 	namespace SMIC
 	{
+		void LoadTimeMap()
+		{
+			if (currentID < 0 && currentID >= _Data.Files.size())
+			{
+				ThrowAlert_Error("How you have managed to select the midi beyond the lists end? O.o\n" + std::to_string(currentID));
+				return;
+			}
+
+			if (!SMICptr || !SMICptr->finished)
+			{
+				ThrowAlert_Warning("Time map is not ready yet...");
+				return;
+			}
+
+			if (SMICptr->internal_time_map.empty())
+			{
+				ThrowAlert_Error("Time map of the selected midi is empty...");
+				return;
+			}
+
+			_Data[currentID].TimeMap = SMICptr->internal_time_map;
+			OpenFileProperties(currentID);
+			WH->DisableWindow("SMIC");
+		}
+
 		void EnablePG()
 		{
 			auto UIElement_PG = (Graphing<single_midi_info_collector::polyphony_graph>*)(*(*WH)["SMIC"])["POLY_GRAPH"];
@@ -980,6 +1031,7 @@ namespace PropsAndSets
 				UIElement_Butt->SafeStringReplace("Disable graph B");
 			UIElement_PG->Enabled ^= true;
 		}
+
 		void EnableTG()
 		{
 			auto UIElement_TG = (Graphing<single_midi_info_collector::tempo_graph>*)(*(*WH)["SMIC"])["TEMPO_GRAPH"];
@@ -990,16 +1042,19 @@ namespace PropsAndSets
 				UIElement_Butt->SafeStringReplace("Disable graph A");
 			UIElement_TG->Enabled ^= true;
 		}
+
 		void ResetTG()
 		{//TEMPO_GRAPH
 			auto UIElement_TG = (Graphing<single_midi_info_collector::tempo_graph>*)(*(*WH)["SMIC"])["TEMPO_GRAPH"];
 			UIElement_TG->Reset();
 		}
+
 		void ResetPG()
 		{//TEMPO_GRAPH
 			auto UIElement_PG = (Graphing<single_midi_info_collector::tempo_graph>*)(*(*WH)["SMIC"])["POLY_GRAPH"];
 			UIElement_PG->Reset();
 		}
+
 		void SwitchPersonalUse()
 		{//PERSONALUSE
 			auto UIElement_Butt = (Button*)(*(*WH)["SMIC"])["PERSONALUSE"];
@@ -1009,6 +1064,7 @@ namespace PropsAndSets
 			else
 				UIElement_Butt->SafeStringReplace(".atraw");
 		}
+
 		void ExportTG()
 		{
 			std::thread th([]()
@@ -1029,6 +1085,7 @@ namespace PropsAndSets
 			});
 			th.detach();
 		}
+
 		void ExportAll()
 		{
 			std::thread th([]()
@@ -1131,6 +1188,7 @@ namespace PropsAndSets
 			});
 			th.detach();
 		}
+
 		void DiffirentiateTicks()
 		{
 			std::thread th([]()
@@ -1183,6 +1241,7 @@ namespace PropsAndSets
 			});
 			th.detach();
 		}
+
 		void IntegrateTime()
 		{
 			WH->MainWindow_ID = "SMIC";
@@ -1228,6 +1287,7 @@ namespace PropsAndSets
 			InfoLine->SafeStringReplace("Integration was succsessfully finished");
 		}
 	}
+
 	void OnApplySettings()
 	{
 		if (currentID < 0 && currentID >= _Data.Files.size())
@@ -1320,6 +1380,7 @@ namespace PropsAndSets
 		inplaceMergeState &= !_Data[currentID].RSBCompression;
 		_Data[currentID].InplaceMergeEnabled = inplaceMergeState;
 	}
+
 	void OnApplyBS2A()
 	{
 		if (currentID < 0 && currentID >= _Data.Files.size())
@@ -1347,6 +1408,7 @@ namespace PropsAndSets
 	{
 		std::uint8_t TMax = 0, TMin = 0;
 		std::int16_t TTransp = 0;
+
 		void OnCaT()
 		{
 			auto Wptr = (*WH)["CAT"];
@@ -1357,6 +1419,7 @@ namespace PropsAndSets
 			CATptr->UpdateInfo();
 			WH->EnableWindow("CAT");
 		}
+
 		void OnReset()
 		{
 			auto Wptr = (*WH)["CAT"];
@@ -1366,6 +1429,7 @@ namespace PropsAndSets
 			CATptr->PianoTransform->TransposeVal = 0;
 			CATptr->UpdateInfo();
 		}
+
 		void OnCDT128()
 		{
 			auto Wptr = (*WH)["CAT"];
@@ -1375,6 +1439,7 @@ namespace PropsAndSets
 			CATptr->PianoTransform->TransposeVal = 0;
 			CATptr->UpdateInfo();
 		}
+
 		void On0_127to128_255()
 		{
 			auto Wptr = (*WH)["CAT"];
@@ -1384,6 +1449,7 @@ namespace PropsAndSets
 			CATptr->PianoTransform->TransposeVal = 128;
 			CATptr->UpdateInfo();
 		}
+
 		void OnCopy()
 		{
 			auto Wptr = (*WH)["CAT"];
@@ -1392,6 +1458,7 @@ namespace PropsAndSets
 			TMin = CATptr->PianoTransform->Min;
 			TTransp = CATptr->PianoTransform->TransposeVal;
 		}
+
 		void OnPaste()
 		{
 			auto Wptr = (*WH)["CAT"];
@@ -1401,6 +1468,7 @@ namespace PropsAndSets
 			CATptr->PianoTransform->TransposeVal = TTransp;
 			CATptr->UpdateInfo();
 		}
+
 		void OnDelete()
 		{
 			auto Wptr = (*WH)["CAT"];
@@ -1427,6 +1495,7 @@ namespace PropsAndSets
 			VM->PLC_bb = _Data[currentID].VolumeMap;
 			WH->EnableWindow("VM");
 		}
+
 		void OnDegreeShape()
 		{
 			auto Wptr = (*WH)["VM"];
@@ -1443,6 +1512,7 @@ namespace PropsAndSets
 			else
 				ThrowAlert_Error("If you see this message, some error might have happen, since PLC_bb is null");
 		}
+
 		void OnSimplify()
 		{
 			auto Wptr = (*WH)["VM"];
@@ -1454,6 +1524,7 @@ namespace PropsAndSets
 			else
 				ThrowAlert_Error("If you see this message, some error might have happen, since PLC_bb is null");
 		}
+
 		void OnTrace()
 		{
 			auto Wptr = (*WH)["VM"];
@@ -1470,6 +1541,7 @@ namespace PropsAndSets
 			else
 				ThrowAlert_Error("If you see this message, some error might have happen, since PLC_bb is null");
 		}
+
 		void OnSetModeChange() 
 		{
 			auto Wptr = (*WH)["VM"];
@@ -1482,6 +1554,7 @@ namespace PropsAndSets
 			else
 				ThrowAlert_Error("If you see this message, some error might have happen, since PLC_bb is null");
 		}
+
 		void OnErase()
 		{
 			auto Wptr = (*WH)["VM"];
@@ -1491,6 +1564,7 @@ namespace PropsAndSets
 			else
 				ThrowAlert_Error("If you see this message, some error might have happen, since PLC_bb is null");
 		}
+
 		void OnDelete()
 		{
 			if (_Data[currentID].VolumeMap)
@@ -1538,7 +1612,7 @@ void OnSubmitGlobalPPQN()
 	std::uint16_t PPQN = (t.size()) ? stoi(t) : _Data.GlobalPPQN;
 	_Data.SetGlobalPPQN(PPQN, true);
 	WH->DisableWindow("PROMPT");
-	//PropsAndSets::OGPInMIDIList(PropsAndSets::currentID);
+	//PropsAndSets::OpenFileProperties(PropsAndSets::currentID);
 }
 
 void OnGlobalPPQN()
@@ -1553,7 +1627,7 @@ void OnSubmitGlobalOffset()
 	std::uint32_t O = (t.size()) ? std::stoi(t) : _Data.GlobalOffset;
 	_Data.SetGlobalOffset(O);
 	WH->DisableWindow("PROMPT");
-	//PropsAndSets::OGPInMIDIList(PropsAndSets::currentID);
+	//PropsAndSets::OpenFileProperties(PropsAndSets::currentID);
 }
 void OnGlobalOffset()
 {
@@ -1568,7 +1642,7 @@ void OnSubmitGlobalTempo()
 	float Tempo = (t.size()) ? std::stof(t) : _Data.GlobalNewTempo;
 	_Data.SetGlobalTempo(Tempo);
 	WH->DisableWindow("PROMPT");
-	//PropsAndSets::OGPInMIDIList(PropsAndSets::currentID);
+	//PropsAndSets::OpenFileProperties(PropsAndSets::currentID);
 }
 void OnGlobalTempo()
 {
@@ -2011,7 +2085,7 @@ void Init()
 	constexpr unsigned BORDER = 0xFFFFFF7F;
 	constexpr unsigned HEADER = 0x285685CF;
 	
-	/*SelectablePropertedList* SPL = new SelectablePropertedList(BS_List_Black_Small, NULL, PropsAndSets::OGPInMIDIList, -50, 172, 300, 12, 65, 30);
+	/*SelectablePropertedList* SPL = new SelectablePropertedList(BS_List_Black_Small, NULL, PropsAndSets::OpenFileProperties, -50, 172, 300, 12, 65, 30);
 	MoveableWindow* T = new MoveableResizeableWindow(MainWindowName.str(), System_White, -200, 200, 400, 400, 0x3F3F3FAF, 0x7F7F7F7F, 0, [SPL](float dH, float dW, float NewHeight, float NewWidth) {
 		constexpr float TopMargin = 200 - 172;
 		constexpr float BottomMargin = 12;
@@ -2028,7 +2102,7 @@ void Init()
 	MoveableWindow* T = new MoveableFuiWindow(std::format("SAFC v{}.{}.{}.{}", maj, min, ver, build), System_White, -200, 197.5f, 400, 397.5f, 300, 2.5f, 100, 100, 5, BACKGROUND, HEADER, BORDER);
 
 	Button* Butt;
-	(*T)["List"] = new SelectablePropertedList(BS_List_Black_Small, NULL, PropsAndSets::OGPInMIDIList, -50, 172, 300, 12, 65, 30);;
+	(*T)["List"] = new SelectablePropertedList(BS_List_Black_Small, NULL, PropsAndSets::OpenFileProperties, -50, 172, 300, 12, 65, 30);;
 
 	(*T)["ADD_Butt"] = new Button("Add MIDIs", System_White, OnAdd, 150, 167.5, 75, 12, 1, 0x00003FAF, 0xFFFFFFFF, 0x00003FFF, 0xFFFFFFFF, 0xF7F7F7FF, NULL, " ");
 	(*T)["REM_Butt"] = new Button("Remove selected", System_White, OnRem, 150, 155, 75, 12, 1, 0x3F0000AF, 0xFFFFFFFF, 0x3F0000FF, 0xFFFFFFFF, 0xF7F7F7FF, NULL, " ");
@@ -2217,6 +2291,7 @@ void Init()
 	(*T)["TG_EXP"] = new Button("Export Tempo", System_White, PropsAndSets::SMIC::ExportTG, -110, 60 - WindowHeaderSize, 65, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr);
 	(*T)["TG_RESET"] = new Button("Reset graph A", System_White, PropsAndSets::SMIC::ResetTG, 45, 40 - WindowHeaderSize, 65, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr);
 	(*T)["PG_RESET"] = new Button("Reset graph B", System_White, PropsAndSets::SMIC::ResetPG, 45, 20 - WindowHeaderSize, 65, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr);
+	(*T)["LD_TIME_MAP"] = new Button("Copy time map", System_White, PropsAndSets::SMIC::LoadTimeMap, 45, 0 - WindowHeaderSize, 65, 10, 1, 0x7F7F7F3F, 0x7F7F7FFF, 0xFFFFFFFF, 0x000000FF, 0xFFFFFFFF, nullptr);
 	(*T)["PERSONALUSE"] = Butt = new Button(".csv", System_White, PropsAndSets::SMIC::SwitchPersonalUse, 105, 40 - WindowHeaderSize, 45, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, System_White, "Switches output format for `export all`");
 	Butt->Tip->SafeChangePosition_Argumented(_Align::right, Butt->Xpos + Butt->Width * 0.5, Butt->Tip->CYpos);
 	(*T)["TOTAL_INFO"] = new TextBox("----", System_White, 0, -150, 35, 285, 10, 0, 0, 0, _Align::left);
