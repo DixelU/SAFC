@@ -9,6 +9,8 @@
 #include "../btree/btree_map.h"
 #include "../integers.h"
 
+#include <boost/container/flat_map.hpp>
+
 #define MTrk 1297379947
 #define MThd 1297377380
 
@@ -126,7 +128,7 @@ struct single_midi_info_collector
 	};
 
 	using tempo_graph = btree::btree_map<std::int64_t, tempo_event>;
-	using time_graph = btree::btree_map<std::int64_t, long_time>;
+	using time_graph = boost::container::flat_map<std::int64_t, long_time>;
 	using der_polyphony_graph = btree::btree_map<std::int64_t, note_on_off_counter>;
 	using polyphony_graph = btree::btree_map<std::int64_t, std::int64_t>;
 
