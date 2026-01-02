@@ -159,4 +159,154 @@ public:
 	}
 } bbb_ffr;
 
+struct bbb_mmap
+{
+private:
+	HANDLE hFile, hMapping;
+	unsigned char* data;
+	unsigned char* curr_pos;
+	uint64_t size;
+
+	void init(const wchar_t* filename)
+	{
+		hFile = CreateFileW(
+			filename,
+			GENERIC_READ,
+			FILE_SHARE_READ,
+			NULL,
+			OPEN_EXISTING,
+			FILE_ATTRIBUTE_NORMAL | FILE_ATTRIBUTE_READONLY,
+			NULL
+		);
+
+		if (!hFile)
+			return;
+
+		LARGE_INTEGER fileSize;
+		if (!GetFileSizeEx(hFile, &fileSize))
+		{
+			CloseHandle(hFile);
+			hFile = nullptr;
+			return;
+		}
+
+		size = fileSize.QuadPart;
+
+		hMapping = CreateFileMappingW(
+			hFile,
+			NULL,
+			PAGE_READONLY,
+			fileSize.HighPart,
+			fileSize.LowPart,
+			NULL
+		);
+
+		if (!hMapping)
+		{
+			CloseHandle(hFile);
+			hFile = nullptr;
+			return;
+		}
+
+		void* ptr = MapViewOfFile(
+			hMapping,
+			FILE_MAP_READ,
+			0,
+			0,
+			0
+		);
+
+		if (!ptr)
+		{
+			// Handle error
+			CloseHandle(hMapping);
+			CloseHandle(hFile);
+			hMapping = nullptr;
+			hFile = nullptr;
+			return;
+		}
+
+		data = reinterpret_cast<unsigned char*>(ptr);
+		curr_pos = data;
+	}
+
+	inline unsigned char __get()
+	{
+		size_t offset = curr_pos - data;
+		if (offset < size) [[likely]]
+			return *(curr_pos++);
+		return 0;
+	}
+
+public:
+	bbb_mmap(const wchar_t* filename) :
+		hFile(nullptr),
+		hMapping(nullptr),
+		data(nullptr),
+		curr_pos(nullptr),
+		size(0)
+	{
+		init(filename);
+	}
+
+	~bbb_mmap()
+	{
+		close();
+	}
+
+	inline void reopen_next_file(const wchar_t* filename)
+	{
+		close();
+		init(filename);
+	}
+
+	//rdbuf analogue
+	inline void put_into_ostream(std::ostream& out)
+	{
+		out.write((char*)(curr_pos), size);
+		close();
+	}
+
+	inline void seekg(unsigned long long int abs_pos)
+	{
+		curr_pos = data + abs_pos;
+	}
+
+	void close()
+	{
+		if (data)
+			UnmapViewOfFile(data);
+
+		if (hMapping)
+			CloseHandle(hMapping);
+
+		if (hFile)
+			CloseHandle(hFile);
+
+		size = 0;
+		curr_pos = data = nullptr;
+		hMapping = nullptr;
+		hFile = nullptr;
+	}
+
+	inline unsigned char get()
+	{
+		return __get();
+	}
+
+	inline signed long long int tellg() const
+	{
+		return curr_pos - data;
+	}
+	inline bool good() const
+	{
+		return data && !eof();
+	}
+	inline bool eof() const
+	{
+		return tellg() >= size;
+	}
+};
+
+
 #endif
