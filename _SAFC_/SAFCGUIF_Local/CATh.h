@@ -2,19 +2,24 @@
 #ifndef SAFGUIF_L_CATH
 #define SAFGUIF_L_CATH
 
-#include "../SAFGUIF/SAFGUIF.h"
-#include "../SAFC_InnerModules/SAFC_IM.h"
+#include <utility>
 
-bool IsWhiteKey(std::uint8_t Key)
+#include "../SAFGUIF/SAFGUIF.h"
+
+// #include "../SAFC_InnerModules/include_all.h"
+
+constexpr bool is_white_key(std::uint8_t Key)
 {
 	Key %= 12;
-	if (Key < 5)return !(Key & 1);
-	else return (Key & 1);
+	if (Key < 5)
+		return !(Key & 1);
+	else 
+		return (Key & 1);
 }
 
-struct CAT_Piano :HandleableUIPart
+struct CAT_Piano : HandleableUIPart
 {
-	std::shared_ptr<CutAndTransposeKeys> PianoTransform;
+	std::shared_ptr<cut_and_transpose> PianoTransform;
 	SingleTextLine* MinCont, * MaxCont, * Transp;
 	float CalculatedHeight, CalculatedWidth;
 	float BaseXPos, BaseYPos, PianoHeight, KeyWidth;
@@ -26,7 +31,7 @@ struct CAT_Piano :HandleableUIPart
 		delete Transp;
 	}
 
-	CAT_Piano(float BaseXPos, float BaseYPos, float KeyWidth, float PianoHeight, std::shared_ptr<CutAndTransposeKeys> PianoTransform)
+	CAT_Piano(float BaseXPos, float BaseYPos, float KeyWidth, float PianoHeight, std::shared_ptr<cut_and_transpose> PianoTransform)
 	{
 		this->BaseXPos = BaseXPos;
 		this->BaseYPos = BaseYPos;
@@ -49,10 +54,10 @@ struct CAT_Piano :HandleableUIPart
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		if (!PianoTransform) 
 			return;
-		MinCont->SafeStringReplace("Min: " + std::to_string(PianoTransform->Min));
-		MaxCont->SafeStringReplace("Max: " + std::to_string(PianoTransform->Max));
-		Transp->SafeStringReplace("Transp: " + std::to_string(PianoTransform->TransposeVal));
-		Transp->SafeChangePosition(BaseXPos + ((PianoTransform->TransposeVal >= 0) ? 1 : -1) * KeyWidth * (128 * 1.25f), BaseYPos +
+		MinCont->SafeStringReplace("Min: " + std::to_string(PianoTransform->min_val));
+		MaxCont->SafeStringReplace("Max: " + std::to_string(PianoTransform->max_val));
+		Transp->SafeStringReplace("Transp: " + std::to_string(PianoTransform->transpose_val));
+		Transp->SafeChangePosition(BaseXPos + ((PianoTransform->transpose_val >= 0) ? 1 : -1) * KeyWidth * (128 * 1.25f), BaseYPos +
 			0.75 * PianoHeight
 			);
 	}
@@ -72,8 +77,8 @@ struct CAT_Piano :HandleableUIPart
 		glBegin(GL_LINES);
 		for (int i = 0; i < 256; i++, x += KeyWidth)
 		{//Main piano
-			Inside = ((i >= (PianoTransform->Min)) && (i <= (PianoTransform->Max)));
-			if (IsWhiteKey(i))
+			Inside = ((i >= (PianoTransform->min_val)) && (i <= (PianoTransform->max_val)));
+			if (is_white_key(i))
 			{
 				glColor4f(1, 1, 1, (Inside ? 0.9f : 0.25f));
 				glVertex2f(x, BaseYPos - 1.25f * PianoHeight);
@@ -90,13 +95,13 @@ struct CAT_Piano :HandleableUIPart
 			glVertex2f(x, BaseYPos - 0.75f * PianoHeight);
 			glVertex2f(x, BaseYPos - 1.25f * PianoHeight);
 		}
-		x = BaseXPos - (128 + PianoTransform->TransposeVal) * KeyWidth;
+		x = BaseXPos - (128 + PianoTransform->transpose_val) * KeyWidth;
 		for (int i = 0; i < 256; i++, x += KeyWidth)
 		{//CAT Piano
 			if (fabs(x - BaseXPos) >= 0.5 * CalculatedWidth)
 				continue;
-			Inside = ((i - (PianoTransform->TransposeVal) >= (PianoTransform->Min)) && (i - (PianoTransform->TransposeVal) <= (PianoTransform->Max)));
-			if (IsWhiteKey(i))
+			Inside = ((i - (PianoTransform->transpose_val) >= (PianoTransform->min_val)) && (i - (PianoTransform->transpose_val) <= (PianoTransform->max_val)));
+			if (is_white_key(i))
 			{
 				glColor4f(1, 1, 1, (Inside ? 0.9f : 0.25f));
 				glVertex2f(x, BaseYPos + 1.25f * PianoHeight);
@@ -115,13 +120,13 @@ struct CAT_Piano :HandleableUIPart
 		}
 		glEnd();
 
-		x = BaseXPos - (128 - PianoTransform->Min + 0.5f) * KeyWidth;//Square
+		x = BaseXPos - (128 - PianoTransform->min_val + 0.5f) * KeyWidth;//Square
 		glLineWidth(1);
 		glColor4f(0, 1, 0, 0.75f);
 		glBegin(GL_LINE_LOOP);
 		glVertex2f(x, BaseYPos - 1.5f * PianoHeight);
 		glVertex2f(x, BaseYPos + 1.5f * PianoHeight);
-		x += KeyWidth * (PianoTransform->Max - PianoTransform->Min + 1);
+		x += KeyWidth * (PianoTransform->max_val - PianoTransform->min_val + 1);
 		glVertex2f(x, BaseYPos + 1.5f * PianoHeight);
 		glVertex2f(x, BaseYPos - 1.5f * PianoHeight);
 		glEnd();
@@ -175,49 +180,49 @@ struct CAT_Piano :HandleableUIPart
 			{
 			case 'W':
 			case 'w':
-				if (PianoTransform->TransposeVal < 255)
+				if (PianoTransform->transpose_val < 255)
 				{
-					PianoTransform->TransposeVal += 1;
+					PianoTransform->transpose_val += 1;
 					UpdateInfo();
 				}
 				break;
 			case 'S':
 			case 's':
-				if (PianoTransform->TransposeVal > -255)
+				if (PianoTransform->transpose_val > -255)
 				{
-					PianoTransform->TransposeVal -= 1;
+					PianoTransform->transpose_val -= 1;
 					UpdateInfo();
 				}
 				break;
 			case 'D':
 			case 'd':
-				if (PianoTransform->Min < 255)
+				if (PianoTransform->min_val < 255)
 				{
-					PianoTransform->Min += 1;
+					PianoTransform->min_val += 1;
 					UpdateInfo();
 				}
 				break;
 			case 'A':
 			case 'a':
-				if (PianoTransform->Min > 0)
+				if (PianoTransform->min_val > 0)
 				{
-					PianoTransform->Min -= 1;
+					PianoTransform->min_val -= 1;
 					UpdateInfo();
 				}
 				break;
 			case 'E':
 			case 'e':
-				if (PianoTransform->Max < 255)
+				if (PianoTransform->max_val < 255)
 				{
-					PianoTransform->Max += 1;
+					PianoTransform->max_val += 1;
 					UpdateInfo();
 				}
 				break;
 			case 'Q':
 			case 'q':
-				if (PianoTransform->Max > 0)
+				if (PianoTransform->max_val > 0)
 				{
-					PianoTransform->Max -= 1;
+					PianoTransform->max_val -= 1;
 					UpdateInfo();
 				}
 				break;

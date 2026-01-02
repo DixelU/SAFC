@@ -3,13 +3,13 @@
 #define SAFGUIF_L_SMRPV
 
 #include "../SAFGUIF/SAFGUIF.h"
-#include "../SAFC_InnerModules/SAFC_IM.h"
+#include "../SAFC_InnerModules/include_all.h"
 
 struct SMRP_Vis : HandleableUIPart 
 {
 	std::pair<
-		MIDICollectionThreadedMerger::proc_data_ptr, 
-		MIDICollectionThreadedMerger::message_buffer_ptr> SMRP;
+		midi_collection_threaded_merger::proc_data_ptr, 
+		midi_collection_threaded_merger::message_buffer_ptr> SMRP;
 
 	float _xpos, _ypos;
 	bool _processing, _finished, _hovered;
@@ -74,8 +74,8 @@ struct SMRP_Vis : HandleableUIPart
 		this->_stl_info->SafeStringReplace(NewInfoString);
 	}
 	void SetSMRP(std::pair<
-		MIDICollectionThreadedMerger::proc_data_ptr,
-		MIDICollectionThreadedMerger::message_buffer_ptr>& smrp)
+		midi_collection_threaded_merger::proc_data_ptr,
+		midi_collection_threaded_merger::message_buffer_ptr>& smrp)
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		SMRP = smrp;

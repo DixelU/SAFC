@@ -161,7 +161,7 @@ struct single_midi_info_collector
 		std::uint64_t last_tick = 0;
 		std::uint64_t current_tick = 0;
 		std::uint8_t IO = 0, rsb_byte = 0; // TODO: REMOVE THE DAMN IO VARIABLE
-		track_data track_data;
+		track_data track_data{};
 
 		error_line = " ";
 		log_line = " ";
@@ -335,13 +335,13 @@ struct single_midi_info_collector
 		poly_differences[last_tick + 1] = 0;
 
 		std::int64_t current_poly = 0;
-		for (auto cur_pair : poly_differences)
+		for (auto & cur_pair : poly_differences)
 			polyphony[cur_pair.first] = (current_poly += cur_pair.second);
 
 		long_time time;
 		uint64_t previous_tick = 0;
 		uint32_t previous_tempo = tempo_event{}.get_raw();
-		time.denominator = 1000000 * ppq;
+		time.denominator = 1000000ull * ppq;
 
 		for (const auto & [tick, tempo_data] : tempo_map)
 		{

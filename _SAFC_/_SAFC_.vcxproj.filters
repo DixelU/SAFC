@@ -99,22 +99,22 @@
     <ClInclude Include="bbb_ffio.h">
       <Filter>Файлы заголовков\MIDI Processing</Filter>
     </ClInclude>
-    <ClInclude Include="SAFC_InnerModules\CAT.h">
+    <ClInclude Include="SAFC_InnerModules\cut_and_transpose.h">
       <Filter>Файлы заголовков\MIDI Processing</Filter>
     </ClInclude>
-    <ClInclude Include="SAFC_InnerModules\FMC.h">
+    <ClInclude Include="SAFC_InnerModules\fast_midi_checker.h">
       <Filter>Файлы заголовков\MIDI Processing</Filter>
     </ClInclude>
-    <ClInclude Include="SAFC_InnerModules\MCTM.h">
+    <ClInclude Include="SAFC_InnerModules\midi_collection_threaded_merger.h">
       <Filter>Файлы заголовков\MIDI Processing</Filter>
     </ClInclude>
-    <ClInclude Include="SAFC_InnerModules\PLC.h">
+    <ClInclude Include="SAFC_InnerModules\polyline_converter.h">
       <Filter>Файлы заголовков\MIDI Processing</Filter>
     </ClInclude>
-    <ClInclude Include="SAFC_InnerModules\SAFC_IM.h">
+    <ClInclude Include="SAFC_InnerModules\include_all.h">
       <Filter>Файлы заголовков\MIDI Processing</Filter>
     </ClInclude>
-    <ClInclude Include="SAFC_InnerModules\SMIC.h">
+    <ClInclude Include="SAFC_InnerModules\single_midi_info_collector.h">
       <Filter>Файлы заголовков\MIDI Processing</Filter>
     </ClInclude>
     <ClInclude Include="SAFCGUIF_Local\CATh.h">
@@ -135,22 +135,13 @@
     <ClInclude Include="SAFGUIF\fonted_manip.h">
       <Filter>Файлы заголовков</Filter>
     </ClInclude>
-    <ClInclude Include="SAFC_InnerModules\HTDBR.h">
-      <Filter>Файлы заголовков\MIDI Processing</Filter>
-    </ClInclude>
-    <ClInclude Include="SAFC_InnerModules\SMRP.h">
-      <Filter>Файлы заголовков\MIDI Processing</Filter>
-    </ClInclude>
     <ClInclude Include="SAFGUIF\editbox.h">
       <Filter>Файлы заголовков\SAFGUIF</Filter>
     </ClInclude>
     <ClInclude Include="SAFGUIF\movable_resizeable_window.h">
       <Filter>Файлы заголовков\SAFGUIF</Filter>
     </ClInclude>
-    <ClInclude Include="MRWF.h">
-      <Filter>Файлы заголовков\MIDI Processing</Filter>
-    </ClInclude>
-    <ClInclude Include="SAFC_InnerModules\SMRP2.h">
+    <ClInclude Include="SAFC_InnerModules\single_midi_processor_2.h">
       <Filter>Файлы заголовков\MIDI Processing</Filter>
     </ClInclude>
     <ClInclude Include="function_wrapper.h">
@@ -158,6 +149,9 @@
     </ClInclude>
     <ClInclude Include="SAFGUIF\moveable_fui_window.h">
       <Filter>Файлы заголовков\SAFGUIF</Filter>
+    </ClInclude>
+    <ClInclude Include="SAFC_InnerModules\bool_settings.h">
+      <Filter>Файлы заголовков\MIDI Processing</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

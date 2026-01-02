@@ -35,6 +35,4 @@ enum _BoolSettings
 	imp_filter_allow_other = SMP_BOOL_SETTINGS_IMP_FILTER_ALLOW_OTHER,
 };
 
-using BIT = bool;
-
 #endif 

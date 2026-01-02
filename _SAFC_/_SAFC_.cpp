@@ -2,34 +2,21 @@
 
 #include <algorithm>
 #include <cstdlib>
-#include <wchar.h>
 #include <io.h>
 #include <tuple>
-#include <ctime>
 #include <mutex>
 #include <iostream>
-#include <cstdlib>
-#include <cmath>
 #include <vector>
 #include <filesystem>
 #include <deque>
-#include <unordered_set>
-#include <unordered_map>
-#include <list>
-#include <optional>
-#include <limits>
 #include <fstream>
-#include <set>
 #include <string>
 #include <iterator>
 #include <map>
-#include <deque>
-#include <array>
 #include <thread>
 #include <boost/algorithm/string.hpp>
 
 #include <WinSock2.h>
-#include <WinInet.h>
 
 #pragma comment (lib, "Version.lib")//Urlmon.lib
 #pragma comment (lib, "Urlmon.lib")//Urlmon.lib
@@ -40,25 +27,21 @@
 #pragma comment (lib, "Crypt32.Lib")
 #pragma comment (lib, "XmlLite.lib")
 
-#include "allocator.h"
 #include "WinReg.h"
-#include "resource.h"
-
-#include <stack>
-#include "bbb_ffio.h"
 
 #include "JSON/JSON.h"
 #include "JSON/JSON.cpp"
-#include "JSON/JSONValue.h"
 #include "JSON/JSONValue.cpp"
 
 #include "btree/btree_map.h"
 #include "SAFGUIF/fonted_manip.h"
 #include "SAFGUIF/SAFGUIF.h"
-#include "SAFC_InnerModules/SAFC_IM.h"
+#include "SAFC_InnerModules/include_all.h"
 #include "SAFCGUIF_Local/SAFGUIF_L.h"
 
-#include "SAFC_InnerModules/SMRP2.h"
+#include "SAFC_InnerModules/single_midi_processor_2.h"
+#include "SAFC_InnerModules/bool_settings.h"
+#include "consts.h"
 
 #include <boost/dll.hpp>
 #include <archive.h>
@@ -382,8 +365,7 @@ size_t GetAvailableMemory()
 ////TRUE USAGE STARTS HERE////
 //////////////////////////////
 
-ButtonSettings
-* BS_List_Black_Small = new ButtonSettings(System_White, 0, 0, 100, 10, 1, 0, 0, 0xFFEFDFFF, 0x00003F7F, 0x7F7F7FFF);
+ButtonSettings* BS_List_Black_Small = new ButtonSettings(System_White, 0, 0, 100, 10, 1, 0, 0, 0xFFEFDFFF, 0x00003F7F, 0x7F7F7FFF);
 
 std::uint32_t DefaultBoolSettings = _BoolSettings::remove_remnants | _BoolSettings::remove_empty_tracks | _BoolSettings::all_instruments_to_piano;
 
@@ -395,10 +377,10 @@ struct FileSettings
 	std::uint16_t NewPPQN, OldPPQN, OldTrackNumber, MergeMultiplier;
 	std::int16_t GroupID;
 	double NewTempo;
-	std::uint64_t FileSize;
+	std::uint64_t filesize;
 	std::int64_t SelectionStart, SelectionLength;
 	bool
-		IsMIDI,
+		is_midi,
 		InplaceMergeEnabled,
 		allow_legacy_rsb_meta_interaction,
 		RSBCompression,
@@ -407,9 +389,9 @@ struct FileSettings
 		AllowSysex,
 		EnableZeroVelocity,
 		ApplyOffsetAfter;
-	std::shared_ptr<CutAndTransposeKeys> KeyMap;
-	std::shared_ptr<PLC<std::uint8_t, std::uint8_t>> VolumeMap;
-	std::shared_ptr<PLC<std::uint16_t, std::uint16_t>> PitchBendMap;
+	std::shared_ptr<cut_and_transpose> KeyMap;
+	std::shared_ptr<polyline_converter<std::uint8_t, std::uint8_t>> VolumeMap;
+	std::shared_ptr<polyline_converter<std::uint16_t, std::uint16_t>> PitchBendMap;
 	std::uint32_t BoolSettings;
 	std::int64_t OffsetTicks;
 
@@ -425,16 +407,16 @@ struct FileSettings
 		for (int i = 0; i < Filename.size(); i++)
 			AppearancePath.push_back((char)(Filename[i] & 0xFF));
 		//cout << AppearancePath << " ::\n";
-		FastMIDIChecker FMIC(Filename);
-		this->IsMIDI = FMIC.IsAcssessable && FMIC.IsMIDI;
+		fast_midi_checker FMIC(Filename);
+		this->is_midi = FMIC.is_acssessible && FMIC.is_midi;
 		OldPPQN = FMIC.PPQN;
 		NewPPQN = FMIC.PPQN;
 		MergeMultiplier = 0;
-		OldTrackNumber = FMIC.ExpectedTrackNumber;
+		OldTrackNumber = FMIC.expected_track_number;
 		OffsetTicks = InplaceMergeEnabled = 0;
 		AllowSysex = false;
 		EnableZeroVelocity = false;
-		FileSize = FMIC.FileSize;
+		filesize = FMIC.filesize;
 		GroupID = NewTempo = 0;
 		SelectionStart = 0;
 		SelectionLength = -1;
@@ -470,9 +452,9 @@ struct FileSettings
 		smrp_data->filename = Filename;
 		smrp_data->postfix = WFileNamePostfix;
 		if(VolumeMap)
-			settings.volume_map = std::make_shared<BYTE_PLC_Core>(VolumeMap);
+			settings.volume_map = std::make_shared<byte_plc_core>(VolumeMap);
 		if(PitchBendMap)
-			settings.pitch_map = std::make_shared<_14BIT_PLC_Core>(PitchBendMap);
+			settings.pitch_map = std::make_shared<_14bit_plc_core>(PitchBendMap);
 		settings.key_converter = KeyMap;
 		settings.new_ppqn = NewPPQN;
 		settings.old_ppqn = OldPPQN;
@@ -499,7 +481,7 @@ struct FileSettings
 		InplaceMergeEnabled = 
 			settings.details.inplace_mergable = InplaceMergeEnabled && !RSBCompression;
 		settings.details.group_id = GroupID;
-		settings.details.initial_filesize = FileSize;
+		settings.details.initial_filesize = filesize;
 		settings.offset = OffsetTicks;
 
 		if (NewTempo > 3.)
@@ -525,15 +507,15 @@ struct FileSettings
 struct _SFD_RSP 
 {
 	std::int32_t ID;
-	std::int64_t FileSize;
-	_SFD_RSP(std::int32_t ID, std::int64_t FileSize)
+	std::int64_t filesize;
+	_SFD_RSP(std::int32_t ID, std::int64_t filesize)
 	{
 		this->ID = ID;
-		this->FileSize = FileSize;
+		this->filesize = filesize;
 	}
 	inline bool operator<(_SFD_RSP a)
 	{
-		return FileSize < a.FileSize;
+		return filesize < a.filesize;
 	}
 };
 
@@ -590,20 +572,20 @@ struct SAFCData
 
 		for (int i = 0; i < Files.size(); i++)
 		{
-			Sizes.emplace_back(i, Files[i].FileSize);
+			Sizes.emplace_back(i, Files[i].filesize);
 		}
 
 		std::sort(Sizes.begin(), Sizes.end());
 
 		for (int i = 0; i < Sizes.size(); i++)
 		{
-			SumSize.push_back((T += Sizes[i].FileSize));
+			SumSize.push_back((T += Sizes[i].filesize));
 		}
 
 		for (int i = 0; i < SumSize.size(); i++)
 		{
 			Files[Sizes[i].ID].GroupID = (std::uint16_t)(ceil(((float)SumSize[i] / ((float)SumSize.back())) * ThreadsCount) - 1.);
-			std::cout << "Thread " << Files[Sizes[i].ID].GroupID << ": " << Sizes[i].FileSize << ":\t" << Sizes[i].ID << std::endl;
+			std::cout << "Thread " << Files[Sizes[i].ID].GroupID << ": " << Sizes[i].filesize << ":\t" << Sizes[i].ID << std::endl;
 		}
 	}
 
@@ -643,13 +625,13 @@ struct SAFCData
 			Files.erase(Files.begin() + ID);
 	}
 
-	std::shared_ptr<MIDICollectionThreadedMerger> MCTM_Constructor()
+	std::shared_ptr<midi_collection_threaded_merger> MCTM_Constructor()
 	{
 		using proc_data_ptr = std::shared_ptr<single_midi_processor_2::processing_data>;
 		std::vector<proc_data_ptr> SMRPv;
 		for (int i = 0; i < Files.size(); i++)
 			SMRPv.push_back(Files[i].BuildSMRPProcessingData());
-		return std::make_shared<MIDICollectionThreadedMerger>(SMRPv, GlobalPPQN, SavePath, IsCLIMode);
+		return std::make_shared<midi_collection_threaded_merger>(SMRPv, GlobalPPQN, SavePath, IsCLIMode);
 	}
 
 	FileSettings& operator[](std::int32_t ID)
@@ -659,7 +641,7 @@ struct SAFCData
 };
 
 SAFCData _Data;
-std::shared_ptr<MIDICollectionThreadedMerger> GlobalMCTM;
+std::shared_ptr<midi_collection_threaded_merger> GlobalMCTM;
 
 void ThrowAlert_Error(std::string&& AlertText) 
 {
@@ -796,7 +778,7 @@ void AddFiles(const std::vector<std::wstring>& Filenames)
 			continue;
 		_Data.Files.push_back(FileSettings(Filenames[i]));
 		auto& lastFile = _Data.Files.back();
-		if (lastFile.IsMIDI)
+		if (lastFile.is_midi)
 		{
 			if (WH)
 				_WH_t("MAIN", "List", SelectablePropertedList*)->SafePushBackNewString(lastFile.AppearanceFilename);
@@ -893,7 +875,7 @@ namespace PropsAndSets
 		((CheckBox*)((*PASWptr)["APPLY_OFFSET_AFTER"]))->State = _Data[ID].ApplyOffsetAfter;
 
 		((TextBox*)((*PASWptr)["CONSTANT_PROPS"]))->SafeStringReplace(
-			"File size: " + std::to_string(_Data[ID].FileSize) + "b\n" +
+			"File size: " + std::to_string(_Data[ID].filesize) + "b\n" +
 			"Old PPQN: " + std::to_string(_Data[ID].OldPPQN) + "\n" +
 			"Track number (header info): " + std::to_string(_Data[ID].OldTrackNumber) + "\n" +
 			"\"Remnant\" file postfix: " + _Data[ID].FileNamePostfix + "\n" +
@@ -1414,7 +1396,7 @@ namespace PropsAndSets
 			auto Wptr = (*WH)["CAT"];
 			auto CATptr = (CAT_Piano*)((*Wptr)["CAT_ITSELF"]);
 			if (!_Data[currentID].KeyMap)
-				_Data[currentID].KeyMap = std::make_shared<CutAndTransposeKeys>(0, 127, 0);
+				_Data[currentID].KeyMap = std::make_shared<cut_and_transpose>(0, 127, 0);
 			CATptr->PianoTransform = _Data[currentID].KeyMap;
 			CATptr->UpdateInfo();
 			WH->EnableWindow("CAT");
@@ -1424,9 +1406,9 @@ namespace PropsAndSets
 		{
 			auto Wptr = (*WH)["CAT"];
 			auto CATptr = (CAT_Piano*)((*Wptr)["CAT_ITSELF"]);
-			CATptr->PianoTransform->Max = 255;
-			CATptr->PianoTransform->Min = 0;
-			CATptr->PianoTransform->TransposeVal = 0;
+			CATptr->PianoTransform->max_val = 255;
+			CATptr->PianoTransform->min_val = 0;
+			CATptr->PianoTransform->transpose_val = 0;
 			CATptr->UpdateInfo();
 		}
 
@@ -1434,9 +1416,9 @@ namespace PropsAndSets
 		{
 			auto Wptr = (*WH)["CAT"];
 			auto CATptr = (CAT_Piano*)((*Wptr)["CAT_ITSELF"]);
-			CATptr->PianoTransform->Max = 127;
-			CATptr->PianoTransform->Min = 0;
-			CATptr->PianoTransform->TransposeVal = 0;
+			CATptr->PianoTransform->max_val = 127;
+			CATptr->PianoTransform->min_val = 0;
+			CATptr->PianoTransform->transpose_val = 0;
 			CATptr->UpdateInfo();
 		}
 
@@ -1444,9 +1426,9 @@ namespace PropsAndSets
 		{
 			auto Wptr = (*WH)["CAT"];
 			auto CATptr = (CAT_Piano*)((*Wptr)["CAT_ITSELF"]);
-			CATptr->PianoTransform->Max = 127;
-			CATptr->PianoTransform->Min = 0;
-			CATptr->PianoTransform->TransposeVal = 128;
+			CATptr->PianoTransform->max_val = 127;
+			CATptr->PianoTransform->min_val = 0;
+			CATptr->PianoTransform->transpose_val = 128;
 			CATptr->UpdateInfo();
 		}
 
@@ -1454,18 +1436,18 @@ namespace PropsAndSets
 		{
 			auto Wptr = (*WH)["CAT"];
 			auto CATptr = (CAT_Piano*)((*Wptr)["CAT_ITSELF"]);
-			TMax = CATptr->PianoTransform->Max;
-			TMin = CATptr->PianoTransform->Min;
-			TTransp = CATptr->PianoTransform->TransposeVal;
+			TMax = CATptr->PianoTransform->max_val;
+			TMin = CATptr->PianoTransform->min_val;
+			TTransp = CATptr->PianoTransform->transpose_val;
 		}
 
 		void OnPaste()
 		{
 			auto Wptr = (*WH)["CAT"];
 			auto CATptr = (CAT_Piano*)((*Wptr)["CAT_ITSELF"]);
-			CATptr->PianoTransform->Max = TMax;
-			CATptr->PianoTransform->Min = TMin;
-			CATptr->PianoTransform->TransposeVal = TTransp;
+			CATptr->PianoTransform->max_val = TMax;
+			CATptr->PianoTransform->min_val = TMin;
+			CATptr->PianoTransform->transpose_val = TTransp;
 			CATptr->UpdateInfo();
 		}
 
@@ -1491,7 +1473,7 @@ namespace PropsAndSets
 			VM->Hovered = 0;
 			VM->RePutMode = 0;
 			if (!_Data[currentID].VolumeMap)
-				_Data[currentID].VolumeMap = std::make_shared<PLC<std::uint8_t, std::uint8_t>>();
+				_Data[currentID].VolumeMap = std::make_shared<polyline_converter<std::uint8_t, std::uint8_t>>();
 			VM->PLC_bb = _Data[currentID].VolumeMap;
 			WH->EnableWindow("VM");
 		}
@@ -1504,10 +1486,10 @@ namespace PropsAndSets
 			{
 				auto IFDeg = ((InputField*)(*Wptr)["VM_DEGREE"]);
 				float Degree = std::stof(IFDeg->GetCurrentInput("0"));
-				VM->PLC_bb->ConversionMap.clear();
-				VM->PLC_bb->ConversionMap[127] = 127;
+				VM->PLC_bb->map.clear();
+				VM->PLC_bb->map[127] = 127;
 				for (int i = 0; i < 128; i++) 
-					VM->PLC_bb->InsertNewPoint(i, std::ceil(std::pow(i / 127., Degree) * 127.));
+					VM->PLC_bb->insert(i, std::ceil(std::pow(i / 127., Degree) * 127.));
 			}
 			else
 				ThrowAlert_Error("If you see this message, some error might have happen, since PLC_bb is null");
@@ -1531,12 +1513,12 @@ namespace PropsAndSets
 			auto VM = ((PLC_VolumeWorker*)(*Wptr)["VM_PLC"]);
 			if (VM->PLC_bb)
 			{
-				if (VM->PLC_bb->ConversionMap.empty())return;
+				if (VM->PLC_bb->map.empty())return;
 				std::uint8_t C[256]{};
 				for (int i = 0; i < 255; i++)
-					C[i] = VM->PLC_bb->AskForValue(i);
+					C[i] = VM->PLC_bb->at(i);
 				for (int i = 0; i < 255; i++)
-					VM->PLC_bb->ConversionMap[i] = C[i];
+					VM->PLC_bb->map[i] = C[i];
 			}
 			else
 				ThrowAlert_Error("If you see this message, some error might have happen, since PLC_bb is null");
@@ -1560,7 +1542,7 @@ namespace PropsAndSets
 			auto Wptr = (*WH)["VM"];
 			auto VM = ((PLC_VolumeWorker*)(*Wptr)["VM_PLC"]);
 			if (VM->PLC_bb)
-				VM->PLC_bb->ConversionMap.clear();
+				VM->PLC_bb->map.clear();
 			else
 				ThrowAlert_Error("If you see this message, some error might have happen, since PLC_bb is null");
 		}
@@ -1882,7 +1864,7 @@ void OnStart()
 		std::string temp = "";
 		MW->AddUIElement(temp = "SMRP_C" + std::to_string(ID), Vis);
 
-		std::thread([](std::shared_ptr<MIDICollectionThreadedMerger> pMCTM, SMRP_Vis* pVIS, std::uint32_t ID)
+		std::thread([](std::shared_ptr<midi_collection_threaded_merger> pMCTM, SMRP_Vis* pVIS, std::uint32_t ID)
 		{
 			std::string SID = "SMRP_C" + std::to_string(ID);
 			std::cout << SID << " Processing started" << std::endl;
@@ -1900,7 +1882,7 @@ void OnStart()
 		}, GlobalMCTM, Vis, ID).detach();
 	}
 
-	std::thread([](std::shared_ptr<MIDICollectionThreadedMerger> pMCTM, SAFCData* SD, MoveableWindow* MW)
+	std::thread([](std::shared_ptr<midi_collection_threaded_merger> pMCTM, SAFCData* SD, MoveableWindow* MW)
 	{
 		while (pMCTM->CheckSMRPProcessingAndStartNextStep())
 			//that's some really dumb synchronization... TODO: MAKE BETTER
@@ -1915,7 +1897,7 @@ void OnStart()
 			(-100., 0., System_White, &(pMCTM->IntermediateInplaceFlag), &(pMCTM->IITrackCount));
 		(*MW)["RM"] = new BoolAndWORDChecker<decltype(pMCTM->IntermediateInplaceFlag), decltype(pMCTM->IRTrackCount)>
 			(100., 0., System_White, &(pMCTM->IntermediateRegularFlag), &(pMCTM->IRTrackCount));
-		std::thread ILO([](std::shared_ptr<MIDICollectionThreadedMerger> pMCTM, SAFCData* SD, MoveableWindow* MW)
+		std::thread ILO([](std::shared_ptr<midi_collection_threaded_merger> pMCTM, SAFCData* SD, MoveableWindow* MW)
 		{
 			while (!pMCTM->CheckRIMerge())
 			{
@@ -1932,7 +1914,7 @@ void OnStart()
 		ILO.detach();
 	}, GlobalMCTM, &_Data, MW).detach();
 
-	std::thread([](std::shared_ptr<MIDICollectionThreadedMerger> pMCTM, MoveableWindow* MW, std::chrono::steady_clock::time_point start_timepoint)
+	std::thread([](std::shared_ptr<midi_collection_threaded_merger> pMCTM, MoveableWindow* MW, std::chrono::steady_clock::time_point start_timepoint)
 	{
 		auto timer_ptr = (InputField*)(*MW)["TIMER"];
 		while (!pMCTM->CompleteFlag)
@@ -2214,7 +2196,7 @@ void Init()
 	(*WH)["CAT"] = T;
 
 	T = new MoveableFuiWindow("Volume map.", System_White, -150, 150, 300, 350, 200, 2.5f, 100, 100, 2.5f, BACKGROUND_OPQ, HEADER, BORDER);
-	(*T)["VM_PLC"] = new PLC_VolumeWorker(0, 0 - WindowHeaderSize, 300 - WindowHeaderSize * 2, 300 - WindowHeaderSize * 2, std::make_shared<PLC<std::uint8_t, std::uint8_t>>());///todo: interface
+	(*T)["VM_PLC"] = new PLC_VolumeWorker(0, 0 - WindowHeaderSize, 300 - WindowHeaderSize * 2, 300 - WindowHeaderSize * 2, std::make_shared<polyline_converter<std::uint8_t, std::uint8_t>>());///todo: interface
 	(*T)["VM_SSBDIIF"] = Butt = new Button("Shape alike x^y", System_White, PropsAndSets::VolumeMap::OnDegreeShape, -110 + WindowHeaderSize, -150 - WindowHeaderSize, 80, 10, 1, 0xFFFFFF3F, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFAFFF3F, 0xFFAFFFFF, System_White, "Where y is from frame bellow");///Set shape by degree in input field;
 	Butt->Tip->SafeChangePosition_Argumented(_Align::left, -150 + WindowHeaderSize, -160 - WindowHeaderSize);
 	(*T)["VM_DEGREE"] = new InputField("1", -140 + WindowHeaderSize, -170 - WindowHeaderSize, 10, 20, System_White, NULL, 0x007FFFFF, NULL, " ", 4, _Align::center, _Align::center, InputField::Type::FP_PositiveNumbers);

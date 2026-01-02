@@ -6,11 +6,9 @@
 #include <string>
 #include <vector>
 #include <map>
-#include <thread>
 #include <memory>
 #include <mutex>
 #include <functional>
-#include <stack>
 #include <array>
 #include <atomic>
 #include <ostream>
@@ -20,10 +18,10 @@
 #include "../bbb_ffio.h"
 #include "../SAFGUIF/header_utils.h"
 
-#include "PLC.h"
-#include "CAT.h"
+#include "polyline_converter.h"
+#include "cut_and_transpose.h"
 
-#include "SMIC.h"
+#include "single_midi_info_collector.h"
 
 #include "../function_wrapper.h"
 
@@ -144,8 +142,8 @@ struct single_midi_processor_2
 			{
 				key_events_at_selection_front.clear();
 				channel_events_at_selection_front.clear();
-				key_events_at_selection_front.reserve(1 << 16);
-				channel_events_at_selection_front.reserve(1 << 8);
+				key_events_at_selection_front.reserve(1ull << 16);
+				channel_events_at_selection_front.reserve(1ull << 8);
 
 				frontal_tempo = default_tempo;
 				frontal_color_event = {};
@@ -294,9 +292,9 @@ struct single_midi_processor_2
 		bool enable_imp_events_filter = false;
 		important_filter_settings imp_events_filter;
 
-		std::shared_ptr<BYTE_PLC_Core> volume_map;
-		std::shared_ptr<_14BIT_PLC_Core> pitch_map;
-		std::shared_ptr<CutAndTransposeKeys> key_converter;
+		std::shared_ptr<byte_plc_core> volume_map;
+		std::shared_ptr<_14bit_plc_core> pitch_map;
+		std::shared_ptr<cut_and_transpose> key_converter;
 		details_data details;
 		processing_details proc_details;
 	};

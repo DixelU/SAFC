@@ -3,11 +3,11 @@
 #define SAFGUIF_L_PLCV
 
 #include "../SAFGUIF/SAFGUIF.h"
-#include "../SAFC_InnerModules/SAFC_IM.h"
+// #include "../SAFC_InnerModules/include_all.h"
 
 struct PLC_VolumeWorker : HandleableUIPart
 {
-	std::shared_ptr<PLC<std::uint8_t, std::uint8_t>> PLC_bb;
+	std::shared_ptr<polyline_converter<std::uint8_t, std::uint8_t>> PLC_bb;
 	std::pair<std::uint8_t, std::uint8_t> _HoveredPoint;
 	SingleTextLine* STL_MSG;
 	float CXPos, CYPos, HorizontalSidesSize, VerticalSidesSize;
@@ -15,11 +15,12 @@ struct PLC_VolumeWorker : HandleableUIPart
 	bool Hovered, ActiveSetting, RePutMode/*JustPut=0*/;
 	std::uint8_t XCP, YCP;
 	std::uint8_t FPX, FPY;
+
 	~PLC_VolumeWorker() override
 	{
 		delete STL_MSG;
 	}
-	PLC_VolumeWorker(float CXPos, float CYPos, float Width, float Height, std::shared_ptr<PLC<std::uint8_t, std::uint8_t>> PLC_bb = nullptr)
+	PLC_VolumeWorker(float CXPos, float CYPos, float Width, float Height, std::shared_ptr<polyline_converter<std::uint8_t, std::uint8_t>> PLC_bb = nullptr)
 	{
 		this->PLC_bb = std::move(PLC_bb);
 		this->CXPos = CXPos;
@@ -68,22 +69,22 @@ struct PLC_VolumeWorker : HandleableUIPart
 			glVertex2f(begx + HorizontalSidesSize, begy + _ysqsz * (YCP + 1));
 			glEnd();
 		}
-		if (PLC_bb && PLC_bb->ConversionMap.size())
+		if (PLC_bb && PLC_bb->map.size())
 		{
 			glLineWidth(3);
 			glColor4f(1, 0.75f, 1, 0.5f);
 			glBegin(GL_LINE_STRIP);
-			glVertex2f(begx, begy + _ysqsz * (PLC_bb->AskForValue(0) + 0.5f));
+			glVertex2f(begx, begy + _ysqsz * (PLC_bb->at(0) + 0.5f));
 
-			for (auto Y = PLC_bb->ConversionMap.begin(); Y != PLC_bb->ConversionMap.end(); Y++)
+			for (auto Y = PLC_bb->map.begin(); Y != PLC_bb->map.end(); Y++)
 				glVertex2f(begx + (Y->first + 0.5f) * _xsqsz, begy + (Y->second + 0.5f) * _ysqsz);
 
-			glVertex2f(begx + 255.5f * _xsqsz, begy + _ysqsz * (PLC_bb->AskForValue(255) + 0.5f));
+			glVertex2f(begx + 255.5f * _xsqsz, begy + _ysqsz * (PLC_bb->at(255) + 0.5f));
 			glEnd();
 			glColor4f(1, 1, 1, 0.75f);
 			glPointSize(5);
 			glBegin(GL_POINTS);
-			for (auto Y = PLC_bb->ConversionMap.begin(); Y != PLC_bb->ConversionMap.end(); Y++)
+			for (auto Y = PLC_bb->map.begin(); Y != PLC_bb->map.end(); Y++)
 				glVertex2f(begx + (Y->first + 0.5f) * _xsqsz, begy + (Y->second + 0.5f) * _ysqsz);
 			glEnd();
 		}
@@ -95,14 +96,14 @@ struct PLC_VolumeWorker : HandleableUIPart
 			glVertex2f(begx + (XCP + 0.5f) * _xsqsz, begy + (YCP + 0.5f) * _ysqsz);
 			if (FPX < XCP)
 			{
-				Y = PLC_bb->ConversionMap.upper_bound(XCP);
-				if (Y != PLC_bb->ConversionMap.end())
+				Y = PLC_bb->map.upper_bound(XCP);
+				if (Y != PLC_bb->map.end())
 				{
 					glVertex2f(begx + (Y->first + 0.5f) * _xsqsz, begy + (Y->second + 0.5f) * _ysqsz);
 					glVertex2f(begx + (XCP + 0.5f) * _xsqsz, begy + (YCP + 0.5f) * _ysqsz);
 				}
-				Y = PLC_bb->ConversionMap.lower_bound(FPX);
-				if (Y != PLC_bb->ConversionMap.end() && Y != PLC_bb->ConversionMap.begin())
+				Y = PLC_bb->map.lower_bound(FPX);
+				if (Y != PLC_bb->map.end() && Y != PLC_bb->map.begin())
 				{
 					--Y;
 					glVertex2f(begx + (Y->first + 0.5f) * _xsqsz, begy + (Y->second + 0.5f) * _ysqsz);
@@ -110,14 +111,14 @@ struct PLC_VolumeWorker : HandleableUIPart
 				}
 			}
 			else {
-				Y = PLC_bb->ConversionMap.upper_bound(FPX);
-				if (Y != PLC_bb->ConversionMap.end())
+				Y = PLC_bb->map.upper_bound(FPX);
+				if (Y != PLC_bb->map.end())
 				{
 					glVertex2f(begx + (Y->first + 0.5f) * _xsqsz, begy + (Y->second + 0.5f) * _ysqsz);
 					glVertex2f(begx + (FPX + 0.5f) * _xsqsz, begy + (FPY + 0.5f) * _ysqsz);
 				}
-				Y = PLC_bb->ConversionMap.lower_bound(XCP);
-				if (Y != PLC_bb->ConversionMap.end() && Y != PLC_bb->ConversionMap.begin())
+				Y = PLC_bb->map.lower_bound(XCP);
+				if (Y != PLC_bb->map.end() && Y != PLC_bb->map.begin())
 				{
 					--Y;
 					glVertex2f(begx + (Y->first + 0.5f) * _xsqsz, begy + (Y->second + 0.5f) * _ysqsz);
@@ -153,13 +154,13 @@ struct PLC_VolumeWorker : HandleableUIPart
 		if (PLC_bb)
 		{
 			std::uint8_t TF, TS;
-			for (auto Y = PLC_bb->ConversionMap.begin(); Y != PLC_bb->ConversionMap.end();) 
+			for (auto Y = PLC_bb->map.begin(); Y != PLC_bb->map.end();)
 			{
 				TF = Y->first;
 				TS = Y->second;
-				Y = PLC_bb->ConversionMap.erase(Y);
-				if (PLC_bb->AskForValue(TF) != TS) 
-					PLC_bb->ConversionMap[TF] = TS;
+				Y = PLC_bb->map.erase(Y);
+				if (PLC_bb->at(TF) != TS) 
+					PLC_bb->map[TF] = TS;
 			}
 		}
 	}
@@ -206,19 +207,19 @@ struct PLC_VolumeWorker : HandleableUIPart
 				std::swap(A, B);
 				std::swap(ValA, ValB);
 			}
-			auto itA = PLC_bb->ConversionMap.lower_bound(A), itB = PLC_bb->ConversionMap.upper_bound(B);
+			auto itA = PLC_bb->map.lower_bound(A), itB = PLC_bb->map.upper_bound(B);
 			while (itA != itB)
-				itA = PLC_bb->ConversionMap.erase(itA);
+				itA = PLC_bb->map.erase(itA);
 
-			PLC_bb->InsertNewPoint(A, ValA);
-			PLC_bb->InsertNewPoint(B, ValB);
+			PLC_bb->insert(A, ValA);
+			PLC_bb->insert(B, ValB);
 		}
 	}
 	void JustPutNewValue(std::uint8_t A, std::uint8_t ValA)
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		if (PLC_bb)
-			PLC_bb->InsertNewPoint(A, ValA);
+			PLC_bb->insert(A, ValA);
 	}
 	bool MouseHandler(float mx, float my, CHAR Button, CHAR State) override
 	{

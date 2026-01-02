@@ -2,11 +2,12 @@
 #ifndef SAFGUIF_L_DND
 #define SAFGUIF_L_DND
 
-#include <dwmapi.h>
+// #include <dwmapi.h>
 #include <Windows.h>
-#include "../SAFGUIF/SAFGUIF.h"
-#include "../SAFC_InnerModules/SAFC_IM.h"
+// #include "../SAFGUIF/SAFGUIF.h"
+// #include "../SAFC_InnerModules/include_all.h"
 
+#include <vector>
 
 #pragma comment (lib, "dwmapi.lib")
 

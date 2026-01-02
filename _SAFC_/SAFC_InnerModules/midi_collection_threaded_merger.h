@@ -7,11 +7,11 @@ void ThrowAlert_Warning(std::string&& AlertText);
 
 #include <set>
 #include <thread>
-#include <ranges>
+#include <vector>
 
-#include "SMRP2.h"
+#include "single_midi_processor_2.h"
 
-struct MIDICollectionThreadedMerger
+struct midi_collection_threaded_merger
 {
 	std::wstring SaveTo;
 	std::atomic_bool FirstStageComplete;
@@ -160,8 +160,8 @@ struct MIDICollectionThreadedMerger
 				out.pop_back();
 		}
 	};
-	~MIDICollectionThreadedMerger() = default;
-	MIDICollectionThreadedMerger(
+	~midi_collection_threaded_merger() = default;
+	midi_collection_threaded_merger(
 		std::vector<proc_data_ptr> processing_data, 
 		std::uint16_t FinalPPQN, 
 		std::wstring SaveTo,
@@ -451,7 +451,7 @@ struct MIDICollectionThreadedMerger
 				else if (Track.empty())
 					continue;
 
-				if (Track.size() > EDGE * 2) 
+				if (Track.size() / 2 > EDGE) 
 				{
 					std::int64_t TotalShift = EDGE, PrevEdgePos = 0;
 					DegeneratedTrackIterator DTI(Track);

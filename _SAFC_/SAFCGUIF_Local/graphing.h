@@ -3,7 +3,7 @@
 #define SAFGUIF_L_G
 
 #include "../SAFGUIF/SAFGUIF.h"
-#include "../SAFC_InnerModules/SAFC_IM.h"
+// #include "../SAFC_InnerModules/SAFC_IM.h"
 
 using local_fp_type = float;
 constexpr float __epsilon = std::numeric_limits<float>::min() * 10;

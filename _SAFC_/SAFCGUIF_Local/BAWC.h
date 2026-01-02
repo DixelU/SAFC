@@ -4,7 +4,7 @@
 #define SAFGUIF_L_BAWC 
 
 #include "../SAFGUIF/SAFGUIF.h"
-#include "../SAFC_InnerModules/SAFC_IM.h"
+// #include "../SAFC_InnerModules/include_all.h"
 
 template<typename bool_type, typename number_type>
 struct BoolAndWORDChecker : HandleableUIPart
