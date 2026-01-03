@@ -355,22 +355,11 @@ namespace dixelu
 		__DIXELU_CONDITIONAL_CPP14_SPECIFIERS
 			self_type& operator+=(const self_type& rhs)
 		{
-			const bool lhs_lo_carried_bit = get_bit(down_type_bits - 1);
-			const bool rhs_lo_carried_bit = rhs.get_bit(down_type_bits - 1);
-			const bool carry_possibility = lhs_lo_carried_bit ^ rhs_lo_carried_bit;
-			const bool definite_carry = lhs_lo_carried_bit && rhs_lo_carried_bit;
+			lo += rhs.lo;
+			if (lo < rhs.lo)
+				hi += down_type(1);
 
 			hi += rhs.hi;
-			lo += rhs.lo;
-
-			if (definite_carry)
-				hi += down_type(1);
-			else if (carry_possibility)
-			{
-				const auto carried_bit = get_bit(down_type_bits - 1);
-				if (!carried_bit)
-					hi += down_type(1);
-			}
 
 			return *this;
 		}

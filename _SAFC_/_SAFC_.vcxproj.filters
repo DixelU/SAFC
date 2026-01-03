@@ -153,6 +153,9 @@
     <ClInclude Include="SAFC_InnerModules\bool_settings.h">
       <Filter>Файлы заголовков\MIDI Processing</Filter>
     </ClInclude>
+    <ClInclude Include="SAFC_InnerModules\simple_player.h">
+      <Filter>Файлы заголовков</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="_SAFC_.cpp">
