@@ -1396,7 +1396,6 @@ struct single_midi_processor_2
 				return false;
 
 			using uint128_t = dixelu::long_uint<0>;
-			using uint256_t = dixelu::long_uint<1>;
 			const auto target_tick = convert_ppq(tick, new_ppqn, old_ppqn);
 
 			const auto upper_bound = time_map.upper_bound(target_tick);
@@ -1404,11 +1403,13 @@ struct single_midi_processor_2
 			const auto rhs = (upper_bound == time_map.end()) ? lhs : upper_bound;
 
 			// a - coeficient of linear combination
-			uint256_t a_n = target_tick - lhs->first; // numerator
-			uint256_t a_d = (rhs->first == lhs->first) ? 1 : rhs->first - lhs->first; // denominator
+			uint64_t a_n = target_tick - lhs->first; // numerator
+			uint64_t a_d = (rhs->first == lhs->first) ? 1 : rhs->first - lhs->first; // denominator
 			// a_d >= a_n >= 0;
-			
-			auto time_numerator = a_n * uint256_t{rhs->second.numerator} + (a_d - a_n) * uint256_t{lhs->second.numerator};
+
+			auto time_numerator = 
+				uint128_t::__direct_karatsuba_mul<0>(a_n, rhs->second.numerator) + 
+				uint128_t::__direct_karatsuba_mul<0>(a_d - a_n, lhs->second.numerator);
 			auto time_denominator = a_d * target_tempo_val;
 
 			auto new_tick = (time_numerator * new_ppqn) / (time_denominator * old_ppqn);

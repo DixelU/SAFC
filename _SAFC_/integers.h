@@ -420,79 +420,6 @@ namespace dixelu
 			return ((bool)lo | (bool)hi);
 		}
 
-		__DIXELU_CONDITIONAL_CPP14_SPECIFIERS
-			self_type& __experimental_shift_bits_left(size_type shift)
-		{
-			if (shift < base_bits)
-			{
-				const auto shifted_part_length = base_bits - shift;
-				const auto shift_cut_mask = (~0ULL << shifted_part_length);
-
-				size_type mask_buffer = 0;
-				for (size_type i = 0; i < size; ++i)
-				{
-					auto& current_value = operator[](i);
-					mask_buffer = (current_value & shift_cut_mask) >> shifted_part_length;
-					current_value = (current_value << shift) | mask_buffer;
-				}
-
-				return *this;
-			}
-			else
-			{
-				auto rough_shift_length_in_bytes = shift / base_bits;
-				auto accurate_shift = shift - rough_shift_length_in_bytes * base_bits;
-
-				for (std::ptrdiff_t i = size - 1; i >= rough_shift_length_in_bytes; --i)
-				{
-					auto& this_el = operator[](i);
-					auto& prev_el = operator[](i - rough_shift_length_in_bytes);
-					this_el = prev_el;
-				}
-				for (std::ptrdiff_t i = rough_shift_length_in_bytes - 1; i >= 0; --i)
-					operator[](i) = 0;
-
-				return __experimental_shift_bits_left(accurate_shift);
-			}
-		}
-
-		__DIXELU_CONDITIONAL_CPP14_SPECIFIERS
-			self_type& __experimental_shift_bits_right(size_type shift)
-		{
-			if (shift < base_bits)
-			{
-				const auto shifted_part_length = base_bits - shift;
-				const auto shift_cut_mask = (~0ULL >> shifted_part_length);
-
-				size_type mask_buffer = 0;
-				for (std::ptrdiff_t i = size - 1; i >= 0; --i)
-				{
-					auto& current_value = operator[](i);
-					auto shifted_value_copy = (current_value >> shift) | mask_buffer;
-					mask_buffer = (current_value & shift_cut_mask) << shifted_part_length;
-					current_value = shifted_value_copy;
-				}
-
-				return *this;
-			}
-			else
-			{
-				auto rough_shift_length_in_bytes = shift / base_bits;
-				auto accurate_shift = shift - rough_shift_length_in_bytes * base_bits;
-
-				for (std::ptrdiff_t i = 0; i < size - rough_shift_length_in_bytes; ++i)
-				{
-					auto& this_el = operator[](i);
-					auto& next_el = operator[](i + rough_shift_length_in_bytes);
-					this_el = next_el;
-				}
-				for (std::ptrdiff_t i = size - rough_shift_length_in_bytes; i < size; ++i)
-					operator[](i) = 0;
-
-				return __experimental_shift_bits_right(accurate_shift);
-			}
-		}
-
 		///* https://github.com/glitchub/arith64/blob/master/arith64.c *///
 		__DIXELU_CONDITIONAL_CPP14_SPECIFIERS
 			self_type& operator<<=(size_type rhs)
@@ -583,27 +510,6 @@ namespace dixelu
 		{
 			return (*this = (*this * rhs));
 		}
-
-		/*template<std::uint64_t __deg>
-		__DIXELU_CONDITIONAL_CPP14_SPECIFIERS
-			static long_uint<__deg> __downtype_mul_long(const long_uint<__deg>& lhs, const long_uint<__deg>& rhs)
-		{
-			long_uint<__deg> carry(1);
-			long_uint<__deg> result;
-			long_uint<__deg> rolling_rhs = rhs;
-			long_uint<__deg> diminishing_lhs = lhs;
-			while (diminishing_lhs)
-			{
-				if (diminishing_lhs & carry)
-				{
-					result += rolling_rhs;
-					diminishing_lhs &= ~(carry);
-				}
-				rolling_rhs <<= 1;
-				carry <<= 1;
-			}
-			return result;
-		}*/
 
 		__DIXELU_CONDITIONAL_CPP14_SPECIFIERS
 		static long_uint<0>
