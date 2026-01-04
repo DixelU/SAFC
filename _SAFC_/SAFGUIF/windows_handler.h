@@ -37,7 +37,7 @@ struct WindowsHandler
 
 		Map["PROMPT"] = ptr = new MoveableFuiWindow("prompt", System_White, -50, 50, 100, 100, 50, 2.5, 25, 25, 2.5f, BACKGROUND, HEADER_PROMPT, BORDER);
 		(*ptr)["FLD"] = new InputField("", 0, 35 - WindowHeaderSize, 10, 80, System_White, NULL, 0x007FFFFF, NULL, "", 0, _Align::center);
-		(*ptr)["TXT"] = new TextBox("_abc_", System_White, 0, 7.5 - WindowHeaderSize, 10, 80, 7.5, 0, 0, 2, _Align::center, TextBox::VerticalOverflow::recalibrate);
+		(*ptr)["TXT"] = new TextBox("_abc_", System_White, 0.f, 2.5 - WindowHeaderSize, 10, 80, 7.5, 0, 0, 2, _Align::center, TextBox::VerticalOverflow::recalibrate);
 		(*ptr)["BUTT"] = new Button("Submit", System_White, NULL, -0, -20 - WindowHeaderSize, 80, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFF7F00FF, 0xFFFFFFFF, 0xFF7F00FF, NULL, " ");
 		ptr->WindowName->SafeMove(0, 2.5f);
 	}
