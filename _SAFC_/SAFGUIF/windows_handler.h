@@ -80,13 +80,14 @@ struct WindowsHandler
 		auto wptr = Map["PROMPT"];
 		auto ifptr = ((InputField*)(*wptr)["FLD"]);
 		auto tbptr = ((TextBox*)(*wptr)["TXT"]);
-		wptr->SafeWindowRename(WindowTitle, true);
 		//wptr->WindowName->SafeChangePosition(0, (alertheight - WindowHeaderSize) * 0.5f);
 		ifptr->InputType = InputType;
 		ifptr->MaxChars = MaxChars;
 		ifptr->UpdateInputString(DefaultString);
 		tbptr->TextAlign = STipAlign;
 		tbptr->SafeStringReplace(StaticTipText);
+		wptr->SafeWindowRename(WindowTitle, false);
+
 		((Button*)(*wptr)["BUTT"])->OnClick = OnSubmit;
 
 		wptr->SafeChangePosition(-50, 50);
@@ -102,7 +103,6 @@ struct WindowsHandler
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		auto AlertWptr = Map["ALERT"];
-		AlertWptr->SafeWindowRename(AlertHeader, true);
 		//AlertWptr->WindowName->SafeChangePosition(0, alertheight / 2);
 		AlertWptr->SafeChangePosition_Argumented(0, 0, 0);
 		AlertWptr->_NotSafeResize_Centered(alertheight, 200);
@@ -113,6 +113,8 @@ struct WindowsHandler
 				AlertWptr->_NotSafeResize_Centered(AlertWTptr->CalculatedTextHeight + WindowHeaderSize, AlertWptr->Width);
 			}
 		*/
+		AlertWptr->SafeWindowRename(AlertHeader, false);
+
 		auto AlertWSptr = ((SpecialSignHandler*)(*AlertWptr)["AlertSign"]);
 		AlertWSptr->_ReplaceVoidFunc(SpecialSignsDrawFunc);
 		if (Update)

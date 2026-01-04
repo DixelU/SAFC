@@ -242,7 +242,7 @@ struct MoveableWindow : HandleableUIPart
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		SafeWindowRename(NewWindowTitle);
 	}
-	void SafeWindowRename(const std::string& NewWindowTitle, bool ForceNoShift = false)
+	virtual void SafeWindowRename(const std::string& NewWindowTitle, bool ForceNoShift = false)
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		if (!WindowName)
@@ -252,7 +252,7 @@ struct MoveableWindow : HandleableUIPart
 		if (ForceNoShift)
 			return;
 
-		WindowName->SafeChangePosition_Argumented(GLOBAL_LEFT, XWindowPos + WindowHeaderSize * 0.5f, WindowName->CYpos);
+		WindowName->SafeChangePosition_Argumented(GLOBAL_LEFT, XWindowPos + WindowHeaderSize * 0.5f, YWindowPos - WindowHeaderSize * 0.5f);
 	}
 	HandleableUIPart*& operator[](const std::string& ID)
 	{

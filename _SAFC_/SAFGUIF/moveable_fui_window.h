@@ -299,6 +299,22 @@ struct MoveableFuiWindow : public MoveableWindow
 		else
 			return flag;
 	}
+
+	void SafeWindowRename(const std::string& NewWindowTitle, bool ForceNoShift = false) override
+	{
+		std::lock_guard<std::recursive_mutex> locker(Lock);
+		if (!WindowName)
+			return;
+
+		WindowName->SafeStringReplace(NewWindowTitle);
+		if (ForceNoShift)
+			return;
+
+		this->WindowName->SafeChangePosition_Argumented(
+			_Align::center,
+			XWindowPos + Width * 0.5f,
+			YWindowPos - (WindowHeaderSize - HeadersHatHeight) * 0.5f);
+	}
 };
 
 #endif 
