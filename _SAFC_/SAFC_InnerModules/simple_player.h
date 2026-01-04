@@ -24,14 +24,20 @@ private:
 	{
 		std::aligned_storage_t<sizeof(T), alignof(T)> data[slab_size];
 		const T* capacity_end;
-		T* begin, end;
+		T* begin;
+		T* end;
 
 		std::unique_ptr<slab> next_slab;
 
-		slab(): begin(data), end(data), capacity_end(data + sizeof(data)), next_slab(nullptr) {}
+		slab() :
+			capacity_end(reinterpret_cast<T*>(data) + slab_size),
+			begin(reinterpret_cast<T*>(data)),
+			end(reinterpret_cast<T*>(data)),
+			next_slab(nullptr)
+		{}
 
-		size_t size() const { end - begin; }
-		bool empty() const { return begin == end; }
+		[[nodiscard]] size_t size() const { return end - begin; }
+		[[nodiscard]] bool empty() const { return begin == end; }
 
 		T& front() { return *begin; }
 		const T& front() const { return *begin; }
@@ -39,12 +45,14 @@ private:
 		T& back() { return *(end - 1); }
 		const T& back() const { return *(end - 1); }
 
-		void pop() { begin->operator~T(); begin++; }
-		void push(T&& v) { ::new(end) T(std::move(v)); end++; }
+		void pop() { begin->~T(); ++begin; }
+		void push(T&& v) { ::new(end) T(std::move(v)); ++end; }
 
 		bool full() const { return end == capacity_end; }
 
-		void reset__unsafe() { begin = end = data; }
+		void reset__unsafe() { begin = end = reinterpret_cast<T*>(data); }
+
+		void clear() { while (begin != end) pop(); }
 	};
 
 	std::vector<std::unique_ptr<slab>> unused_slabs;
@@ -60,7 +68,7 @@ private:
 			return std::move(ptr);
 		}
 
-		return new slab();
+		return std::make_unique<slab>();
 	}
 
 	void dispose_of_empty_slab(std::unique_ptr<slab>&& slab_ptr)
@@ -69,6 +77,18 @@ private:
 		unused_slabs.push_back(std::move(slab_ptr));
 	}
 
+	struct iterator
+	{
+		slab* current_slab = nullptr;
+		T* cur_obj = nullptr;
+
+		T* operator->() { return cur_obj; }
+		T& operator*() { return *cur_obj; }
+		iterator& operator++(int)
+		{
+
+		}
+	};
 public:
 	buffered_queue() = default;
 
@@ -79,13 +99,13 @@ public:
 			head = get_empty_slab();
 			tail = head.get();
 		}
-		
+
 		if (tail->full())
 		{
 			tail->next_slab = get_empty_slab();
-			tail = tail->next_slab->get();
+			tail = tail->next_slab.get();
 		}
-		
+
 		tail->push(std::move(value));
 	}
 
@@ -93,11 +113,29 @@ public:
 	{
 		if (empty()) [[unlikely]]
 			return;
+
+		head->pop();
+
+		if (!head->empty() || !head->full())
+			return;
+
+		auto new_head = std::move(head->next_slab);
+		head->next_slab = nullptr;
+		if (new_head == nullptr)
+			tail = nullptr;
+
+		dispose_of_empty_slab(std::move(head));
+		head = std::move(new_head);
 	}
 
-	void empty()
+	bool empty()
 	{
 		return !head || head->empty();
+	}
+
+	void clear()
+	{
+		while (!empty()) pop();
 	}
 };
 
