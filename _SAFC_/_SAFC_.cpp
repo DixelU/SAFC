@@ -2863,6 +2863,9 @@ struct SafcCliRuntime:
 
 int main(int argc, char** argv)
 {
+	simple_player pl;
+	pl.init();
+
 	__versionTuple = ___GetVersion();
 
 	std::ios_base::sync_with_stdio(false); //why not
