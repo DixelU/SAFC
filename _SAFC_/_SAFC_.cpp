@@ -645,12 +645,16 @@ std::shared_ptr<midi_collection_threaded_merger> GlobalMCTM;
 
 void ThrowAlert_Error(std::string&& AlertText) 
 {
+	std::cerr << AlertText << std::endl;
+
 	if (WH)
 		WH->ThrowAlert(AlertText, "ERROR!", SpecialSigns::DrawExTriangle, true, 0xFFAF00FF, 0xFF);
 }
 
 void ThrowAlert_Warning(std::string&& AlertText)
 {
+	std::cout << AlertText << std::endl;
+
 	if (WH)
 		WH->ThrowAlert(AlertText, "Warning!", SpecialSigns::DrawExTriangle, true, 0x7F7F7FFF, 0xFFFFFFAF);
 }

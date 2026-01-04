@@ -159,7 +159,7 @@ public:
 	}
 } bbb_ffr;
 
-struct bbb_mmap
+typedef struct byte_by_byte_memory_mapped_file
 {
 private:
 	HANDLE hFile, hMapping;
@@ -239,7 +239,7 @@ private:
 	}
 
 public:
-	bbb_mmap(const wchar_t* filename) :
+	byte_by_byte_memory_mapped_file(const wchar_t* filename) :
 		hFile(nullptr),
 		hMapping(nullptr),
 		data(nullptr),
@@ -249,9 +249,24 @@ public:
 		init(filename);
 	}
 
-	~bbb_mmap()
+	~byte_by_byte_memory_mapped_file()
 	{
 		close();
+	}
+
+	inline const unsigned char* begin() const
+	{
+		return data;
+	}
+
+	inline const unsigned char* ptr() const
+	{
+		return curr_pos;
+	}
+
+	inline unsigned long long int length() const
+	{
+		return size;
 	}
 
 	inline void reopen_next_file(const wchar_t* filename)
@@ -306,7 +321,7 @@ public:
 	{
 		return tellg() >= size;
 	}
-};
+} bbb_mmap;
 
 
 #endif

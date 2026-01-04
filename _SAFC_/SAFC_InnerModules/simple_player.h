@@ -4,6 +4,15 @@
 
 #include "Windows.h"
 
+#include <vector>
+#include <string>
+#include <chrono>
+#include <thread>
+
+#include "../bbb_ffio.h"
+
+#include "single_midi_processor_2.h"
+
 struct simple_player
 {
 	simple_player() = default;
@@ -11,13 +20,15 @@ struct simple_player
 	void init()
 	{
 		enum_devices();
+		init_midi_out(current_device);
 
-		if (!kdmapi_status)
-			init_kdmapi();
+		warnings = std::make_shared<printing_logger>("33");
 	}
 
+	using tick_type = std::uint64_t;
+
 private:
-	void init_kdmapi()
+	void try_init_kdmapi()
 	{
 		kdmapi_status = nullptr;
 
@@ -30,6 +41,184 @@ private:
 			return;
 
 		short_msg = (decltype(short_msg))GetProcAddress(moduleHandle, "SendDirectData");
+	}
+
+	bool open(std::wstring filename)
+	{
+		// prerequisite: this is a midi file with valid header;
+		mmap = std::make_unique<bbb_mmap>(filename);
+		info = midi_info{};
+
+		if (!mmap || !mmap->good())
+		{
+			ThrowAlert_Warning("Unable to open MIDI file for playback");
+			return false;
+		}
+
+		const auto begin = mmap->begin();
+		const auto size = mmap->length();
+		const auto end = begin + size;
+
+		info.size = size;
+
+		if (size < 18)
+		{
+			info.scanned = size;
+			return false;
+		}
+
+		info.ppq = (begin[12] << 8) | (begin[13]);
+		
+		auto ptr = begin + 14;
+
+		while (ptr < end)
+		{
+			read_through_one_track(ptr, end);
+			info.scanned = ptr - begin;
+		}
+
+		if (info.tracks.empty())
+			return false;
+
+		for (auto & [tick, tempo] : info.tempo_tmp);
+	}
+
+	void read_through_one_track(const uint8_t*& cur, const uint8_t* end)
+	{
+		tick_type current_tick = 0;
+
+		uint32_t header = 0;
+		uint32_t rsb = 0;
+		uint32_t track_expected_size = 0;
+
+		bool is_good = true;
+		bool is_reading = true;
+
+		auto get_byte = [&cur, end]() { return get_value_and_increment(cur, end); };
+		while (header != MTrk_header && (cur < end)) //MTrk = 1297379947
+			header = (header << 8) | get_byte();
+
+		if (cur >= end)
+			return;
+
+		for (int i = 0; i < 4; i++)
+			track_expected_size = (track_expected_size << 8) | get_byte();
+
+		const auto raw_track_data_begin = cur;
+		while (cur < end && is_reading && is_good)
+		{
+			uint8_t command = 0;
+			uint8_t param_buffer = 0;
+
+			auto delta_time = get_vlv(cur, end);
+			current_tick += delta_time;
+
+			command = get_byte();
+			if (command < 0x80)
+			{
+				param_buffer = command;
+				command = rsb;
+			}
+			else
+			{
+				if (command < 0xF0)
+					rsb = command;
+
+				if (command < 0xF0 || command == 0xFF)
+					param_buffer = get_byte();
+				else
+					param_buffer = 0xFF;
+			}
+
+			if (command < 0x80 || cur >= end)
+			{
+				ThrowAlert_Error("Byte " + std::to_string(cur - mmap->begin()) + ": Unexpected 0 RSB\nAt least one track was skipped!");
+				is_good = false;
+				break;
+			}
+
+			switch (command >> 4)
+			{
+				case 0x8: case 0x9:
+				case 0xA: case 0xB: case 0xE:
+				{
+					get_byte();
+					break;
+				}
+				case 0xC: case 0xD:
+				{
+					break;
+				}
+				case 0xF:
+				{
+					uint8_t com = command;
+					uint8_t type = param_buffer;
+
+					is_reading &= !(type == 0x2F && com == 0xFF);
+					if (true /* disable if legacy rsb metas will misbehave again */)
+						rsb = 0;
+
+					if (!is_reading)
+						continue;
+
+					if (type == 0x51 && com == 0xFF)
+					{
+						auto length_3 = get_byte();
+						uint32_t value = (get_byte() << 16);
+						value |= (get_byte() << 8);
+						value |= (get_byte());
+
+						info.tempo_tmp[current_tick] = value;
+					}
+
+					auto length = get_vlv(cur, end);
+					for (std::size_t i = 0; i < length; ++i)
+						get_byte();
+					
+					break;
+				}
+				default:
+				{
+					ThrowAlert_Warning("Byte " + (std::to_string(cur - mmap->begin()) + ": Unknown event type " + std::to_string(command)));
+					is_good = false;
+					break;
+				}
+			}
+		}
+
+		if (!is_good || is_reading)
+			return;
+
+		if (track_expected_size != cur - raw_track_data_begin)
+			warnings->report({track_expected_size, cur - raw_track_data_begin}, "Track size mismatch");
+
+		info.ticks_length = std::max(current_tick, info.ticks_length);
+
+		auto& track_info = info.tracks.emplace_back();
+		track_info.begining = raw_track_data_begin;
+		track_info.ending = cur;
+	}
+
+	inline static uint8_t get_value_and_increment(const uint8_t*& cur, const uint8_t* end)
+	{
+		if (cur < end)
+			return *(cur++);
+		return 0;
+	}
+
+	static uint64_t get_vlv(const uint8_t*& cur, const uint8_t* end)
+	{
+		uint64_t value = 0;
+
+		uint8_t single_byte;
+		do
+		{
+			single_byte = get_value_and_increment(cur, end);
+			value = value << 7 | single_byte & 0x7F;
+		}
+		while (single_byte & 0x80);
+
+		return value;
 	}
 
 	void enum_devices()
@@ -54,36 +243,67 @@ private:
 			current_device = 0; // select first one
 	}
 
-
-	void close_midi_out(void)
+	void close_midi_out()
 	{
 		int attempts = 0;
 
-		if (hout)
+		if (!hout)
+			return;
+
+		auto hout_copy = hout.load();
+		hout = nullptr;
+
+		midiOutReset(hout_copy);
+		while (midiOutClose(hout_copy) != MMSYSERR_NOERROR && attempts++ < 8)
+			std::this_thread::sleep_for(std::chrono::milliseconds(250));
+
+		if (attempts == 8)
+			ThrowAlert_Error("Unable to close the MIDI out");
+	}
+
+	void init_midi_out(size_t device)
+	{
+		auto hout_copy = hout.load();
+		if (hout_copy)
+			return;
+
+		if (device >= devices.size())
+			return;
+
+		try
 		{
-			all_notes_off();
-			auto hout_copy = hout;
-			hout = NULL;
+			if (midiOutOpen(&hout_copy, device, 0, 0, 0) != MMSYSERR_NOERROR)
+			{
+				std::wstring name = devices[device].szPname;
+				auto readable_name = std::string(name.begin(), name.end());
+				ThrowAlert_Error("Unable to open MIDI out '" + readable_name + "'!");
+				hout = nullptr;
+			}
+			else
+			{
+				hout = hout_copy;
+				short_msg = [](uint32_t msg) { midiOutShortMsg(hout, msg); };
+			}
 
-			midiOutReset(hout_copy);
-			while (midiOutClose(hout_copy) != MMSYSERR_NOERROR && attempts++ < 10)
-				Sleep(200);
-
-			if (attempts == 10)
-				ThrowAlert_Error("Enable to close the MIDI out");
+			if (!kdmapi_status)
+				try_init_kdmapi();
+		}
+		catch (...)
+		{
+			ThrowAlert_Error("midiOutOpen() horribly failed...\n");
 		}
 	}
 
 	void all_notes_off_channel(uint8_t channel)
 	{
 		channel &= 0x0F;
+
 		short_msg(make_smsg(0xB0 | channel, 120));
 		short_msg(make_smsg(0xB0 | channel, 121));
 		short_msg(make_smsg(0xB0 | channel, 123));
 	}
 
-	// Turns all notes off on all channels
-	void all_notes_off(void)
+	void all_notes_off()
 	{
 		for (uint8_t c = 0; c < 16; c++)
 			all_notes_off_channel(c);
@@ -94,13 +314,46 @@ private:
 		return (uint32_t)prog | (arg1 << 8) | (arg2 << 16);
 	}
 
+	struct track_info
+	{
+		const uint8_t* begining;
+		const uint8_t* ending;
+	};
+
+	struct midi_info
+	{
+		std::vector<track_info> tracks;
+		std::map<uint64_t, uint32_t> tempo_tmp;
+		uint64_t ticks_length;
+
+		volatile uint64_t scanned{0};
+		volatile bool ready{false};
+		uint64_t size{0};
+
+		uint16_t ppq{0};
+	};
+
+	struct playback_state
+	{
+		tick_type current_tick;
+	};
+
+	std::shared_ptr<logger_base> warnings;
+
+	std::unique_ptr<bbb_mmap> mmap;
+
+	midi_info info;
+	playback_state state;
+
 	size_t current_device = ~0ULL;
 	std::vector<MIDIOUTCAPS> devices;
-	HMIDIOUT hout = nullptr;
+	inline static std::atomic<HMIDIOUT> hout = nullptr;
 
 	void(WINAPI* short_msg)(uint32_t msg) = nullptr;
-
 	bool(WINAPI* kdmapi_status)() = nullptr;
+
+	inline static constexpr std::uint32_t MTrk_header = 1297379947;
+	inline static constexpr std::uint32_t MThd_header = 1297377380;
 };
 
 #endif

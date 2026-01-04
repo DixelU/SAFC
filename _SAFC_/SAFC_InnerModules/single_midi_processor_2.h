@@ -12,6 +12,7 @@
 #include <array>
 #include <atomic>
 #include <ostream>
+#include <unordered_set>
 
 #include <syncstream>
 
@@ -30,6 +31,21 @@ struct logger_base
 	virtual ~logger_base() = default;
 	virtual void operator<<(std::string&& message) {};
 	virtual std::string getLast() const { return ""; };
+
+	virtual void report(std::vector<std::ptrdiff_t> data, std::string&& message)
+	{
+		std::string accumulator = "{";
+
+		for (size_t i = 0; i < data.size(); ++i)
+		{
+			accumulator += std::to_string(data[i]);
+			if (i + 1 < data.size())
+				accumulator += ", ";
+		}
+		accumulator += "}";
+
+		operator<<(std::move(accumulator) + ": " + std::move(message));
+	};
 };
 
 struct logger :
@@ -50,10 +66,15 @@ public:
 		std::lock_guard locker(mtx);
 		return (messages.size()) ? messages.back() : "";
 	}
-}; 
+	std::vector<std::string> getAll() const
+	{
+		std::lock_guard locker(mtx);
+		return messages;
+	}
+};
 
 struct singleline_logger :
-	public logger_base
+	public logger
 {
 protected:
 	std::string message;
@@ -76,13 +97,40 @@ struct printing_logger :
 	public singleline_logger
 {
 public:
+	std::string color;
+	printing_logger(std::string color = "37") : color(std::move(color)) {}
 	~printing_logger() override {}
 	void operator<<(std::string&& message) override
 	{
 		std::lock_guard locker(mtx);
 		this->message = std::move(message);
-		std::osyncstream(std::cout) << this->message << std::endl;
+		std::osyncstream(std::cout) << "\x1b[0;" + color + "m " << this->message << "\x1b[0m" << std::endl;
 	}
+};
+
+struct nonrepeating_logger :
+	public printing_logger
+{
+public:
+	~nonrepeating_logger() override {}
+	nonrepeating_logger(std::string color = "37")
+		:printing_logger(color)
+	{}
+	void operator<<(std::string&& message) override
+	{
+		if (message == "flush")
+			return used_messages.clear();
+
+		auto pos = message.find_last_of('}');
+		if (pos == std::string::npos)
+			pos = 0;
+
+		auto [it, success] = used_messages.insert(message.substr(pos));
+		if (success)
+			printing_logger::operator<<(std::move(message));
+	}
+private:
+	std::unordered_set<std::string> used_messages;
 };
 
 struct single_midi_processor_2
