@@ -12,6 +12,7 @@
 #include "../bbb_ffio.h"
 
 #include "single_midi_processor_2.h"
+#include "single_midi_info_collector.h"
 
 struct simple_player
 {
@@ -77,10 +78,33 @@ private:
 			info.scanned = ptr - begin;
 		}
 
+		info.scanned = end - begin;
+
 		if (info.tracks.empty())
 			return false;
 
-		for (auto & [tick, tempo] : info.tempo_tmp);
+		single_midi_info_collector::long_time time;
+		uint64_t previous_tick = 0;
+		uint32_t previous_tempo = 0x07A120;
+		time.denominator = info.ppq;
+
+		for (const auto& [tick, tempo_data] : info.tempo_tmp)
+		{
+			auto interval_seconds_rhs = dixelu::long_uint<0>{tick - previous_tick} * previous_tempo;
+
+			time.numerator += interval_seconds_rhs;
+			auto microseconds = time.numerator / time.denominator;
+
+			info.time_map_mcsecs.emplace_back(tick, microseconds);
+
+			previous_tick = tick;
+			previous_tempo = tempo_data;
+		}
+	}
+
+	void playback_thread()
+	{
+
 	}
 
 	void read_through_one_track(const uint8_t*& cur, const uint8_t* end)
@@ -324,6 +348,7 @@ private:
 	{
 		std::vector<track_info> tracks;
 		std::map<uint64_t, uint32_t> tempo_tmp;
+		std::vector<uint64_t, uint64_t> time_map_mcsecs;
 		uint64_t ticks_length;
 
 		volatile uint64_t scanned{0};
@@ -335,7 +360,8 @@ private:
 
 	struct playback_state
 	{
-		tick_type current_tick;
+		tick_type load_tick;
+		tick_type playback_tick;
 	};
 
 	std::shared_ptr<logger_base> warnings;
