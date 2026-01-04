@@ -14,6 +14,94 @@
 #include "single_midi_processor_2.h"
 #include "single_midi_info_collector.h"
 
+template<typename T>
+struct buffered_queue
+{
+private:
+	static constexpr size_t slab_size = 4096;
+
+	struct slab
+	{
+		std::aligned_storage_t<sizeof(T), alignof(T)> data[slab_size];
+		const T* capacity_end;
+		T* begin, end;
+
+		std::unique_ptr<slab> next_slab;
+
+		slab(): begin(data), end(data), capacity_end(data + sizeof(data)), next_slab(nullptr) {}
+
+		size_t size() const { end - begin; }
+		bool empty() const { return begin == end; }
+
+		T& front() { return *begin; }
+		const T& front() const { return *begin; }
+
+		T& back() { return *(end - 1); }
+		const T& back() const { return *(end - 1); }
+
+		void pop() { begin->operator~T(); begin++; }
+		void push(T&& v) { ::new(end) T(std::move(v)); end++; }
+
+		bool full() const { return end == capacity_end; }
+
+		void reset__unsafe() { begin = end = data; }
+	};
+
+	std::vector<std::unique_ptr<slab>> unused_slabs;
+	std::unique_ptr<slab> head{};
+	slab* tail = nullptr;
+
+	std::unique_ptr<slab> get_empty_slab()
+	{
+		if (!unused_slabs.empty())
+		{
+			auto ptr = std::move(unused_slabs.back());
+			unused_slabs.pop_back();
+			return std::move(ptr);
+		}
+
+		return new slab();
+	}
+
+	void dispose_of_empty_slab(std::unique_ptr<slab>&& slab_ptr)
+	{
+		slab_ptr->reset__unsafe();
+		unused_slabs.push_back(std::move(slab_ptr));
+	}
+
+public:
+	buffered_queue() = default;
+
+	void push(T&& value)
+	{
+		if (!head)
+		{
+			head = get_empty_slab();
+			tail = head.get();
+		}
+		
+		if (tail->full())
+		{
+			tail->next_slab = get_empty_slab();
+			tail = tail->next_slab->get();
+		}
+		
+		tail->push(std::move(value));
+	}
+
+	void pop()
+	{
+		if (empty()) [[unlikely]]
+			return;
+	}
+
+	void empty()
+	{
+		return !head || head->empty();
+	}
+};
+
+
 struct simple_player
 {
 	simple_player() = default;
@@ -104,7 +192,7 @@ private:
 
 	void playback_thread()
 	{
-
+		
 	}
 
 	void read_through_one_track(const uint8_t*& cur, const uint8_t* end)
@@ -356,6 +444,12 @@ private:
 		uint64_t size{0};
 
 		uint16_t ppq{0};
+	};
+
+	struct track_playback_state
+	{
+		const uint8_t* position;
+
 	};
 
 	struct playback_state
