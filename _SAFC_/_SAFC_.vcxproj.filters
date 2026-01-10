@@ -30,7 +30,7 @@
     <ClInclude Include="resource.h">
       <Filter>Файлы заголовков</Filter>
     </ClInclude>
-    <ClInclude Include="WinReg.h">
+    <ClInclude Include="WinRegWrappers.h">
       <Filter>Файлы заголовков</Filter>
     </ClInclude>
     <ClInclude Include="allocator.h">

@@ -172,14 +172,12 @@ namespace lFontSymbolsInfo
 	void InitialiseFont(const std::string& FontName, bool force = false)
 	{
 		if (!force && FontName == PrevFontName && PrevSize == Size &&
-			(std::abs)(Prev_lFONT_HEIGHT_TO_WIDTH - lFONT_HEIGHT_TO_WIDTH) < FLT_EPSILON)
+			(std::abs)(Prev_lFONT_HEIGHT_TO_WIDTH - lFONT_HEIGHT_TO_WIDTH) < std::numeric_limits<float>::epsilon())
 			return;
-		else
-		{
-			PrevFontName = FontName;
-			PrevSize = Size;
-			Prev_lFONT_HEIGHT_TO_WIDTH = lFONT_HEIGHT_TO_WIDTH;
-		}
+
+		PrevFontName = FontName;
+		PrevSize = Size;
+		Prev_lFONT_HEIGHT_TO_WIDTH = lFONT_HEIGHT_TO_WIDTH;
 
 		if (!IsInitialised)
 		{

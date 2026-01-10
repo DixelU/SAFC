@@ -126,6 +126,6 @@ namespace dixelu
         }
 
         inline R operator()(Args... args) const { return (_function_ref)(soa::detail::forward<Args>(args)...); }
-        operator bool() const { return _callable; }
+        operator bool() const { return _callable.use_count() != 0; }
     };
 }

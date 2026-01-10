@@ -250,7 +250,7 @@ struct SingleTextLine
 
 	void Draw()
 	{
-		if (CalculatedWidth < FLT_EPSILON)
+		if (CalculatedWidth < std::numeric_limits<float>::epsilon())
 			RecalculateWidth();
 
 		for (auto& ch: Chars)

@@ -173,7 +173,7 @@ private:
 	bool open(std::wstring filename)
 	{
 		// prerequisite: this is a midi file with valid header;
-		mmap = std::make_unique<bbb_mmap>(filename);
+		mmap = std::make_unique<bbb_mmap>(filename.c_str());
 		info = midi_info{};
 
 		if (!mmap || !mmap->good())
@@ -289,17 +289,17 @@ private:
 
 			switch (command >> 4)
 			{
-				case 0x8: case 0x9:
-				case 0xA: case 0xB: case 0xE:
+			case 0x8: case 0x9:
+			case 0xA: case 0xB: case 0xE:
 				{
 					get_byte();
 					break;
 				}
-				case 0xC: case 0xD:
+			case 0xC: case 0xD:
 				{
 					break;
 				}
-				case 0xF:
+			case 0xF:
 				{
 					uint8_t com = command;
 					uint8_t type = param_buffer;
@@ -324,10 +324,10 @@ private:
 					auto length = get_vlv(cur, end);
 					for (std::size_t i = 0; i < length; ++i)
 						get_byte();
-					
+
 					break;
 				}
-				default:
+			default:
 				{
 					ThrowAlert_Warning("Byte " + (std::to_string(cur - mmap->begin()) + ": Unknown event type " + std::to_string(command)));
 					is_good = false;
@@ -344,9 +344,11 @@ private:
 
 		info.ticks_length = std::max(current_tick, info.ticks_length);
 
-		auto& track_info = info.tracks.emplace_back();
-		track_info.begining = raw_track_data_begin;
-		track_info.ending = cur;
+		track_info track;
+		track.begining = raw_track_data_begin;
+		track.ending = cur;
+
+		info.tracks.push_back(std::move(track));
 	}
 
 	inline static uint8_t get_value_and_increment(const uint8_t*& cur, const uint8_t* end)
@@ -381,7 +383,7 @@ private:
 
 		for (int i = 0; i < count; i++)
 		{
-			MIDIOUTCAPS out;
+			MIDIOUTCAPSW out;
 			auto ret = midiOutGetDevCapsW(i, &out, sizeof(out));
 			if (ret != MMSYSERR_NOERROR)
 				continue;
@@ -474,7 +476,7 @@ private:
 	{
 		std::vector<track_info> tracks;
 		std::map<uint64_t, uint32_t> tempo_tmp;
-		std::vector<uint64_t, uint64_t> time_map_mcsecs;
+		std::vector<std::pair<uint64_t, uint64_t>> time_map_mcsecs;
 		uint64_t ticks_length;
 
 		volatile uint64_t scanned{0};
@@ -504,14 +506,14 @@ private:
 	playback_state state;
 
 	size_t current_device = ~0ULL;
-	std::vector<MIDIOUTCAPS> devices;
-	inline static std::atomic<HMIDIOUT> hout = nullptr;
+	std::vector<MIDIOUTCAPSW> devices;
+	inline static std::atomic<HMIDIOUT> hout;
 
 	void(WINAPI* short_msg)(uint32_t msg) = nullptr;
 	bool(WINAPI* kdmapi_status)() = nullptr;
 
-	inline static constexpr std::uint32_t MTrk_header = 1297379947;
-	inline static constexpr std::uint32_t MThd_header = 1297377380;
+	constexpr static std::uint32_t MTrk_header = 1297379947;
+	constexpr static std::uint32_t MThd_header = 1297377380;
 };
 
 #endif

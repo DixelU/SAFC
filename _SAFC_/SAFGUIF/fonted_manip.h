@@ -3,7 +3,7 @@
 #define SAFGUIF_FM
 
 #include <iostream>
-#include "../WinReg.h"
+#include "../WinRegWrappers.h"
 #include "header_utils.h"
 
 bool RestoreIsFontedVar()

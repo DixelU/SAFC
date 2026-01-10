@@ -1984,4 +1984,4 @@ struct single_midi_processor_2
 	}
 };
 
-#endif SAF_SMRP2
+#endif // SAF_SMRP2

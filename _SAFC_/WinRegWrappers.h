@@ -63,7 +63,6 @@
 #include <utility>          // std::swap, std::pair
 #include <vector>           // std::vector
 
-
 namespace WinReg {
 
 

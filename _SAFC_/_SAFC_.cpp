@@ -27,7 +27,7 @@
 #pragma comment (lib, "Crypt32.Lib")
 #pragma comment (lib, "XmlLite.lib")
 
-#include "WinReg.h"
+#include "WinRegWrappers.h"
 
 #include "JSON/JSON.h"
 #include "JSON/JSON.cpp"
@@ -42,6 +42,8 @@
 #include "SAFC_InnerModules/single_midi_processor_2.h"
 #include "SAFC_InnerModules/bool_settings.h"
 #include "consts.h"
+
+#include "background_worker.h"
 
 #include <boost/dll.hpp>
 #include <archive.h>
@@ -659,7 +661,7 @@ void ThrowAlert_Warning(std::string&& AlertText)
 		WH->ThrowAlert(AlertText, "Warning!", SpecialSigns::DrawExTriangle, true, 0x7F7F7FFF, 0xFFFFFFAF);
 }
 
-std::vector<std::wstring> MOFD(const wchar_t* Title)
+std::vector<std::wstring> multiple_open_file_dialog(const wchar_t* Title)
 {
 	OPENFILENAME ofn;       // common dialog box structure
 	wchar_t szFile[50000];       // buffer for file name
@@ -725,14 +727,14 @@ std::vector<std::wstring> MOFD(const wchar_t* Title)
 		return std::vector<std::wstring>{L""};
 	}
 }
-std::wstring SOFD(const wchar_t* Title)
+std::wstring save_open_file_dialog(const wchar_t* Title)
 {
 	wchar_t filename[MAX_PATH];
 	OPENFILENAME ofn;
 	ZeroMemory(&filename, sizeof(filename));
 	ZeroMemory(&ofn, sizeof(ofn));
 	ofn.lStructSize = sizeof(ofn);
-	ofn.hwndOwner = NULL;  // If you have a window to center over, put its HANDLE here
+	ofn.hwndOwner = NULL;  // If you have a merge_preview_container to center over, put its HANDLE here
 	ofn.lpstrFilter = L"MIDI Files(*.mid)\0*.mid\0";
 	ofn.lpstrFile = filename;
 	ofn.nMaxFile = MAX_PATH;
@@ -767,10 +769,18 @@ std::wstring SOFD(const wchar_t* Title)
 	}
 }
 
-//////////IMPORTANT STUFFS ABOVE///////////
+////////// IMPORTANT STUFF ABOVE ///////////
 
-#define _WH(Window,Element) ((*(*WH)[Window])[Element])//...uh
-#define _WH_t(Window,Element,Type) ((Type)_WH(Window,Element))
+HandleableUIPart* _WH(const char* window, const char* element)
+{
+	return ((*(*WH)[window])[element]);
+}
+
+template<typename ui_part_type>
+ui_part_type* _WH_t(const char* window, const char* element) requires std::is_base_of_v<HandleableUIPart, ui_part_type>
+{
+	return dynamic_cast<ui_part_type*>(_WH(window, element));
+}
 
 void AddFiles(const std::vector<std::wstring>& Filenames)
 {
@@ -785,7 +795,7 @@ void AddFiles(const std::vector<std::wstring>& Filenames)
 		if (lastFile.is_midi)
 		{
 			if (WH)
-				_WH_t("MAIN", "List", SelectablePropertedList*)->SafePushBackNewString(lastFile.AppearanceFilename);
+				_WH_t<SelectablePropertedList>("MAIN", "List")->SafePushBackNewString(lastFile.AppearanceFilename);
 
 			std::uint32_t Counter = 0;
 			lastFile.NewTempo = _Data.GlobalNewTempo;
@@ -816,8 +826,10 @@ void AddFiles(const std::vector<std::wstring>& Filenames)
 }
 void OnAdd()
 {
-	std::vector<std::wstring> Filenames = MOFD(L"Select midi files");
-	AddFiles(Filenames);
+	worker_singleton<struct midi_file_list>::instance().push([](){
+		std::vector<std::wstring> Filenames = multiple_open_file_dialog(L"Select midi files");
+		AddFiles(Filenames);
+	});
 }
 
 namespace PropsAndSets
@@ -1053,7 +1065,7 @@ namespace PropsAndSets
 
 		void ExportTG()
 		{
-			std::thread th([]()
+			worker_singleton<struct info_collection>::instance().push([]()
 			{
 				WH->MainWindow_ID = "SMIC";
 				WH->DisableAllWindows();
@@ -1069,12 +1081,11 @@ namespace PropsAndSets
 				WH->EnableWindow("SMIC");
 				InfoLine->SafeStringReplace("Graph A was successfully exported...");
 			});
-			th.detach();
 		}
 
 		void ExportAll()
 		{
-			std::thread th([]()
+			worker_singleton<struct info_collection>::instance().push([]()
 			{
 				WH->MainWindow_ID = "SMIC";
 				WH->DisableAllWindows();
@@ -1172,13 +1183,12 @@ namespace PropsAndSets
 				WH->EnableWindow("SMIC");
 				InfoLine->SafeStringReplace("Graph B was successfully exported...");
 			});
-			th.detach();
 		}
 
 		void DiffirentiateTicks()
 		{
-			std::thread th([]()
-				{
+			worker_singleton<struct info_collection>::instance().push([]()
+			{
 				WH->MainWindow_ID = "SMIC";
 				WH->DisableAllWindows();
 				auto InfoLine = (*(*WH)["SMIC"])["FLL"];
@@ -1195,6 +1205,7 @@ namespace PropsAndSets
 				double ppq = SMICptr->ppq;
 				double prev_tempo = 120;
 				std::int64_t last_tick = (*SMICptr->tempo_map.rbegin()).first;
+
 				for (auto& cur_pair : SMICptr->tempo_map/*; cur_pair != SMICptr->tempo_map.end(); cur_pair++*/)
 				{
 					cur_tick = cur_pair.first;
@@ -1205,6 +1216,7 @@ namespace PropsAndSets
 					prev_second = cur_seconds;
 					prev_tick = cur_tick;
 				}
+
 				auto cur = cur_tick - prev_tick;
 				ticks_limit -= prev_tick;
 				double rate = ((cur) ? ((double)ticks_limit / cur) : 0);
@@ -1225,52 +1237,54 @@ namespace PropsAndSets
 				WH->EnableWindow("SMIC");
 				InfoLine->SafeStringReplace("Integration was succsessfully finished");
 			});
-			th.detach();
 		}
 
 		void IntegrateTime()
 		{
-			WH->MainWindow_ID = "SMIC";
-			WH->DisableAllWindows();
-			auto InfoLine = (*(*WH)["SMIC"])["FLL"];
-			auto UIMinutes = (InputField*)(*(*WH)["SMIC"])["INT_MIN"];
-			auto UISeconds = (InputField*)(*(*WH)["SMIC"])["INT_SEC"];
-			auto UIMilliseconds = (InputField*)(*(*WH)["SMIC"])["INT_MSC"];
-			auto UIOutput = (TextBox*)(*(*WH)["SMIC"])["ANSWER"];
-			InfoLine->SafeStringReplace("Integration has begun");
-
-			double seconds_limit = 0;
-			seconds_limit += std::stoi(UIMinutes->GetCurrentInput("0")) * 60.;
-			seconds_limit += std::stoi(UISeconds->GetCurrentInput("0"));
-			seconds_limit += std::stoi(UIMilliseconds->GetCurrentInput("0")) / 1000.;
-
-			std::int64_t prev_tick = 0, cur_tick = 0;
-			double cur_seconds = 0;
-			double prev_second = 0;
-			double ppq = SMICptr->ppq;
-			double prev_tempo = 120;
-			std::int64_t last_tick = (*SMICptr->tempo_map.rbegin()).first;
-			for (auto& cur_pair : SMICptr->tempo_map/*; cur_pair != SMICptr->tempo_map.end(); cur_pair++*/)
+			worker_singleton<struct info_collection>::instance().push([]()
 			{
-				cur_tick = cur_pair.first;
-				cur_seconds += (cur_tick - prev_tick) * (60 / (prev_tempo * ppq));
-				if (cur_seconds > seconds_limit || cur_tick == last_tick)
-					break;
-				prev_tempo = cur_pair.second;
-				prev_second = cur_seconds;
-				prev_tick = cur_tick;
-			}
-			cur_seconds -= prev_second;
-			seconds_limit -= prev_second;
-			auto rate = (seconds_limit == 0) ? 0 : seconds_limit / cur_seconds;
-			std::int64_t tick = (cur_tick - prev_tick) * rate + prev_tick;
+				WH->MainWindow_ID = "SMIC";
+				WH->DisableAllWindows();
+				auto InfoLine = (*(*WH)["SMIC"])["FLL"];
+				auto UIMinutes = (InputField*)(*(*WH)["SMIC"])["INT_MIN"];
+				auto UISeconds = (InputField*)(*(*WH)["SMIC"])["INT_SEC"];
+				auto UIMilliseconds = (InputField*)(*(*WH)["SMIC"])["INT_MSC"];
+				auto UIOutput = (TextBox*)(*(*WH)["SMIC"])["ANSWER"];
+				InfoLine->SafeStringReplace("Integration has begun");
 
-			UIOutput->SafeStringReplace("Tick: " + std::to_string(tick));
+				double seconds_limit = 0;
+				seconds_limit += std::stoi(UIMinutes->GetCurrentInput("0")) * 60.;
+				seconds_limit += std::stoi(UISeconds->GetCurrentInput("0"));
+				seconds_limit += std::stoi(UIMilliseconds->GetCurrentInput("0")) / 1000.;
 
-			WH->MainWindow_ID = "MAIN";
-			WH->EnableWindow("MAIN");
-			WH->EnableWindow("SMIC");
-			InfoLine->SafeStringReplace("Integration was succsessfully finished");
+				std::int64_t prev_tick = 0, cur_tick = 0;
+				double cur_seconds = 0;
+				double prev_second = 0;
+				double ppq = SMICptr->ppq;
+				double prev_tempo = 120;
+				std::int64_t last_tick = (*SMICptr->tempo_map.rbegin()).first;
+				for (auto& cur_pair : SMICptr->tempo_map/*; cur_pair != SMICptr->tempo_map.end(); cur_pair++*/)
+				{
+					cur_tick = cur_pair.first;
+					cur_seconds += (cur_tick - prev_tick) * (60 / (prev_tempo * ppq));
+					if (cur_seconds > seconds_limit || cur_tick == last_tick)
+						break;
+					prev_tempo = cur_pair.second;
+					prev_second = cur_seconds;
+					prev_tick = cur_tick;
+				}
+				cur_seconds -= prev_second;
+				seconds_limit -= prev_second;
+				auto rate = (seconds_limit == 0) ? 0 : seconds_limit / cur_seconds;
+				std::int64_t tick = (cur_tick - prev_tick) * rate + prev_tick;
+
+				UIOutput->SafeStringReplace("Tick: " + std::to_string(tick));
+
+				WH->MainWindow_ID = "MAIN";
+				WH->EnableWindow("MAIN");
+				WH->EnableWindow("SMIC");
+				InfoLine->SafeStringReplace("Integration was succsessfully finished");
+			});
 		}
 	}
 
@@ -1281,6 +1295,7 @@ namespace PropsAndSets
 			ThrowAlert_Warning("You cannot apply current settings to file with ID " + std::to_string(currentID));
 			return;
 		}
+
 		std::int32_t T;
 		std::string CurStr = "";
 		auto SMPASptr = (*WH)["SMPAS"];
@@ -1463,6 +1478,7 @@ namespace PropsAndSets
 			_Data[currentID].KeyMap = nullptr;
 		}
 	}
+
 	namespace VolumeMap
 	{
 		void OnVolMap()
@@ -1569,26 +1585,30 @@ namespace PropsAndSets
 
 void OnRem()
 {
-	auto ptr = _WH_t("MAIN", "List", SelectablePropertedList*);
-	for (auto ID = ptr->SelectedID.rbegin(); ID != ptr->SelectedID.rend(); ++ID)
-		_Data.RemoveByID(*ID);
-	ptr->RemoveSelected();
-	WH->DisableAllWindows();
-	_Data.SetGlobalPPQN();
-	_Data.ResolveSubdivisionProblem_GroupIDAssign();
+	worker_singleton<struct midi_file_list>::instance().push([](){
+		auto ptr = _WH_t<SelectablePropertedList>("MAIN", "List");
+		for (auto ID = ptr->SelectedID.rbegin(); ID != ptr->SelectedID.rend(); ++ID)
+			_Data.RemoveByID(*ID);
+		ptr->RemoveSelected();
+		WH->DisableAllWindows();
+		_Data.SetGlobalPPQN();
+		_Data.ResolveSubdivisionProblem_GroupIDAssign();
+	});
 }
 
 void OnRemAll()
 {
-	auto ptr = _WH_t("MAIN", "List", SelectablePropertedList*);
-	WH->DisableAllWindows();
-	while (_Data.Files.size())
-	{
-		_Data.RemoveByID(0);
-		ptr->SafeRemoveStringByID(0);
-	}
-	//_Data.SetGlobalPPQN();
-	//_Data.ResolveSubdivisionProblem_GroupIDAssign();
+	worker_singleton<struct midi_file_list>::instance().push([](){
+		auto ptr = _WH_t<SelectablePropertedList>("MAIN", "List");
+		WH->DisableAllWindows();
+		while (_Data.Files.size())
+		{
+			_Data.RemoveByID(0);
+			ptr->SafeRemoveStringByID(0);
+		}
+		//_Data.SetGlobalPPQN();
+		//_Data.ResolveSubdivisionProblem_GroupIDAssign();
+	});
 }
 
 void OnSubmitGlobalPPQN()
@@ -1603,7 +1623,14 @@ void OnSubmitGlobalPPQN()
 
 void OnGlobalPPQN()
 {
-	WH->ThrowPrompt("New value will be assigned to every MIDI\n(in settings)", "Global PPQN", OnSubmitGlobalPPQN, _Align::center, InputField::Type::NaturalNumbers, std::to_string(_Data.GlobalPPQN), 5);
+	WH->ThrowPrompt(
+		"New value will be assigned to every MIDI\n(in settings)",
+		"Global PPQN",
+		OnSubmitGlobalPPQN,
+		_Align::center,
+		InputField::Type::NaturalNumbers,
+		std::to_string(_Data.GlobalPPQN),
+		5);
 }
 
 void OnSubmitGlobalOffset()
@@ -1613,12 +1640,18 @@ void OnSubmitGlobalOffset()
 	std::uint32_t O = (t.size()) ? std::stoi(t) : _Data.GlobalOffset;
 	_Data.SetGlobalOffset(O);
 	WH->DisableWindow("PROMPT");
-	//PropsAndSets::OpenFileProperties(PropsAndSets::currentID);
 }
+
 void OnGlobalOffset()
 {
-	WH->ThrowPrompt("Sets new global offset", "Global Offset", OnSubmitGlobalOffset, _Align::center, InputField::Type::WholeNumbers, std::to_string(_Data.GlobalOffset), 10);
-	std::cout << _Data.GlobalOffset << " " << std::to_string(_Data.GlobalOffset) << std::endl;
+	WH->ThrowPrompt(
+		"Sets new global offset",
+		"Global Offset",
+		OnSubmitGlobalOffset,
+		_Align::center,
+		InputField::Type::WholeNumbers,
+		std::to_string(_Data.GlobalOffset),
+		10);
 }
 
 void OnSubmitGlobalTempo()
@@ -1628,8 +1661,8 @@ void OnSubmitGlobalTempo()
 	float Tempo = (t.size()) ? std::stof(t) : _Data.GlobalNewTempo;
 	_Data.SetGlobalTempo(Tempo);
 	WH->DisableWindow("PROMPT");
-	//PropsAndSets::OpenFileProperties(PropsAndSets::currentID);
 }
+
 void OnGlobalTempo()
 {
 	WH->ThrowPrompt("Sets specific tempo value to every MIDI\n(in settings)", "Global S. Tempo\0", OnSubmitGlobalTempo, _Align::center, InputField::Type::FP_PositiveNumbers, std::to_string(_Data.GlobalNewTempo), 8);
@@ -1664,13 +1697,13 @@ void OnRemAllModules()
 {
 	OnRemVolMaps();
 	OnRemCATs();
-	//OnRemPitchMaps();
 }
 
 namespace Settings
 {
 	INT ShaderMode = 0;
 	WinReg::RegKey RegestryAccess;
+
 	void OnSettings()
 	{
 		WH->EnableWindow("APP_SETTINGS");//_Data.DetectedThreads
@@ -1696,6 +1729,7 @@ namespace Settings
 		((CheckBox*)((*pptr)["INPLACE_MERGE"]))->State = _Data.InplaceMergeFlag;
 		((CheckBox*)((*pptr)["AUTOUPDATECHECK"]))->State = check_autoupdates;
 	}
+
 	void OnSetApply()
 	{
 		bool isRegestryOpened = false;
@@ -1775,12 +1809,14 @@ namespace Settings
 
 		Settings::RegestryAccess.Close();
 	}
+
 	void ChangeIsFontedVar()
 	{
 		is_fonted = !is_fonted;
 		SetIsFontedVar(is_fonted);
 		exit(0);
 	}
+
 	void ApplyToAll()
 	{
 		OnSetApply();
@@ -1794,11 +1830,13 @@ namespace Settings
 			Y->ApplyOffsetAfter = _Data.ApplyOffsetAfter;
 		}
 	}
+
 	void ApplyFSWheel(double new_val)
 	{
 		lFontSymbolsInfo::Size = new_val;
 		lFontSymbolsInfo::InitialiseFont(default_font_name);
 	}
+
 	void ApplyRelWheel(double new_val)
 	{
 		lFONT_HEIGHT_TO_WIDTH = new_val;
@@ -1808,11 +1846,13 @@ namespace Settings
 
 std::pair<float, float> GetPositionForOneOf(std::int32_t Position, std::int32_t Amount, float UnitSize, float HeightRel)
 {
-	std::pair<float, float> T{ 0.f, 0.f };
-	std::int32_t SideAmount = ceil(sqrt(Amount));
-	T.first = (0 - (Position % SideAmount) + ((SideAmount - 1) / 2.f)) * UnitSize;
-	T.second = (0 - (Position / SideAmount) + ((SideAmount - 1) / 2.f)) * UnitSize * HeightRel;
-	return T;
+	std::pair<float, float> coords{ 0.f, 0.f };
+	std::int32_t side_count = ceil(sqrt(Amount));
+
+	coords.first = (0 - (Position % side_count) + ((side_count - 1) / 2.f)) * UnitSize;
+	coords.second = (0 - (Position / side_count) + ((side_count - 1) / 2.f)) * UnitSize * HeightRel;
+
+	return coords;
 }
 
 void OnStart()
@@ -1820,146 +1860,147 @@ void OnStart()
 	if (_Data.Files.empty())
 		return;
 
-	WH->MainWindow_ID = "SMRP_CONTAINER";
-	WH->DisableAllWindows();
-	WH->EnableWindow("SMRP_CONTAINER");
-
-	GlobalMCTM = _Data.MCTM_Constructor();
-
-	auto start_timepoint = std::chrono::high_resolution_clock::now();
-
-	GlobalMCTM->StartProcessingMIDIs();
-
-	MoveableWindow* MW;
-	std::uint32_t ID = 0;
-
-	MW = (*WH)["SMRP_CONTAINER"];
-	std::vector<std::string> undesired_window_activities;
-
-	for (auto& single_activity_pair : MW->WindowActivities) 
+	worker_singleton<struct merge>::instance().push([]()
 	{
-		if (single_activity_pair.first.substr(0, 6) == "SMRP_C")
-			undesired_window_activities.push_back(single_activity_pair.first);
-		//MW->DeleteUIElementByName(singleActivity.first);
-	}
+		WH->MainWindow_ID = "SMRP_CONTAINER";
+		WH->DisableAllWindows();
+		WH->EnableWindow("SMRP_CONTAINER");
 
-	for(auto& singleActivityName: undesired_window_activities)
-		MW->DeleteUIElementByName(singleActivityName);
+		GlobalMCTM = _Data.MCTM_Constructor();
 
-	auto timer_ptr = (InputField*)(*MW)["TIMER"];
-	auto now = std::chrono::high_resolution_clock::now();
-	auto difference = std::chrono::duration_cast<std::chrono::milliseconds>(now - start_timepoint);
-	timer_ptr->SafeStringReplace(std::to_string(difference.count() * 0.001) + " s");
+		auto start_timepoint = std::chrono::high_resolution_clock::now();
 
-	std::this_thread::sleep_for(std::chrono::milliseconds(100));
+		GlobalMCTM->StartProcessingMIDIs();
 
-	decltype(GlobalMCTM->currently_processed) currently_processed_copy;
+		auto merge_preview_container = (*WH)["SMRP_CONTAINER"];
+		std::vector<std::string> undesired_window_activities;
 
-	{
-		GlobalMCTM->currently_processed_locker.lock();
-		currently_processed_copy = GlobalMCTM->currently_processed;
-		GlobalMCTM->currently_processed_locker.unlock();
-	}
-
-	for (ID = 0; ID < currently_processed_copy.size(); ID++)
-	{
-		auto Q = GetPositionForOneOf(ID, currently_processed_copy.size(), 140, 0.7);
-		auto Vis = new SMRP_Vis(Q.first, Q.second, System_White);
-		std::string temp = "";
-		MW->AddUIElement(temp = "SMRP_C" + std::to_string(ID), Vis);
-
-		std::thread([](std::shared_ptr<midi_collection_threaded_merger> pMCTM, SMRP_Vis* pVIS, std::uint32_t ID)
+		for (auto& single_activity_pair : merge_preview_container->WindowActivities)
 		{
-			std::string SID = "SMRP_C" + std::to_string(ID);
-			std::cout << SID << " Processing started" << std::endl;
-			bool finished = false;
-			while (GlobalMCTM->CheckSMRPProcessing()) 
-			{
-				GlobalMCTM->currently_processed_locker.lock();
-				finished = GlobalMCTM->currently_processed[ID].second->finished;
-				pVIS->SetSMRP(GlobalMCTM->currently_processed[ID]);
-				GlobalMCTM->currently_processed_locker.unlock();
-
-				std::this_thread::sleep_for(std::chrono::milliseconds(66));
-			}
-			std::cout << SID << " Processing stopped" << std::endl;
-		}, GlobalMCTM, Vis, ID).detach();
-	}
-
-	std::thread([](std::shared_ptr<midi_collection_threaded_merger> pMCTM, SAFCData* SD, MoveableWindow* MW)
-	{
-		while (pMCTM->CheckSMRPProcessingAndStartNextStep())
-			//that's some really dumb synchronization... TODO: MAKE BETTER
-			std::this_thread::sleep_for(std::chrono::milliseconds(100));
-
-		std::cout << "SMRP: Out from sleep\n" << std::flush;
-		for (int i = 0; i <= pMCTM->currently_processed.size(); i++)
-			MW->DeleteUIElementByName("SMRP_C" + std::to_string(i));
-
-		MW->SafeChangePosition_Argumented(0, 0, 0);
-		(*MW)["IM"] = new BoolAndWORDChecker<decltype(pMCTM->IntermediateInplaceFlag), decltype(pMCTM->IITrackCount)>
-			(-100., 0., System_White, &(pMCTM->IntermediateInplaceFlag), &(pMCTM->IITrackCount));
-		(*MW)["RM"] = new BoolAndWORDChecker<decltype(pMCTM->IntermediateInplaceFlag), decltype(pMCTM->IRTrackCount)>
-			(100., 0., System_White, &(pMCTM->IntermediateRegularFlag), &(pMCTM->IRTrackCount));
-		std::thread ILO([](std::shared_ptr<midi_collection_threaded_merger> pMCTM, SAFCData* SD, MoveableWindow* MW)
-		{
-			while (!pMCTM->CheckRIMerge())
-			{
-				std::this_thread::sleep_for(std::chrono::milliseconds(66));
-			}
-
-			std::cout << "RI: Out from sleep!\n";
-			MW->DeleteUIElementByName("IM");
-			MW->DeleteUIElementByName("RM");
-			MW->SafeChangePosition_Argumented(0, 0, 0);
-			(*MW)["FM"] = new BoolAndWORDChecker<decltype(pMCTM->CompleteFlag), int>
-				(0., 0., System_White, &(pMCTM->CompleteFlag), NULL);
-		}, pMCTM, SD, MW);
-		ILO.detach();
-	}, GlobalMCTM, &_Data, MW).detach();
-
-	std::thread([](std::shared_ptr<midi_collection_threaded_merger> pMCTM, MoveableWindow* MW, std::chrono::steady_clock::time_point start_timepoint)
-	{
-		auto timer_ptr = (InputField*)(*MW)["TIMER"];
-		while (!pMCTM->CompleteFlag)
-		{
-			auto now = std::chrono::high_resolution_clock::now();
-			auto difference = std::chrono::duration_cast<std::chrono::duration<double>>(now - start_timepoint);
-			timer_ptr->SafeStringReplace(std::to_string(difference.count()) + " s");
-			std::this_thread::sleep_for(std::chrono::milliseconds(50));
-
-			auto freeMemory = GetAvailableMemory();
-			if (freeMemory < 512)
-			{
-				auto message = 
-					"There is less than " + 
-					std::to_string(freeMemory) + 
-					"MB of available RAM!\n"
-					"SAFC may corrupt MIDI data or fail to finish the processing!";
-
-				std::cout << message << std::endl;
-				ThrowAlert_Warning(std::move(message));
-			}
+			if (single_activity_pair.first.substr(0, 6) == "SMRP_C")
+				undesired_window_activities.push_back(single_activity_pair.first);
 		}
-		std::cout << "F: Out from sleep!!!\n";
-		MW->DeleteUIElementByName("FM");
 
-		WH->DisableWindow(WH->MainWindow_ID);
-		WH->MainWindow_ID = "MAIN";
-		//WH->DisableAllWindows();
-		WH->EnableWindow("MAIN");
-		//pMCTM->ResetEverything();
-	}, GlobalMCTM, MW, start_timepoint).detach();
+		for (auto& name : undesired_window_activities)
+			merge_preview_container->DeleteUIElementByName(name);
 
-	//ThrowAlert_Error("It's not done yet :p");
+		auto timer_ptr = (InputField*)(*merge_preview_container)["TIMER"];
+		auto now = std::chrono::high_resolution_clock::now();
+		auto difference = std::chrono::duration_cast<std::chrono::milliseconds>(now - start_timepoint);
+		timer_ptr->SafeStringReplace(std::to_string(difference.count() * 0.001) + " s");
+
+		std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+		decltype(GlobalMCTM->currently_processed) currently_processed_copy;
+
+		{
+			GlobalMCTM->currently_processed_locker.lock();
+			currently_processed_copy = GlobalMCTM->currently_processed;
+			GlobalMCTM->currently_processed_locker.unlock();
+		}
+
+		for (size_t ID = 0; ID < currently_processed_copy.size(); ID++)
+		{
+			auto position = GetPositionForOneOf(ID, currently_processed_copy.size(), 140, 0.7);
+			auto visualiser = new SMRP_Vis(position.first, position.second, System_White);
+
+			std::string element_id;
+			merge_preview_container->AddUIElement(element_id = "SMRP_C" + std::to_string(ID), visualiser);
+
+			std::thread([](std::shared_ptr<midi_collection_threaded_merger> pMCTM, SMRP_Vis* pVIS, std::uint32_t ID)
+			{
+				std::string SID = "SMRP_C" + std::to_string(ID);
+				std::cout << SID << " Processing started" << std::endl;
+				bool finished = false;
+				while (GlobalMCTM->CheckSMRPProcessing())
+				{
+					GlobalMCTM->currently_processed_locker.lock();
+					finished = GlobalMCTM->currently_processed[ID].second->finished;
+					pVIS->SetSMRP(GlobalMCTM->currently_processed[ID]);
+					GlobalMCTM->currently_processed_locker.unlock();
+
+					std::this_thread::sleep_for(std::chrono::milliseconds(66));
+				}
+				std::cout << SID << " Processing stopped" << std::endl;
+			}, GlobalMCTM, visualiser, ID).detach();
+		}
+
+		worker_singleton<struct merge_ri_stage>::instance().push([safc_data_pointer = &_Data, merge_preview_container]()
+		{
+			//that's some really dumb synchronization... TODO: MAKE BETTER
+			while (GlobalMCTM->CheckSMRPProcessingAndStartNextStep())
+				std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+			std::cout << "SMRP: Out from sleep\n" << std::flush;
+			for (int i = 0; i <= GlobalMCTM->currently_processed.size(); i++)
+				merge_preview_container->DeleteUIElementByName("SMRP_C" + std::to_string(i));
+
+			merge_preview_container->SafeChangePosition_Argumented(0, 0, 0);
+			(*merge_preview_container)["IM"] = new BoolAndWORDChecker<decltype(GlobalMCTM->IntermediateInplaceFlag), decltype(GlobalMCTM->IITrackCount)>
+				(-100., 0., System_White, &(GlobalMCTM->IntermediateInplaceFlag), &(GlobalMCTM->IITrackCount));
+			(*merge_preview_container)["RM"] = new BoolAndWORDChecker<decltype(GlobalMCTM->IntermediateInplaceFlag), decltype(GlobalMCTM->IRTrackCount)>
+				(100., 0., System_White, &(GlobalMCTM->IntermediateRegularFlag), &(GlobalMCTM->IRTrackCount));
+			
+			worker_singleton<struct merge_ri_stage_cleanup>::instance().push([safc_data_pointer, merge_preview_container]()
+			{
+				while (!GlobalMCTM->CheckRIMerge())
+					std::this_thread::sleep_for(std::chrono::milliseconds(33));
+
+				std::cout << "RI: Out from sleep!\n";
+				merge_preview_container->DeleteUIElementByName("IM");
+				merge_preview_container->DeleteUIElementByName("RM");
+				merge_preview_container->SafeChangePosition_Argumented(0, 0, 0);
+				(*merge_preview_container)["FM"] = new BoolAndWORDChecker<decltype(GlobalMCTM->CompleteFlag), int>
+					(0., 0., System_White, &(GlobalMCTM->CompleteFlag), NULL);
+			});
+		});
+
+		worker_singleton<struct merge_global_cleanup>::instance().push([start_timepoint, merge_preview_container]()
+		{
+			auto timer_ptr = (InputField*)(*merge_preview_container)["TIMER"];
+
+			while (!GlobalMCTM->CompleteFlag)
+			{
+				auto now = std::chrono::high_resolution_clock::now();
+				auto difference = std::chrono::duration_cast<std::chrono::duration<double>>(now - start_timepoint);
+
+				timer_ptr->SafeStringReplace(std::to_string(difference.count()) + " s");
+				std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+				auto freeMemory = GetAvailableMemory();
+				if (freeMemory < 512)
+				{
+					auto message =
+						"There is less than " +
+						std::to_string(freeMemory) +
+						"MB of available RAM!\n"
+						"SAFC may corrupt MIDI data or fail to finish the processing!";
+
+					std::cout << message << std::endl;
+					ThrowAlert_Warning(std::move(message));
+				}
+			}
+
+			std::cout << "F: Out from sleep!!!\n";
+			merge_preview_container->DeleteUIElementByName("FM");
+
+			WH->DisableWindow(WH->MainWindow_ID);
+			WH->MainWindow_ID = "MAIN";
+			//WH->DisableAllWindows();
+			WH->EnableWindow("MAIN");
+			//GlobalMCTM->ResetEverything();
+		});
+	});
 }
 
 void OnSaveTo()
 {
-	_Data.SavePath = SOFD(L"Save final midi to...");
-	size_t Pos = _Data.SavePath.rfind(L".mid");
-	if (Pos >= _Data.SavePath.size() || Pos <= _Data.SavePath.size() - 4)
-		_Data.SavePath += L".mid";
+	worker_singleton<struct save_file_dialog>::instance().push([](){
+		_Data.SavePath = save_open_file_dialog(L"Save final midi to...");
+		size_t Pos = _Data.SavePath.rfind(L".mid");
+		if (Pos >= _Data.SavePath.size() || Pos <= _Data.SavePath.size() - 4)
+			_Data.SavePath += L".mid";
+	});
 }
 
 void RestoreRegSettings()
@@ -2087,7 +2128,7 @@ void Init()
 	MoveableWindow* T = new MoveableFuiWindow(std::format("SAFC v{}.{}.{}.{}", maj, min, ver, build), System_White, -200, 197.5f, 400, 397.5f, 300, 2.5f, 100, 100, 5, BACKGROUND, HEADER, BORDER);
 
 	Button* Butt;
-	(*T)["List"] = new SelectablePropertedList(BS_List_Black_Small, NULL, PropsAndSets::OpenFileProperties, -50, 172, 300, 12, 65, 30);;
+	(*T)["List"] = new SelectablePropertedList(BS_List_Black_Small, NULL, PropsAndSets::OpenFileProperties, -45, 172, 295, 12, 64, 30);;
 
 	(*T)["ADD_Butt"] = new Button("Add MIDIs", System_White, OnAdd, 150, 167.5, 75, 12, 1, 0x00003FAF, 0xFFFFFFFF, 0x00003FFF, 0xFFFFFFFF, 0xF7F7F7FF, NULL, " ");
 	(*T)["REM_Butt"] = new Button("Remove selected", System_White, OnRem, 150, 155, 75, 12, 1, 0x3F0000AF, 0xFFFFFFFF, 0x3F0000FF, 0xFFFFFFFF, 0xF7F7F7FF, NULL, " ");
@@ -2351,13 +2392,13 @@ void mDisplay()
 		{
 			WH->ThrowAlert("Today is a special day! ( -w-)\nToday you'll have new background\n(-w- )", "1st of April!", SpecialSigns::DrawWait, 1, 0xFF00FFFF, 20);
 			(*WH)["ALERT"]->RGBABackground = 0xF;
-			_WH_t("ALERT", "AlertText", TextBox*)->SafeTextColorChange(0xFFFFFFFF);
+			_WH_t<TextBox>("ALERT", "AlertText")->SafeTextColorChange(0xFFFFFFFF);
 		}
 		if (YearsOld >= 0)
 		{
 			WH->ThrowAlert("Interesting fact: today is exactly " + std::to_string(YearsOld) + " years since first SAFC release.\n(o w o  )", "SAFC birthday", SpecialSigns::DrawWait, 1, 0xFF7F3FFF, 50);
 			(*WH)["ALERT"]->RGBABackground = 0xF;
-			_WH_t("ALERT", "AlertText", TextBox*)->SafeTextColorChange(0xFFFFFFFF);
+			_WH_t<TextBox>("ALERT", "AlertText")->SafeTextColorChange(0xFFFFFFFF);
 		}
 		ANIMATION_IS_ACTIVE = !ANIMATION_IS_ACTIVE;
 		onTimer(0);
@@ -2622,6 +2663,8 @@ struct SafcGuiRuntime :
 		glutDisplayFunc(mDisplay);
 		mInit();
 		glutMainLoop();
+
+
 	}
 };
 
@@ -2867,8 +2910,8 @@ struct SafcCliRuntime:
 
 int main(int argc, char** argv)
 {
-	simple_player pl;
-	pl.init();
+	//simple_player pl;
+	//pl.init();
 
 	__versionTuple = ___GetVersion();
 
@@ -2884,6 +2927,9 @@ int main(int argc, char** argv)
 		runtime = std::make_shared<SafcGuiRuntime>();
 
 	(*runtime)(argc, argv);
+
+	// stop all interactions and current async tasks
+	workers_collection::stop_all();
 
 	return 0;
 }

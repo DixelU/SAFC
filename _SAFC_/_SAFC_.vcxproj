@@ -341,7 +341,7 @@
     <ClInclude Include="SAFGUIF\textbox.h" />
     <ClInclude Include="SAFGUIF\wheel_variable_changer.h" />
     <ClInclude Include="SAFGUIF\windows_handler.h" />
-    <ClInclude Include="WinReg.h" />
+    <ClInclude Include="WinRegWrappers.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="_SAFC_.cpp" />
