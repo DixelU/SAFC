@@ -340,7 +340,7 @@ private:
 			return;
 
 		if (track_expected_size != cur - raw_track_data_begin)
-			warnings->report({track_expected_size, cur - raw_track_data_begin}, "Track size mismatch");
+			warnings->report({static_cast<ptrdiff_t>(track_expected_size), cur - raw_track_data_begin}, "Track size mismatch");
 
 		info.ticks_length = std::max(current_tick, info.ticks_length);
 
