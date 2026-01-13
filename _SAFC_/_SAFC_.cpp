@@ -2116,7 +2116,7 @@ void PlayerWatchFunc()
 		auto seconds = state.current_time_us / 1000000;
 		auto parts_of_second = state.current_time_us % 1000000;
 
-		auto str = std::format("Playback tick {} ~ {}:{} seconds", state.current_tick, seconds, parts_of_second / 10000);
+		auto str = std::format("Playback tick {} ~ {:0>2}:{:0>2} seconds", state.current_tick, seconds, parts_of_second / 10000);
 		textbox->SafeStringReplace(str);
 
 		std::this_thread::sleep_for(std::chrono::milliseconds(20));
