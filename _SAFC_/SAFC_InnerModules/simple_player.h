@@ -318,6 +318,8 @@ private:
 			previous_tick = tick;
 			previous_tempo = tempo_data;
 		}
+
+		return true;
 	}
 
 	void update_tempo_cache_at(size_t index) const
@@ -425,16 +427,15 @@ private:
 			// read first delta time for each track
 			if (state.track_states[i].position < state.track_states[i].end)
 			{
-				state.track_states[i].next_event_tick = get_vlv(
-					state.track_states[i].position,
-					state.track_states[i].end
-				);
+				state.track_states[i].next_event_tick = 
+					get_vlv(state.track_states[i].position, state.track_states[i].end);
 			}
 			else
 			{
 				state.track_states[i].done = true;
 			}
 		}
+
 		state.active_tracks = info.tracks.size();
 		state.start_time = std::chrono::steady_clock::now();
 

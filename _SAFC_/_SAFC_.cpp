@@ -2101,9 +2101,9 @@ void OnOpenPlayer()
 
 	worker_singleton<struct player_watcher>::instance().push([]()
 	{
-		auto& state = player->get_state();
-		while (true)
-			std::cout << state.current_tick << " " << state.current_time_us << std::endl;
+		//auto& state = player->get_state();
+		//while (true)
+		//	std::cout << state.current_tick << " " << state.current_time_us << std::endl;
 	});
 }
 
