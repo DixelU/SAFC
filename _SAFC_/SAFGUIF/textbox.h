@@ -6,13 +6,15 @@
 #include "handleable_ui_part.h"
 #include "single_text_line_settings.h"
 
+// todo: if i plan to continue using SAFGUIF - i'll have to refactor this mess
+
 struct TextBox : HandleableUIPart
 {
 	enum class VerticalOverflow { cut, display, recalibrate };
 	_Align TextAlign;
 	VerticalOverflow VOverflow;
 	std::string Text;
-	std::vector<SingleTextLine*> Lines;
+	std::vector<std::unique_ptr<SingleTextLine>> Lines;
 	float Xpos, Ypos;
 	float Width, Height;
 	float VerticalOffset, CalculatedTextHeight;
@@ -22,8 +24,6 @@ struct TextBox : HandleableUIPart
 	~TextBox() override 
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
-		for (auto i = Lines.begin(); i != Lines.end(); ++i)
-			delete* i;
 		Lines.clear();
 	}
 	TextBox(std::string Text, SingleTextLineSettings* STLS, float Xpos, float Ypos, float Height, float Width, float VerticalOffset, std::uint32_t RGBABackground, std::uint32_t RGBABorder, std::uint8_t BorderWidth, _Align TextAlign = _Align::left, VerticalOverflow VOverflow = VerticalOverflow::cut)
@@ -46,11 +46,11 @@ struct TextBox : HandleableUIPart
 	void TextReformat()
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
-		std::vector<std::vector<std::string>>SplittedText;
+		std::vector<std::vector<std::string>>SplitText;
 		std::vector<std::string> Paragraph;
 		std::string Line;
 		STLS->SetNewPos(Xpos, Ypos + 0.5f * Height + 0.5f * VerticalOffset);
-		////OOOOOF... Someone help me with these please :d
+
 		for (int i = 0; i < Text.size(); i++)
 		{
 			if (Text[i] == ' ')
@@ -62,27 +62,30 @@ struct TextBox : HandleableUIPart
 			{
 				Paragraph.push_back(Line);
 				Line.clear();
-				SplittedText.push_back(Paragraph);
+				SplitText.push_back(Paragraph);
 				Paragraph.clear();
 			}
 			else Line.push_back(Text[i]);
 			if (i == Text.size() - 1)
 			{
 				Paragraph.push_back(Line);
-				SplittedText.push_back(Paragraph);
+				SplitText.push_back(Paragraph);
 				Line.clear();
 				Paragraph.clear();
 			}
 		}
-		for (int i = 0; i < SplittedText.size(); i++)
+
+		for (int i = 0; i < SplitText.size(); i++)
 		{
-#define Para SplittedText[i]
+#define Para SplitText[i]
 #define LINES Paragraph
 			for (int q = 0; q < Para.size(); q++)
 			{
 				if ((Para[q].size() + 1 + Line.size()) < SymbolsPerLine)
+				{
 					if (Line.size())Line = (Line + " " + Para[q]);
 					else Line = Para[q];
+				}
 				else
 				{
 					if (Line.size())LINES.push_back(Line);
@@ -99,28 +102,34 @@ struct TextBox : HandleableUIPart
 #undef LINES	
 #undef Para
 		}
+
 		for (int i = 0; i < Paragraph.size(); i++)
 		{
 			STLS->Move(0, 0 - VerticalOffset);
-			//cout << Paragraph[i] << endl;
-			if (VOverflow == VerticalOverflow::cut && STLS->CYpos < Ypos - Height)break;
-			Lines.push_back(STLS->CreateOne(Paragraph[i]));
-			if (TextAlign == _Align::right)Lines.back()->SafeChangePosition_Argumented(GLOBAL_RIGHT, ((this->Xpos) + (0.5f * Width) - this->STLS->XUnitSize), Lines.back()->CYpos);
-			else if (TextAlign == _Align::left)Lines.back()->SafeChangePosition_Argumented(GLOBAL_LEFT, ((this->Xpos) - (0.5f * Width) + this->STLS->XUnitSize), Lines.back()->CYpos);
+			if (VOverflow == VerticalOverflow::cut && STLS->CYpos < Ypos - Height)
+				break;
+
+			auto& new_line = Lines.emplace_back(STLS->CreateOne(Paragraph[i]));
+
+			if (TextAlign == _Align::right)
+				new_line->SafeChangePosition_Argumented(GLOBAL_RIGHT, ((this->Xpos) + (0.5f * Width) - this->STLS->XUnitSize), Lines.back()->CYpos);
+			else if (TextAlign == _Align::left)
+				new_line->SafeChangePosition_Argumented(GLOBAL_LEFT, ((this->Xpos) - (0.5f * Width) + this->STLS->XUnitSize), Lines.back()->CYpos);
 		}
 		CalculatedTextHeight = (Lines.front()->CYpos - Lines.back()->CYpos) + Lines.front()->CalculatedHeight;
+
 		if (VOverflow == VerticalOverflow::recalibrate)
 		{
 			float dy = (CalculatedTextHeight - this->Height);
-			for (auto Y = Lines.begin(); Y != Lines.end(); ++Y)
-				(*Y)->SafeMove(0, (dy + Lines.front()->CalculatedHeight) * 0.5f);
+			for (auto& line_ptr : Lines)
+				line_ptr->SafeMove(0, (dy + Lines.front()->CalculatedHeight) * 0.5f);
 		}
 	}
 	void SafeTextColorChange(std::uint32_t NewColor)
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
-		for (auto i = Lines.begin(); i != Lines.end(); ++i)
-			(*i)->SafeColorChange(NewColor);
+		for (auto& line_ptr : Lines)
+			line_ptr->SafeColorChange(NewColor);
 	}
 	bool MouseHandler(float mx, float my, CHAR Button/*-1 left, 1 right, 0 move*/, CHAR State /*-1 down, 1 up*/)  override
 	{
@@ -130,6 +139,7 @@ struct TextBox : HandleableUIPart
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		this->Text = (NewString.size()) ? NewString : " ";
+
 		Lines.clear();
 		RecalculateAvailableSpaceForText();
 		TextReformat();
@@ -149,9 +159,8 @@ struct TextBox : HandleableUIPart
 		Xpos += dx;
 		Ypos += dy;
 		STLS->Move(dx, dy);
-		for (int i = 0; i < Lines.size(); i++) {
-			Lines[i]->SafeMove(dx, dy);
-		}
+		for (auto& line_ptr : Lines)
+			line_ptr->SafeMove(dx, dy);
 	}
 	void SafeChangePosition(float NewX, float NewY)
 	{
@@ -197,8 +206,8 @@ struct TextBox : HandleableUIPart
 			glVertex2f(Xpos - (Width * 0.5f), Ypos - (0.5f * Height));
 			glEnd();
 		}
-		for (int i = 0; i < Lines.size(); i++) 
-			Lines[i]->Draw();
+		for (auto& line_ptr : Lines)
+			line_ptr->Draw();
 	}
 	inline std::uint32_t TellType() override
 	{
