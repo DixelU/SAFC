@@ -2087,6 +2087,42 @@ void OnOtherSettings()
 	WH->EnableWindow("OTHER_SETS");
 }
 
+void PlayerWatchFunc()
+{
+	WH->EnableWindow("SIMPLAYER");
+	auto window = (*WH)["SIMPLAYER"];
+	auto textbox = (TextBox*)(*window)["TEXT"];
+
+	// todo: debug memory leak in textbox lmao
+
+	auto& info = player->get_info();
+	while (true)
+	{
+		uint64_t scanned = info.scanned;
+		uint64_t size = info.size;
+
+		auto str = std::format("Read {} out of {} ~ {}", scanned, size, (float)(scanned) / size);
+		textbox->SafeStringReplace(str);
+
+		if (info.scanned == info.size)
+			break;
+
+		std::this_thread::sleep_for(std::chrono::milliseconds(20));
+	}
+
+	auto& state = player->get_state();
+	while (state.playing)
+	{
+		auto seconds = state.current_time_us / 1000000;
+		auto parts_of_second = state.current_time_us % 1000000;
+
+		auto str = std::format("Playback tick {} ~ {}:{} seconds", state.current_tick, seconds, parts_of_second / 10000);
+		textbox->SafeStringReplace(str);
+
+		std::this_thread::sleep_for(std::chrono::milliseconds(20));
+	}
+}
+
 void OnOpenPlayer()
 {
 	worker_singleton<struct player_thread>::instance().push([]()
@@ -2096,14 +2132,10 @@ void OnOpenPlayer()
 			return;
 
 		auto& id = ptr->SelectedID.front();
-		player->simple_run(_Data[id].Filename);
-	});
 
-	worker_singleton<struct player_watcher>::instance().push([]()
-	{
-		//auto& state = player->get_state();
-		//while (true)
-		//	std::cout << state.current_tick << " " << state.current_time_us << std::endl;
+		worker_singleton<struct player_watcher>::instance().push(PlayerWatchFunc);
+
+		player->simple_run(_Data[id].Filename);
 	});
 }
 
@@ -2359,6 +2391,7 @@ void Init()
 		-100, 50 + WindowHeaderSize, 200, 100, 150, 2.5, 15, 15, 2.5, BACKGROUND_OPQ, HEADER, BORDER);
 
 	(*T)["TEXT"] = new TextBox("Stay tuned for future proof-of-concept player inside SAFC :)", System_White, 0, 0, 50, 175, 10, 0, 0, 0, center, TextBox::VerticalOverflow::display);
+	//(*T)["DAMN"] = new InputField(" ", 0, 0, 10, 100, System_White, nullptr, 0, System_White, "Runtime data", 100, center);
 
 	(*WH)["SIMPLAYER"] = T;
 

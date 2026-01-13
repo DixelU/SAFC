@@ -217,6 +217,38 @@ struct simple_player
 		}
 	};
 
+	struct midi_info
+	{
+		std::vector<track_info> tracks;
+		std::map<uint64_t, uint32_t> tempo_tmp;
+		std::vector<std::pair<uint64_t, uint64_t>> time_map_mcsecs;
+		uint64_t ticks_length;
+
+		volatile uint64_t scanned{0};
+		volatile bool ready{false};
+		volatile uint64_t size{0};
+
+		uint16_t ppq{0};
+	};
+
+	struct tempo_cache
+	{
+		size_t current_index;      // index into time_map_mcsecs
+		tick_type base_tick;       // tick at current tempo change
+		uint64_t base_time_us;     // microseconds at current tempo change
+		uint32_t current_tempo;    // current tempo (us per quarter note)
+		tick_type next_change_tick; // tick of next tempo change (or max for last)
+
+		void reset()
+		{
+			current_index = ~0ULL;
+			base_tick = 0;
+			base_time_us = 0;
+			current_tempo = 500000; // default 120 BPM
+			next_change_tick = ~0ULL;
+		}
+	};
+
 	simple_player() = default;
 
 	void init()
@@ -241,23 +273,12 @@ struct simple_player
 
 	const playback_state& get_state() const
 	{
-		return this->state;
+		return state;
 	}
 
-private:
-	void try_init_kdmapi()
+	const midi_info& get_info() const
 	{
-		kdmapi_status = nullptr;
-
-		auto moduleHandle = GetModuleHandleW(L"OmniMIDI");
-		if (!moduleHandle)
-			return;
-
-		kdmapi_status = (decltype(kdmapi_status))GetProcAddress(moduleHandle, "IsKDMAPIAvailable");
-		if (!kdmapi_status || !kdmapi_status())
-			return;
-
-		short_msg = (decltype(short_msg))GetProcAddress(moduleHandle, "SendDirectData");
+		return info;
 	}
 
 	bool open(std::wstring filename)
@@ -322,97 +343,6 @@ private:
 		return true;
 	}
 
-	void update_tempo_cache_at(size_t index) const
-	{
-		tcache.current_index = index;
-
-		if (index == ~0ULL || info.time_map_mcsecs.empty())
-		{
-			// before first tempo change - use defaults
-			tcache.base_tick = 0;
-			tcache.base_time_us = 0;
-			tcache.current_tempo = 500000;
-			tcache.next_change_tick = info.time_map_mcsecs.empty()
-				? ~0ULL
-				: info.time_map_mcsecs[0].first;
-			return;
-		}
-
-		const auto& entry = info.time_map_mcsecs[index];
-		tcache.base_tick = entry.first;
-		tcache.base_time_us = entry.second;
-
-		// get tempo from tempo_tmp
-		auto tempo_it = info.tempo_tmp.find(tcache.base_tick);
-		tcache.current_tempo = (tempo_it != info.tempo_tmp.end()) ? tempo_it->second : 500000;
-
-		// set next change tick
-		if (index + 1 < info.time_map_mcsecs.size())
-			tcache.next_change_tick = info.time_map_mcsecs[index + 1].first;
-		else
-			tcache.next_change_tick = ~0ULL;
-	}
-
-	uint64_t tick_to_microseconds(tick_type tick) const
-	{
-		// fast path: tick is within current cached tempo region
-		if (tick >= tcache.base_tick && tick < tcache.next_change_tick)
-		{
-			uint64_t delta_ticks = tick - tcache.base_tick;
-			return tcache.base_time_us + (delta_ticks * tcache.current_tempo) / info.ppq;
-		}
-
-		// check if we just crossed into the next tempo region (common case in sequential playback)
-		if (tick >= tcache.next_change_tick && tcache.current_index != ~0ULL)
-		{
-			size_t next_idx = tcache.current_index + 1;
-			if (next_idx < info.time_map_mcsecs.size())
-			{
-				// peek ahead - if tick is before the one after next, we found it
-				tick_type after_next = (next_idx + 1 < info.time_map_mcsecs.size())
-					? info.time_map_mcsecs[next_idx + 1].first
-					: ~0ULL;
-
-				if (tick < after_next)
-				{
-					update_tempo_cache_at(next_idx);
-					uint64_t delta_ticks = tick - tcache.base_tick;
-					return tcache.base_time_us + (delta_ticks * tcache.current_tempo) / info.ppq;
-				}
-			}
-		}
-
-		// slow path: binary search (for seeks or jumps)
-		if (info.time_map_mcsecs.empty())
-		{
-			tcache.reset();
-			return (tick * 500000ULL) / info.ppq;
-		}
-
-		auto it = std::upper_bound(
-			info.time_map_mcsecs.begin(),
-			info.time_map_mcsecs.end(),
-			tick,
-			[](tick_type t, const std::pair<uint64_t, uint64_t>& entry) {
-				return t < entry.first;
-			}
-		);
-
-		if (it == info.time_map_mcsecs.begin())
-		{
-			// tick is before first tempo change
-			update_tempo_cache_at(~0ULL);
-			return (tick * 500000ULL) / info.ppq;
-		}
-
-		--it;
-		size_t idx = static_cast<size_t>(it - info.time_map_mcsecs.begin());
-		update_tempo_cache_at(idx);
-
-		uint64_t delta_ticks = tick - tcache.base_tick;
-		return tcache.base_time_us + (delta_ticks * tcache.current_tempo) / info.ppq;
-	}
-
 	void playback_thread()
 	{
 		state.reset();
@@ -427,7 +357,7 @@ private:
 			// read first delta time for each track
 			if (state.track_states[i].position < state.track_states[i].end)
 			{
-				state.track_states[i].next_event_tick = 
+				state.track_states[i].next_event_tick =
 					get_vlv(state.track_states[i].position, state.track_states[i].end);
 			}
 			else
@@ -610,6 +540,112 @@ private:
 		// playback finished
 		all_notes_off();
 		state.playing = false;
+	}
+private:
+	void try_init_kdmapi()
+	{
+		kdmapi_status = nullptr;
+
+		auto moduleHandle = GetModuleHandleW(L"OmniMIDI");
+		if (!moduleHandle)
+			return;
+
+		kdmapi_status = (decltype(kdmapi_status))GetProcAddress(moduleHandle, "IsKDMAPIAvailable");
+		if (!kdmapi_status || !kdmapi_status())
+			return;
+
+		short_msg = (decltype(short_msg))GetProcAddress(moduleHandle, "SendDirectData");
+	}
+
+	void update_tempo_cache_at(size_t index) const
+	{
+		tcache.current_index = index;
+
+		if (index == ~0ULL || info.time_map_mcsecs.empty())
+		{
+			// before first tempo change - use defaults
+			tcache.base_tick = 0;
+			tcache.base_time_us = 0;
+			tcache.current_tempo = 500000;
+			tcache.next_change_tick = info.time_map_mcsecs.empty()
+				? ~0ULL
+				: info.time_map_mcsecs[0].first;
+			return;
+		}
+
+		const auto& entry = info.time_map_mcsecs[index];
+		tcache.base_tick = entry.first;
+		tcache.base_time_us = entry.second;
+
+		// get tempo from tempo_tmp
+		auto tempo_it = info.tempo_tmp.find(tcache.base_tick);
+		tcache.current_tempo = (tempo_it != info.tempo_tmp.end()) ? tempo_it->second : 500000;
+
+		// set next change tick
+		if (index + 1 < info.time_map_mcsecs.size())
+			tcache.next_change_tick = info.time_map_mcsecs[index + 1].first;
+		else
+			tcache.next_change_tick = ~0ULL;
+	}
+
+	uint64_t tick_to_microseconds(tick_type tick) const
+	{
+		// fast path: tick is within current cached tempo region
+		if (tick >= tcache.base_tick && tick < tcache.next_change_tick)
+		{
+			uint64_t delta_ticks = tick - tcache.base_tick;
+			return tcache.base_time_us + (delta_ticks * tcache.current_tempo) / info.ppq;
+		}
+
+		// check if we just crossed into the next tempo region (common case in sequential playback)
+		if (tick >= tcache.next_change_tick && tcache.current_index != ~0ULL)
+		{
+			size_t next_idx = tcache.current_index + 1;
+			if (next_idx < info.time_map_mcsecs.size())
+			{
+				// peek ahead - if tick is before the one after next, we found it
+				tick_type after_next = (next_idx + 1 < info.time_map_mcsecs.size())
+					? info.time_map_mcsecs[next_idx + 1].first
+					: ~0ULL;
+
+				if (tick < after_next)
+				{
+					update_tempo_cache_at(next_idx);
+					uint64_t delta_ticks = tick - tcache.base_tick;
+					return tcache.base_time_us + (delta_ticks * tcache.current_tempo) / info.ppq;
+				}
+			}
+		}
+
+		// slow path: binary search (for seeks or jumps)
+		if (info.time_map_mcsecs.empty())
+		{
+			tcache.reset();
+			return (tick * 500000ULL) / info.ppq;
+		}
+
+		auto it = std::upper_bound(
+			info.time_map_mcsecs.begin(),
+			info.time_map_mcsecs.end(),
+			tick,
+			[](tick_type t, const std::pair<uint64_t, uint64_t>& entry) {
+				return t < entry.first;
+			}
+		);
+
+		if (it == info.time_map_mcsecs.begin())
+		{
+			// tick is before first tempo change
+			update_tempo_cache_at(~0ULL);
+			return (tick * 500000ULL) / info.ppq;
+		}
+
+		--it;
+		size_t idx = static_cast<size_t>(it - info.time_map_mcsecs.begin());
+		update_tempo_cache_at(idx);
+
+		uint64_t delta_ticks = tick - tcache.base_tick;
+		return tcache.base_time_us + (delta_ticks * tcache.current_tempo) / info.ppq;
 	}
 
 	bool read_through_one_track(const uint8_t*& cur, const uint8_t* end)
@@ -847,38 +883,6 @@ private:
 	{
 		return (uint32_t)prog | (arg1 << 8) | (arg2 << 16);
 	}
-
-	struct midi_info
-	{
-		std::vector<track_info> tracks;
-		std::map<uint64_t, uint32_t> tempo_tmp;
-		std::vector<std::pair<uint64_t, uint64_t>> time_map_mcsecs;
-		uint64_t ticks_length;
-
-		volatile uint64_t scanned{0};
-		volatile bool ready{false};
-		uint64_t size{0};
-
-		uint16_t ppq{0};
-	};
-
-	struct tempo_cache
-	{
-		size_t current_index;      // index into time_map_mcsecs
-		tick_type base_tick;       // tick at current tempo change
-		uint64_t base_time_us;     // microseconds at current tempo change
-		uint32_t current_tempo;    // current tempo (us per quarter note)
-		tick_type next_change_tick; // tick of next tempo change (or max for last)
-
-		void reset()
-		{
-			current_index = ~0ULL;
-			base_tick = 0;
-			base_time_us = 0;
-			current_tempo = 500000; // default 120 BPM
-			next_change_tick = ~0ULL;
-		}
-	};
 
 	std::shared_ptr<logger_base> warnings;
 
