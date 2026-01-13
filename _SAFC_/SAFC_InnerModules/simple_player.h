@@ -8,6 +8,8 @@
 #include <string>
 #include <chrono>
 #include <thread>
+#include <algorithm>
+#include <atomic>
 
 #include "../bbb_ffio.h"
 
@@ -142,17 +144,105 @@ public:
 
 struct simple_player
 {
+	using tick_type = std::uint64_t;
+
+	struct track_info
+	{
+		const uint8_t* begining;
+		const uint8_t* ending;
+	};
+
+	struct buffered_event
+	{
+		tick_type tick;
+		uint64_t time_us;
+		uint8_t status;
+		uint8_t data1;
+		uint8_t data2;
+
+		bool is_note_on() const { return (status & 0xF0) == 0x90 && data2 > 0; }
+		bool is_note_off() const { return (status & 0xF0) == 0x80 || ((status & 0xF0) == 0x90 && data2 == 0); }
+		uint8_t channel() const { return status & 0x0F; }
+		uint8_t key() const { return data1; }
+		uint8_t velocity() const { return data2; }
+	};
+
+	struct track_playback_state
+	{
+		const uint8_t* position;
+		const uint8_t* end;
+		tick_type current_tick;
+		tick_type next_event_tick;
+		uint8_t rsb; // running status byte
+		bool done;
+
+		void init(const track_info& track)
+		{
+			position = track.begining;
+			end = track.ending;
+			current_tick = 0;
+			next_event_tick = 0;
+			rsb = 0;
+			done = false;
+		}
+	};
+
+	struct playback_state
+	{
+		tick_type current_tick;
+		uint64_t current_time_us;
+		std::chrono::steady_clock::time_point start_time;
+		uint64_t start_offset_us;
+
+		std::vector<track_playback_state> track_states;
+		size_t active_tracks;
+
+		std::atomic<bool> playing;
+		mutable std::atomic<bool> stop_requested;
+		mutable std::atomic<bool> paused;
+
+		buffered_queue<buffered_event> event_buffer;
+
+		void reset()
+		{
+			current_tick = 0;
+			current_time_us = 0;
+			start_offset_us = 0;
+			active_tracks = 0;
+			playing = false;
+			stop_requested = false;
+			paused = false;
+			track_states.clear();
+			event_buffer.clear();
+		}
+	};
+
 	simple_player() = default;
 
 	void init()
 	{
-		enum_devices();
-		init_midi_out(current_device);
+		update_devices();
+		init_midi_out(devices.size() - 1);
 
 		warnings = std::make_shared<printing_logger>("33");
 	}
 
-	using tick_type = std::uint64_t;
+	void simple_run(std::wstring filename)
+	{
+		auto res = open(filename);
+		if (!res)
+		{
+			ThrowAlert_Error("Playback failed");
+			return;
+		}
+
+		playback_thread();
+	}
+
+	const playback_state& get_state() const
+	{
+		return this->state;
+	}
 
 private:
 	void try_init_kdmapi()
@@ -200,7 +290,9 @@ private:
 
 		while (ptr < end)
 		{
-			read_through_one_track(ptr, end);
+			if(!read_through_one_track(ptr, end))
+				return false;
+
 			info.scanned = ptr - begin;
 		}
 
@@ -228,12 +320,298 @@ private:
 		}
 	}
 
-	void playback_thread()
+	void update_tempo_cache_at(size_t index) const
 	{
-		
+		tcache.current_index = index;
+
+		if (index == ~0ULL || info.time_map_mcsecs.empty())
+		{
+			// before first tempo change - use defaults
+			tcache.base_tick = 0;
+			tcache.base_time_us = 0;
+			tcache.current_tempo = 500000;
+			tcache.next_change_tick = info.time_map_mcsecs.empty()
+				? ~0ULL
+				: info.time_map_mcsecs[0].first;
+			return;
+		}
+
+		const auto& entry = info.time_map_mcsecs[index];
+		tcache.base_tick = entry.first;
+		tcache.base_time_us = entry.second;
+
+		// get tempo from tempo_tmp
+		auto tempo_it = info.tempo_tmp.find(tcache.base_tick);
+		tcache.current_tempo = (tempo_it != info.tempo_tmp.end()) ? tempo_it->second : 500000;
+
+		// set next change tick
+		if (index + 1 < info.time_map_mcsecs.size())
+			tcache.next_change_tick = info.time_map_mcsecs[index + 1].first;
+		else
+			tcache.next_change_tick = ~0ULL;
 	}
 
-	void read_through_one_track(const uint8_t*& cur, const uint8_t* end)
+	uint64_t tick_to_microseconds(tick_type tick) const
+	{
+		// fast path: tick is within current cached tempo region
+		if (tick >= tcache.base_tick && tick < tcache.next_change_tick)
+		{
+			uint64_t delta_ticks = tick - tcache.base_tick;
+			return tcache.base_time_us + (delta_ticks * tcache.current_tempo) / info.ppq;
+		}
+
+		// check if we just crossed into the next tempo region (common case in sequential playback)
+		if (tick >= tcache.next_change_tick && tcache.current_index != ~0ULL)
+		{
+			size_t next_idx = tcache.current_index + 1;
+			if (next_idx < info.time_map_mcsecs.size())
+			{
+				// peek ahead - if tick is before the one after next, we found it
+				tick_type after_next = (next_idx + 1 < info.time_map_mcsecs.size())
+					? info.time_map_mcsecs[next_idx + 1].first
+					: ~0ULL;
+
+				if (tick < after_next)
+				{
+					update_tempo_cache_at(next_idx);
+					uint64_t delta_ticks = tick - tcache.base_tick;
+					return tcache.base_time_us + (delta_ticks * tcache.current_tempo) / info.ppq;
+				}
+			}
+		}
+
+		// slow path: binary search (for seeks or jumps)
+		if (info.time_map_mcsecs.empty())
+		{
+			tcache.reset();
+			return (tick * 500000ULL) / info.ppq;
+		}
+
+		auto it = std::upper_bound(
+			info.time_map_mcsecs.begin(),
+			info.time_map_mcsecs.end(),
+			tick,
+			[](tick_type t, const std::pair<uint64_t, uint64_t>& entry) {
+				return t < entry.first;
+			}
+		);
+
+		if (it == info.time_map_mcsecs.begin())
+		{
+			// tick is before first tempo change
+			update_tempo_cache_at(~0ULL);
+			return (tick * 500000ULL) / info.ppq;
+		}
+
+		--it;
+		size_t idx = static_cast<size_t>(it - info.time_map_mcsecs.begin());
+		update_tempo_cache_at(idx);
+
+		uint64_t delta_ticks = tick - tcache.base_tick;
+		return tcache.base_time_us + (delta_ticks * tcache.current_tempo) / info.ppq;
+	}
+
+	void playback_thread()
+	{
+		state.reset();
+		update_tempo_cache_at(~0ULL); // initialize cache for tick 0
+		state.playing = true;
+
+		// initialize track states
+		state.track_states.resize(info.tracks.size());
+		for (size_t i = 0; i < info.tracks.size(); ++i)
+		{
+			state.track_states[i].init(info.tracks[i]);
+			// read first delta time for each track
+			if (state.track_states[i].position < state.track_states[i].end)
+			{
+				state.track_states[i].next_event_tick = get_vlv(
+					state.track_states[i].position,
+					state.track_states[i].end
+				);
+			}
+			else
+			{
+				state.track_states[i].done = true;
+			}
+		}
+		state.active_tracks = info.tracks.size();
+		state.start_time = std::chrono::steady_clock::now();
+
+		// lookahead for visualization (microseconds)
+		constexpr uint64_t lookahead_us = 2000000; // 2 seconds
+
+		while (state.active_tracks > 0 && !state.stop_requested)
+		{
+			// handle pause
+			while (state.paused && !state.stop_requested)
+			{
+				std::this_thread::sleep_for(std::chrono::milliseconds(10));
+				state.start_time = std::chrono::steady_clock::now();
+			}
+
+			if (state.stop_requested)
+				break;
+
+			// find track with earliest next event
+			size_t next_track = ~0ULL;
+			tick_type min_tick = ~0ULL;
+
+			for (size_t i = 0; i < state.track_states.size(); ++i)
+			{
+				if (state.track_states[i].done)
+					continue;
+
+				if (state.track_states[i].next_event_tick < min_tick)
+				{
+					min_tick = state.track_states[i].next_event_tick;
+					next_track = i;
+				}
+			}
+
+			if (next_track == ~0ULL)
+				break;
+
+			auto& track = state.track_states[next_track];
+
+			// update current tick/time
+			state.current_tick = min_tick;
+			state.current_time_us = tick_to_microseconds(min_tick);
+
+			// wait until it's time to play this event
+			auto elapsed = std::chrono::steady_clock::now() - state.start_time;
+			auto elapsed_us = std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count();
+			int64_t target_us = static_cast<int64_t>(state.current_time_us - state.start_offset_us);
+
+			if (target_us > elapsed_us)
+			{
+				auto wait_us = target_us - elapsed_us;
+				if (wait_us > 1000)
+				{
+					std::this_thread::sleep_for(std::chrono::microseconds(wait_us - 500));
+				}
+				// spin-wait for precision
+				while (true)
+				{
+					elapsed = std::chrono::steady_clock::now() - state.start_time;
+					elapsed_us = std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count();
+					if (elapsed_us >= target_us)
+						break;
+				}
+			}
+
+			// process the event
+			if (track.position >= track.end)
+			{
+				track.done = true;
+				--state.active_tracks;
+				continue;
+			}
+
+			uint8_t command = get_value_and_increment(track.position, track.end);
+			uint8_t data1 = 0;
+			uint8_t data2 = 0;
+
+			if (command < 0x80)
+			{
+				// running status
+				data1 = command;
+				command = track.rsb;
+			}
+			else
+			{
+				if (command < 0xF0)
+					track.rsb = command;
+
+				if (command < 0xF0 || command == 0xFF)
+					data1 = get_value_and_increment(track.position, track.end);
+				else
+					data1 = 0xFF;
+			}
+
+			if (command < 0x80)
+			{
+				track.done = true;
+				--state.active_tracks;
+				continue;
+			}
+
+			bool event_sent = false;
+			switch (command >> 4)
+			{
+				case 0x8: // note off
+				case 0x9: // note on
+				case 0xA: // aftertouch
+				case 0xB: // control change
+				case 0xE: // pitch bend
+				{
+					data2 = get_value_and_increment(track.position, track.end);
+					if (short_msg)
+						short_msg(make_smsg(command, data1, data2));
+					event_sent = true;
+					break;
+				}
+				case 0xC: // program change
+				case 0xD: // channel pressure
+				{
+					if (short_msg)
+						short_msg(make_smsg(command, data1));
+					event_sent = true;
+					break;
+				}
+				case 0xF: // meta/sysex
+				{
+					uint8_t type = data1;
+					bool end_of_track = (type == 0x2F && command == 0xFF);
+
+					if (command == 0xFF)
+						track.rsb = 0; // reset RSB on meta events
+
+					if (end_of_track)
+					{
+						track.done = true;
+						--state.active_tracks;
+						continue;
+					}
+
+					// skip meta/sysex data (tempo already handled during initial parsing)
+					auto length = get_vlv(track.position, track.end);
+					track.position += length;
+					break;
+				}
+			}
+
+			// buffer note events for visualization with lookahead
+			/*if (event_sent && ((command >> 4) == 0x8 || (command >> 4) == 0x9))
+			{
+				buffered_event ev;
+				ev.tick = min_tick;
+				ev.time_us = state.current_time_us;
+				ev.status = command;
+				ev.data1 = data1;
+				ev.data2 = data2;
+				state.event_buffer.push(std::move(ev));
+			}*/
+
+			// read next delta time
+			if (track.position < track.end && !track.done)
+			{
+				auto delta = get_vlv(track.position, track.end);
+				track.next_event_tick = min_tick + delta;
+			}
+			else
+			{
+				track.done = true;
+				--state.active_tracks;
+			}
+		}
+
+		// playback finished
+		all_notes_off();
+		state.playing = false;
+	}
+
+	bool read_through_one_track(const uint8_t*& cur, const uint8_t* end)
 	{
 		tick_type current_tick = 0;
 
@@ -249,7 +627,7 @@ private:
 			header = (header << 8) | get_byte();
 
 		if (cur >= end)
-			return;
+			return true;
 
 		for (int i = 0; i < 4; i++)
 			track_expected_size = (track_expected_size << 8) | get_byte();
@@ -289,17 +667,17 @@ private:
 
 			switch (command >> 4)
 			{
-			case 0x8: case 0x9:
-			case 0xA: case 0xB: case 0xE:
+				case 0x8: case 0x9:
+				case 0xA: case 0xB: case 0xE:
 				{
 					get_byte();
 					break;
 				}
-			case 0xC: case 0xD:
+				case 0xC: case 0xD:
 				{
 					break;
 				}
-			case 0xF:
+				case 0xF:
 				{
 					uint8_t com = command;
 					uint8_t type = param_buffer;
@@ -307,9 +685,6 @@ private:
 					is_reading &= !(type == 0x2F && com == 0xFF);
 					if (true /* disable if legacy rsb metas will misbehave again */)
 						rsb = 0;
-
-					if (!is_reading)
-						continue;
 
 					if (type == 0x51 && com == 0xFF)
 					{
@@ -319,15 +694,19 @@ private:
 						value |= (get_byte());
 
 						info.tempo_tmp[current_tick] = value;
+						continue;
 					}
 
 					auto length = get_vlv(cur, end);
 					for (std::size_t i = 0; i < length; ++i)
 						get_byte();
 
+					if (!is_reading)
+						continue;
+
 					break;
 				}
-			default:
+				default:
 				{
 					ThrowAlert_Warning("Byte " + (std::to_string(cur - mmap->begin()) + ": Unknown event type " + std::to_string(command)));
 					is_good = false;
@@ -337,7 +716,7 @@ private:
 		}
 
 		if (!is_good || is_reading)
-			return;
+			return false;
 
 		if (track_expected_size != cur - raw_track_data_begin)
 			warnings->report({static_cast<ptrdiff_t>(track_expected_size), cur - raw_track_data_begin}, "Track size mismatch");
@@ -349,6 +728,8 @@ private:
 		track.ending = cur;
 
 		info.tracks.push_back(std::move(track));
+
+		return true;
 	}
 
 	inline static uint8_t get_value_and_increment(const uint8_t*& cur, const uint8_t* end)
@@ -373,7 +754,7 @@ private:
 		return value;
 	}
 
-	void enum_devices()
+	void update_devices()
 	{
 		devices.clear();
 		current_device = ~0ULL;
@@ -466,12 +847,6 @@ private:
 		return (uint32_t)prog | (arg1 << 8) | (arg2 << 16);
 	}
 
-	struct track_info
-	{
-		const uint8_t* begining;
-		const uint8_t* ending;
-	};
-
 	struct midi_info
 	{
 		std::vector<track_info> tracks;
@@ -486,16 +861,22 @@ private:
 		uint16_t ppq{0};
 	};
 
-	struct track_playback_state
+	struct tempo_cache
 	{
-		const uint8_t* position;
+		size_t current_index;      // index into time_map_mcsecs
+		tick_type base_tick;       // tick at current tempo change
+		uint64_t base_time_us;     // microseconds at current tempo change
+		uint32_t current_tempo;    // current tempo (us per quarter note)
+		tick_type next_change_tick; // tick of next tempo change (or max for last)
 
-	};
-
-	struct playback_state
-	{
-		tick_type load_tick;
-		tick_type playback_tick;
+		void reset()
+		{
+			current_index = ~0ULL;
+			base_tick = 0;
+			base_time_us = 0;
+			current_tempo = 500000; // default 120 BPM
+			next_change_tick = ~0ULL;
+		}
 	};
 
 	std::shared_ptr<logger_base> warnings;
@@ -504,6 +885,7 @@ private:
 
 	midi_info info;
 	playback_state state;
+	mutable tempo_cache tcache;
 
 	size_t current_device = ~0ULL;
 	std::vector<MIDIOUTCAPSW> devices;

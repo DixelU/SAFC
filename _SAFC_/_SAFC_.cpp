@@ -771,6 +771,8 @@ std::wstring save_open_file_dialog(const wchar_t* Title)
 
 ////////// IMPORTANT STUFF ABOVE ///////////
 
+std::shared_ptr<simple_player> player;
+
 HandleableUIPart* _WH(const char* window, const char* element)
 {
 	return ((*(*WH)[window])[element]);
@@ -2087,7 +2089,22 @@ void OnOtherSettings()
 
 void OnOpenPlayer()
 {
-	WH->EnableWindow("SIMPLAYER");
+	worker_singleton<struct player_thread>::instance().push([]()
+	{
+		auto ptr = _WH_t<SelectablePropertedList>("MAIN", "List");
+		if (ptr->SelectedID.empty())
+			return;
+
+		auto& id = ptr->SelectedID.front();
+		player->simple_run(_Data[id].Filename);
+	});
+
+	worker_singleton<struct player_watcher>::instance().push([]()
+	{
+		auto& state = player->get_state();
+		while (true)
+			std::cout << state.current_tick << " " << state.current_time_us << std::endl;
+	});
 }
 
 void Init()
@@ -2910,8 +2927,8 @@ struct SafcCliRuntime:
 
 int main(int argc, char** argv)
 {
-	//simple_player pl;
-	//pl.init();
+	player = std::make_shared<simple_player>();
+	player->init();
 
 	__versionTuple = ___GetVersion();
 
