@@ -740,7 +740,7 @@ struct simple_player
 					std::this_thread::sleep_for(std::chrono::microseconds(wait_us - 50));
 				}
 				// spin-wait for final precision
-				while (true)
+				while (!state.stop_requested)
 				{
 					elapsed = std::chrono::steady_clock::now() - state.start_time;
 					elapsed_us = std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count();

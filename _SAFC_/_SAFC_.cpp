@@ -2141,8 +2141,6 @@ void OnOpenPlayer()
 
 		player->simple_run(_Data[id].Filename);
 	});
-
-	worker_singleton<struct player_thread>::assign_co_destructor([](){ player->stop(); });
 }
 
 void OnPlayerPauseToggle()
@@ -2565,6 +2563,14 @@ void mInit()
 	gluOrtho2D((0 - internal_range) * (WindX / window_base_width), internal_range * (WindX / window_base_width), (0 - internal_range) * (WindY / window_base_height), internal_range * (WindY / window_base_height));
 }
 
+void mClose()
+{
+	Settings::RegestryAccess.Close();
+
+	if (player)
+		player->stop();
+}
+
 void onTimer(int v)
 {
 	glutTimerFunc(33, onTimer, 0);
@@ -2681,8 +2687,6 @@ void mSpecialKey(int Key, int x, int y)
 
 void mExit(int a)
 {
-	Settings::RegestryAccess.Close();
-
 }
 
 struct SafcRuntime
@@ -2744,6 +2748,7 @@ struct SafcGuiRuntime :
 		glHint(GL_POINT_SMOOTH_HINT, GL_FASTEST);
 		glHint(GL_POLYGON_SMOOTH_HINT, GL_FASTEST);
 
+		glutCloseFunc(mClose);
 		glutMouseFunc(mClick);
 		glutReshapeFunc(OnResize);
 		glutSpecialFunc(mSpecialKey);
