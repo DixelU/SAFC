@@ -297,6 +297,7 @@ struct simple_player
 		std::atomic<bool> playing;
 		mutable std::atomic<bool> stop_requested;
 		mutable std::atomic<bool> paused;
+		std::atomic<uint64_t> pause_position_us{0};  // MIDI time when paused (for proper resume)
 
 		// Lookahead buffer for pre-parsed MIDI messages
 		lookahead_buffer send_buffer;
@@ -317,6 +318,7 @@ struct simple_player
 			playing = false;
 			stop_requested = false;
 			paused = false;
+			pause_position_us = 0;
 			parser_done = false;
 			parsed_up_to_us = 0;
 			sender_position_us = 0;
@@ -387,6 +389,64 @@ struct simple_player
 	const midi_info& get_info() const
 	{
 		return info;
+	}
+
+	// Pause playback - silences notes and remembers position
+	void pause()
+	{
+		if (!state.playing || state.paused)
+			return;
+
+		// Record where we are in the MIDI timeline
+		state.pause_position_us.store(state.current_time_us, std::memory_order_release);
+		state.paused.store(true, std::memory_order_release);
+
+		// Silence all notes immediately
+		all_notes_off();
+	}
+
+	// Resume playback from paused position
+	void resume()
+	{
+		if (!state.playing || !state.paused)
+			return;
+
+		// Update timing: set offset to where we paused, reset wall-clock start
+		uint64_t pause_pos = state.pause_position_us.load(std::memory_order_acquire);
+		state.start_offset_us = pause_pos;
+		state.start_time = std::chrono::steady_clock::now();
+
+		// Unpause - sender thread will continue from here
+		state.paused.store(false, std::memory_order_release);
+	}
+
+	// Toggle pause state
+	void toggle_pause()
+	{
+		if (state.paused.load(std::memory_order_acquire))
+			resume();
+		else
+			pause();
+	}
+
+	// Stop playback completely
+	void stop()
+	{
+		state.stop_requested.store(true, std::memory_order_release);
+
+		// If paused, unpause so threads can exit
+		if (state.paused.load(std::memory_order_acquire))
+			state.paused.store(false, std::memory_order_release);
+	}
+
+	bool is_paused() const
+	{
+		return state.paused.load(std::memory_order_acquire);
+	}
+
+	bool is_playing() const
+	{
+		return state.playing.load(std::memory_order_acquire);
 	}
 
 	bool open(std::wstring filename)
@@ -629,11 +689,19 @@ struct simple_player
 	{
 		while (!state.stop_requested)
 		{
-			// handle pause
-			while (state.paused && !state.stop_requested)
+			// handle pause - wait until unpaused
+			if (state.paused.load(std::memory_order_acquire))
 			{
-				std::this_thread::sleep_for(std::chrono::milliseconds(10));
-				state.start_time = std::chrono::steady_clock::now();
+				// Wait until resumed or stopped
+				while (state.paused.load(std::memory_order_acquire) && !state.stop_requested)
+					std::this_thread::sleep_for(std::chrono::milliseconds(10));
+
+				if (state.stop_requested)
+					break;
+
+				// Resume: recalculate timing based on where we paused
+				// start_offset_us was updated by resume(), start_time was reset
+				// so we just continue - next event will be timed relative to new start
 			}
 
 			if (state.stop_requested)

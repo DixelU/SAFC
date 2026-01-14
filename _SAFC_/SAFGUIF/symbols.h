@@ -95,8 +95,6 @@ struct DottedSymbol
 				break;
 			}
 		}
-		if (is_fonted)
-			VerticalShift = 0;
 		glColor4ub(R, G, B, A);
 		glLineWidth(LineWidth);
 		glPointSize(LineWidth);
@@ -425,8 +423,6 @@ struct BiColoredDottedSymbol : DottedSymbol
 				break;
 			}
 		}
-		if (is_fonted)
-			VerticalShift = 0;
 		std::uint8_t IO;
 		glLineWidth(LineWidth);
 		glPointSize(LineWidth);

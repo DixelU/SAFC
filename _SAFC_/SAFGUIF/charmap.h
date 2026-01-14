@@ -10,10 +10,9 @@ std::unordered_map<char, std::string> ASCII;
 void InitASCIIMap()
 {
 	ASCII.clear();
-	std::ifstream file("ascii.dotmap", std::ios::in);
-	std::string T;
-	if (true) {
-		for (int i = 0; i <= 32; i++)ASCII[i] = " ";
+
+	if (true)
+	{
 		ASCII['!'] = "85 2";
 		ASCII['"'] = "74 96";
 		ASCII['#'] = "81 92 64";
@@ -108,18 +107,29 @@ void InitASCIIMap()
 		ASCII['|'] = "82";
 		ASCII['}'] = "7856521";
 		ASCII['~'] = "4859~";
-		ASCII[127] = "71937 97 31";
-		for (int i = 128; i < 256; i++) ASCII[i] = " ";
+		ASCII['\177'] = "71937 97 31";
+
+		ASCII['\200'] = "1761575651";
+		ASCII['\201'] = "47964~";
+		ASCII['\202'] = "17 93";
+
+		for (int i = 0; i < 256; i++)
+			if (ASCII[i].empty())
+				ASCII[i].push_back(' ');
 	}
 	else
 	{
+		std::ifstream file("ascii.dotmap", std::ios::in);
+		std::string T;
+
 		for (int i = 0; i < 256; i++)
 		{
 			getline(file, T);
 			ASCII[(char)i] = T;
 		}
+
+		file.close();
 	}
-	file.close();
 }
 
 #endif

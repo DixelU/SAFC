@@ -2101,7 +2101,7 @@ void PlayerWatchFunc()
 		uint64_t scanned = info.scanned;
 		uint64_t size = info.size;
 
-		auto str = std::format("Read {} out of {} ~ {}", scanned, size, (float)(scanned) / size);
+		auto str = std::format("Read {} out of {} ~ {:2.2}%", scanned, size, scanned * 100.f / size);
 		textbox->SafeStringReplace(str);
 
 		if (info.scanned == info.size)
@@ -2117,11 +2117,13 @@ void PlayerWatchFunc()
 		auto seconds = state.current_time_us / 1000000;
 		auto parts_of_second = state.current_time_us % 1000000;
 
-		auto str = std::format("Playback tick {} ~ {:0>2}:{:0>2} seconds", state.current_tick, seconds, parts_of_second / 10000);
+		auto str = std::format("{:0>2}:{:0>2} seconds", seconds, parts_of_second / 10000);
 		textbox->SafeStringReplace(str);
 
 		std::this_thread::sleep_for(std::chrono::milliseconds(20));
-		was_playing = state.playing;
+		bool is_playing = state.playing;
+		if (is_playing)
+			was_playing = true;
 	}
 }
 
@@ -2138,6 +2140,38 @@ void OnOpenPlayer()
 		worker_singleton<struct player_watcher>::instance().push(PlayerWatchFunc);
 
 		player->simple_run(_Data[id].Filename);
+	});
+}
+
+void OnPlayerPauseToggle()
+{
+	player->toggle_pause();
+
+	auto window = (*WH)["SIMPLAYER"];
+	auto pause = (Button*)(*window)["PAUSE"];
+
+	if (player->is_paused())
+		pause->SafeStringReplace("\200");
+	else
+		pause->SafeStringReplace("\202");
+}
+
+void OnPlayerStop()
+{
+	player->stop();
+
+	worker_singleton<struct player_thread>::instance().push([]()
+	{
+		auto window = (*WH)["SIMPLAYER"];
+		auto pause = (Button*)(*window)["PAUSE"];
+		auto textbox = (TextBox*)(*window)["TEXT"];
+
+		if (player->is_paused())
+			pause->SafeStringReplace("\200");
+		else
+			pause->SafeStringReplace("\202");
+
+		textbox->SafeStringReplace("Track was reset, please restart the player");
 	});
 }
 
@@ -2325,7 +2359,7 @@ void Init()
 	(*T)["AS_ROT_ANGLE"] = AngleInput;
 	(*T)["AS_FONT_SIZE"] = new WheelVariableChanger(Settings::ApplyFSWheel, -37.5, -82.5, lFontSymbolsInfo::Size, 1, System_White, "Font size", "Delta", WheelVariableChanger::Type::addictable);
 	(*T)["AS_FONT_P"] = new WheelVariableChanger(Settings::ApplyRelWheel, -37.5, -22.5, lFONT_HEIGHT_TO_WIDTH, 0.01, System_White, "Font rel.", "Delta", WheelVariableChanger::Type::addictable);
-	(*T)["AS_FONT_NAME"] = new InputField(default_font_name, 52.5 - WindowHeaderSize, 55 - WindowHeaderSize, 10, 100, _STLS_WhiteSmall, &default_font_name, 0x007FFFFF, System_White, "Font name", 32, _Align::center, _Align::left, InputField::Type::Text);
+	(*T)["AS_FONT_NAME"] = new InputField(default_font_name, 52.5 - WindowHeaderSize, 55 - WindowHeaderSize, 10, 100, Legacy_White, &default_font_name, 0x007FFFFF, System_White, "Font name", 32, _Align::center, _Align::left, InputField::Type::Text);
 
 	(*T)["BOOL_REM_TRCKS"] = new CheckBox(-97.5 + WindowHeaderSize, 95 - WindowHeaderSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, System_White, _Align::left, "Remove empty tracks");
 	(*T)["BOOL_REM_REM"] = new CheckBox(-82.5 + WindowHeaderSize, 95 - WindowHeaderSize, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, System_White, _Align::left, "Remove merge \"remnants\"");
@@ -2392,8 +2426,9 @@ void Init()
 	T = new MoveableFuiWindow("Simple MIDI player settings", System_White, /*-200, 197.5, 400, 397.5, 150, 2.5f, 75, 75, 5*/
 		-100, 50 + WindowHeaderSize, 200, 100, 150, 2.5, 15, 15, 2.5, BACKGROUND_OPQ, HEADER, BORDER);
 
-	(*T)["TEXT"] = new TextBox("Stay tuned for future proof-of-concept player inside SAFC :)", System_White, 0, 0, 50, 175, 10, 0, 0, 0, center, TextBox::VerticalOverflow::display);
-	//(*T)["DAMN"] = new InputField(" ", 0, 0, 10, 100, System_White, nullptr, 0, System_White, "Runtime data", 100, center);
+	(*T)["TEXT"] = new TextBox("BOOP", Legacy_White, 0, 0, 50, 175, 10, 0, 0, 0, center, TextBox::VerticalOverflow::display);
+	(*T)["PAUSE"] = new Button("\202", Legacy_White, OnPlayerPauseToggle, -87.5, 52.5 - WindowHeaderSize, 10, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr);
+	(*T)["STOP"] = new Button("\201", Legacy_White, OnPlayerStop, -72.5, 52.5 - WindowHeaderSize, 10, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr);
 
 	(*WH)["SIMPLAYER"] = T;
 
@@ -2716,7 +2751,7 @@ struct SafcGuiRuntime :
 		mInit();
 		glutMainLoop();
 
-
+		OnPlayerStop();
 	}
 };
 

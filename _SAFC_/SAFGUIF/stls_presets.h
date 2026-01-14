@@ -5,8 +5,8 @@
 #include "single_text_line_settings.h"
 
 SingleTextLineSettings
-	* _STLS_WhiteSmall = new SingleTextLineSettings("_", 0, 0, 5, 0xFFFFFFFF),
-	* _STLS_BlackSmall = new SingleTextLineSettings("_", 0, 0, 5, 0x000000FF),
+	* Legacy_White = new SingleTextLineSettings("_", 0, 0, 5, 0xFFFFFFFF),
+	* Legacy_Black = new SingleTextLineSettings("_", 0, 0, 5, 0x000000FF),
 
 	* System_Black = (is_fonted) ? new SingleTextLineSettings(10, 0x000000FF) : new SingleTextLineSettings("_", 0, 0, 5, 0x000000FF),
 	* System_White = (is_fonted) ? new SingleTextLineSettings(10, 0xFFFFFFFF) : new SingleTextLineSettings("_", 0, 0, 5, 0xFFFFFFFF),
