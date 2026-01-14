@@ -2141,6 +2141,8 @@ void OnOpenPlayer()
 
 		player->simple_run(_Data[id].Filename);
 	});
+
+	worker_singleton<struct player_thread>::assign_co_destructor([](){ player->stop(); });
 }
 
 void OnPlayerPauseToggle()
@@ -2426,9 +2428,9 @@ void Init()
 	T = new MoveableFuiWindow("Simple MIDI player settings", System_White, /*-200, 197.5, 400, 397.5, 150, 2.5f, 75, 75, 5*/
 		-100, 50 + WindowHeaderSize, 200, 100, 150, 2.5, 15, 15, 2.5, BACKGROUND_OPQ, HEADER, BORDER);
 
-	(*T)["TEXT"] = new TextBox("BOOP", Legacy_White, 0, 0, 50, 175, 10, 0, 0, 0, center, TextBox::VerticalOverflow::display);
-	(*T)["PAUSE"] = new Button("\202", Legacy_White, OnPlayerPauseToggle, -87.5, 52.5 - WindowHeaderSize, 10, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr);
-	(*T)["STOP"] = new Button("\201", Legacy_White, OnPlayerStop, -72.5, 52.5 - WindowHeaderSize, 10, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr);
+	(*T)["TEXT"] = new TextBox("BOOP", Legacy_White, 0, 0, 50, 175, 10, 0, 0, 0, left, TextBox::VerticalOverflow::display);
+	(*T)["PAUSE"] = new Button("\202", Legacy_White, OnPlayerPauseToggle, -90, 55 - WindowHeaderSize, 10, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr);
+	(*T)["STOP"] = new Button("\201", Legacy_White, OnPlayerStop, -75, 55 - WindowHeaderSize, 10, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr);
 
 	(*WH)["SIMPLAYER"] = T;
 
@@ -2680,6 +2682,7 @@ void mSpecialKey(int Key, int x, int y)
 void mExit(int a)
 {
 	Settings::RegestryAccess.Close();
+
 }
 
 struct SafcRuntime
@@ -2709,7 +2712,7 @@ struct SafcGuiRuntime :
 		InitASCIIMap();
 		//cout << to_string((std::uint16_t)0) << endl;
 
-		srand(TIMESEED());
+		srand(TIMESEED()); 
 		__glutInitWithExit(&argc, argv, mExit);
 		//cout << argv[0] << endl;
 		glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGBA | GLUT_ALPHA | GLUT_MULTISAMPLE);
@@ -2750,8 +2753,6 @@ struct SafcGuiRuntime :
 		glutDisplayFunc(mDisplay);
 		mInit();
 		glutMainLoop();
-
-		OnPlayerStop();
 	}
 };
 
@@ -3014,9 +3015,6 @@ int main(int argc, char** argv)
 		runtime = std::make_shared<SafcGuiRuntime>();
 
 	(*runtime)(argc, argv);
-
-	// stop all interactions and current async tasks
-	workers_collection::stop_all();
 
 	return 0;
 }

@@ -17,6 +17,7 @@ struct background_worker
 	~background_worker();
 
 	void push(std::function<void()> task);
+	void assign_co_destructor(std::function<void()> co_destructor);
 	void stop();
 
 private:
@@ -28,6 +29,7 @@ private:
 	std::mutex task_queue_mutex;
 	std::condition_variable task_queue_cv;
 	std::deque<std::function<void()>> task_queue;
+	std::function<void()> co_destructor;
 };
 
 struct workers_collection
@@ -57,6 +59,11 @@ struct worker_singleton
 		static workers_collection _{instance};
 		return instance;
 	}
+
+	static void assign_co_destructor(std::function<void()> co_destructor)
+	{
+		instance().assign_co_destructor(std::move(co_destructor));
+	}
 };
 
 background_worker::background_worker() :
@@ -65,6 +72,9 @@ background_worker::background_worker() :
 
 background_worker::~background_worker()
 {
+	if (this->co_destructor)
+		this->co_destructor();
+
 	this->stop();
 }
 
@@ -74,6 +84,11 @@ void background_worker::push(std::function<void()> task)
 
 	this->task_queue.push_back(std::move(task));
 	this->task_queue_cv.notify_one();
+}
+
+inline void background_worker::assign_co_destructor(std::function<void()> co_destructor)
+{
+	this->co_destructor = co_destructor;
 }
 
 void background_worker::stop()
