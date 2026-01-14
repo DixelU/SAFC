@@ -10,6 +10,7 @@
 #include <thread>
 #include <algorithm>
 #include <atomic>
+#include <queue>
 
 #include "../bbb_ffio.h"
 
@@ -187,6 +188,19 @@ struct simple_player
 		}
 	};
 
+	struct track_event_ref
+	{
+		tick_type tick;
+		size_t track_index;
+		bool operator>(const track_event_ref& other) const { return tick > other.tick; }
+	};
+
+	using event_queue_type = std::priority_queue<
+		track_event_ref,
+		std::vector<track_event_ref>,
+		std::greater<track_event_ref>
+	>;
+
 	struct playback_state
 	{
 		tick_type current_tick;
@@ -349,16 +363,18 @@ struct simple_player
 		update_tempo_cache_at(~0ULL); // initialize cache for tick 0
 		state.playing = true;
 
-		// initialize track states
+		// initialize track states and build priority queue
+		event_queue_type event_queue;
 		state.track_states.resize(info.tracks.size());
+
 		for (size_t i = 0; i < info.tracks.size(); ++i)
 		{
 			state.track_states[i].init(info.tracks[i]);
-			// read first delta time for each track
 			if (state.track_states[i].position < state.track_states[i].end)
 			{
 				state.track_states[i].next_event_tick =
 					get_vlv(state.track_states[i].position, state.track_states[i].end);
+				event_queue.push({state.track_states[i].next_event_tick, i});
 			}
 			else
 			{
@@ -369,10 +385,7 @@ struct simple_player
 		state.active_tracks = info.tracks.size();
 		state.start_time = std::chrono::steady_clock::now();
 
-		// lookahead for visualization (microseconds)
-		constexpr uint64_t lookahead_us = 2000000; // 2 seconds
-
-		while (state.active_tracks > 0 && !state.stop_requested)
+		while (!event_queue.empty() && !state.stop_requested)
 		{
 			// handle pause
 			while (state.paused && !state.stop_requested)
@@ -384,35 +397,18 @@ struct simple_player
 			if (state.stop_requested)
 				break;
 
-			// find track with earliest next event
-			size_t next_track = ~0ULL;
-			tick_type min_tick = ~0ULL;
+			// get the tick for this batch (all events at same tick processed together)
+			tick_type batch_tick = event_queue.top().tick;
+			uint64_t batch_time_us = tick_to_microseconds(batch_tick);
 
-			for (size_t i = 0; i < state.track_states.size(); ++i)
-			{
-				if (state.track_states[i].done)
-					continue;
+			// update state once per batch
+			state.current_tick = batch_tick;
+			state.current_time_us = batch_time_us;
 
-				if (state.track_states[i].next_event_tick < min_tick)
-				{
-					min_tick = state.track_states[i].next_event_tick;
-					next_track = i;
-				}
-			}
-
-			if (next_track == ~0ULL)
-				break;
-
-			auto& track = state.track_states[next_track];
-
-			// update current tick/time
-			state.current_tick = min_tick;
-			state.current_time_us = tick_to_microseconds(min_tick);
-
-			// wait until it's time to play this event
+			// wait until it's time to play this batch
 			auto elapsed = std::chrono::steady_clock::now() - state.start_time;
 			auto elapsed_us = std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count();
-			int64_t target_us = static_cast<int64_t>(state.current_time_us - state.start_offset_us);
+			int64_t target_us = static_cast<int64_t>(batch_time_us - state.start_offset_us);
 
 			if (target_us > elapsed_us)
 			{
@@ -431,109 +427,110 @@ struct simple_player
 				}
 			}
 
-			// process the event
-			if (track.position >= track.end)
+			// process ALL events at this tick
+			while (!event_queue.empty() && event_queue.top().tick == batch_tick)
 			{
-				track.done = true;
-				--state.active_tracks;
-				continue;
-			}
-
-			uint8_t command = get_value_and_increment(track.position, track.end);
-			uint8_t data1 = 0;
-			uint8_t data2 = 0;
-
-			if (command < 0x80)
-			{
-				// running status
-				data1 = command;
-				command = track.rsb;
-			}
-			else
-			{
-				if (command < 0xF0)
-					track.rsb = command;
-
-				if (command < 0xF0 || command == 0xFF)
-					data1 = get_value_and_increment(track.position, track.end);
-				else
-					data1 = 0xFF;
-			}
-
-			if (command < 0x80)
-			{
-				track.done = true;
-				--state.active_tracks;
-				continue;
-			}
-
-			bool event_sent = false;
-			switch (command >> 4)
-			{
-				case 0x8: // note off
-				case 0x9: // note on
-				case 0xA: // aftertouch
-				case 0xB: // control change
-				case 0xE: // pitch bend
-				{
-					data2 = get_value_and_increment(track.position, track.end);
-					if (short_msg)
-						short_msg(make_smsg(command, data1, data2));
-					event_sent = true;
+				if (state.stop_requested)
 					break;
-				}
-				case 0xC: // program change
-				case 0xD: // channel pressure
-				{
-					if (short_msg)
-						short_msg(make_smsg(command, data1));
-					event_sent = true;
-					break;
-				}
-				case 0xF: // meta/sysex
-				{
-					uint8_t type = data1;
-					bool end_of_track = (type == 0x2F && command == 0xFF);
 
-					if (command == 0xFF)
-						track.rsb = 0; // reset RSB on meta events
+				auto ref = event_queue.top();
+				event_queue.pop();
 
-					if (end_of_track)
+				auto& track = state.track_states[ref.track_index];
+
+				if (track.done || track.position >= track.end)
+				{
+					if (!track.done)
 					{
 						track.done = true;
 						--state.active_tracks;
-						continue;
 					}
-
-					// skip meta/sysex data (tempo already handled during initial parsing)
-					auto length = get_vlv(track.position, track.end);
-					track.position += length;
-					break;
+					continue;
 				}
-			}
 
-			// buffer note events for visualization with lookahead
-			/*if (event_sent && ((command >> 4) == 0x8 || (command >> 4) == 0x9))
-			{
-				buffered_event ev;
-				ev.tick = min_tick;
-				ev.time_us = state.current_time_us;
-				ev.status = command;
-				ev.data1 = data1;
-				ev.data2 = data2;
-				state.event_buffer.push(std::move(ev));
-			}*/
+				// process the event
+				uint8_t command = get_value_and_increment(track.position, track.end);
+				uint8_t data1 = 0;
+				uint8_t data2 = 0;
 
-			// read next delta time
-			if (track.position < track.end && !track.done)
-			{
-				auto delta = get_vlv(track.position, track.end);
-				track.next_event_tick = min_tick + delta;
-			}
-			else
-			{
-				track.done = true;
-				--state.active_tracks;
+				if (command < 0x80)
+				{
+					// running status
+					data1 = command;
+					command = track.rsb;
+				}
+				else
+				{
+					if (command < 0xF0)
+						track.rsb = command;
+
+					if (command < 0xF0 || command == 0xFF)
+						data1 = get_value_and_increment(track.position, track.end);
+					else
+						data1 = 0xFF;
+				}
+
+				if (command < 0x80)
+				{
+					track.done = true;
+					--state.active_tracks;
+					continue;
+				}
+
+				switch (command >> 4)
+				{
+					case 0x8: // note off
+					case 0x9: // note on
+					case 0xA: // aftertouch
+					case 0xB: // control change
+					case 0xE: // pitch bend
+					{
+						data2 = get_value_and_increment(track.position, track.end);
+						if (short_msg)
+							short_msg(make_smsg(command, data1, data2));
+						break;
+					}
+					case 0xC: // program change
+					case 0xD: // channel pressure
+					{
+						if (short_msg)
+							short_msg(make_smsg(command, data1));
+						break;
+					}
+					case 0xF: // meta/sysex
+					{
+						uint8_t type = data1;
+						bool end_of_track = (type == 0x2F && command == 0xFF);
+
+						if (command == 0xFF)
+							track.rsb = 0; // reset RSB on meta events
+
+						if (end_of_track)
+						{
+							track.done = true;
+							--state.active_tracks;
+							continue;
+						}
+
+						// skip meta/sysex data (tempo already handled during initial parsing)
+						auto length = get_vlv(track.position, track.end);
+						track.position += length;
+						break;
+					}
+				}
+
+				// read next delta time and re-queue track if it has more events
+				if (track.position < track.end && !track.done)
+				{
+					auto delta = get_vlv(track.position, track.end);
+					track.next_event_tick = batch_tick + delta;
+					event_queue.push({track.next_event_tick, ref.track_index});
+				}
+				else if (!track.done)
+				{
+					track.done = true;
+					--state.active_tracks;
+				}
 			}
 		}
 
