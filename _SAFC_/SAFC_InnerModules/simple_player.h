@@ -153,19 +153,101 @@ struct simple_player
 		const uint8_t* ending;
 	};
 
-	struct buffered_event
+	struct buffered_note
 	{
 		tick_type tick;
+		tick_type length; // may be way larger than u64 though
 		uint64_t time_us;
-		uint8_t status;
-		uint8_t data1;
-		uint8_t data2;
+		uint32_t color_n : 24;
+		uint32_t key : 8;
+	};
 
-		bool is_note_on() const { return (status & 0xF0) == 0x90 && data2 > 0; }
-		bool is_note_off() const { return (status & 0xF0) == 0x80 || ((status & 0xF0) == 0x90 && data2 == 0); }
-		uint8_t channel() const { return status & 0x0F; }
-		uint8_t key() const { return data1; }
-		uint8_t velocity() const { return data2; }
+	struct send_event
+	{
+		uint64_t time_us;    // target send time in microseconds from start
+		uint32_t short_msg;  // prepared MIDI short message (0 = invalid/empty)
+	};
+
+	// Lock-free SPSC ring buffer for pre-parsed MIDI messages
+	struct lookahead_buffer
+	{
+		static constexpr size_t buffer_size = 1 << 20; // must be power of 2
+		static constexpr size_t buffer_mask = buffer_size - 1;
+
+		std::unique_ptr<send_event[]> buffer;
+		alignas(64) std::atomic<size_t> head{0}; // producer writes here
+		alignas(64) std::atomic<size_t> tail{0}; // consumer reads here
+
+		lookahead_buffer() : buffer(std::make_unique<send_event[]>(buffer_size)) {}
+
+		void reset()
+		{
+			head.store(0, std::memory_order_relaxed);
+			tail.store(0, std::memory_order_relaxed);
+		}
+
+		// Returns number of events in buffer
+		size_t size() const
+		{
+			size_t h = head.load(std::memory_order_acquire);
+			size_t t = tail.load(std::memory_order_acquire);
+			return (h - t) & buffer_mask;
+		}
+
+		bool empty() const
+		{
+			return head.load(std::memory_order_acquire) == tail.load(std::memory_order_acquire);
+		}
+
+		bool full() const
+		{
+			size_t h = head.load(std::memory_order_relaxed);
+			size_t t = tail.load(std::memory_order_acquire);
+			return ((h + 1) & buffer_mask) == t;
+		}
+
+		// Producer: push event (returns false if full)
+		bool try_push(uint64_t time_us, uint32_t msg)
+		{
+			size_t h = head.load(std::memory_order_relaxed);
+			size_t next_h = (h + 1) & buffer_mask;
+
+			if (next_h == tail.load(std::memory_order_acquire))
+				return false; // full
+
+			buffer[h] = {time_us, msg};
+			head.store(next_h, std::memory_order_release);
+			return true;
+		}
+
+		// Consumer: peek at front event (returns nullptr if empty)
+		const send_event* peek() const
+		{
+			size_t t = tail.load(std::memory_order_relaxed);
+			if (t == head.load(std::memory_order_acquire))
+				return nullptr;
+			return &buffer[t];
+		}
+
+		// Consumer: pop front event
+		void pop()
+		{
+			size_t t = tail.load(std::memory_order_relaxed);
+			if (t != head.load(std::memory_order_acquire))
+				tail.store((t + 1) & buffer_mask, std::memory_order_release);
+		}
+
+		// Consumer: pop and return (returns {0,0} if empty)
+		send_event try_pop()
+		{
+			size_t t = tail.load(std::memory_order_relaxed);
+			if (t == head.load(std::memory_order_acquire))
+				return {0, 0};
+
+			send_event ev = buffer[t];
+			tail.store((t + 1) & buffer_mask, std::memory_order_release);
+			return ev;
+		}
 	};
 
 	struct track_playback_state
@@ -209,13 +291,22 @@ struct simple_player
 		uint64_t start_offset_us;
 
 		std::vector<track_playback_state> track_states;
+		buffered_queue<buffered_note> notes;
 		size_t active_tracks;
 
 		std::atomic<bool> playing;
 		mutable std::atomic<bool> stop_requested;
 		mutable std::atomic<bool> paused;
 
-		buffered_queue<buffered_event> event_buffer;
+		// Lookahead buffer for pre-parsed MIDI messages
+		lookahead_buffer send_buffer;
+		std::atomic<bool> parser_done{false};       // parser finished all events
+		std::atomic<uint64_t> parsed_up_to_us{0};   // how far ahead the parser has reached (in us)
+		std::atomic<uint64_t> sender_position_us{0}; // current sender playback position (in us)
+
+		// Lookahead limits: parser throttles when too far ahead
+		static constexpr uint64_t max_lookahead_us = 5000000;  // 5 seconds max lookahead
+		static constexpr uint64_t min_lookahead_us = 1000000;  // 1 second min before resuming parse
 
 		void reset()
 		{
@@ -226,8 +317,11 @@ struct simple_player
 			playing = false;
 			stop_requested = false;
 			paused = false;
+			parser_done = false;
+			parsed_up_to_us = 0;
+			sender_position_us = 0;
 			track_states.clear();
-			event_buffer.clear();
+			send_buffer.reset();
 		}
 	};
 
@@ -357,11 +451,10 @@ struct simple_player
 		return true;
 	}
 
-	void playback_thread()
+	// Parser thread: pre-parses MIDI events into the lookahead buffer
+	void parser_thread_func()
 	{
-		state.reset();
 		update_tempo_cache_at(~0ULL); // initialize cache for tick 0
-		state.playing = true;
 
 		// initialize track states and build priority queue
 		event_queue_type event_queue;
@@ -383,49 +476,31 @@ struct simple_player
 		}
 
 		state.active_tracks = info.tracks.size();
-		state.start_time = std::chrono::steady_clock::now();
 
 		while (!event_queue.empty() && !state.stop_requested)
 		{
-			// handle pause
-			while (state.paused && !state.stop_requested)
+			// get the tick for this batch
+			tick_type batch_tick = event_queue.top().tick;
+			uint64_t batch_time_us = tick_to_microseconds(batch_tick);
+
+			// Throttle: wait if we're too far ahead of the sender
+			while (!state.stop_requested)
 			{
-				std::this_thread::sleep_for(std::chrono::milliseconds(10));
-				state.start_time = std::chrono::steady_clock::now();
+				uint64_t sender_pos = state.sender_position_us.load(std::memory_order_acquire);
+				uint64_t lookahead = (batch_time_us > sender_pos) ? (batch_time_us - sender_pos) : 0;
+
+				if (lookahead < playback_state::max_lookahead_us)
+					break;
+
+				// Too far ahead - sleep until sender catches up closer
+				std::this_thread::sleep_for(std::chrono::milliseconds(1));
 			}
 
 			if (state.stop_requested)
 				break;
 
-			// get the tick for this batch (all events at same tick processed together)
-			tick_type batch_tick = event_queue.top().tick;
-			uint64_t batch_time_us = tick_to_microseconds(batch_tick);
-
-			// update state once per batch
-			state.current_tick = batch_tick;
-			state.current_time_us = batch_time_us;
-
-			// wait until it's time to play this batch
-			auto elapsed = std::chrono::steady_clock::now() - state.start_time;
-			auto elapsed_us = std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count();
-			int64_t target_us = static_cast<int64_t>(batch_time_us - state.start_offset_us);
-
-			if (target_us > elapsed_us)
-			{
-				auto wait_us = target_us - elapsed_us;
-				if (wait_us > 1000)
-				{
-					std::this_thread::sleep_for(std::chrono::microseconds(wait_us - 500));
-				}
-				// spin-wait for precision
-				while (true)
-				{
-					elapsed = std::chrono::steady_clock::now() - state.start_time;
-					elapsed_us = std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count();
-					if (elapsed_us >= target_us)
-						break;
-				}
-			}
+			// update parsed position for sender thread visibility
+			state.parsed_up_to_us.store(batch_time_us, std::memory_order_release);
 
 			// process ALL events at this tick
 			while (!event_queue.empty() && event_queue.top().tick == batch_tick)
@@ -477,6 +552,8 @@ struct simple_player
 					continue;
 				}
 
+				uint32_t msg_to_send = 0;
+
 				switch (command >> 4)
 				{
 					case 0x8: // note off
@@ -486,15 +563,13 @@ struct simple_player
 					case 0xE: // pitch bend
 					{
 						data2 = get_value_and_increment(track.position, track.end);
-						if (short_msg)
-							short_msg(make_smsg(command, data1, data2));
+						msg_to_send = make_smsg(command, data1, data2);
 						break;
 					}
 					case 0xC: // program change
 					case 0xD: // channel pressure
 					{
-						if (short_msg)
-							short_msg(make_smsg(command, data1));
+						msg_to_send = make_smsg(command, data1);
 						break;
 					}
 					case 0xF: // meta/sysex
@@ -519,6 +594,18 @@ struct simple_player
 					}
 				}
 
+				// Push message to lookahead buffer (wait if buffer is full)
+				if (msg_to_send != 0)
+				{
+					while (!state.send_buffer.try_push(batch_time_us, msg_to_send))
+					{
+						if (state.stop_requested)
+							break;
+						// Buffer full - yield briefly and retry
+						std::this_thread::yield();
+					}
+				}
+
 				// read next delta time and re-queue track if it has more events
 				if (track.position < track.end && !track.done)
 				{
@@ -533,6 +620,88 @@ struct simple_player
 				}
 			}
 		}
+
+		state.parser_done.store(true, std::memory_order_release);
+	}
+
+	// Sender thread: sends pre-parsed events with precise timing
+	void sender_thread_func()
+	{
+		while (!state.stop_requested)
+		{
+			// handle pause
+			while (state.paused && !state.stop_requested)
+			{
+				std::this_thread::sleep_for(std::chrono::milliseconds(10));
+				state.start_time = std::chrono::steady_clock::now();
+			}
+
+			if (state.stop_requested)
+				break;
+
+			// peek at next event
+			const send_event* ev = state.send_buffer.peek();
+
+			if (!ev)
+			{
+				// buffer empty - check if parser is done
+				if (state.parser_done.load(std::memory_order_acquire))
+					break; // all done
+
+				// wait for parser to produce more events
+				std::this_thread::yield();
+				continue;
+			}
+
+			uint64_t target_us = ev->time_us - state.start_offset_us;
+
+			// update current position for UI and parser throttling
+			state.current_time_us = ev->time_us;
+			state.sender_position_us.store(ev->time_us, std::memory_order_release);
+
+			// wait until it's time to send this event
+			auto elapsed = std::chrono::steady_clock::now() - state.start_time;
+			auto elapsed_us = std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count();
+
+			if (static_cast<int64_t>(target_us) > elapsed_us)
+			{
+				auto wait_us = target_us - elapsed_us;
+				if (wait_us > 1000)
+				{
+					// sleep for most of the wait time
+					std::this_thread::sleep_for(std::chrono::microseconds(wait_us - 50));
+				}
+				// spin-wait for final precision
+				while (true)
+				{
+					elapsed = std::chrono::steady_clock::now() - state.start_time;
+					elapsed_us = std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count();
+					if (elapsed_us >= static_cast<int64_t>(target_us))
+						break;
+				}
+			}
+
+			// send the event
+			if (short_msg && ev->short_msg != 0)
+				short_msg(ev->short_msg);
+
+			state.send_buffer.pop();
+		}
+	}
+
+	void playback_thread()
+	{
+		state.reset();
+		state.playing = true;
+		state.start_time = std::chrono::steady_clock::now();
+
+		// launch parser and sender threads
+		std::thread parser_thread([this]() { parser_thread_func(); });
+		std::thread sender_thread([this]() { sender_thread_func(); });
+
+		// wait for both threads to finish
+		parser_thread.join();
+		sender_thread.join();
 
 		// playback finished
 		all_notes_off();
