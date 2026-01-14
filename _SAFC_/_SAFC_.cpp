@@ -2111,7 +2111,8 @@ void PlayerWatchFunc()
 	}
 
 	auto& state = player->get_state();
-	while (state.playing)
+	bool was_playing = false;
+	while (was_playing <= state.playing)
 	{
 		auto seconds = state.current_time_us / 1000000;
 		auto parts_of_second = state.current_time_us % 1000000;
@@ -2120,6 +2121,7 @@ void PlayerWatchFunc()
 		textbox->SafeStringReplace(str);
 
 		std::this_thread::sleep_for(std::chrono::milliseconds(20));
+		was_playing = state.playing;
 	}
 }
 
