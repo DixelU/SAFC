@@ -110,7 +110,7 @@ public:
 
 		head->pop();
 
-		if (!head->empty() || !head->full())
+		if (!head->empty())
 			return;
 
 		auto new_head = std::move(head->next_slab);
@@ -245,14 +245,15 @@ struct simple_player
 			// Find and remove most recent note with matching color_id (LIFO)
 			buffered_note* find_and_remove(uint32_t color_id)
 			{
-				for (auto& entry : entries | std::views::reverse)
+				for (auto it = entries.rbegin(); it != entries.rend(); ++it)
 				{
-					if (entry.color_id != color_id)
+					if (it->color_id != color_id)
 						continue;
-					
-					buffered_note* result = entry.note_ptr;
-					// Swap with last and shrink
-					entry = entries.back();
+
+					buffered_note* result = it->note_ptr;
+					// Swap with last and pop
+					*it = entries.back();
+					entries.pop_back();
 					return result;
 				}
 
@@ -311,7 +312,7 @@ struct simple_player
 			uint32_t color_id = make_color_id(track_index, channel);
 
 			// Push to falling notes queue
-			falling_notes[key].push({time_us, 0, color_id});
+			falling_notes[key].push({time_us, ~0ULL, color_id});
 
 			// Track as pending for note_off matching
 			buffered_note* note_ptr = &falling_notes[key].back();
@@ -1058,7 +1059,7 @@ struct simple_player
 		std::vector<color> colors;
 		//std::unordered_map<uint32_t, uint32_t> track_colors;
 
-		constexpr static float WIDTH = 400, HEIGHT = 250;
+		constexpr static float WIDTH = 390, HEIGHT = 250;
 		constexpr static bool is_white_key(std::uint8_t Key)
 		{
 			Key %= 12;
@@ -1190,18 +1191,18 @@ struct simple_player
 			{
 				auto& note = *it;
 
-				int64_t begin_offset = current_us - note.start_time_us;
-				int64_t end_offset = current_us - note.end_time_us;
+				float begin_y = float(note.start_time_us - current_us) / float(data.scroll_window_us);
+				float end_y = 0;
 
-				float begin_y = float(begin_offset) / float(data.scroll_window_us);
-				float end_y = float(end_offset) / float(data.scroll_window_us);
-
-				if (end_y < 0 || begin_y > draw_data::HEIGHT)
+				if (note.end_time_us != ~0ULL)
+					end_y = float(note.end_time_us - current_us) / float(data.scroll_window_us);
+				
+				if (end_y < 0 || begin_y > 1)
 					continue;
 
 				auto color_value = rotate(0xFF7F008F, note.color_id);
 
-				if (begin_y < 0 && end_y > 0)
+				if (begin_y <= 0 && end_y >= 0)
 				{
 					keyboard_colors[index] = draw_data::color{
 						.r = uint8_t(color_value >> 24),
@@ -1210,11 +1211,14 @@ struct simple_player
 					};
 				}
 
-				//begin_y = std::clamp(begin_y, 0.f, 1.f);
-				//end_y = std::clamp(end_y, 0.f, 1.f);
+				begin_y = std::clamp(begin_y, 0.f, 1.f);
+				end_y = std::clamp(end_y, 0.f, 1.f);
 
-				begin_y = (data.keyboard->tr.y + draw_data::HEIGHT) * (1 - begin_y) + (begin_y)*data.keyboard->tr.y;
-				end_y = (data.keyboard->tr.y + draw_data::HEIGHT) * (1 - end_y) + (end_y)*data.keyboard->tr.y;
+				begin_y = data.keyboard->tr.y + draw_data::HEIGHT * begin_y;
+				end_y = data.keyboard->tr.y + draw_data::HEIGHT * end_y;
+
+				//begin_y = (data.keyboard->tr.y + draw_data::HEIGHT) * (1 - begin_y) + (begin_y)*data.keyboard->tr.y;
+				//end_y = (data.keyboard->tr.y + draw_data::HEIGHT) * (1 - end_y) + (end_y)*data.keyboard->tr.y;
 
 				__glcolor(color_value | 0xFF);
 
@@ -1632,7 +1636,7 @@ struct PlayerViewer : public HandleableUIPart
 		ypos(ypos),
 		data(std::make_unique<simple_player::draw_data>())
 	{
-		data->init(20, 12.5f, 2.25f);
+		data->init(40, 20, 3.75f);
 		data->move(xpos - 0.5 * simple_player::draw_data::WIDTH, ypos);
 	}
 

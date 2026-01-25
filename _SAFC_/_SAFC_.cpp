@@ -2424,7 +2424,7 @@ void Init()
 	T = new MoveableFuiWindow("Simple MIDI player settings", System_White, /*-200, 197.5, 400, 397.5, 150, 2.5f, 75, 75, 5*/
 		-200, 175 + WindowHeaderSize, 400, 375, 150, 2.5, 15, 15, 2.5, BACKGROUND_OPQ, HEADER, BORDER);
 
-	(*T)["TEXT"] = new TextBox("BOOP", Legacy_White, 175, 200, 50, 175, 10, 0, 0, 0, right, TextBox::VerticalOverflow::display);
+	(*T)["TEXT"] = new TextBox("TIME", Legacy_White, 0, 125 + WindowHeaderSize, 50, 175, 10, 0, 0, 0, center, TextBox::VerticalOverflow::display);
 	(*T)["PAUSE"] = new Button("\202", Legacy_White, OnPlayerPauseToggle, -190, 180 - WindowHeaderSize, 10, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr);
 	(*T)["STOP"] = new Button("\201", Legacy_White, OnPlayerStop, -175, 180 - WindowHeaderSize, 10, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr);
 
