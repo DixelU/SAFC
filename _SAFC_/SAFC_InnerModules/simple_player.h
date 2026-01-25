@@ -11,6 +11,8 @@
 #include <algorithm>
 #include <atomic>
 #include <queue>
+#include <array>
+#include <mutex>
 
 #include "../bbb_ffio.h"
 
@@ -80,18 +82,6 @@ private:
 		unused_slabs.push_back(std::move(slab_ptr));
 	}
 
-	struct iterator
-	{
-		slab* current_slab = nullptr;
-		T* cur_obj = nullptr;
-
-		T* operator->() { return cur_obj; }
-		T& operator*() { return *cur_obj; }
-		iterator& operator++(int)
-		{
-
-		}
-	};
 public:
 	buffered_queue() = default;
 
@@ -140,6 +130,71 @@ public:
 	{
 		while (!empty()) pop();
 	}
+
+	T& front()
+	{
+		return head->front();
+	}
+
+	const T& front() const
+	{
+		return head->front();
+	}
+
+	T& back()
+	{
+		return tail->back();
+	}
+
+	const T& back() const
+	{
+		return tail->back();
+	}
+
+	// Iterator support for traversal (needed for note_off matching in visuals)
+	struct iterator
+	{
+		slab* current_slab;
+		T* cur;
+
+		iterator(slab* s, T* p) : current_slab(s), cur(p) {}
+
+		T& operator*() { return *cur; }
+		T* operator->() { return cur; }
+
+		iterator& operator++()
+		{
+			++cur;
+			if (cur >= current_slab->end && current_slab->next_slab)
+			{
+				current_slab = current_slab->next_slab.get();
+				cur = current_slab->begin;
+			}
+			return *this;
+		}
+
+		bool operator!=(const iterator& other) const
+		{
+			return cur != other.cur || current_slab != other.current_slab;
+		}
+
+		bool operator==(const iterator& other) const
+		{
+			return cur == other.cur && current_slab == other.current_slab;
+		}
+	};
+
+	iterator begin()
+	{
+		if (!head) return iterator(nullptr, nullptr);
+		return iterator(head.get(), head->begin);
+	}
+
+	iterator end()
+	{
+		if (!tail) return iterator(nullptr, nullptr);
+		return iterator(tail, tail->end);
+	}
 };
 
 
@@ -155,11 +210,262 @@ struct simple_player
 
 	struct buffered_note
 	{
-		tick_type tick;
-		tick_type length; // may be way larger than u64 though
+		uint64_t length_us; // may be way larger than u64 though
 		uint64_t time_us;
-		uint32_t color_n : 24;
-		uint32_t key : 8;
+		uint32_t color_n;
+	};
+
+	// Visual note for falling notes display
+	struct visual_note
+	{
+		uint64_t start_time_us;   // note on time
+		uint64_t end_time_us;     // note off time (0 = still held/pending)
+		uint32_t color_id;        // (track_index << 4) | channel - unique color per track+channel
+		uint8_t velocity;
+	};
+
+	// Visuals viewport: manages falling notes display and keyboard state
+	// Thread-safe: parser thread pushes notes, render thread reads state
+	struct visuals_viewport
+	{
+		static constexpr size_t key_count = 128;
+		static constexpr size_t max_pending_per_key = 64;  // max concurrent note_ons per key awaiting note_off
+
+		mutable std::mutex mtx;  // protects all mutable state
+
+		// Pending note tracking entry - points to note in queue awaiting its note_off
+		struct pending_entry
+		{
+			uint32_t color_id;
+			visual_note* note_ptr;
+		};
+
+		// Fixed-size stack of pending notes per key (LIFO for matching)
+		struct pending_list
+		{
+			pending_entry entries[max_pending_per_key];
+			size_t count = 0;
+
+			void push(uint32_t color_id, visual_note* ptr)
+			{
+				if (count < max_pending_per_key)
+					entries[count++] = {color_id, ptr};
+			}
+
+			// Find and remove most recent note with matching color_id (LIFO)
+			visual_note* find_and_remove(uint32_t color_id)
+			{
+				for (size_t i = count; i-- > 0;)
+				{
+					if (entries[i].color_id == color_id)
+					{
+						visual_note* result = entries[i].note_ptr;
+						// Swap with last and shrink
+						entries[i] = entries[--count];
+						return result;
+					}
+				}
+				return nullptr;
+			}
+
+			void clear() { count = 0; }
+		};
+
+		// Held note info for keyboard coloring
+		struct held_note
+		{
+			uint32_t color_id;
+			uint8_t velocity;
+		};
+
+		// Per-key queues for falling notes visualization
+		std::array<buffered_queue<visual_note>, key_count> falling_notes;
+
+		// Per-key pending note trackers for note_off matching
+		std::array<pending_list, key_count> pending;
+
+		// Keyboard state: currently held notes per key (for keyboard coloring)
+		// Using small vector since multiple tracks can hold same key simultaneously
+		std::array<std::vector<held_note>, key_count> held_notes;
+
+		// Generate unique color_id from track index and channel
+		static uint32_t make_color_id(size_t track_index, uint8_t channel)
+		{
+			return static_cast<uint32_t>((track_index << 4) | (channel & 0x0F));
+		}
+
+		// Extract track index from color_id
+		static size_t get_track_from_color(uint32_t color_id)
+		{
+			return color_id >> 4;
+		}
+
+		// Extract channel from color_id
+		static uint8_t get_channel_from_color(uint32_t color_id)
+		{
+			return static_cast<uint8_t>(color_id & 0x0F);
+		}
+
+		// RAII lock guard for render code - hold this while iterating/reading visuals
+		[[nodiscard]] std::unique_lock<std::mutex> lock() const
+		{
+			return std::unique_lock<std::mutex>(mtx);
+		}
+
+		// Push a note_on event - creates visual note and tracks as pending
+		// Thread-safe: called from parser thread
+		void push_note_on(uint8_t key, uint64_t time_us, size_t track_index, uint8_t channel, uint8_t velocity)
+		{
+			if (key >= key_count)
+				return;
+
+			std::lock_guard<std::mutex> guard(mtx);
+
+			uint32_t color_id = make_color_id(track_index, channel);
+
+			// Push to falling notes queue
+			falling_notes[key].push({time_us, 0, color_id, velocity});
+
+			// Track as pending for note_off matching
+			visual_note* note_ptr = &falling_notes[key].back();
+			pending[key].push(color_id, note_ptr);
+		}
+
+		// Push a note_off event - finds matching pending note and sets end_time
+		// Thread-safe: called from parser thread
+		void push_note_off(uint8_t key, uint64_t time_us, size_t track_index, uint8_t channel)
+		{
+			if (key >= key_count)
+				return;
+
+			std::lock_guard<std::mutex> guard(mtx);
+
+			uint32_t color_id = make_color_id(track_index, channel);
+
+			// Find matching pending note and set its end time
+			visual_note* note = pending[key].find_and_remove(color_id);
+			if (note)
+				note->end_time_us = time_us;
+		}
+
+		// Remove notes that have fully scrolled past (end_time < cutoff)
+		// Caller must hold lock() or ensure no concurrent access
+		void cull_expired_unlocked(uint64_t cutoff_time_us)
+		{
+			for (size_t key = 0; key < key_count; ++key)
+			{
+				auto& queue = falling_notes[key];
+				while (!queue.empty())
+				{
+					auto& front = queue.front();
+					// Only cull if note has ended and end is before cutoff
+					if (front.end_time_us != 0 && front.end_time_us < cutoff_time_us)
+						queue.pop();
+					else
+						break;  // Queue is ordered by start_time, so stop if this one isn't expired
+				}
+			}
+		}
+
+		// Thread-safe version of cull_expired
+		void cull_expired(uint64_t cutoff_time_us)
+		{
+			std::lock_guard<std::mutex> guard(mtx);
+			cull_expired_unlocked(cutoff_time_us);
+		}
+
+		// Update keyboard held state at given playback time
+		// Caller must hold lock() or ensure no concurrent access
+		void update_keyboard_state_unlocked(uint64_t current_time_us)
+		{
+			// Clear current state
+			for (auto& held : held_notes)
+				held.clear();
+
+			// Scan all keys and find notes that are active at current_time
+			for (size_t key = 0; key < key_count; ++key)
+			{
+				auto& queue = falling_notes[key];
+				for (auto it = queue.begin(); it != queue.end(); ++it)
+				{
+					auto& note = *it;
+					// Note is held if: started <= current_time AND (not ended OR ended > current_time)
+					bool started = note.start_time_us <= current_time_us;
+					bool not_ended = (note.end_time_us == 0) || (note.end_time_us > current_time_us);
+
+					if (started && not_ended)
+					{
+						held_notes[key].push_back({note.color_id, note.velocity});
+					}
+				}
+			}
+		}
+
+		// Thread-safe version
+		void update_keyboard_state(uint64_t current_time_us)
+		{
+			std::lock_guard<std::mutex> guard(mtx);
+			update_keyboard_state_unlocked(current_time_us);
+		}
+
+		// Get the dominant color for a key (most recent/highest velocity held note)
+		// Call after update_keyboard_state; caller should hold lock() for thread safety
+		uint32_t get_key_color(uint8_t key) const
+		{
+			if (key >= key_count || held_notes[key].empty())
+				return ~0u;
+
+			// Return the last held note's color (most recently pressed)
+			return held_notes[key].back().color_id;
+		}
+
+		// Get velocity for a key (for intensity display)
+		// Call after update_keyboard_state; caller should hold lock() for thread safety
+		uint8_t get_key_velocity(uint8_t key) const
+		{
+			if (key >= key_count || held_notes[key].empty())
+				return 0;
+
+			return held_notes[key].back().velocity;
+		}
+
+		// Check if a key is currently held
+		// Call after update_keyboard_state; caller should hold lock() for thread safety
+		bool is_key_held(uint8_t key) const
+		{
+			return key < key_count && !held_notes[key].empty();
+		}
+
+		// Get count of held notes on a key (for polyphonic display)
+		// Call after update_keyboard_state; caller should hold lock() for thread safety
+		size_t get_held_count(uint8_t key) const
+		{
+			return key < key_count ? held_notes[key].size() : 0;
+		}
+
+		// Clear all visual state (unlocked version)
+		void clear_unlocked()
+		{
+			for (auto& q : falling_notes)
+				q.clear();
+			for (auto& p : pending)
+				p.clear();
+			for (auto& h : held_notes)
+				h.clear();
+		}
+
+		// Thread-safe clear
+		void clear()
+		{
+			std::lock_guard<std::mutex> guard(mtx);
+			clear_unlocked();
+		}
+
+		// Reset for new playback (thread-safe)
+		void reset()
+		{
+			clear();
+		}
 	};
 
 	struct send_event
@@ -292,6 +598,7 @@ struct simple_player
 
 		std::vector<track_playback_state> track_states;
 		buffered_queue<buffered_note> notes;
+		visuals_viewport visuals;
 		size_t active_tracks;
 
 		std::atomic<bool> playing;
@@ -324,6 +631,7 @@ struct simple_player
 			sender_position_us = 0;
 			track_states.clear();
 			send_buffer.reset();
+			visuals.reset();
 		}
 	};
 
@@ -389,6 +697,17 @@ struct simple_player
 	const midi_info& get_info() const
 	{
 		return info;
+	}
+
+	// Get visuals viewport for rendering (non-const for update_keyboard_state/cull_expired)
+	visuals_viewport& get_visuals()
+	{
+		return state.visuals;
+	}
+
+	const visuals_viewport& get_visuals() const
+	{
+		return state.visuals;
 	}
 
 	// Pause playback - silences notes and remembers position
@@ -543,9 +862,16 @@ struct simple_player
 			tick_type batch_tick = event_queue.top().tick;
 			uint64_t batch_time_us = tick_to_microseconds(batch_tick);
 
-			// Throttle: wait if we're too far ahead of the sender
+			// Throttle: wait if we're too far ahead of the sender, or if paused
 			while (!state.stop_requested)
 			{
+				// Wait while paused (sleep longer to avoid busy-wait)
+				if (state.paused.load(std::memory_order_acquire))
+				{
+					std::this_thread::sleep_for(std::chrono::milliseconds(10));
+					continue;
+				}
+
 				uint64_t sender_pos = state.sender_position_us.load(std::memory_order_acquire);
 				uint64_t lookahead = (batch_time_us > sender_pos) ? (batch_time_us - sender_pos) : 0;
 
@@ -617,7 +943,34 @@ struct simple_player
 				switch (command >> 4)
 				{
 					case 0x8: // note off
+					{
+						data2 = get_value_and_increment(track.position, track.end);
+						msg_to_send = make_smsg(command, data1, data2);
+
+						// Push to visuals viewport
+						uint8_t channel = command & 0x0F;
+						uint8_t key = data1;
+
+						state.visuals.push_note_off(key, batch_time_us, ref.track_index, channel);
+						break;
+					}
 					case 0x9: // note on
+					{
+						data2 = get_value_and_increment(track.position, track.end);
+						msg_to_send = make_smsg(command, data1, data2);
+
+						// Push to visuals viewport (velocity 0 = note off)
+						uint8_t channel = command & 0x0F;
+						uint8_t key = data1;
+						uint8_t velocity = data2;
+
+						if (velocity > 0)
+							state.visuals.push_note_on(key, batch_time_us, ref.track_index, channel, velocity);
+						else
+							state.visuals.push_note_off(key, batch_time_us, ref.track_index, channel);
+
+						break;
+					}
 					case 0xA: // aftertouch
 					case 0xB: // control change
 					case 0xE: // pitch bend
@@ -739,6 +1092,7 @@ struct simple_player
 					// sleep for most of the wait time
 					std::this_thread::sleep_for(std::chrono::microseconds(wait_us - 50));
 				}
+
 				// spin-wait for final precision
 				while (!state.stop_requested)
 				{
@@ -775,6 +1129,118 @@ struct simple_player
 		all_notes_off();
 		state.playing = false;
 	}
+
+	struct draw_data
+	{
+		struct point { float x, y; };
+		struct quad_geometry { point tl, tr, br, bl; };
+
+		quad_geometry keyboard[128];
+		uint8_t key_n[128];
+		uint64_t scroll_window_us;
+		std::map<uint32_t, uint32_t> track_colors;
+
+		constexpr static float WIDTH = 160.f, HEIGHT = 90.f;
+		constexpr static int white_keys_count() 
+		{
+			int count = 0;
+			for (uint8_t key = 0; key < 128; key++)
+				count += is_white_key(key);
+
+			return count;
+		}
+
+		void init(float keyboard_height, float black_hight, float black_width)
+		{
+			constexpr int total = white_keys_count();
+			constexpr float white_width = WIDTH / total;
+			constexpr float general_connector_width = WIDTH / 128;
+
+			quad_geometry* first = keyboard, *last = keyboard + 127;
+
+			for (uint8_t key = 0; key < 128; key++)
+			{
+				if (is_white_key(key))
+				{
+					uint32_t index = first - keyboard;
+
+					first->bl.x = first->tl.x = index * white_width;
+					first->br.x = first->tr.x = (index + 1) * white_width;
+
+					first->bl.y = first->br.y = -0.5 * WIDTH;
+					first->tl.y = first->tr.y = -0.5 * WIDTH + keyboard_height;
+
+					key_n[index] = key;
+
+					++first;
+				}
+				else
+				{
+					key_n[last - keyboard] = key;
+
+					last->bl.x = last->tl.x = key * general_connector_width - 0.5f * black_width;
+					last->br.x = last->tr.x = key * general_connector_width + 0.5f * black_width;
+
+					last->bl.y = last->br.y = -0.5 * WIDTH + keyboard_height - black_hight;
+					last->tl.y = last->tr.y = -0.5 * WIDTH + keyboard_height;
+
+					--last;
+				}
+			}
+		}
+	};
+
+	void draw(const draw_data& data)
+	{
+		auto& visuals = get_visuals();
+		uint64_t current_us = get_state().current_time_us;
+
+		auto guard = visuals.lock();  // hold for entire render frame
+
+		visuals.cull_expired_unlocked(current_us - data.scroll_window_us);
+		visuals.update_keyboard_state_unlocked(current_us);
+
+		// Draw falling notes
+
+		struct color { uint8_t r, g, b; };
+		color keyboard[128]{0xFF};
+
+		for (uint8_t index = 0; index < 128; ++index)
+		{
+			uint8_t key = data.key_n[index];
+
+			for (auto it = visuals.falling_notes[key].begin();
+				it != visuals.falling_notes[key].end(); ++it)
+			{
+				// render note bar using it->start_time_us, it->end_time_us,
+				// it->color_id
+			}
+
+			uint32_t color_index = visuals.get_key_color(key);
+			if (color_index == ~0u)
+				continue;
+
+			auto color_value = data.track_colors.at(color_index);
+
+			keyboard[index] = color{
+				.r = uint8_t(color_value >> 24),
+				.g = uint8_t(color_value >> 16),
+				.b = uint8_t(color_value >> 8),
+			};
+		}
+
+		glColor3ub(255, 255, 255);
+		glEnableClientState(GL_VERTEX_ARRAY);
+		glEnableClientState(GL_COLOR_ARRAY);
+
+		glVertexPointer(2, GL_FLOAT, sizeof(draw_data::point), data.keyboard);
+		glColorPointer(3, GL_UNSIGNED_BYTE, sizeof(color), keyboard);
+		glDrawArrays(GL_QUADS, 0, 128);
+
+		glDisableClientState(GL_VERTEX_ARRAY);
+		glDisableClientState(GL_COLOR_ARRAY);
+	}
+
 private:
 	void try_init_kdmapi()
 	{
