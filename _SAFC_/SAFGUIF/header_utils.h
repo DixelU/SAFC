@@ -86,6 +86,9 @@ auto HandCursor = ::LoadCursor(NULL, IDC_HAND), AllDirectCursor = ::LoadCursor(N
 
 bool check_autoupdates = true;
 
+struct simple_player;
+std::shared_ptr<simple_player> player;
+
 void absoluteToActualCoords(int ix, int iy, float& x, float& y);
 void inline rotate(float& x, float& y);
 

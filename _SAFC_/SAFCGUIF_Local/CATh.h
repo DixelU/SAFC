@@ -8,15 +8,6 @@
 
 // #include "../SAFC_InnerModules/include_all.h"
 
-constexpr bool is_white_key(std::uint8_t Key)
-{
-	Key %= 12;
-	if (Key < 5)
-		return !(Key & 1);
-	else 
-		return (Key & 1);
-}
-
 struct CAT_Piano : HandleableUIPart
 {
 	std::shared_ptr<cut_and_transpose> PianoTransform;
@@ -47,6 +38,15 @@ struct CAT_Piano : HandleableUIPart
 		this->MaxCont = System_White->CreateOne("_");
 		this->Transp = System_White->CreateOne("_");
 		UpdateInfo();
+	}
+
+	constexpr static bool is_white_key(std::uint8_t Key)
+	{
+		Key %= 12;
+		if (Key < 5)
+			return !(Key & 1);
+		else
+			return (Key & 1);
 	}
 
 	void UpdateInfo()

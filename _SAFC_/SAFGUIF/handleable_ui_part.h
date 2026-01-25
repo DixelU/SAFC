@@ -5,7 +5,8 @@
 #include <mutex>
 #include "header_utils.h"
 
-struct HandleableUIPart {
+struct HandleableUIPart
+{
 	std::recursive_mutex Lock;
 	bool Enabled;
 	HandleableUIPart() { Enabled = true; }
