@@ -530,7 +530,7 @@ struct simple_player
 
 		// Lookahead limits: parser throttles when too far ahead
 		static constexpr uint64_t max_lookahead_us = 5000000;  // 5 seconds max lookahead
-		static constexpr uint64_t min_lookahead_us = 1000000;  // 1 second min before resuming parse
+		static constexpr uint64_t min_lookahead_us = 2000000;  // 1 second min before resuming parse
 
 		void reset()
 		{
@@ -1054,7 +1054,7 @@ struct simple_player
 
 		quad_geometry keyboard[128];
 		uint8_t key_n[128];
-		uint64_t scroll_window_us = 1 << 20;
+		uint64_t scroll_window_us = 1 << 19;
 		std::vector<quad_geometry> quads;
 		std::vector<color> colors;
 		//std::unordered_map<uint32_t, uint32_t> track_colors;
@@ -1191,13 +1191,16 @@ struct simple_player
 			{
 				auto& note = *it;
 
-				float begin_y = float(note.start_time_us - current_us) / float(data.scroll_window_us);
-				float end_y = 0;
+				int64_t start_offset = note.start_time_us - current_us;
+				int64_t end_offset = note.end_time_us - current_us;
+
+				float begin_y = float(start_offset) / float(data.scroll_window_us);
+				float end_y = 1;
 
 				if (note.end_time_us != ~0ULL)
-					end_y = float(note.end_time_us - current_us) / float(data.scroll_window_us);
+					end_y = float(end_offset) / float(data.scroll_window_us);
 				
-				if (end_y < 0 || begin_y > 1)
+				if (end_y < -0.01f || begin_y > 1.01f)
 					continue;
 
 				auto color_value = rotate(0xFF7F008F, note.color_id);
@@ -1254,12 +1257,23 @@ struct simple_player
 				else
 					color = {0, 0, 0};
 			}
-			
+
 			glColor3ub(color.r, color.g, color.b);
 			glVertex2f(key.tl.x, key.tl.y);
 			glVertex2f(key.tr.x, key.tr.y);
 			glVertex2f(key.br.x, key.br.y);
 			glVertex2f(key.bl.x, key.bl.y);
+		}
+		glEnd();
+
+		glColor3ub(0, 0, 0);
+		glBegin(GL_LINES);
+		for (uint8_t i = 0; i < total_white; ++i)
+		{
+			const auto& key = data.keyboard[i];
+
+			glVertex2f(key.tr.x, key.tr.y);
+			glVertex2f(key.br.x, key.br.y);
 		}
 		glEnd();
 	}
@@ -1636,7 +1650,7 @@ struct PlayerViewer : public HandleableUIPart
 		ypos(ypos),
 		data(std::make_unique<simple_player::draw_data>())
 	{
-		data->init(40, 20, 3.75f);
+		data->init(40, 22.5, 3.75f);
 		data->move(xpos - 0.5 * simple_player::draw_data::WIDTH, ypos);
 	}
 
