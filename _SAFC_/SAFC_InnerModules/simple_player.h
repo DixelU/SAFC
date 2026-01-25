@@ -1059,7 +1059,7 @@ struct simple_player
 		std::vector<color> colors;
 		//std::unordered_map<uint32_t, uint32_t> track_colors;
 
-		constexpr static float WIDTH = 390, HEIGHT = 250;
+		constexpr static float WIDTH = 400, HEIGHT = 250;
 		constexpr static bool is_white_key(std::uint8_t Key)
 		{
 			Key %= 12;
@@ -1078,7 +1078,7 @@ struct simple_player
 			return count;
 		}
 
-		void init(float keyboard_height, float black_hight, float black_width)
+		void init(float keyboard_height, float black_hight, float black_margins)
 		{
 			constexpr int total = white_keys_count();
 			constexpr float white_width = WIDTH / total;
@@ -1106,8 +1106,8 @@ struct simple_player
 				{
 					key_n[last - keyboard] = key;
 
-					last->bl.x = last->tl.x = key * general_connector_width - 0.5f * black_width;
-					last->br.x = last->tr.x = key * general_connector_width + 0.5f * black_width;
+					last->bl.x = last->tl.x = key * general_connector_width - black_margins;
+					last->br.x = last->tr.x = (key + 1) * general_connector_width + black_margins;
 
 					last->bl.y = last->br.y = -0.5 * HEIGHT - black_hight;
 					last->tl.y = last->tr.y = -0.5 * HEIGHT;
@@ -1266,14 +1266,32 @@ struct simple_player
 		}
 		glEnd();
 
+		auto& black_example = data.keyboard[127];
+
 		glColor3ub(0, 0, 0);
 		glBegin(GL_LINES);
-		for (uint8_t i = 0; i < total_white; ++i)
+		for (uint8_t i = 0; i < total_white - 1; ++i)
+		{
+			const auto& key = data.keyboard[i];
+
+			auto note = i % 7;
+
+			bool is_full = note == 2 || note == 6;
+
+			glVertex2f(key.tr.x, is_full ? key.tr.y : black_example.br.y);
+			glVertex2f(key.br.x, key.br.y);
+		}
+
+		for (uint8_t i = total_white; i < 128; ++i)
 		{
 			const auto& key = data.keyboard[i];
 
 			glVertex2f(key.tr.x, key.tr.y);
 			glVertex2f(key.br.x, key.br.y);
+			glVertex2f(key.br.x, key.br.y);
+			glVertex2f(key.bl.x, key.bl.y);
+			glVertex2f(key.bl.x, key.bl.y);
+			glVertex2f(key.tl.x, key.tl.y);
 		}
 		glEnd();
 	}
@@ -1650,7 +1668,7 @@ struct PlayerViewer : public HandleableUIPart
 		ypos(ypos),
 		data(std::make_unique<simple_player::draw_data>())
 	{
-		data->init(40, 22.5, 3.75f);
+		data->init(40, 22.5f, 0);
 		data->move(xpos - 0.5 * simple_player::draw_data::WIDTH, ypos);
 	}
 
