@@ -347,7 +347,7 @@ struct simple_player
 				{
 					auto& front = queue.front();
 					// Only cull if note has ended and end is before cutoff
-					if (front.end_time_us != 0 && front.end_time_us - cutoff_time_us < 0)
+					if (front.end_time_us != ~0ULL && static_cast<int64_t>(front.end_time_us) < cutoff_time_us)
 						queue.pop();
 					else
 						break;  // Queue is ordered by start_time, so stop if this one isn't expired
@@ -1162,7 +1162,7 @@ struct simple_player
 
 		auto guard = visuals.lock();  // hold for entire render frame
 
-		visuals.cull_expired_unlocked(current_us - data.scroll_window_us);
+		visuals.cull_expired_unlocked(int64_t(current_us) - data.scroll_window_us);
 
 		// Draw falling notes
 		draw_data::color keyboard_colors[128];
