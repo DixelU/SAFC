@@ -529,8 +529,8 @@ struct simple_player
 		std::atomic<uint64_t> sender_position_us{0}; // current sender playback position (in us)
 
 		// Lookahead limits: parser throttles when too far ahead
-		static constexpr uint64_t max_lookahead_us = 5000000;  // 5 seconds max lookahead
-		static constexpr uint64_t min_lookahead_us = 2000000;  // 1 second min before resuming parse
+		static constexpr uint64_t max_lookahead_us = 7500000;  // 5 seconds max lookahead
+		static constexpr uint64_t min_lookahead_us = 2500000;  // 2.5 seconds min before resuming parse
 
 		void reset()
 		{
