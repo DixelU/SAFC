@@ -338,7 +338,7 @@ struct simple_player
 
 		// Remove notes that have fully scrolled past (end_time < cutoff)
 		// Caller must hold lock() or ensure no concurrent access
-		void cull_expired_unlocked(uint64_t cutoff_time_us)
+		void cull_expired_unlocked(int64_t cutoff_time_us)
 		{
 			for (size_t key = 0; key < key_count; ++key)
 			{
@@ -347,7 +347,7 @@ struct simple_player
 				{
 					auto& front = queue.front();
 					// Only cull if note has ended and end is before cutoff
-					if (front.end_time_us != 0 && front.end_time_us < cutoff_time_us)
+					if (front.end_time_us != 0 && front.end_time_us - cutoff_time_us < 0)
 						queue.pop();
 					else
 						break;  // Queue is ordered by start_time, so stop if this one isn't expired
@@ -394,7 +394,7 @@ struct simple_player
 	// Lock-free SPSC ring buffer for pre-parsed MIDI messages
 	struct lookahead_buffer
 	{
-		static constexpr size_t buffer_size = 1 << 20; // must be power of 2
+		static constexpr size_t buffer_size = 1 << 22; // must be power of 2
 		static constexpr size_t buffer_mask = buffer_size - 1;
 
 		std::unique_ptr<send_event[]> buffer;
@@ -1030,8 +1030,9 @@ struct simple_player
 	void playback_thread()
 	{
 		state.reset();
-		state.playing = true;
+		// Set start_time BEFORE playing flag to avoid race with draw()
 		state.start_time = std::chrono::steady_clock::now();
+		state.playing.store(true, std::memory_order_release);
 
 		// launch parser and sender threads
 		std::thread parser_thread([this]() { parser_thread_func(); });
@@ -1135,36 +1136,6 @@ struct simple_player
 			}
 		}
 	};
-
-	uint32_t mul255_div_by_factor(uint32_t rgba, uint32_t divisor)
-	{
-		// Works well when divisor is small constant: 2,3,4,5,6,8,10,...
-		// divisor must be > 0
-
-		constexpr uint32_t MAGIC_R = (1u << 24) / 255u + 1;  // ~ 0x01010101 when using 1<<24
-
-		// 1. unpack
-		uint32_t rb = rgba & 0x00FF00FFu;          // R and B in low 8 bits each
-		uint32_t ga = (rgba >> 8) & 0x00FF00FFu;   // G and A
-
-		// 2. multiply + add rounding bias
-		rb = ((rb * MAGIC_R) >> 24) / divisor;
-		ga = ((ga * MAGIC_R) >> 24) / divisor;
-
-		// 3. saturate (optional but strongly recommended)
-		rb += ((rb >> 8) & 1) * 0x00FF00FFu;   // cheap saturate to 255
-		ga += ((ga >> 8) & 1) * 0x00FF00FFu;
-
-		// 4. repack
-		return (ga << 8) | rb;
-	}
-
-	uint32_t rotate(uint32_t color, uint32_t shift)
-	{
-		auto rem = shift % 32;
-		
-		return color << (32 - rem) | color >> rem;
-	}
 
 	void draw(const draw_data& data)
 	{
@@ -1313,6 +1284,37 @@ struct simple_player
 	}
 
 private:
+
+	static uint32_t mul255_div_by_factor(uint32_t rgba, uint32_t divisor)
+	{
+		// Works well when divisor is small constant: 2,3,4,5,6,8,10,...
+		// divisor must be > 0
+
+		constexpr uint32_t MAGIC_R = (1u << 24) / 255u + 1;  // ~ 0x01010101 when using 1<<24
+
+		// 1. unpack
+		uint32_t rb = rgba & 0x00FF00FFu;          // R and B in low 8 bits each
+		uint32_t ga = (rgba >> 8) & 0x00FF00FFu;   // G and A
+
+		// 2. multiply + add rounding bias
+		rb = ((rb * MAGIC_R) >> 24) / divisor;
+		ga = ((ga * MAGIC_R) >> 24) / divisor;
+
+		// 3. saturate (optional but strongly recommended)
+		rb += ((rb >> 8) & 1) * 0x00FF00FFu;   // cheap saturate to 255
+		ga += ((ga >> 8) & 1) * 0x00FF00FFu;
+
+		// 4. repack
+		return (ga << 8) | rb;
+	}
+
+	static uint32_t rotate(uint32_t color, uint32_t shift)
+	{
+		auto rem = shift % 32;
+
+		return color << (32 - rem) | color >> rem;
+	}
+
 	void try_init_kdmapi()
 	{
 		kdmapi_status = nullptr;
