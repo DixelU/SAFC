@@ -1082,7 +1082,7 @@ struct simple_player
 		{
 			constexpr int total = white_keys_count();
 			constexpr float white_width = WIDTH / total;
-			constexpr float general_connector_width = WIDTH / 128;
+			constexpr float general_connector_width = WIDTH / 128.25f;
 
 			quad_geometry* first = keyboard, *last = keyboard + 127;
 
@@ -1171,7 +1171,23 @@ struct simple_player
 		constexpr int total_white = draw_data::white_keys_count();
 
 		auto& visuals = get_visuals();
-		uint64_t current_us = get_state().current_time_us;
+
+		// Compute current playback position from wall-clock for smooth visualization
+		uint64_t current_us;
+		const auto& st = get_state();
+		if (st.playing.load(std::memory_order_acquire) && !st.paused.load(std::memory_order_acquire))
+		{
+			auto elapsed = std::chrono::steady_clock::now() - st.start_time;
+			current_us = st.start_offset_us + std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count();
+		}
+		else if (st.paused.load(std::memory_order_acquire))
+		{
+			current_us = st.pause_position_us.load(std::memory_order_acquire);
+		}
+		else
+		{
+			current_us = 0;
+		}
 
 		auto guard = visuals.lock();  // hold for entire render frame
 
