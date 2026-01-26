@@ -166,34 +166,41 @@ public:
 		iterator& operator++()
 		{
 			++cur;
-			if (cur >= current_slab->end && current_slab->next_slab)
+			bool end_of_slab = (cur >= current_slab->end);
+
+			if (end_of_slab && current_slab->next_slab)
 			{
 				current_slab = current_slab->next_slab.get();
 				cur = current_slab->begin;
 			}
+			else if (end_of_slab)
+				return iterator(nullptr, nullptr);
+
 			return *this;
 		}
 
 		bool operator!=(const iterator& other) const
 		{
-			return cur != other.cur || current_slab != other.current_slab;
+			return cur != other.cur /* || current_slab != other.current_slab*/;
 		}
 
 		bool operator==(const iterator& other) const
 		{
-			return cur == other.cur && current_slab == other.current_slab;
+			return cur == other.cur /* && current_slab == other.current_slab */ ;
 		}
 	};
 
 	iterator begin()
 	{
-		if (!head) return iterator(nullptr, nullptr);
+		if (!head)
+			return iterator(nullptr, nullptr);
 		return iterator(head.get(), head->begin);
 	}
 
 	iterator end()
 	{
-		if (!tail) return iterator(nullptr, nullptr);
+		if (!tail)
+			return iterator(nullptr, nullptr);
 		return iterator(tail, tail->end);
 	}
 };
@@ -1055,7 +1062,7 @@ struct simple_player
 
 		quad_geometry keyboard[128];
 		uint8_t key_n[128];
-		uint64_t scroll_window_us = 1 << 19;
+		uint64_t scroll_window_us = 1 << 16;
 		std::vector<quad_geometry> quads;
 		std::vector<color> colors;
 		//std::unordered_map<uint32_t, uint32_t> track_colors;
