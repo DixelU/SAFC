@@ -21,6 +21,7 @@
 #include "single_midi_info_collector.h"
 
 template<typename T>
+template<typename T>
 struct buffered_queue
 {
 private:
