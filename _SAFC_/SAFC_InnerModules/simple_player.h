@@ -122,7 +122,7 @@ public:
 		head = std::move(new_head);
 	}
 
-	bool empty()
+	[[nodiscard]] bool empty() const
 	{
 		return !head || head->empty();
 	}
@@ -132,22 +132,22 @@ public:
 		while (!empty()) pop();
 	}
 
-	T& front()
+	[[nodiscard]] T& front()
 	{
 		return head->front();
 	}
 
-	const T& front() const
+	[[nodiscard]] const T& front() const
 	{
 		return head->front();
 	}
 
-	T& back()
+	[[nodiscard]] T& back()
 	{
 		return tail->back();
 	}
 
-	const T& back() const
+	[[nodiscard]] const T& back() const
 	{
 		return tail->back();
 	}
@@ -190,14 +190,14 @@ public:
 		}
 	};
 
-	iterator begin()
+	[[nodiscard]] iterator begin()
 	{
 		if (!head)
 			return iterator(nullptr, nullptr);
 		return iterator(head.get(), head->begin);
 	}
 
-	iterator end()
+	[[nodiscard]] iterator end()
 	{
 		if (!tail)
 			return iterator(nullptr, nullptr);
@@ -1062,10 +1062,12 @@ struct simple_player
 
 		quad_geometry keyboard[128];
 		uint8_t key_n[128];
-		uint64_t scroll_window_us = 1 << 16;
+		uint64_t scroll_window_us = 1 << 14;
 		std::vector<quad_geometry> quads;
 		std::vector<color> colors;
 		//std::unordered_map<uint32_t, uint32_t> track_colors;
+
+		bool enable_simulated_lag = true;
 
 		constexpr static float WIDTH = 400, HEIGHT = 250;
 		constexpr static bool is_white_key(std::uint8_t Key)
@@ -1168,6 +1170,14 @@ struct simple_player
 		}
 
 		auto guard = visuals.lock();  // hold for entire render frame
+
+		if (data.enable_simulated_lag)
+		{
+			uint64_t max = state.parsed_up_to_us.load(std::memory_order_relaxed);
+
+			if (max < current_us + data.scroll_window_us)
+				current_us = max - data.scroll_window_us;
+		}
 
 		visuals.cull_expired_unlocked(int64_t(current_us) - data.scroll_window_us);
 
