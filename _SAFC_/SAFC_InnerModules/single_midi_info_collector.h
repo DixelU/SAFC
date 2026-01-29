@@ -214,7 +214,7 @@ struct single_midi_info_collector
 					if (type == 0x2F)
 					{
 						tracks.push_back(track_data);
-						log_line = "Passed " + std::to_string(tracks.size()) + " tracks";
+						log_line = "Track " + std::to_string(tracks.size()) + " parsed";
 						break;
 					}
 					else if (type == 0x51)

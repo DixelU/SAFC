@@ -20,6 +20,9 @@
 #include "single_midi_processor_2.h"
 #include "single_midi_info_collector.h"
 
+#define SIMPLE_PLAYER_FORCE_NO_INLINE 
+// __declspec(noinline)
+
 // Lock-free SPSC slab-based queue
 // Producer (parser): push, back
 // Consumer (renderer): pop, front, empty, iteration
@@ -160,7 +163,7 @@ public:
 	buffered_queue_spsc& operator=(const buffered_queue_spsc&) = delete;
 
 	// Producer: push element
-	__declspec(noinline) void push(T&& value)
+	SIMPLE_PLAYER_FORCE_NO_INLINE void push(T&& value)
 	{
 		ensure_initialized_producer();
 
@@ -185,7 +188,7 @@ public:
 	}
 
 	// Consumer: pop front element
-	__declspec(noinline) void pop()
+	SIMPLE_PLAYER_FORCE_NO_INLINE void pop()
 	{
 		if (!head_) [[unlikely]]
 			return;
@@ -426,7 +429,7 @@ struct simple_player
 
 		// Push a note_on event - creates visual note and tracks as pending
 		// Called from parser thread only - no locking needed
-		__declspec(noinline) void push_note_on(uint8_t key, uint64_t time_us, size_t track_index, uint8_t channel, uint8_t velocity)
+		SIMPLE_PLAYER_FORCE_NO_INLINE void push_note_on(uint8_t key, uint64_t time_us, size_t track_index, uint8_t channel, uint8_t velocity)
 		{
 			if (key >= key_count)
 				return;
@@ -443,7 +446,7 @@ struct simple_player
 
 		// Push a note_off event - finds matching pending note and sets end_time
 		// Called from parser thread only - atomic store for end_time_us
-		__declspec(noinline) void push_note_off(uint8_t key, uint64_t time_us, size_t track_index, uint8_t channel)
+		SIMPLE_PLAYER_FORCE_NO_INLINE void push_note_off(uint8_t key, uint64_t time_us, size_t track_index, uint8_t channel)
 		{
 			if (key >= key_count)
 				return;
@@ -458,7 +461,7 @@ struct simple_player
 
 		// Remove notes that have fully scrolled past (end_time < cutoff)
 		// Called from render thread only - no locking needed
-		__declspec(noinline) void cull_expired(int64_t cutoff_time_us)
+		SIMPLE_PLAYER_FORCE_NO_INLINE void cull_expired(int64_t cutoff_time_us)
 		{
 			for (size_t key = 0; key < key_count; ++key)
 			{
@@ -539,7 +542,7 @@ struct simple_player
 		}
 
 		// Producer: push event (returns false if full)
-		__declspec(noinline) bool try_push(uint64_t time_us, uint32_t msg)
+		SIMPLE_PLAYER_FORCE_NO_INLINE bool try_push(uint64_t time_us, uint32_t msg)
 		{
 			size_t h = head.load(std::memory_order_relaxed);
 			size_t next_h = (h + 1) & buffer_mask;
@@ -553,7 +556,7 @@ struct simple_player
 		}
 
 		// Consumer: peek at front event (returns nullptr if empty)
-		__declspec(noinline) const send_event* peek() const
+		SIMPLE_PLAYER_FORCE_NO_INLINE const send_event* peek() const
 		{
 			size_t t = tail.load(std::memory_order_relaxed);
 			if (t == head.load(std::memory_order_acquire))
@@ -562,7 +565,7 @@ struct simple_player
 		}
 
 		// Consumer: pop front event
-		__declspec(noinline) void pop()
+		SIMPLE_PLAYER_FORCE_NO_INLINE void pop()
 		{
 			size_t t = tail.load(std::memory_order_relaxed);
 			if (t != head.load(std::memory_order_acquire))
@@ -570,7 +573,7 @@ struct simple_player
 		}
 
 		// Consumer: pop and return (returns {0,0} if empty)
-		__declspec(noinline) send_event try_pop()
+		SIMPLE_PLAYER_FORCE_NO_INLINE send_event try_pop()
 		{
 			size_t t = tail.load(std::memory_order_relaxed);
 			if (t == head.load(std::memory_order_acquire))
@@ -856,7 +859,7 @@ struct simple_player
 	}
 
 	// Parser thread: pre-parses MIDI events into the lookahead buffer
-	__declspec(noinline) void parser_thread_func()
+	SIMPLE_PLAYER_FORCE_NO_INLINE void parser_thread_func()
 	{
 		update_tempo_cache_at(~0ULL); // initialize cache for tick 0
 
@@ -1063,7 +1066,7 @@ struct simple_player
 	}
 
 	// Sender thread: sends pre-parsed events with precise timing
-	__declspec(noinline) void sender_thread_func()
+	SIMPLE_PLAYER_FORCE_NO_INLINE void sender_thread_func()
 	{
 		while (!state.stop_requested)
 		{
@@ -1248,7 +1251,7 @@ struct simple_player
 		}
 	};
 
-	__declspec(noinline) void draw(const draw_data& data)
+	SIMPLE_PLAYER_FORCE_NO_INLINE void draw(const draw_data& data)
 	{
 		constexpr int total_white = draw_data::white_keys_count();
 
@@ -1450,7 +1453,7 @@ private:
 		short_msg = (decltype(short_msg))GetProcAddress(moduleHandle, "SendDirectData");
 	}
 
-	__declspec(noinline) void update_tempo_cache_at(size_t index) const
+	SIMPLE_PLAYER_FORCE_NO_INLINE void update_tempo_cache_at(size_t index) const
 	{
 		tcache.current_index = index;
 
@@ -1481,7 +1484,7 @@ private:
 			tcache.next_change_tick = ~0ULL;
 	}
 
-	__declspec(noinline) uint64_t tick_to_microseconds(tick_type tick) const
+	SIMPLE_PLAYER_FORCE_NO_INLINE uint64_t tick_to_microseconds(tick_type tick) const
 	{
 		// fast path: tick is within current cached tempo region
 		if (tick >= tcache.base_tick && tick < tcache.next_change_tick)
