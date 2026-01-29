@@ -20,146 +20,255 @@
 #include "single_midi_processor_2.h"
 #include "single_midi_info_collector.h"
 
+// Lock-free SPSC slab-based queue
+// Producer (parser): push, back
+// Consumer (renderer): pop, front, empty, iteration
 template<typename T>
-template<typename T>
-struct buffered_queue
+struct buffered_queue_spsc
 {
 private:
-	static constexpr size_t slab_size = 4096;
+	static constexpr size_t slab_size = 1 << 15;
 
 	struct slab
 	{
-		std::aligned_storage_t<sizeof(T), alignof(T)> data[slab_size];
-		const T* capacity_end;
-		T* begin;
-		T* end;
+		alignas(64) std::aligned_storage_t<sizeof(T), alignof(T)> data[slab_size];
 
-		std::unique_ptr<slab> next_slab;
+		T* begin;                      // consumer-owned, only consumer modifies
+		std::atomic<T*> end;           // producer writes, consumer reads
+		std::atomic<slab*> next_slab;  // producer writes, consumer reads
 
 		slab() :
-			capacity_end(reinterpret_cast<T*>(data) + slab_size),
 			begin(reinterpret_cast<T*>(data)),
 			end(reinterpret_cast<T*>(data)),
 			next_slab(nullptr)
 		{}
 
-		[[nodiscard]] size_t size() const { return end - begin; }
-		[[nodiscard]] bool empty() const { return begin == end; }
+		T* capacity_end() const { return reinterpret_cast<T*>(const_cast<slab*>(this)->data) + slab_size; }
+		T* data_begin() { return reinterpret_cast<T*>(data); }
+
+		[[nodiscard]] bool empty_consumer() const
+		{
+			return begin == end.load(std::memory_order_acquire);
+		}
 
 		T& front() { return *begin; }
 		const T& front() const { return *begin; }
 
-		T& back() { return *(end - 1); }
-		const T& back() const { return *(end - 1); }
+		void pop_consumer() { begin->~T(); ++begin; }
 
-		void pop() { begin->~T(); ++begin; }
-		void push(T&& v) { ::new(end) T(std::move(v)); ++end; }
-
-		bool full() const { return end == capacity_end; }
-
-		void reset__unsafe() { begin = end = reinterpret_cast<T*>(data); }
-
-		void clear() { while (begin != end) pop(); }
-	};
-
-	std::vector<std::unique_ptr<slab>> unused_slabs;
-	std::unique_ptr<slab> head{};
-	slab* tail = nullptr;
-
-	std::unique_ptr<slab> get_empty_slab()
-	{
-		if (!unused_slabs.empty())
+		bool full_producer() const
 		{
-			auto ptr = std::move(unused_slabs.back());
-			unused_slabs.pop_back();
-			return std::move(ptr);
+			return end.load(std::memory_order_relaxed) == capacity_end();
 		}
 
-		return std::make_unique<slab>();
+		void push_producer(T&& v)
+		{
+			T* cur_end = end.load(std::memory_order_relaxed);
+			::new(cur_end) T(std::move(v));
+			end.store(cur_end + 1, std::memory_order_release);
+		}
+
+		T& back_producer()
+		{
+			return *(end.load(std::memory_order_relaxed) - 1);
+		}
+
+		void reset_for_reuse()
+		{
+			begin = data_begin();
+			end.store(data_begin(), std::memory_order_relaxed);
+			next_slab.store(nullptr, std::memory_order_relaxed);
+		}
+
+		void clear_consumer()
+		{
+			while (begin != end.load(std::memory_order_acquire))
+				pop_consumer();
+		}
+	};
+
+	// Producer-owned
+	alignas(64) slab* tail_ = nullptr;
+
+	// Consumer-owned
+	alignas(64) slab* head_ = nullptr;
+
+	// Lock-free recycle stack: consumer pushes, producer pops
+	alignas(64) std::atomic<slab*> recycle_head_{nullptr};
+
+	slab* producer_get_slab()
+	{
+		// Try recycle stack first (lock-free pop)
+		slab* r = recycle_head_.load(std::memory_order_acquire);
+		while (r)
+		{
+			slab* next = r->next_slab.load(std::memory_order_relaxed);
+			if (recycle_head_.compare_exchange_weak(r, next,
+				std::memory_order_acquire, std::memory_order_relaxed))
+			{
+				r->reset_for_reuse();
+				return r;
+			}
+		}
+		return new slab();
 	}
 
-	void dispose_of_empty_slab(std::unique_ptr<slab>&& slab_ptr)
+	void consumer_recycle_slab(slab* s)
 	{
-		slab_ptr->reset__unsafe();
-		unused_slabs.push_back(std::move(slab_ptr));
+		// Lock-free push to recycle stack
+		slab* old_head = recycle_head_.load(std::memory_order_relaxed);
+		do {
+			s->next_slab.store(old_head, std::memory_order_relaxed);
+		} while (!recycle_head_.compare_exchange_weak(old_head, s,
+			std::memory_order_release, std::memory_order_relaxed));
+	}
+
+	void ensure_initialized_producer()
+	{
+		if (!tail_)
+		{
+			tail_ = producer_get_slab();
+			head_ = tail_;
+		}
 	}
 
 public:
-	buffered_queue() = default;
+	buffered_queue_spsc() = default;
 
-	void push(T&& value)
+	~buffered_queue_spsc()
 	{
-		if (!head)
+		// Clean up main chain
+		while (head_)
 		{
-			head = get_empty_slab();
-			tail = head.get();
+			slab* next = head_->next_slab.load(std::memory_order_relaxed);
+			head_->clear_consumer();
+			delete head_;
+			head_ = next;
 		}
-
-		if (tail->full())
+		// Clean up recycle stack
+		slab* r = recycle_head_.load(std::memory_order_relaxed);
+		while (r)
 		{
-			tail->next_slab = get_empty_slab();
-			tail = tail->next_slab.get();
+			slab* next = r->next_slab.load(std::memory_order_relaxed);
+			delete r;
+			r = next;
 		}
-
-		tail->push(std::move(value));
 	}
 
-	void pop()
+	// Non-copyable, non-movable (due to internal pointers)
+	buffered_queue_spsc(const buffered_queue_spsc&) = delete;
+	buffered_queue_spsc& operator=(const buffered_queue_spsc&) = delete;
+
+	// Producer: push element
+	__declspec(noinline) void push(T&& value)
 	{
-		if (empty()) [[unlikely]]
-			return;
+		ensure_initialized_producer();
 
-		head->pop();
-
-		if (!head->empty())
-			return;
-
-		auto new_head = std::move(head->next_slab);
-		head->next_slab = nullptr;
-		if (new_head == nullptr)
-			tail = nullptr;
-
-		dispose_of_empty_slab(std::move(head));
-		head = std::move(new_head);
+		if (tail_->full_producer())
+		{
+			slab* new_slab = producer_get_slab();
+			new_slab->push_producer(std::move(value));
+			// Publish new slab - consumer will see it when following next_slab
+			tail_->next_slab.store(new_slab, std::memory_order_release);
+			tail_ = new_slab;
+		}
+		else
+		{
+			tail_->push_producer(std::move(value));
+		}
 	}
 
+	// Producer: get reference to last pushed element (for pending tracking)
+	[[nodiscard]] T& back()
+	{
+		return tail_->back_producer();
+	}
+
+	// Consumer: pop front element
+	__declspec(noinline) void pop()
+	{
+		if (!head_) [[unlikely]]
+			return;
+
+		head_->pop_consumer();
+
+		// If current slab exhausted, try to advance
+		if (head_->empty_consumer())
+		{
+			slab* next = head_->next_slab.load(std::memory_order_acquire);
+			if (next)
+			{
+				slab* old = head_;
+				head_ = next;
+				consumer_recycle_slab(old);
+			}
+			// else: keep empty slab as head (producer might add more)
+		}
+	}
+
+	// Consumer: check if empty
 	[[nodiscard]] bool empty() const
 	{
-		return !head || head->empty();
+		if (!head_)
+			return true;
+
+		if (!head_->empty_consumer())
+			return false;
+
+		// Current slab empty - check if there's a next one
+		return head_->next_slab.load(std::memory_order_acquire) == nullptr;
 	}
 
-	void clear()
-	{
-		while (!empty()) pop();
-	}
-
+	// Consumer: get front element
 	[[nodiscard]] T& front()
 	{
-		return head->front();
+		// Advance past empty slabs if needed
+		while (head_->empty_consumer())
+		{
+			slab* next = head_->next_slab.load(std::memory_order_acquire);
+			if (!next) break;
+			slab* old = head_;
+			head_ = next;
+			consumer_recycle_slab(old);
+		}
+		return head_->front();
 	}
 
 	[[nodiscard]] const T& front() const
 	{
-		return head->front();
+		return const_cast<buffered_queue_spsc*>(this)->front();
 	}
 
-	[[nodiscard]] T& back()
+	// Clear all elements (consumer operation, but callable during reset)
+	void clear()
 	{
-		return tail->back();
+		while (head_)
+		{
+			head_->clear_consumer();
+			slab* next = head_->next_slab.load(std::memory_order_relaxed);
+			if (next)
+			{
+				consumer_recycle_slab(head_);
+				head_ = next;
+			}
+			else
+			{
+				// Keep one slab for reuse
+				head_->reset_for_reuse();
+				tail_ = head_;
+				break;
+			}
+		}
 	}
 
-	[[nodiscard]] const T& back() const
-	{
-		return tail->back();
-	}
-
-	// Iterator support for traversal (needed for note_off matching in visuals)
+	// Consumer iterator for traversal
 	struct iterator
 	{
 		slab* current_slab;
 		T* cur;
+		T* slab_end;  // cached end for current slab
 
-		iterator(slab* s, T* p) : current_slab(s), cur(p) {}
+		iterator(slab* s, T* p, T* e) : current_slab(s), cur(p), slab_end(e) {}
 
 		T& operator*() { return *cur; }
 		T* operator->() { return cur; }
@@ -167,42 +276,41 @@ public:
 		iterator& operator++()
 		{
 			++cur;
-			bool end_of_slab = (cur >= current_slab->end);
-
-			if (end_of_slab && current_slab->next_slab)
+			if (cur >= slab_end)
 			{
-				current_slab = current_slab->next_slab.get();
-				cur = current_slab->begin;
+				slab* next = current_slab ?
+					current_slab->next_slab.load(std::memory_order_acquire) : nullptr;
+				if (next)
+				{
+					current_slab = next;
+					cur = current_slab->begin;
+					slab_end = current_slab->end.load(std::memory_order_acquire);
+				}
+				// else: stay at end position
 			}
-			else if (end_of_slab)
-				return iterator(nullptr, nullptr);
-
 			return *this;
 		}
 
-		bool operator!=(const iterator& other) const
-		{
-			return cur != other.cur /* || current_slab != other.current_slab*/;
-		}
-
-		bool operator==(const iterator& other) const
-		{
-			return cur == other.cur /* && current_slab == other.current_slab */ ;
-		}
+		bool operator!=(const iterator& other) const { return cur != other.cur; }
+		bool operator==(const iterator& other) const { return cur == other.cur; }
 	};
 
+	// Consumer: begin iterator
 	[[nodiscard]] iterator begin()
 	{
-		if (!head)
-			return iterator(nullptr, nullptr);
-		return iterator(head.get(), head->begin);
+		if (!head_)
+			return iterator(nullptr, nullptr, nullptr);
+		T* e = head_->end.load(std::memory_order_acquire);
+		return iterator(head_, head_->begin, e);
 	}
 
+	// Consumer: end iterator (snapshot of current tail position)
 	[[nodiscard]] iterator end()
 	{
-		if (!tail)
-			return iterator(nullptr, nullptr);
-		return iterator(tail, tail->end);
+		if (!tail_)
+			return iterator(nullptr, nullptr, nullptr);
+		T* e = tail_->end.load(std::memory_order_acquire);
+		return iterator(tail_, e, e);
 	}
 };
 
@@ -217,23 +325,41 @@ struct simple_player
 	};
 
 	// Buffered note for notes display
+	// Note: end_time_us is atomic for lock-free note_off updates
 	struct buffered_note
 	{
-		uint64_t start_time_us;   // note on time
-		uint64_t end_time_us;     // note off time (0 = still held/pending)
-		uint32_t color_id;        // (track_index << 4) | channel - unique color per track+channel
-		//uint8_t velocity;
+		uint64_t start_time_us;              // note on time (immutable after creation)
+		std::atomic<uint64_t> end_time_us;   // note off time (~0 = still held/pending)
+		uint32_t color_id;                   // (track_index << 4) | channel (immutable after creation)
+
+		buffered_note() : start_time_us(0), end_time_us(~0ULL), color_id(0) {}
+
+		buffered_note(uint64_t start, uint64_t end, uint32_t color)
+			: start_time_us(start), end_time_us(end), color_id(color) {}
+
+		// Move constructor for queue operations
+		buffered_note(buffered_note&& other) noexcept
+			: start_time_us(other.start_time_us)
+			, end_time_us(other.end_time_us.load(std::memory_order_relaxed))
+			, color_id(other.color_id) {}
+
+		buffered_note& operator=(buffered_note&& other) noexcept
+		{
+			start_time_us = other.start_time_us;
+			end_time_us.store(other.end_time_us.load(std::memory_order_relaxed), std::memory_order_relaxed);
+			color_id = other.color_id;
+			return *this;
+		}
 	};
 
 	// Visuals viewport: manages notes display and keyboard state
-	// Thread-safe: parser thread pushes notes, render thread reads state
+	// Lock-free SPSC: parser thread pushes notes, render thread reads state
 	struct visuals_viewport
 	{
 		static constexpr size_t key_count = 128;
 
-		mutable std::mutex mtx;  // protects all mutable state
-
 		// Pending note tracking entry - points to note in queue awaiting its note_off
+		// Only accessed by parser thread - no synchronization needed
 		struct pending_entry
 		{
 			uint32_t color_id;
@@ -241,6 +367,7 @@ struct simple_player
 		};
 
 		// Fixed-size stack of pending notes per key (LIFO for matching)
+		// Parser-private: only accessed by parser thread
 		struct pending_list
 		{
 			std::vector<pending_entry> entries;
@@ -271,17 +398,12 @@ struct simple_player
 			void clear() { entries.clear(); }
 		};
 
-		// Held note info for keyboard coloring
-		struct held_note
-		{
-			uint32_t color_id;
-			uint8_t velocity;
-		};
-
-		// Per-key queues for falling notes visualization
-		std::array<buffered_queue<buffered_note>, key_count> falling_notes;
+		// Per-key SPSC queues for falling notes visualization
+		// Producer: parser thread, Consumer: render thread
+		std::array<buffered_queue_spsc<buffered_note>, key_count> falling_notes;
 
 		// Per-key pending note trackers for note_off matching
+		// Parser-private: only accessed by parser thread
 		std::array<pending_list, key_count> pending;
 
 		// Generate unique color_id from track index and channel
@@ -302,51 +424,41 @@ struct simple_player
 			return static_cast<uint8_t>(color_id & 0x0F);
 		}
 
-		// RAII lock guard for render code - hold this while iterating/reading visuals
-		[[nodiscard]] std::unique_lock<std::mutex> lock() const
-		{
-			return std::unique_lock<std::mutex>(mtx);
-		}
-
 		// Push a note_on event - creates visual note and tracks as pending
-		// Thread-safe: called from parser thread
-		void push_note_on(uint8_t key, uint64_t time_us, size_t track_index, uint8_t channel, uint8_t velocity)
+		// Called from parser thread only - no locking needed
+		__declspec(noinline) void push_note_on(uint8_t key, uint64_t time_us, size_t track_index, uint8_t channel, uint8_t velocity)
 		{
 			if (key >= key_count)
 				return;
 
-			std::lock_guard<std::mutex> guard(mtx);
-
 			uint32_t color_id = make_color_id(track_index, channel);
 
-			// Push to falling notes queue
+			// Push to falling notes queue (lock-free)
 			falling_notes[key].push({time_us, ~0ULL, color_id});
 
-			// Track as pending for note_off matching
+			// Track as pending for note_off matching (parser-private)
 			buffered_note* note_ptr = &falling_notes[key].back();
 			pending[key].push(color_id, note_ptr);
 		}
 
 		// Push a note_off event - finds matching pending note and sets end_time
-		// Thread-safe: called from parser thread
-		void push_note_off(uint8_t key, uint64_t time_us, size_t track_index, uint8_t channel)
+		// Called from parser thread only - atomic store for end_time_us
+		__declspec(noinline) void push_note_off(uint8_t key, uint64_t time_us, size_t track_index, uint8_t channel)
 		{
 			if (key >= key_count)
 				return;
 
-			std::lock_guard<std::mutex> guard(mtx);
-
 			uint32_t color_id = make_color_id(track_index, channel);
 
-			// Find matching pending note and set its end time
+			// Find matching pending note and set its end time (atomic store)
 			buffered_note* note = pending[key].find_and_remove(color_id);
 			if (note)
-				note->end_time_us = time_us;
+				note->end_time_us.store(time_us, std::memory_order_release);
 		}
 
 		// Remove notes that have fully scrolled past (end_time < cutoff)
-		// Caller must hold lock() or ensure no concurrent access
-		void cull_expired_unlocked(int64_t cutoff_time_us)
+		// Called from render thread only - no locking needed
+		__declspec(noinline) void cull_expired(int64_t cutoff_time_us)
 		{
 			for (size_t key = 0; key < key_count; ++key)
 			{
@@ -355,7 +467,9 @@ struct simple_player
 				{
 					auto& front = queue.front();
 					// Only cull if note has ended and end is before cutoff
-					if (front.end_time_us != ~0ULL && static_cast<int64_t>(front.end_time_us) < cutoff_time_us)
+					// Atomic load for end_time_us
+					uint64_t end_time = front.end_time_us.load(std::memory_order_acquire);
+					if (end_time != ~0ULL && static_cast<int64_t>(end_time) < cutoff_time_us)
 						queue.pop();
 					else
 						break;  // Queue is ordered by start_time, so stop if this one isn't expired
@@ -363,15 +477,9 @@ struct simple_player
 			}
 		}
 
-		// Thread-safe version of cull_expired
-		void cull_expired(uint64_t cutoff_time_us)
-		{
-			std::lock_guard<std::mutex> guard(mtx);
-			cull_expired_unlocked(cutoff_time_us);
-		}
-
-		// Clear all visual state (unlocked version)
-		void clear_unlocked()
+		// Clear all visual state
+		// Should only be called when no concurrent access (e.g., during reset)
+		void clear()
 		{
 			for (auto& q : falling_notes)
 				q.clear();
@@ -379,14 +487,7 @@ struct simple_player
 				p.clear();
 		}
 
-		// Thread-safe clear
-		void clear()
-		{
-			std::lock_guard<std::mutex> guard(mtx);
-			clear_unlocked();
-		}
-
-		// Reset for new playback (thread-safe)
+		// Reset for new playback
 		void reset()
 		{
 			clear();
@@ -438,7 +539,7 @@ struct simple_player
 		}
 
 		// Producer: push event (returns false if full)
-		bool try_push(uint64_t time_us, uint32_t msg)
+		__declspec(noinline) bool try_push(uint64_t time_us, uint32_t msg)
 		{
 			size_t h = head.load(std::memory_order_relaxed);
 			size_t next_h = (h + 1) & buffer_mask;
@@ -452,7 +553,7 @@ struct simple_player
 		}
 
 		// Consumer: peek at front event (returns nullptr if empty)
-		const send_event* peek() const
+		__declspec(noinline) const send_event* peek() const
 		{
 			size_t t = tail.load(std::memory_order_relaxed);
 			if (t == head.load(std::memory_order_acquire))
@@ -461,7 +562,7 @@ struct simple_player
 		}
 
 		// Consumer: pop front event
-		void pop()
+		__declspec(noinline) void pop()
 		{
 			size_t t = tail.load(std::memory_order_relaxed);
 			if (t != head.load(std::memory_order_acquire))
@@ -469,7 +570,7 @@ struct simple_player
 		}
 
 		// Consumer: pop and return (returns {0,0} if empty)
-		send_event try_pop()
+		__declspec(noinline) send_event try_pop()
 		{
 			size_t t = tail.load(std::memory_order_relaxed);
 			if (t == head.load(std::memory_order_acquire))
@@ -755,7 +856,7 @@ struct simple_player
 	}
 
 	// Parser thread: pre-parses MIDI events into the lookahead buffer
-	void parser_thread_func()
+	__declspec(noinline) void parser_thread_func()
 	{
 		update_tempo_cache_at(~0ULL); // initialize cache for tick 0
 
@@ -962,7 +1063,7 @@ struct simple_player
 	}
 
 	// Sender thread: sends pre-parsed events with precise timing
-	void sender_thread_func()
+	__declspec(noinline) void sender_thread_func()
 	{
 		while (!state.stop_requested)
 		{
@@ -1063,7 +1164,7 @@ struct simple_player
 
 		quad_geometry keyboard[128];
 		uint8_t key_n[128];
-		uint64_t scroll_window_us = 1 << 14;
+		uint64_t scroll_window_us = 1 << 18;
 		std::vector<quad_geometry> quads;
 		std::vector<color> colors;
 		//std::unordered_map<uint32_t, uint32_t> track_colors;
@@ -1147,7 +1248,7 @@ struct simple_player
 		}
 	};
 
-	void draw(const draw_data& data)
+	__declspec(noinline) void draw(const draw_data& data)
 	{
 		constexpr int total_white = draw_data::white_keys_count();
 
@@ -1170,7 +1271,7 @@ struct simple_player
 			current_us = 0;
 		}
 
-		auto guard = visuals.lock();  // hold for entire render frame
+		// Lock-free: no mutex needed
 
 		if (data.enable_simulated_lag)
 		{
@@ -1180,7 +1281,7 @@ struct simple_player
 				current_us = max - data.scroll_window_us;
 		}
 
-		visuals.cull_expired_unlocked(int64_t(current_us) - data.scroll_window_us);
+		visuals.cull_expired(int64_t(current_us) - data.scroll_window_us);
 
 		// Draw falling notes
 		draw_data::color keyboard_colors[128];
@@ -1196,15 +1297,18 @@ struct simple_player
 			{
 				auto& note = *it;
 
+				// Atomic load for end_time_us (may be updated by parser)
+				uint64_t end_time = note.end_time_us.load(std::memory_order_acquire);
+
 				int64_t start_offset = note.start_time_us - current_us;
-				int64_t end_offset = note.end_time_us - current_us;
+				int64_t end_offset = end_time - current_us;
 
 				float begin_y = float(start_offset) / float(data.scroll_window_us);
 				float end_y = 1;
 
-				if (note.end_time_us != ~0ULL)
+				if (end_time != ~0ULL)
 					end_y = float(end_offset) / float(data.scroll_window_us);
-				
+
 				if (end_y < -0.01f || begin_y > 1.01f)
 					continue;
 
@@ -1246,8 +1350,6 @@ struct simple_player
 				glEnd();
 			}
 		}
-
-		guard.unlock();
 		
 		glBegin(GL_QUADS);
 		for (uint8_t i = 0; i < 128; ++i)
@@ -1348,7 +1450,7 @@ private:
 		short_msg = (decltype(short_msg))GetProcAddress(moduleHandle, "SendDirectData");
 	}
 
-	void update_tempo_cache_at(size_t index) const
+	__declspec(noinline) void update_tempo_cache_at(size_t index) const
 	{
 		tcache.current_index = index;
 
@@ -1379,7 +1481,7 @@ private:
 			tcache.next_change_tick = ~0ULL;
 	}
 
-	uint64_t tick_to_microseconds(tick_type tick) const
+	__declspec(noinline) uint64_t tick_to_microseconds(tick_type tick) const
 	{
 		// fast path: tick is within current cached tempo region
 		if (tick >= tcache.base_tick && tick < tcache.next_change_tick)
