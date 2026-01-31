@@ -2169,8 +2169,32 @@ void OnPlayerStop()
 		else
 			pause->SafeStringReplace("\202");
 
-		textbox->SafeStringReplace("Track was reset, please restart the player");
+		textbox->SafeStringReplace("Playback was reset, please restart the player");
 	});
+}
+
+void OnViewLengthChange(float value)
+{
+	auto window = (*WH)["SIMPLAYER"];
+	auto player_viewer = (PlayerViewer*)(*window)["VIEW"];
+	
+	player_viewer->data->scroll_window_us = std::pow(2, value);
+}
+
+void OnUnbufferedSwitch()
+{
+	auto window = (*WH)["SIMPLAYER"];
+	auto player_viewer = (PlayerViewer*)(*window)["VIEW"];
+	auto buffering_switch = (Button*)(*window)["BUFFERING_SWITCH"];
+
+	player_viewer->data->enable_simulated_lag ^= true;
+
+	buffering_switch->SafeStringReplace(player_viewer->data->enable_simulated_lag ? "Simulate lag" : "Allow unbuffered");
+}
+
+void SwitchMaximise()
+{
+
 }
 
 void Init()
@@ -2421,14 +2445,24 @@ void Init()
 
 	(*WH)["SMIC"] = T;
 
-	T = new MoveableFuiWindow("Simple MIDI player settings", System_White, /*-200, 197.5, 400, 397.5, 150, 2.5f, 75, 75, 5*/
+	T = new MoveableFuiWindow("Simple MIDI player", System_White, /*-200, 197.5, 400, 397.5, 150, 2.5f, 75, 75, 5*/
 		-200, 175 + WindowHeaderSize, 400, 375, 150, 2.5, 65, 65, 2.5, BACKGROUND_OPQ, HEADER, BORDER);
 
-	(*T)["TEXT"] = new TextBox("TIME", Legacy_White, 0, 130 + WindowHeaderSize, 50, 175, 10, 0, 0, 0, _Align(center | top), TextBox::VerticalOverflow::display);
+	(*T)["TEXT"] = new TextBox("TIME", Legacy_White, 0, 130 + WindowHeaderSize, 50, 175, 10, 0xFFFFFF1A, 0, 0, _Align(center | top), TextBox::VerticalOverflow::display);
 	(*T)["PAUSE"] = new Button("\202", Legacy_White, OnPlayerPauseToggle, -190, 180 - WindowHeaderSize, 10, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr);
 	(*T)["STOP"] = new Button("\201", Legacy_White, OnPlayerStop, -175, 180 - WindowHeaderSize, 10, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr);
 
-	(*T)["VIEW"] = new PlayerViewer(0, -20);
+	auto player_view = new PlayerViewer(0, -20);
+	(*T)["VIEW_LEN_SLIDER"] = new Slider(Slider::Orientation::horizontal, -130, 180 - WindowHeaderSize, 65, 14, 21, log2f(player_view->data->scroll_window_us), OnViewLengthChange, 0x808080FF, 0xFFFFFFFF, 0xAACFFFFF, 0x007FFFFF, 0x808080FF, 10, 4);
+	(*T)["BUFFERING_SWITCH"] = new Button( 
+		player_view->data->enable_simulated_lag ? "Simulate lag" : "Allow unbuffered",
+		System_White, 
+		OnUnbufferedSwitch,
+		155, 180 - WindowHeaderSize, 80, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr);
+
+	(*T)["Maximise"] = new Button("Maximise", System_White, SwitchMaximise, 175, 165 - WindowHeaderSize, 40, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr);
+
+	(*T)["VIEW"] = player_view;
 
 	(*WH)["SIMPLAYER"] = T;
 

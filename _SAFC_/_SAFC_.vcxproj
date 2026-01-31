@@ -334,6 +334,7 @@
     <ClInclude Include="SAFGUIF\SAFGUIF.h" />
     <ClInclude Include="SAFGUIF\single_text_line.h" />
     <ClInclude Include="SAFGUIF\single_text_line_settings.h" />
+    <ClInclude Include="SAFGUIF\slider.h" />
     <ClInclude Include="SAFGUIF\snp_list.h" />
     <ClInclude Include="SAFGUIF\special_signs.h" />
     <ClInclude Include="SAFGUIF\stls_presets.h" />

@@ -10,6 +10,7 @@
 #define TT_CHECKBOX 0b100000
 #define TT_GRAPH 0b1000000
 #define TT_EDITBOX 0b10000000
+#define TT_SLIDER 0b100000000
 
 enum _TellType
 {
@@ -21,7 +22,8 @@ enum _TellType
 	selectable_properted_list = TT_SELPROPLIST,
 	checkbox = TT_CHECKBOX,
 	graph = TT_GRAPH,
-	editbox = TT_EDITBOX
+	editbox = TT_EDITBOX,
+	slider = TT_SLIDER
 };
 
 #define GLOBAL_LEFT 0b0001
