@@ -499,6 +499,7 @@ struct simple_player
 
 	struct send_event
 	{
+		uint64_t tick;
 		uint64_t time_us;    // target send time in microseconds from start
 		uint32_t short_msg;  // prepared MIDI short message (0 = invalid/empty)
 	};
@@ -542,7 +543,7 @@ struct simple_player
 		}
 
 		// Producer: push event (returns false if full)
-		SIMPLE_PLAYER_FORCE_NO_INLINE bool try_push(uint64_t time_us, uint32_t msg)
+		SIMPLE_PLAYER_FORCE_NO_INLINE bool try_push(uint64_t tick, uint64_t time_us, uint32_t msg)
 		{
 			size_t h = head.load(std::memory_order_relaxed);
 			size_t next_h = (h + 1) & buffer_mask;
@@ -550,7 +551,7 @@ struct simple_player
 			if (next_h == tail.load(std::memory_order_acquire))
 				return false; // full
 
-			buffer[h] = {time_us, msg};
+			buffer[h] = {tick, time_us, msg};
 			head.store(next_h, std::memory_order_release);
 			return true;
 		}
@@ -1038,7 +1039,7 @@ struct simple_player
 				// Push message to lookahead buffer (wait if buffer is full)
 				if (msg_to_send != 0)
 				{
-					while (!state.send_buffer.try_push(batch_time_us, msg_to_send))
+					while (!state.send_buffer.try_push(batch_tick, batch_time_us, msg_to_send))
 					{
 						if (state.stop_requested)
 							break;
@@ -1106,6 +1107,7 @@ struct simple_player
 
 			// update current position for UI and parser throttling
 			state.current_time_us = ev->time_us;
+			state.current_tick = ev->tick;
 			state.sender_position_us.store(ev->time_us, std::memory_order_release);
 
 			// wait until it's time to send this event

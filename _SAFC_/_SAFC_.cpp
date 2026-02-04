@@ -2090,6 +2090,7 @@ void PlayerWatchFunc()
 	WH->EnableWindow("SIMPLAYER");
 	auto window = (*WH)["SIMPLAYER"];
 	auto textbox = (TextBox*)(*window)["TEXT"];
+	auto rewind = (Slider*)(*window)["REWIND"];
 
 	// todo: debug memory leak in textbox lmao
 
@@ -2109,14 +2110,18 @@ void PlayerWatchFunc()
 	}
 
 	auto& state = player->get_state();
+
 	bool was_playing = false;
 	while (was_playing <= state.playing)
 	{
 		auto seconds = state.current_time_us / 1000000;
 		auto parts_of_second = state.current_time_us % 1000000;
 
+		auto position = float(state.current_tick) / player->get_info().ticks_length;
+		
 		auto str = std::format("{:0>2}:{:0>2} seconds", seconds, parts_of_second / 10000);
 		textbox->SafeStringReplace(str);
+		rewind->SetValue(position);
 
 		std::this_thread::sleep_for(std::chrono::milliseconds(20));
 		bool is_playing = state.playing;
@@ -2190,6 +2195,11 @@ void OnUnbufferedSwitch()
 	player_viewer->data->enable_simulated_lag ^= true;
 
 	buffering_switch->SafeStringReplace(player_viewer->data->enable_simulated_lag ? "Simulate lag" : "Allow unbuffered");
+}
+
+void OnPlaybackRewind(float value)
+{
+	//player->rewind_to_fraction(value);
 }
 
 void SwitchMaximise()
@@ -2448,7 +2458,7 @@ void Init()
 	T = new MoveableFuiWindow("Simple MIDI player", System_White, /*-200, 197.5, 400, 397.5, 150, 2.5f, 75, 75, 5*/
 		-200, 175 + WindowHeaderSize, 400, 375, 150, 2.5, 65, 65, 2.5, BACKGROUND_OPQ, HEADER, BORDER);
 
-	(*T)["TEXT"] = new TextBox("TIME", Legacy_White, 0, 130 + WindowHeaderSize, 50, 175, 10, 0xFFFFFF1A, 0, 0, _Align(center | top), TextBox::VerticalOverflow::display);
+	(*T)["TEXT"] = new TextBox("TIME", Legacy_White, 0, 130 + WindowHeaderSize, 50, 175, 10, 0xFFFFFF1A, 0, 0, _Align(center | top), TextBox::VerticalOverflow::cut);
 	(*T)["PAUSE"] = new Button("\202", Legacy_White, OnPlayerPauseToggle, -190, 180 - WindowHeaderSize, 10, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr);
 	(*T)["STOP"] = new Button("\201", Legacy_White, OnPlayerStop, -175, 180 - WindowHeaderSize, 10, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr);
 
@@ -2460,7 +2470,9 @@ void Init()
 		OnUnbufferedSwitch,
 		155, 180 - WindowHeaderSize, 80, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr);
 
-	(*T)["Maximise"] = new Button("Maximise", System_White, SwitchMaximise, 175, 165 - WindowHeaderSize, 40, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr);
+	(*T)["REWIND"] = new Slider(Slider::Orientation::horizontal, 0, 130 - WindowHeaderSize, 375, 0, 1, 0, OnPlaybackRewind, 0x808080FF, 0xFFFFFFFF, 0xAACFFFFF, 0x007FFFFF, 0x808080FF, 10, 4);
+
+	(*T)["MAXIMISE"] = new Button("Maximise", System_White, SwitchMaximise, 175, 165 - WindowHeaderSize, 40, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr);
 
 	(*T)["VIEW"] = player_view;
 
