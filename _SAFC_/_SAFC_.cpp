@@ -2090,7 +2090,7 @@ void PlayerWatchFunc()
 	WH->EnableWindow("SIMPLAYER");
 	auto window = (*WH)["SIMPLAYER"];
 	auto textbox = (TextBox*)(*window)["TEXT"];
-	auto rewind = (Slider*)(*window)["REWIND"];
+	auto seek_to_slider = (Slider*)(*window)["SEEK_TO"];
 
 	// todo: debug memory leak in textbox lmao
 
@@ -2119,9 +2119,11 @@ void PlayerWatchFunc()
 
 		auto position = float(state.current_tick) / player->get_info().ticks_length;
 		
-		auto str = std::format("{:0>2}:{:0>2} seconds", seconds, parts_of_second / 10000);
+		auto str = std::format("{:0>2}:{:0>2}:{:0>2}", seconds / 60, seconds % 60, parts_of_second / 10000);
 		textbox->SafeStringReplace(str);
-		rewind->SetValue(position, false);
+		
+		if (!seek_to_slider->Dragging)
+			seek_to_slider->SetValue(position, false);
 
 		std::this_thread::sleep_for(std::chrono::milliseconds(20));
 		bool is_playing = state.playing;
@@ -2197,7 +2199,7 @@ void OnUnbufferedSwitch()
 	buffering_switch->SafeStringReplace(player_viewer->data->enable_simulated_lag ? "Simulate lag" : "Allow unbuffered");
 }
 
-void OnPlaybackRewind(float value)
+void OnPlaybackSeekTo(float value)
 {
 	player->seek_to(value);
 }
@@ -2470,7 +2472,7 @@ void Init()
 		OnUnbufferedSwitch,
 		155, 180 - WindowHeaderSize, 80, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr);
 
-	(*T)["REWIND"] = new Slider(Slider::Orientation::horizontal, 0, 130 - WindowHeaderSize, 375, 0, 1, 0, OnPlaybackRewind, 0x808080FF, 0xFFFFFFFF, 0xAACFFFFF, 0x007FFFFF, 0x808080FF, 10, 4);
+	(*T)["SEEK_TO"] = new Slider(Slider::Orientation::horizontal, 0, 130 - WindowHeaderSize, 375, 0, 1, 0, OnPlaybackSeekTo, 0x808080FF, 0xFFFFFFFF, 0xAACFFFFF, 0x007FFFFF, 0x808080FF, 10, 4);
 
 	(*T)["MAXIMISE"] = new Button("Maximise", System_White, SwitchMaximise, 175, 165 - WindowHeaderSize, 40, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr);
 

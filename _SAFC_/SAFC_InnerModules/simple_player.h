@@ -1560,9 +1560,10 @@ private:
 
 	static uint32_t rotate(uint32_t color, uint32_t shift)
 	{
-		auto rem = shift % 32;
+		constexpr int base = 31;
+		auto rem = shift % base;
 
-		return color << (32 - rem) | color >> rem;
+		return color << (base - rem) | color >> rem;
 	}
 
 	void try_init_kdmapi()
