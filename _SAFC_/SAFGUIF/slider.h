@@ -296,7 +296,7 @@ struct Slider : HandleableUIPart
 	}
 
 	// Helper methods
-	void SetValue(float value)
+	void SetValue(float value, bool with_trigger = true)
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
 		CurrentValue = value;
@@ -308,7 +308,8 @@ struct Slider : HandleableUIPart
 		else
 			NormalizedPosition = 0.0f;
 
-		OnValueChange(CurrentValue);
+		if (with_trigger)
+			OnValueChange(CurrentValue);
 	}
 
 	float GetValue()

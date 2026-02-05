@@ -635,8 +635,14 @@ struct simple_player
 		mutable std::atomic<bool> paused;
 		std::atomic<uint64_t> pause_position_us{0};  // MIDI time when paused (for proper resume)
 
+		// Seek state (written by UI thread, read by playback_thread after join)
+		std::atomic<bool> seek_requested{false};
+		std::atomic<uint64_t> seek_target_us{0};
+		std::atomic<bool> seek_resume_paused{false};
+
 		// Lookahead buffer for pre-parsed MIDI messages
 		lookahead_buffer send_buffer;
+		std::atomic<bool> seeking_ff{false};        // parser is fast-forwarding (sender drains immediately)
 		std::atomic<bool> parser_done{false};       // parser finished all events
 		std::atomic<uint64_t> parsed_up_to_us{0};   // how far ahead the parser has reached (in us)
 		std::atomic<uint64_t> sender_position_us{0}; // current sender playback position (in us)
@@ -655,6 +661,10 @@ struct simple_player
 			stop_requested = false;
 			paused = false;
 			pause_position_us = 0;
+			seek_requested = false;
+			seek_target_us = 0;
+			seek_resume_paused = false;
+			seeking_ff = false;
 			parser_done = false;
 			parsed_up_to_us = 0;
 			sender_position_us = 0;
@@ -670,6 +680,7 @@ struct simple_player
 		std::map<uint64_t, uint32_t> tempo_tmp;
 		std::vector<std::pair<uint64_t, uint64_t>> time_map_mcsecs;
 		uint64_t ticks_length;
+		uint64_t total_duration_us{0};
 
 		volatile uint64_t scanned{0};
 		volatile bool ready{false};
@@ -777,6 +788,26 @@ struct simple_player
 			pause();
 	}
 
+	// Seek to a position in the file (0.0 = start, 1.0 = end)
+	void seek_to(double fraction)
+	{
+		if (!state.playing.load(std::memory_order_acquire))
+			return;
+
+		fraction = std::clamp(fraction, 0.0, 1.0);
+		uint64_t target_us = static_cast<uint64_t>(fraction * info.total_duration_us);
+
+		// Remember whether we were paused so we can restore after seek
+		state.seek_resume_paused.store(state.paused.load(std::memory_order_acquire), std::memory_order_relaxed);
+		state.seek_target_us.store(target_us, std::memory_order_relaxed);
+		state.seek_requested.store(true, std::memory_order_release);
+
+		// Signal threads to stop (unpause if needed so they can exit)
+		if (state.paused.load(std::memory_order_acquire))
+			state.paused.store(false, std::memory_order_release);
+		state.stop_requested.store(true, std::memory_order_release);
+	}
+
 	// Stop playback completely
 	void stop()
 	{
@@ -856,13 +887,27 @@ struct simple_player
 			previous_tempo = tempo_data;
 		}
 
+		// Compute total duration from ticks_length using the tempo map
+		{
+			uint64_t dur_tick = info.ticks_length;
+			uint64_t dur_base_tick = previous_tick;
+			uint64_t dur_base_us = info.time_map_mcsecs.empty() ? 0 : info.time_map_mcsecs.back().second;
+			uint32_t dur_tempo = previous_tempo;
+			info.total_duration_us = dur_base_us + (dur_tick - dur_base_tick) * dur_tempo / info.ppq;
+		}
+
 		return true;
 	}
 
 	// Parser thread: pre-parses MIDI events into the lookahead buffer
-	SIMPLE_PLAYER_FORCE_NO_INLINE void parser_thread_func()
+	// skip_to_us > 0: fast-forward to that time, pushing channel state to buffer for sender
+	SIMPLE_PLAYER_FORCE_NO_INLINE void parser_thread_func(uint64_t skip_to_us = 0, bool pause_after_seek = false)
 	{
 		update_tempo_cache_at(~0ULL); // initialize cache for tick 0
+
+		bool fast_forwarding = (skip_to_us > 0);
+		if (fast_forwarding)
+			state.seeking_ff.store(true, std::memory_order_release);
 
 		// initialize track states and build priority queue
 		event_queue_type event_queue;
@@ -891,31 +936,56 @@ struct simple_player
 			tick_type batch_tick = event_queue.top().tick;
 			uint64_t batch_time_us = tick_to_microseconds(batch_tick);
 
-			// Throttle: wait if we're too far ahead of the sender, or if paused
-			while (!state.stop_requested)
+			// Check if fast-forward is complete
+			if (fast_forwarding && batch_time_us >= skip_to_us)
 			{
-				// Wait while paused (sleep longer to avoid busy-wait)
-				if (state.paused.load(std::memory_order_acquire))
+				fast_forwarding = false;
+
+				// Set timing so sender starts from the seek position
+				state.start_offset_us = skip_to_us;
+				state.start_time = std::chrono::steady_clock::now();
+				state.current_time_us = skip_to_us;
+				state.sender_position_us.store(skip_to_us, std::memory_order_release);
+				state.parsed_up_to_us.store(skip_to_us, std::memory_order_release);
+
+				// Signal sender to transition from immediate drain to timed playback
+				state.seeking_ff.store(false, std::memory_order_release);
+
+				if (pause_after_seek)
 				{
-					std::this_thread::sleep_for(std::chrono::milliseconds(10));
-					continue;
+					state.pause_position_us.store(skip_to_us, std::memory_order_release);
+					state.paused.store(true, std::memory_order_release);
 				}
-
-				uint64_t sender_pos = state.sender_position_us.load(std::memory_order_acquire);
-				uint64_t lookahead = (batch_time_us > sender_pos) ? (batch_time_us - sender_pos) : 0;
-
-				if (lookahead < playback_state::max_lookahead_us)
-					break;
-
-				// Too far ahead - sleep until sender catches up closer
-				std::this_thread::sleep_for(std::chrono::milliseconds(1));
 			}
 
-			if (state.stop_requested)
-				break;
+			if (!fast_forwarding)
+			{
+				// Throttle: wait if we're too far ahead of the sender, or if paused
+				while (!state.stop_requested)
+				{
+					// Wait while paused (sleep longer to avoid busy-wait)
+					if (state.paused.load(std::memory_order_acquire))
+					{
+						std::this_thread::sleep_for(std::chrono::milliseconds(10));
+						continue;
+					}
 
-			// update parsed position for sender thread visibility
-			state.parsed_up_to_us.store(batch_time_us, std::memory_order_release);
+					uint64_t sender_pos = state.sender_position_us.load(std::memory_order_acquire);
+					uint64_t lookahead = (batch_time_us > sender_pos) ? (batch_time_us - sender_pos) : 0;
+
+					if (lookahead < playback_state::max_lookahead_us)
+						break;
+
+					// Too far ahead - sleep until sender catches up closer
+					std::this_thread::sleep_for(std::chrono::milliseconds(1));
+				}
+
+				if (state.stop_requested)
+					break;
+
+				// update parsed position for sender thread visibility
+				state.parsed_up_to_us.store(batch_time_us, std::memory_order_release);
+			}
 
 			// process ALL events at this tick
 			while (!event_queue.empty() && event_queue.top().tick == batch_tick)
@@ -974,33 +1044,38 @@ struct simple_player
 					case 0x8: // note off
 					{
 						data2 = get_value_and_increment(track.position, track.end);
-						msg_to_send = make_smsg(command, data1, data2);
 
-						// Push to visuals viewport
-						uint8_t channel = command & 0x0F;
-						uint8_t key = data1;
-
-						state.visuals.push_note_off(key, batch_time_us, ref.track_index, channel);
+						if (!fast_forwarding)
+						{
+							msg_to_send = make_smsg(command, data1, data2);
+							uint8_t channel = command & 0x0F;
+							state.visuals.push_note_off(data1, batch_time_us, ref.track_index, channel);
+						}
 						break;
 					}
 					case 0x9: // note on
 					{
 						data2 = get_value_and_increment(track.position, track.end);
-						msg_to_send = make_smsg(command, data1, data2);
 
-						// Push to visuals viewport (velocity 0 = note off)
-						uint8_t channel = command & 0x0F;
-						uint8_t key = data1;
-						uint8_t velocity = data2;
+						if (!fast_forwarding)
+						{
+							msg_to_send = make_smsg(command, data1, data2);
+							uint8_t channel = command & 0x0F;
 
-						if (velocity > 0)
-							state.visuals.push_note_on(key, batch_time_us, ref.track_index, channel, velocity);
-						else
-							state.visuals.push_note_off(key, batch_time_us, ref.track_index, channel);
-
+							if (data2 > 0)
+								state.visuals.push_note_on(data1, batch_time_us, ref.track_index, channel, data2);
+							else
+								state.visuals.push_note_off(data1, batch_time_us, ref.track_index, channel);
+						}
 						break;
 					}
-					case 0xA: // aftertouch
+					case 0xA: // aftertouch (transient - skip during fast-forward)
+					{
+						data2 = get_value_and_increment(track.position, track.end);
+						if (!fast_forwarding)
+							msg_to_send = make_smsg(command, data1, data2);
+						break;
+					}
 					case 0xB: // control change
 					case 0xE: // pitch bend
 					{
@@ -1043,7 +1118,6 @@ struct simple_player
 					{
 						if (state.stop_requested)
 							break;
-						// Buffer full - yield briefly and retry
 						std::this_thread::yield();
 					}
 				}
@@ -1067,10 +1141,30 @@ struct simple_player
 	}
 
 	// Sender thread: sends pre-parsed events with precise timing
+	// During seek fast-forward (seeking_ff == true), drains buffer immediately
 	SIMPLE_PLAYER_FORCE_NO_INLINE void sender_thread_func()
 	{
 		while (!state.stop_requested)
 		{
+			// Fast-forward mode: drain buffer immediately, no timing
+			if (state.seeking_ff.load(std::memory_order_acquire))
+			{
+				const send_event* ev = state.send_buffer.peek();
+				if (ev)
+				{
+					if (short_msg && ev->short_msg != 0)
+						short_msg(ev->short_msg);
+					state.send_buffer.pop();
+					continue;
+				}
+
+				// Buffer empty during FF - parser is still filling it
+				if (state.parser_done.load(std::memory_order_acquire))
+					break;
+				std::this_thread::yield();
+				continue;
+			}
+
 			// handle pause - wait until unpaused
 			if (state.paused.load(std::memory_order_acquire))
 			{
@@ -1144,21 +1238,52 @@ struct simple_player
 	void playback_thread()
 	{
 		state.reset();
-		// Set start_time BEFORE playing flag to avoid race with draw()
 		state.start_time = std::chrono::steady_clock::now();
 		state.playing.store(true, std::memory_order_release);
 
-		// launch parser and sender threads
-		std::thread parser_thread([this]() { parser_thread_func(); });
-		std::thread sender_thread([this]() { sender_thread_func(); });
+		uint64_t skip_to_us = 0;
+		bool pause_after_seek = false;
 
-		// wait for both threads to finish
-		parser_thread.join();
-		sender_thread.join();
+		for (;;)
+		{
+			// Reset per-iteration state
+			state.stop_requested.store(false, std::memory_order_relaxed);
+			state.seeking_ff.store(false, std::memory_order_relaxed);
+			state.parser_done.store(false, std::memory_order_relaxed);
+			state.parsed_up_to_us.store(0, std::memory_order_relaxed);
+			state.sender_position_us.store(0, std::memory_order_relaxed);
+			state.send_buffer.reset();
+			state.visuals.reset();
+			state.track_states.clear();
 
-		// playback finished
+			// Launch parser and sender threads
+			std::thread parser_thread([this, skip_to_us, pause_after_seek]() {
+				parser_thread_func(skip_to_us, pause_after_seek);
+			});
+			std::thread sender_thread([this]() { sender_thread_func(); });
+
+			parser_thread.join();
+			sender_thread.join();
+
+			// Check if this was a seek (threads stopped due to seek_requested)
+			if (state.seek_requested.load(std::memory_order_acquire))
+			{
+				skip_to_us = state.seek_target_us.load(std::memory_order_relaxed);
+				pause_after_seek = state.seek_resume_paused.load(std::memory_order_relaxed);
+
+				state.seek_requested.store(false, std::memory_order_relaxed);
+				state.paused.store(false, std::memory_order_relaxed);
+
+				all_notes_off();
+				continue;
+			}
+
+			// Normal exit
+			break;
+		}
+
 		all_notes_off();
-		state.playing = false;
+		state.playing.store(false, std::memory_order_release);
 	}
 
 	struct draw_data

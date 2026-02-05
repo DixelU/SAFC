@@ -2121,7 +2121,7 @@ void PlayerWatchFunc()
 		
 		auto str = std::format("{:0>2}:{:0>2} seconds", seconds, parts_of_second / 10000);
 		textbox->SafeStringReplace(str);
-		rewind->SetValue(position);
+		rewind->SetValue(position, false);
 
 		std::this_thread::sleep_for(std::chrono::milliseconds(20));
 		bool is_playing = state.playing;
@@ -2199,7 +2199,7 @@ void OnUnbufferedSwitch()
 
 void OnPlaybackRewind(float value)
 {
-	//player->rewind_to_fraction(value);
+	player->seek_to(value);
 }
 
 void SwitchMaximise()
