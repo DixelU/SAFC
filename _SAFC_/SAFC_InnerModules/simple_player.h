@@ -20,7 +20,7 @@
 #include "single_midi_processor_2.h"
 #include "single_midi_info_collector.h"
 
-#define SIMPLE_PLAYER_FORCE_NO_INLINE 
+#define SIMPLE_PLAYER_FORCE_NO_INLINE  __declspec(noinline)
 // __declspec(noinline)
 
 // Lock-free SPSC slab-based queue
@@ -712,10 +712,71 @@ struct simple_player
 	void init()
 	{
 		update_devices();
-		init_midi_out(devices.size() - 1);
+		//init_midi_out(devices.size() - 1);
 
 		warnings = std::make_shared<printing_logger>("33");
 	}
+
+	// Get device names as vector of strings for UI
+	std::vector<std::string> get_device_names() const
+	{	
+		std::vector<std::string> names;
+		names.reserve(devices.size());
+
+		for (const auto& device : devices)
+		{
+			std::wstring wname = device.szPname;
+			names.emplace_back(wname.begin(), wname.end());
+		}
+
+		return names;
+	}
+
+	// Get currently selected device index
+	size_t get_current_device() const
+	{
+		return current_device;
+	}
+
+	// Change the current device
+	void set_device(size_t device_index)
+	{
+		if (device_index >= devices.size() || (device_index == current_device && short_msg))
+			return;
+
+		// Close current device if open
+		close_midi_out();
+
+		// Open new device
+		current_device = device_index;
+		init_midi_out(device_index);
+
+		// Call callback if set
+		if (on_device_changed)
+			on_device_changed(device_index);
+	}
+
+	// Restore device by name (for registry persistence)
+	bool restore_device_by_name(const std::wstring& device_name)
+	{
+		if (device_name.empty())
+			return false;
+
+		for (size_t i = 0; i < devices.size(); ++i)
+		{
+			if (devices[i].szPname != device_name)
+				continue;
+			
+			set_device(i);
+			
+			return true;
+		}
+
+		return false;
+	}
+
+	// Callback for when device changes (for UI updates)
+	void(*on_device_changed)(size_t device_index) = nullptr;
 
 	void simple_run(std::wstring filename)
 	{
@@ -1228,7 +1289,7 @@ struct simple_player
 			}
 
 			// send the event
-			if (short_msg && ev->short_msg != 0)
+			if (short_msg && ev->short_msg != 0) [[likely]]
 				short_msg(ev->short_msg);
 
 			state.send_buffer.pop();
@@ -1240,6 +1301,10 @@ struct simple_player
 		state.reset();
 		state.start_time = std::chrono::steady_clock::now();
 		state.playing.store(true, std::memory_order_release);
+
+		// Start paused by default so user can select synth first
+		state.paused.store(true, std::memory_order_release);
+		state.pause_position_us.store(0, std::memory_order_release);
 
 		uint64_t skip_to_us = 0;
 		bool pause_after_seek = false;
@@ -1566,7 +1631,7 @@ private:
 		return color << (base - rem) | color >> rem;
 	}
 
-	void try_init_kdmapi()
+	SIMPLE_PLAYER_FORCE_NO_INLINE void try_init_kdmapi()
 	{
 		kdmapi_status = nullptr;
 
@@ -1844,6 +1909,9 @@ private:
 		if (!hout)
 			return;
 
+		kdmapi_status = nullptr;
+		set_short_msg_noop();
+
 		auto hout_copy = hout.load();
 		hout = nullptr;
 
@@ -1855,8 +1923,16 @@ private:
 			ThrowAlert_Error("Unable to close the MIDI out");
 	}
 
+	void set_short_msg_noop()
+	{
+		short_msg = [](uint32_t msg) {};
+	}
+
 	void init_midi_out(size_t device)
 	{
+		static std::set<std::wstring> kdmapi_allowed
+			{ L"OmniMIDI", L"K[q093jfpowe" };
+
 		auto hout_copy = hout.load();
 		if (hout_copy)
 			return;
@@ -1879,7 +1955,7 @@ private:
 				short_msg = [](uint32_t msg) { midiOutShortMsg(hout, msg); };
 			}
 
-			if (!kdmapi_status)
+			if (!kdmapi_status && kdmapi_allowed.contains(devices[device].szPname))
 				try_init_kdmapi();
 		}
 		catch (...)
@@ -1890,6 +1966,9 @@ private:
 
 	void all_notes_off_channel(uint8_t channel)
 	{
+		if (!short_msg) [[unlikely]]
+			return;
+
 		channel &= 0x0F;
 
 		short_msg(make_smsg(0xB0 | channel, 120));

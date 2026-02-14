@@ -2076,6 +2076,11 @@ void RestoreRegSettings()
 			lFONT_HEIGHT_TO_WIDTH = *(float*)&B;
 		}
 		catch (...) { std::cout << "Exception thrown while restoring FLOAT_FONTHTW from registry\n"; }
+		try
+		{
+			saved_midi_device_name = Settings::RegestryAccess.GetStringValue(L"MIDI_DEVICE_NAME");
+		}
+		catch (...) { std::cout << "Exception thrown while restoring MIDI_DEVICE_NAME from registry\n"; }
 		Settings::RegestryAccess.Close();
 	}
 }
@@ -2085,12 +2090,21 @@ void OnOtherSettings()
 	WH->EnableWindow("OTHER_SETS");
 }
 
+void UpdateDeviceList();
+
 void PlayerWatchFunc()
 {
 	WH->EnableWindow("SIMPLAYER");
 	auto window = (*WH)["SIMPLAYER"];
 	auto textbox = (TextBox*)(*window)["TEXT"];
 	auto seek_to_slider = (Slider*)(*window)["SEEK_TO"];
+
+	// Populate the device list
+	UpdateDeviceList();
+
+	// Update pause button to reflect initial paused state
+	auto pause_button = (Button*)(*window)["PAUSE"];
+	pause_button->SafeStringReplace("\202");  // Play symbol (since it's paused)
 
 	// todo: debug memory leak in textbox lmao
 
@@ -2144,7 +2158,68 @@ void OnOpenPlayer()
 
 		worker_singleton<struct player_watcher>::instance().push(PlayerWatchFunc);
 
+		player->restore_device_by_name(saved_midi_device_name);
 		player->simple_run(_Data[id].Filename);
+	});
+}
+
+void UpdateDeviceList()
+{
+	if (!player)
+		return;
+
+	auto device_list = _WH_t<SelectablePropertedList>("SIMPLAYER", "DEVICE_LIST");
+
+	// Clear existing items
+	device_list->SelectorsText.clear();
+	device_list->SelectedID.clear();
+
+	// Get device names from player
+	auto device_names = player->get_device_names();
+
+	// Populate the list
+	for (const auto& name : device_names)
+		device_list->SafePushBackNewString(name);
+
+	// Select the current device
+	size_t current = player->get_current_device();
+	if (current < device_names.size())
+		device_list->SelectedID.push_back(static_cast<uint32_t>(current));
+
+	device_list->SafeUpdateLines();
+}
+
+void OnDeviceSelect(int device_id)
+{
+	worker_singleton<struct midi_out_select>::instance().push([device_id]()
+	{
+		player->set_device(device_id);
+
+		auto device_list = _WH_t<SelectablePropertedList>("SIMPLAYER", "DEVICE_LIST");
+
+		// Clear previous selection and select the new device
+		device_list->SelectedID.clear();
+		device_list->SelectedID.push_back(static_cast<uint32_t>(device_id));
+
+		// Save the device name to registry
+		auto device_names = player->get_device_names();
+		if (device_id >= 0 && device_id < device_names.size())
+		{
+			std::string device_name = device_names[device_id];
+			std::wstring wdevice_name(device_name.begin(), device_name.end());
+			saved_midi_device_name = wdevice_name;
+
+			try
+			{
+				Settings::RegestryAccess.Open(HKEY_CURRENT_USER, default_reg_path);
+				Settings::RegestryAccess.SetStringValue(L"MIDI_DEVICE_NAME", wdevice_name);
+				Settings::RegestryAccess.Close();
+			}
+			catch (...)
+			{
+				std::cout << "Exception thrown while saving MIDI_DEVICE_NAME to registry\n";
+			}
+		}
 	});
 }
 
@@ -2477,6 +2552,18 @@ void Init()
 	(*T)["MAXIMISE"] = new Button("Maximise", System_White, SwitchMaximise, 175, 165 - WindowHeaderSize, 40, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr);
 
 	(*T)["VIEW"] = player_view;
+
+	// Device selection label and list
+	(*T)["DEVICE_LIST"] = new SelectablePropertedList(
+		BS_List_Black_Small,
+		OnDeviceSelect,
+		nullptr,  // No properties callback
+		-145, 135 + WindowHeaderSize,  // Position: left side, below viewport
+		100,  // Width
+		12,   // Space between items
+		20,   // Max chars per line
+		2     // Max visible lines
+	);
 
 	(*WH)["SIMPLAYER"] = T;
 

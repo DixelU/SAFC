@@ -19,6 +19,7 @@ const char* window_title = "SAFC\0";
 std::wstring default_reg_path = L"Software\\SAFC\\";
 
 std::string default_font_name = "Arial";
+std::wstring saved_midi_device_name = L"";
 bool is_fonted = true;
 
 //#define ROT_ANGLE 0.7
