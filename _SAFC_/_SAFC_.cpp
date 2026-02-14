@@ -2104,7 +2104,7 @@ void PlayerWatchFunc()
 
 	// Update pause button to reflect initial paused state
 	auto pause_button = (Button*)(*window)["PAUSE"];
-	pause_button->SafeStringReplace("\202");  // Play symbol (since it's paused)
+	pause_button->SafeStringReplace("\200");  // Play symbol (since it's paused)
 
 	// todo: debug memory leak in textbox lmao
 
