@@ -2327,28 +2327,29 @@ void ApplySimplayerMaximisedLayout()
 	float row1_y = half_h - 10;
 	float row2_y = row1_y - 25;
 
-	pause_btn->SafeChangePosition(-half_w + 15, row1_y);
-	stop_btn->SafeChangePosition(-half_w + 30, row1_y);
-	vls->SafeChangePosition(-half_w + 80, row1_y);
-	text->SafeChangePosition(0, row1_y - 10);
+	pause_btn->SafeChangePosition(-half_w + 10, row1_y);
+	stop_btn->SafeChangePosition(-half_w + 25, row1_y);
+	vls->SafeChangePosition(-half_w + 75, row1_y);
+	text->SafeChangePosition(0, row1_y - 20);
 	buf_sw->SafeChangePosition(half_w - 50, row1_y);
 
-	max_btn->SafeChangePosition(half_w - 30, row2_y);
+	max_btn->SafeChangePosition(half_w - 30, row2_y + 10);
 	dev_list->SafeChangePosition(-half_w + 60, row2_y + 15);
 
 	// Stretch seek slider
 	float seek_y = row2_y - 15;
-	seek_to->SafeChangePosition(0, seek_y);
+	seek_to->SafeChangePosition(0, seek_y - 10);
 	seek_to->TrackLength = full_width - 30;
 
 	// Compute PlayerViewer geometry
-	float keyboard_height = 40.0f;
+	float width_factor_change = full_width / player_viewer->data->width;
+	//float keyboard_height = 40.0f;
 	float notes_top = seek_y - 15;
-	float notes_bottom = -half_h + keyboard_height;
+	float notes_bottom = -half_h + player_viewer->data->last_keyboard_height * width_factor_change;
 	float notes_height = notes_top - notes_bottom;
 	float view_center_y = (notes_top + notes_bottom) * 0.5f;
 
-	player_viewer->reinit_and_reposition(0, view_center_y, full_width, notes_height);
+	player_viewer->RescaleAndReposition(0, view_center_y, full_width, notes_height);
 }
 
 void SwitchMaximise()
@@ -2391,8 +2392,8 @@ void SwitchMaximise()
 		s.devlist_y = dev_list->HeaderYPos;
 		s.view_x = player_viewer->xpos;
 		s.view_y = player_viewer->ypos;
-		s.view_width = player_viewer->data->WIDTH;
-		s.view_height = player_viewer->data->HEIGHT;
+		s.view_width = player_viewer->data->width;
+		s.view_height = player_viewer->data->height;
 		s.previous_main_window_id = WH->MainWindow_ID;
 
 		// Apply maximized layout
@@ -2429,7 +2430,7 @@ void SwitchMaximise()
 		dev_list->SafeChangePosition(s.devlist_cx, s.devlist_y);
 
 		// Restore PlayerViewer
-		player_viewer->reinit_and_reposition(s.view_x, s.view_y, s.view_width, s.view_height);
+		player_viewer->RescaleAndReposition(s.view_x, s.view_y, s.view_width, s.view_height);
 
 		// Restore window management
 		WH->MainWindow_ID = s.previous_main_window_id;

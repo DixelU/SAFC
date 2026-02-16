@@ -1367,7 +1367,8 @@ struct simple_player
 		bool enable_simulated_lag = true;
 
 		static constexpr float DEFAULT_WIDTH = 400, DEFAULT_HEIGHT = 250;
-		float WIDTH = DEFAULT_WIDTH, HEIGHT = DEFAULT_HEIGHT;
+		float width = DEFAULT_WIDTH, height = DEFAULT_HEIGHT;
+		float last_keyboard_height = 0;
 		constexpr static bool is_white_key(std::uint8_t Key)
 		{
 			Key %= 12;
@@ -1389,8 +1390,8 @@ struct simple_player
 		void init(float keyboard_height, float black_hight, float black_margins)
 		{
 			constexpr int total = white_keys_count();
-			const float white_width = WIDTH / total;
-			const float general_connector_width = WIDTH / 128.25f;
+			const float white_width = width / total;
+			const float general_connector_width = width / 128.25f;
 
 			quad_geometry* first = keyboard, *last = keyboard + 127;
 
@@ -1403,8 +1404,8 @@ struct simple_player
 					first->bl.x = first->tl.x = index * white_width;
 					first->br.x = first->tr.x = (index + 1) * white_width;
 
-					first->bl.y = first->br.y = -0.5 * HEIGHT - keyboard_height;
-					first->tl.y = first->tr.y = -0.5 * HEIGHT;
+					first->bl.y = first->br.y = -0.5 * height - keyboard_height;
+					first->tl.y = first->tr.y = -0.5 * height;
 
 					key_n[index] = key;
 
@@ -1417,12 +1418,14 @@ struct simple_player
 					last->bl.x = last->tl.x = key * general_connector_width - black_margins;
 					last->br.x = last->tr.x = (key + 1) * general_connector_width + black_margins;
 
-					last->bl.y = last->br.y = -0.5 * HEIGHT - black_hight;
-					last->tl.y = last->tr.y = -0.5 * HEIGHT;
+					last->bl.y = last->br.y = -0.5 * height - black_hight;
+					last->tl.y = last->tr.y = -0.5 * height;
 
 					--last;
 				}
 			}
+
+			last_keyboard_height = keyboard_height;
 		}
 
 		void move(float dx, float dy)
@@ -1445,8 +1448,8 @@ struct simple_player
 
 		void reinit(float new_width, float new_height, float keyboard_height, float black_height, float black_margins)
 		{
-			WIDTH = new_width;
-			HEIGHT = new_height;
+			width = new_width;
+			height = new_height;
 			init(keyboard_height, black_height, black_margins);
 		}
 	};
@@ -1529,8 +1532,8 @@ struct simple_player
 				begin_y = std::clamp(begin_y, 0.f, 1.f);
 				end_y = std::clamp(end_y, 0.f, 1.f);
 
-				begin_y = data.keyboard->tr.y + data.HEIGHT * begin_y;
-				end_y = data.keyboard->tr.y + data.HEIGHT * end_y;
+				begin_y = data.keyboard->tr.y + data.height * begin_y;
+				end_y = data.keyboard->tr.y + data.height * end_y;
 
 				//begin_y = (data.keyboard->tr.y + draw_data::HEIGHT) * (1 - begin_y) + (begin_y)*data.keyboard->tr.y;
 				//end_y = (data.keyboard->tr.y + draw_data::HEIGHT) * (1 - end_y) + (end_y)*data.keyboard->tr.y;
@@ -2025,7 +2028,7 @@ struct PlayerViewer : public HandleableUIPart
 		data(std::make_unique<simple_player::draw_data>())
 	{
 		data->init(40, 22.5f, 0);
-		data->move(xpos - 0.5f * data->WIDTH, ypos);
+		data->move(xpos - 0.5f * data->width, ypos);
 	}
 
 	void Draw() override
@@ -2059,20 +2062,24 @@ struct PlayerViewer : public HandleableUIPart
 		float CW = 0.5f * (
 			(std::int32_t)((bool)(GLOBAL_LEFT & Arg))
 			- (std::int32_t)((bool)(GLOBAL_RIGHT & Arg))
-			) * data->WIDTH,
+			) * data->width,
 			CH = 0.5f * (
 				(std::int32_t)((bool)(GLOBAL_BOTTOM & Arg))
 				- (std::int32_t)((bool)(GLOBAL_TOP & Arg))
-				) * data->HEIGHT;
+				) * data->height;
 		SafeChangePosition(NewX + CW, NewY + CH);
 	}
-	void reinit_and_reposition(float new_xpos, float new_ypos, float new_width, float new_height)
+	void RescaleAndReposition(float new_xpos, float new_ypos, float new_width, float new_height)
 	{
 		std::lock_guard<std::recursive_mutex> locker(Lock);
+		
+		float width_factor_change = new_width / data->width;
+		constexpr float black_relative_height = 22.5f / 40.f;
+
 		xpos = new_xpos;
 		ypos = new_ypos;
-		data->reinit(new_width, new_height, 40.f, 22.5f, 0.f);
-		data->move(new_xpos - 0.5f * data->WIDTH, new_ypos);
+		data->reinit(new_width, new_height, data->last_keyboard_height * width_factor_change, data->last_keyboard_height * width_factor_change * black_relative_height, 0.f);
+		data->move(new_xpos - 0.5f * data->width, new_ypos);
 	}
 	void KeyboardHandler(CHAR CH) override
 	{
