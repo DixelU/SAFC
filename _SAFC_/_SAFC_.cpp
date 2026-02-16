@@ -2279,9 +2279,166 @@ void OnPlaybackSeekTo(float value)
 	player->seek_to(value);
 }
 
+bool simplayer_maximised = false;
+
+struct SimplayerSavedState {
+	float window_x, window_y, window_width, window_height;
+	float text_x, text_y;
+	float pause_x, pause_y;
+	float stop_x, stop_y;
+	float buf_switch_x, buf_switch_y;
+	float max_x, max_y;
+	float vls_x, vls_y;
+	float seek_x, seek_y, seek_track_length;
+	float devlist_cx, devlist_y;
+	float view_x, view_y, view_width, view_height;
+	std::string previous_main_window_id;
+} saved_simplayer_state;
+
+void ApplySimplayerMaximisedLayout()
+{
+	float half_w = internal_range * (WindX / window_base_width);
+	float half_h = internal_range * (WindY / window_base_height);
+	float full_width = 2.0f * half_w;
+	float full_height = 2.0f * half_h + WindowHeaderSize;
+
+	auto window = (*WH)["SIMPLAYER"];
+	auto player_viewer = (PlayerViewer*)(*window)["VIEW"];
+	auto text = (TextBox*)(*window)["TEXT"];
+	auto pause_btn = (Button*)(*window)["PAUSE"];
+	auto stop_btn = (Button*)(*window)["STOP"];
+	auto vls = (Slider*)(*window)["VIEW_LEN_SLIDER"];
+	auto buf_sw = (Button*)(*window)["BUFFERING_SWITCH"];
+	auto seek_to = (Slider*)(*window)["SEEK_TO"];
+	auto max_btn = (Button*)(*window)["MAXIMISE"];
+	auto dev_list = (SelectablePropertedList*)(*window)["DEVICE_LIST"];
+
+	// Move window so top-left aligns with viewport top-left
+	float dx = (-half_w) - window->XWindowPos;
+	float dy = (half_h) - window->YWindowPos + WindowHeaderSize;
+	window->SafeMove(dx, dy);
+
+	// Resize window frame
+	window->_NotSafeResize(full_height, full_width);
+	auto fui = (MoveableFuiWindow*)window;
+	fui->SafeWindowRename(window->WindowName->_CurrentText, false);
+
+	// Position controls near the top
+	float row1_y = half_h - 10;
+	float row2_y = row1_y - 25;
+
+	pause_btn->SafeChangePosition(-half_w + 15, row1_y);
+	stop_btn->SafeChangePosition(-half_w + 30, row1_y);
+	vls->SafeChangePosition(-half_w + 80, row1_y);
+	text->SafeChangePosition(0, row1_y - 10);
+	buf_sw->SafeChangePosition(half_w - 50, row1_y);
+
+	max_btn->SafeChangePosition(half_w - 30, row2_y);
+	dev_list->SafeChangePosition(-half_w + 60, row2_y + 15);
+
+	// Stretch seek slider
+	float seek_y = row2_y - 15;
+	seek_to->SafeChangePosition(0, seek_y);
+	seek_to->TrackLength = full_width - 30;
+
+	// Compute PlayerViewer geometry
+	float keyboard_height = 40.0f;
+	float notes_top = seek_y - 15;
+	float notes_bottom = -half_h + keyboard_height;
+	float notes_height = notes_top - notes_bottom;
+	float view_center_y = (notes_top + notes_bottom) * 0.5f;
+
+	player_viewer->reinit_and_reposition(0, view_center_y, full_width, notes_height);
+}
+
 void SwitchMaximise()
 {
+	auto window = (*WH)["SIMPLAYER"];
+	auto player_viewer = (PlayerViewer*)(*window)["VIEW"];
+	auto text = (TextBox*)(*window)["TEXT"];
+	auto pause_btn = (Button*)(*window)["PAUSE"];
+	auto stop_btn = (Button*)(*window)["STOP"];
+	auto vls = (Slider*)(*window)["VIEW_LEN_SLIDER"];
+	auto buf_sw = (Button*)(*window)["BUFFERING_SWITCH"];
+	auto seek_to = (Slider*)(*window)["SEEK_TO"];
+	auto max_btn = (Button*)(*window)["MAXIMISE"];
+	auto dev_list = (SelectablePropertedList*)(*window)["DEVICE_LIST"];
 
+	if (!simplayer_maximised)
+	{
+		// Save current state
+		auto& s = saved_simplayer_state;
+		s.window_x = window->XWindowPos;
+		s.window_y = window->YWindowPos;
+		s.window_width = window->Width;
+		s.window_height = window->Height;
+		s.text_x = text->Xpos;
+		s.text_y = text->Ypos;
+		s.pause_x = pause_btn->Xpos;
+		s.pause_y = pause_btn->Ypos;
+		s.stop_x = stop_btn->Xpos;
+		s.stop_y = stop_btn->Ypos;
+		s.vls_x = vls->Xpos;
+		s.vls_y = vls->Ypos;
+		s.buf_switch_x = buf_sw->Xpos;
+		s.buf_switch_y = buf_sw->Ypos;
+		s.seek_x = seek_to->Xpos;
+		s.seek_y = seek_to->Ypos;
+		s.seek_track_length = seek_to->TrackLength;
+		s.max_x = max_btn->Xpos;
+		s.max_y = max_btn->Ypos;
+		s.devlist_cx = dev_list->HeaderCXPos;
+		s.devlist_y = dev_list->HeaderYPos;
+		s.view_x = player_viewer->xpos;
+		s.view_y = player_viewer->ypos;
+		s.view_width = player_viewer->data->WIDTH;
+		s.view_height = player_viewer->data->HEIGHT;
+		s.previous_main_window_id = WH->MainWindow_ID;
+
+		// Apply maximized layout
+		ApplySimplayerMaximisedLayout();
+
+		// Make SIMPLAYER the sole window
+		WH->MainWindow_ID = "SIMPLAYER";
+		WH->DisableAllWindows();
+
+		simplayer_maximised = true;
+		max_btn->SafeStringReplace("Restore");
+	}
+	else
+	{
+		auto& s = saved_simplayer_state;
+
+		// Move window back to original position
+		float dx = s.window_x - window->XWindowPos;
+		float dy = s.window_y - window->YWindowPos;
+		window->SafeMove(dx, dy);
+		window->_NotSafeResize(s.window_height, s.window_width);
+		auto fui = (MoveableFuiWindow*)window;
+		fui->SafeWindowRename(window->WindowName->_CurrentText, false);
+
+		// Restore each child to saved position
+		text->SafeChangePosition(s.text_x, s.text_y);
+		pause_btn->SafeChangePosition(s.pause_x, s.pause_y);
+		stop_btn->SafeChangePosition(s.stop_x, s.stop_y);
+		vls->SafeChangePosition(s.vls_x, s.vls_y);
+		buf_sw->SafeChangePosition(s.buf_switch_x, s.buf_switch_y);
+		seek_to->SafeChangePosition(s.seek_x, s.seek_y);
+		seek_to->TrackLength = s.seek_track_length;
+		max_btn->SafeChangePosition(s.max_x, s.max_y);
+		dev_list->SafeChangePosition(s.devlist_cx, s.devlist_y);
+
+		// Restore PlayerViewer
+		player_viewer->reinit_and_reposition(s.view_x, s.view_y, s.view_width, s.view_height);
+
+		// Restore window management
+		WH->MainWindow_ID = s.previous_main_window_id;
+		WH->DisableAllWindows();
+		WH->EnableWindow("SIMPLAYER");
+
+		simplayer_maximised = false;
+		max_btn->SafeStringReplace("Maximise");
+	}
 }
 
 void Init()
@@ -2727,6 +2884,9 @@ void OnResize(int x, int y)
 		auto SMRP = (*WH)["SMRP_CONTAINER"];
 		SMRP->SafeChangePosition_Argumented(0, 0, 0);
 		SMRP->_NotSafeResize_Centered(internal_range * 3 * (WindY / window_base_height) + 2 * WindowHeaderSize, internal_range * 3 * (WindX / window_base_width));
+
+		if (simplayer_maximised)
+			ApplySimplayerMaximisedLayout();
 	}
 }
 void inline rotate(float& x, float& y)
@@ -2769,7 +2929,7 @@ void mKey(std::uint8_t k, int x, int y)
 void mClick(int butt, int state, int x, int y)
 {
 	float fx, fy;
-	CHAR Button, State = state;
+	char Button, State = state;
 	absoluteToActualCoords(x, y, fx, fy);
 	Button = butt - 1;
 

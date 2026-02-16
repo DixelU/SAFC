@@ -1366,7 +1366,8 @@ struct simple_player
 
 		bool enable_simulated_lag = true;
 
-		constexpr static float WIDTH = 400, HEIGHT = 250;
+		static constexpr float DEFAULT_WIDTH = 400, DEFAULT_HEIGHT = 250;
+		float WIDTH = DEFAULT_WIDTH, HEIGHT = DEFAULT_HEIGHT;
 		constexpr static bool is_white_key(std::uint8_t Key)
 		{
 			Key %= 12;
@@ -1388,8 +1389,8 @@ struct simple_player
 		void init(float keyboard_height, float black_hight, float black_margins)
 		{
 			constexpr int total = white_keys_count();
-			constexpr float white_width = WIDTH / total;
-			constexpr float general_connector_width = WIDTH / 128.25f;
+			const float white_width = WIDTH / total;
+			const float general_connector_width = WIDTH / 128.25f;
 
 			quad_geometry* first = keyboard, *last = keyboard + 127;
 
@@ -1429,7 +1430,7 @@ struct simple_player
 			for (uint8_t key = 0; key < 128; key++)
 			{
 				quad_geometry& quad = keyboard[key];
-				
+
 				quad.bl.x += dx;
 				quad.br.x += dx;
 				quad.tl.x += dx;
@@ -1440,6 +1441,13 @@ struct simple_player
 				quad.tl.y += dy;
 				quad.tr.y += dy;
 			}
+		}
+
+		void reinit(float new_width, float new_height, float keyboard_height, float black_height, float black_margins)
+		{
+			WIDTH = new_width;
+			HEIGHT = new_height;
+			init(keyboard_height, black_height, black_margins);
 		}
 	};
 
@@ -1521,8 +1529,8 @@ struct simple_player
 				begin_y = std::clamp(begin_y, 0.f, 1.f);
 				end_y = std::clamp(end_y, 0.f, 1.f);
 
-				begin_y = data.keyboard->tr.y + draw_data::HEIGHT * begin_y;
-				end_y = data.keyboard->tr.y + draw_data::HEIGHT * end_y;
+				begin_y = data.keyboard->tr.y + data.HEIGHT * begin_y;
+				end_y = data.keyboard->tr.y + data.HEIGHT * end_y;
 
 				//begin_y = (data.keyboard->tr.y + draw_data::HEIGHT) * (1 - begin_y) + (begin_y)*data.keyboard->tr.y;
 				//end_y = (data.keyboard->tr.y + draw_data::HEIGHT) * (1 - end_y) + (end_y)*data.keyboard->tr.y;
@@ -2017,7 +2025,7 @@ struct PlayerViewer : public HandleableUIPart
 		data(std::make_unique<simple_player::draw_data>())
 	{
 		data->init(40, 22.5f, 0);
-		data->move(xpos - 0.5 * simple_player::draw_data::WIDTH, ypos);
+		data->move(xpos - 0.5f * data->WIDTH, ypos);
 	}
 
 	void Draw() override
@@ -2051,12 +2059,20 @@ struct PlayerViewer : public HandleableUIPart
 		float CW = 0.5f * (
 			(std::int32_t)((bool)(GLOBAL_LEFT & Arg))
 			- (std::int32_t)((bool)(GLOBAL_RIGHT & Arg))
-			) * simple_player::draw_data::WIDTH,
+			) * data->WIDTH,
 			CH = 0.5f * (
 				(std::int32_t)((bool)(GLOBAL_BOTTOM & Arg))
 				- (std::int32_t)((bool)(GLOBAL_TOP & Arg))
-				) * simple_player::draw_data::HEIGHT;
+				) * data->HEIGHT;
 		SafeChangePosition(NewX + CW, NewY + CH);
+	}
+	void reinit_and_reposition(float new_xpos, float new_ypos, float new_width, float new_height)
+	{
+		std::lock_guard<std::recursive_mutex> locker(Lock);
+		xpos = new_xpos;
+		ypos = new_ypos;
+		data->reinit(new_width, new_height, 40.f, 22.5f, 0.f);
+		data->move(new_xpos - 0.5f * data->WIDTH, new_ypos);
 	}
 	void KeyboardHandler(CHAR CH) override
 	{
