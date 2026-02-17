@@ -2108,10 +2108,7 @@ void PlayerWatchFunc()
 	auto pause_button = (Button*)(*window)["PAUSE"];
 	pause_button->SafeStringReplace("\200");  // Play symbol (since it's paused)
 
-	// todo: debug memory leak in textbox lmao
-
 	auto& info = player->get_info();
-	
 	while (true)
 	{
 		uint64_t scanned = info.scanned;
@@ -2120,7 +2117,7 @@ void PlayerWatchFunc()
 		auto str = std::format("Read {} out of {} ~ {:3.2f}%", scanned, size, scanned * 100.f / size);
 		textbox->SafeStringReplace(str);
 
-		if (info.scanned == info.size && info.ready)
+		if (info.open_complete)
 			break;
 
 		std::this_thread::sleep_for(std::chrono::milliseconds(20));

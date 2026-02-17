@@ -683,7 +683,7 @@ struct simple_player
 		uint64_t total_duration_us{0};
 
 		volatile uint64_t scanned{0};
-		volatile bool ready{false};
+		volatile bool open_complete{false};
 		volatile uint64_t size{0};
 
 		uint16_t ppq{0};
@@ -781,6 +781,8 @@ struct simple_player
 	void simple_run(std::wstring filename)
 	{
 		auto res = open(filename);
+		info.open_complete = true;
+
 		if (!res)
 		{
 			ThrowAlert_Error("Playback failed");
