@@ -72,6 +72,9 @@ void background_worker::push(std::function<void()> task)
 {
 	std::unique_lock<std::mutex> lock(this->task_queue_mutex);
 
+	if (this->terminate_flag.load())
+		return;
+
 	this->task_queue.push_back(std::move(task));
 	this->task_queue_cv.notify_one();
 }
@@ -80,6 +83,8 @@ void background_worker::stop()
 {
 	{
 		std::unique_lock<std::mutex> lock(this->task_queue_mutex);
+
+		this->task_queue.clear();
 
 		this->terminate_flag.store(true);
 		this->task_queue_cv.notify_one();

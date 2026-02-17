@@ -2099,6 +2099,8 @@ void PlayerWatchFunc()
 	auto textbox = (TextBox*)(*window)["TEXT"];
 	auto seek_to_slider = (Slider*)(*window)["SEEK_TO"];
 
+	textbox->SafeStringReplace("Opening and reading first track");
+
 	// Populate the device list
 	UpdateDeviceList();
 
@@ -2109,15 +2111,16 @@ void PlayerWatchFunc()
 	// todo: debug memory leak in textbox lmao
 
 	auto& info = player->get_info();
+	
 	while (true)
 	{
 		uint64_t scanned = info.scanned;
 		uint64_t size = info.size;
 
-		auto str = std::format("Read {} out of {} ~ {:2.2}%", scanned, size, scanned * 100.f / size);
+		auto str = std::format("Read {} out of {} ~ {:3.2f}%", scanned, size, scanned * 100.f / size);
 		textbox->SafeStringReplace(str);
 
-		if (info.scanned == info.size)
+		if (info.scanned == info.size && info.ready)
 			break;
 
 		std::this_thread::sleep_for(std::chrono::milliseconds(20));
@@ -2368,33 +2371,33 @@ void SwitchMaximise()
 	if (!simplayer_maximised)
 	{
 		// Save current state
-		auto& s = saved_simplayer_state;
-		s.window_x = window->XWindowPos;
-		s.window_y = window->YWindowPos;
-		s.window_width = window->Width;
-		s.window_height = window->Height;
-		s.text_x = text->Xpos;
-		s.text_y = text->Ypos;
-		s.pause_x = pause_btn->Xpos;
-		s.pause_y = pause_btn->Ypos;
-		s.stop_x = stop_btn->Xpos;
-		s.stop_y = stop_btn->Ypos;
-		s.vls_x = vls->Xpos;
-		s.vls_y = vls->Ypos;
-		s.buf_switch_x = buf_sw->Xpos;
-		s.buf_switch_y = buf_sw->Ypos;
-		s.seek_x = seek_to->Xpos;
-		s.seek_y = seek_to->Ypos;
-		s.seek_track_length = seek_to->TrackLength;
-		s.max_x = max_btn->Xpos;
-		s.max_y = max_btn->Ypos;
-		s.devlist_cx = dev_list->HeaderCXPos;
-		s.devlist_y = dev_list->HeaderYPos;
-		s.view_x = player_viewer->xpos;
-		s.view_y = player_viewer->ypos;
-		s.view_width = player_viewer->data->width;
-		s.view_height = player_viewer->data->height;
-		s.previous_main_window_id = WH->MainWindow_ID;
+		auto& state = saved_simplayer_state;
+		state.window_x = window->XWindowPos;
+		state.window_y = window->YWindowPos;
+		state.window_width = window->Width;
+		state.window_height = window->Height;
+		state.text_x = text->Xpos;
+		state.text_y = text->Ypos;
+		state.pause_x = pause_btn->Xpos;
+		state.pause_y = pause_btn->Ypos;
+		state.stop_x = stop_btn->Xpos;
+		state.stop_y = stop_btn->Ypos;
+		state.vls_x = vls->Xpos;
+		state.vls_y = vls->Ypos;
+		state.buf_switch_x = buf_sw->Xpos;
+		state.buf_switch_y = buf_sw->Ypos;
+		state.seek_x = seek_to->Xpos;
+		state.seek_y = seek_to->Ypos;
+		state.seek_track_length = seek_to->TrackLength;
+		state.max_x = max_btn->Xpos;
+		state.max_y = max_btn->Ypos;
+		state.devlist_cx = dev_list->HeaderCXPos;
+		state.devlist_y = dev_list->HeaderYPos;
+		state.view_x = player_viewer->xpos;
+		state.view_y = player_viewer->ypos;
+		state.view_width = player_viewer->data->width;
+		state.view_height = player_viewer->data->height;
+		state.previous_main_window_id = WH->MainWindow_ID;
 
 		// Apply maximized layout
 		ApplySimplayerMaximisedLayout();
@@ -2408,32 +2411,32 @@ void SwitchMaximise()
 	}
 	else
 	{
-		auto& s = saved_simplayer_state;
+		auto& state = saved_simplayer_state;
 
 		// Move window back to original position
-		float dx = s.window_x - window->XWindowPos;
-		float dy = s.window_y - window->YWindowPos;
+		float dx = state.window_x - window->XWindowPos;
+		float dy = state.window_y - window->YWindowPos;
 		window->SafeMove(dx, dy);
-		window->_NotSafeResize(s.window_height, s.window_width);
+		window->_NotSafeResize(state.window_height, state.window_width);
 		auto fui = (MoveableFuiWindow*)window;
 		fui->SafeWindowRename(window->WindowName->_CurrentText, false);
 
 		// Restore each child to saved position
-		text->SafeChangePosition(s.text_x, s.text_y);
-		pause_btn->SafeChangePosition(s.pause_x, s.pause_y);
-		stop_btn->SafeChangePosition(s.stop_x, s.stop_y);
-		vls->SafeChangePosition(s.vls_x, s.vls_y);
-		buf_sw->SafeChangePosition(s.buf_switch_x, s.buf_switch_y);
-		seek_to->SafeChangePosition(s.seek_x, s.seek_y);
-		seek_to->TrackLength = s.seek_track_length;
-		max_btn->SafeChangePosition(s.max_x, s.max_y);
-		dev_list->SafeChangePosition(s.devlist_cx, s.devlist_y);
+		text->SafeChangePosition(state.text_x, state.text_y);
+		pause_btn->SafeChangePosition(state.pause_x, state.pause_y);
+		stop_btn->SafeChangePosition(state.stop_x, state.stop_y);
+		vls->SafeChangePosition(state.vls_x, state.vls_y);
+		buf_sw->SafeChangePosition(state.buf_switch_x, state.buf_switch_y);
+		seek_to->SafeChangePosition(state.seek_x, state.seek_y);
+		seek_to->TrackLength = state.seek_track_length;
+		max_btn->SafeChangePosition(state.max_x, state.max_y);
+		dev_list->SafeChangePosition(state.devlist_cx, state.devlist_y);
 
 		// Restore PlayerViewer
-		player_viewer->RescaleAndReposition(s.view_x, s.view_y, s.view_width, s.view_height);
+		player_viewer->RescaleAndReposition(state.view_x, state.view_y, state.view_width, state.view_height);
 
 		// Restore window management
-		WH->MainWindow_ID = s.previous_main_window_id;
+		WH->MainWindow_ID = state.previous_main_window_id;
 		WH->DisableAllWindows();
 		WH->EnableWindow("SIMPLAYER");
 
