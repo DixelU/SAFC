@@ -4,11 +4,13 @@ Simple AF Converter (SAFC)
 Allows merging completely different midis by completely different ways!
 Also aims at restoring badly damaged/formatted midi files that other editors, players and tools cannot parse!
 
+And other funky stuff :P
+
 ## Important notice: 
 **Currently is being supported as legacy project.** Update including a complete overhaul is ~~coming soon~~ delayed for indeterminate amount of time.
 
 ## Feature Manual
-Can be found in this repository as a [png file right here](https://github.com/DixelU/SAFC/blob/develop/Manual.png) (yes, i question this decision to this day ...)
+Has partially been migrated to github wiki - https://github.com/DixelU/SAFC/wiki
 
 ## Other stuff
 There's discord server, where SAF apps (SAFC included) were publishing all that time since July/August of 2018: https://discord.gg/CsgEW4P
