@@ -14,13 +14,15 @@
 #include <array>
 #include <ranges>
 #include <mutex>
+#include <unordered_map>
 
 #include "../bbb_ffio.h"
 
 #include "single_midi_processor_2.h"
 #include "single_midi_info_collector.h"
 
-#define SIMPLE_PLAYER_FORCE_NO_INLINE  __declspec(noinline)
+#define SIMPLE_PLAYER_FORCE_NO_INLINE 
+// __declspec(noinline)
 // __declspec(noinline)
 
 // Lock-free SPSC slab-based queue
@@ -170,6 +172,9 @@ public:
 		if (tail_->full_producer())
 		{
 			slab* new_slab = producer_get_slab();
+			if (!new_slab) [[unlikely]]
+				return;
+
 			new_slab->push_producer(std::move(value));
 			// Publish new slab - consumer will see it when following next_slab
 			tail_->next_slab.store(new_slab, std::memory_order_release);
@@ -333,24 +338,24 @@ struct simple_player
 	{
 		uint64_t start_time_us;              // note on time (immutable after creation)
 		std::atomic<uint64_t> end_time_us;   // note off time (~0 = still held/pending)
-		uint32_t color_id;                   // (track_index << 4) | channel (immutable after creation)
+		uint32_t track_id;                   // (track_index << 4) | channel (immutable after creation)
 
-		buffered_note() : start_time_us(0), end_time_us(~0ULL), color_id(0) {}
+		buffered_note() : start_time_us(0), end_time_us(~0ULL), track_id(0) {}
 
-		buffered_note(uint64_t start, uint64_t end, uint32_t color)
-			: start_time_us(start), end_time_us(end), color_id(color) {}
+		buffered_note(uint64_t start, uint64_t end, uint32_t track)
+			: start_time_us(start), end_time_us(end), track_id(track) {}
 
 		// Move constructor for queue operations
 		buffered_note(buffered_note&& other) noexcept
 			: start_time_us(other.start_time_us)
 			, end_time_us(other.end_time_us.load(std::memory_order_relaxed))
-			, color_id(other.color_id) {}
+			, track_id(other.track_id) {}
 
 		buffered_note& operator=(buffered_note&& other) noexcept
 		{
 			start_time_us = other.start_time_us;
 			end_time_us.store(other.end_time_us.load(std::memory_order_relaxed), std::memory_order_relaxed);
-			color_id = other.color_id;
+			track_id = other.track_id;
 			return *this;
 		}
 	};
@@ -365,40 +370,35 @@ struct simple_player
 		// Only accessed by parser thread - no synchronization needed
 		struct pending_entry
 		{
-			uint32_t color_id;
+			uint32_t track_id;
 			buffered_note* note_ptr;
 		};
 
-		// Fixed-size stack of pending notes per key (LIFO for matching)
+		// Per-track_id LIFO stacks of pending notes per key.
+		// O(1) push and find_and_remove via hash map instead of O(n) linear scan.
 		// Parser-private: only accessed by parser thread
 		struct pending_list
 		{
-			std::vector<pending_entry> entries;
+			// track_id -> LIFO stack of note pointers awaiting note_off
+			std::unordered_map<uint32_t, std::vector<buffered_note*>> stacks;
 
-			void push(uint32_t color_id, buffered_note* ptr)
+			void push(uint32_t track_id, buffered_note* ptr)
 			{
-				entries.emplace_back(color_id, ptr);
+				stacks[track_id].push_back(ptr);
 			}
 
-			// Find and remove most recent note with matching color_id (LIFO)
-			buffered_note* find_and_remove(uint32_t color_id)
+			// O(1) average: hash lookup then back-pop (LIFO per track_id)
+			buffered_note* find_and_remove(uint32_t track_id)
 			{
-				for (auto it = entries.rbegin(); it != entries.rend(); ++it)
-				{
-					if (it->color_id != color_id)
-						continue;
-
-					buffered_note* result = it->note_ptr;
-					// Swap with last and pop
-					*it = entries.back();
-					entries.pop_back();
-					return result;
-				}
-
-				return nullptr;
+				auto it = stacks.find(track_id);
+				if (it == stacks.end() || it->second.empty())
+					return nullptr;
+				buffered_note* result = it->second.back();
+				it->second.pop_back();
+				return result;
 			}
 
-			void clear() { entries.clear(); }
+			void clear() { stacks.clear(); }
 		};
 
 		// Per-key SPSC queues for falling notes visualization
@@ -409,22 +409,22 @@ struct simple_player
 		// Parser-private: only accessed by parser thread
 		std::array<pending_list, key_count> pending;
 
-		// Generate unique color_id from track index and channel
+		// Generate unique track_id from track index and channel
 		static uint32_t make_color_id(size_t track_index, uint8_t channel)
 		{
 			return static_cast<uint32_t>((track_index << 4) | (channel & 0x0F));
 		}
 
-		// Extract track index from color_id
-		static size_t get_track_from_color(uint32_t color_id)
+		// Extract track index from track_id
+		static size_t get_track_from_track_id(uint32_t track_id)
 		{
-			return color_id >> 4;
+			return track_id >> 4;
 		}
 
-		// Extract channel from color_id
-		static uint8_t get_channel_from_color(uint32_t color_id)
+		// Extract channel from track_id
+		static uint8_t get_channel_from_track_id(uint32_t track_id)
 		{
-			return static_cast<uint8_t>(color_id & 0x0F);
+			return static_cast<uint8_t>(track_id & 0x0F);
 		}
 
 		// Push a note_on event - creates visual note and tracks as pending
@@ -434,14 +434,14 @@ struct simple_player
 			if (key >= key_count)
 				return;
 
-			uint32_t color_id = make_color_id(track_index, channel);
+			uint32_t track_id = make_color_id(track_index, channel);
 
 			// Push to falling notes queue (lock-free)
-			falling_notes[key].push({time_us, ~0ULL, color_id});
+			falling_notes[key].push({time_us, ~0ULL, track_id});
 
 			// Track as pending for note_off matching (parser-private)
 			buffered_note* note_ptr = &falling_notes[key].back();
-			pending[key].push(color_id, note_ptr);
+			pending[key].push(track_id, note_ptr);
 		}
 
 		// Push a note_off event - finds matching pending note and sets end_time
@@ -451,10 +451,10 @@ struct simple_player
 			if (key >= key_count)
 				return;
 
-			uint32_t color_id = make_color_id(track_index, channel);
+			uint32_t track_id = make_color_id(track_index, channel);
 
 			// Find matching pending note and set its end time (atomic store)
-			buffered_note* note = pending[key].find_and_remove(color_id);
+			buffered_note* note = pending[key].find_and_remove(track_id);
 			if (note)
 				note->end_time_us.store(time_us, std::memory_order_release);
 		}
@@ -504,88 +504,6 @@ struct simple_player
 		uint32_t short_msg;  // prepared MIDI short message (0 = invalid/empty)
 	};
 
-	// Lock-free SPSC ring buffer for pre-parsed MIDI messages
-	struct lookahead_buffer
-	{
-		static constexpr size_t buffer_size = 1 << 22; // must be power of 2
-		static constexpr size_t buffer_mask = buffer_size - 1;
-
-		std::unique_ptr<send_event[]> buffer;
-		alignas(64) std::atomic<size_t> head{0}; // producer writes here
-		alignas(64) std::atomic<size_t> tail{0}; // consumer reads here
-
-		lookahead_buffer() : buffer(std::make_unique<send_event[]>(buffer_size)) {}
-
-		void reset()
-		{
-			head.store(0, std::memory_order_relaxed);
-			tail.store(0, std::memory_order_relaxed);
-		}
-
-		// Returns number of events in buffer
-		size_t size() const
-		{
-			size_t h = head.load(std::memory_order_acquire);
-			size_t t = tail.load(std::memory_order_acquire);
-			return (h - t) & buffer_mask;
-		}
-
-		bool empty() const
-		{
-			return head.load(std::memory_order_acquire) == tail.load(std::memory_order_acquire);
-		}
-
-		bool full() const
-		{
-			size_t h = head.load(std::memory_order_relaxed);
-			size_t t = tail.load(std::memory_order_acquire);
-			return ((h + 1) & buffer_mask) == t;
-		}
-
-		// Producer: push event (returns false if full)
-		SIMPLE_PLAYER_FORCE_NO_INLINE bool try_push(uint64_t tick, uint64_t time_us, uint32_t msg)
-		{
-			size_t h = head.load(std::memory_order_relaxed);
-			size_t next_h = (h + 1) & buffer_mask;
-
-			if (next_h == tail.load(std::memory_order_acquire))
-				return false; // full
-
-			buffer[h] = {tick, time_us, msg};
-			head.store(next_h, std::memory_order_release);
-			return true;
-		}
-
-		// Consumer: peek at front event (returns nullptr if empty)
-		SIMPLE_PLAYER_FORCE_NO_INLINE const send_event* peek() const
-		{
-			size_t t = tail.load(std::memory_order_relaxed);
-			if (t == head.load(std::memory_order_acquire))
-				return nullptr;
-			return &buffer[t];
-		}
-
-		// Consumer: pop front event
-		SIMPLE_PLAYER_FORCE_NO_INLINE void pop()
-		{
-			size_t t = tail.load(std::memory_order_relaxed);
-			if (t != head.load(std::memory_order_acquire))
-				tail.store((t + 1) & buffer_mask, std::memory_order_release);
-		}
-
-		// Consumer: pop and return (returns {0,0} if empty)
-		SIMPLE_PLAYER_FORCE_NO_INLINE send_event try_pop()
-		{
-			size_t t = tail.load(std::memory_order_relaxed);
-			if (t == head.load(std::memory_order_acquire))
-				return {0, 0};
-
-			send_event ev = buffer[t];
-			tail.store((t + 1) & buffer_mask, std::memory_order_release);
-			return ev;
-		}
-	};
-
 	struct track_playback_state
 	{
 		const uint8_t* position;
@@ -613,11 +531,67 @@ struct simple_player
 		bool operator>(const track_event_ref& other) const { return tick > other.tick; }
 	};
 
-	using event_queue_type = std::priority_queue<
-		track_event_ref,
-		std::vector<track_event_ref>,
-		std::greater<track_event_ref>
-	>;
+	// Custom min-heap for track event scheduling.
+	// replace_top() merges pop+push into one sift-down: O(log n) instead of O(2 log n).
+	// Used in the parser inner loop where every event does pop+push.
+	struct track_event_heap
+	{
+		std::vector<track_event_ref> data;
+
+		bool empty() const { return data.empty(); }
+		const track_event_ref& top() const { return data[0]; }
+
+		void push(track_event_ref val)
+		{
+			data.push_back(val);
+			sift_up(data.size() - 1);
+		}
+
+		void pop()
+		{
+			data[0] = data.back();
+			data.pop_back();
+			if (!data.empty())
+				sift_down(0);
+		}
+
+		// Replace root with val and restore heap with one sift-down.
+		// Saves the sift-up that push() would require.
+		void replace_top(track_event_ref val)
+		{
+			data[0] = val;
+			sift_down(0);
+		}
+
+	private:
+		// operator> is tick > other.tick; min-heap: parent.tick <= child.tick
+		void sift_up(size_t i)
+		{
+			while (i > 0)
+			{
+				size_t parent = (i - 1) >> 1;
+				if (!(data[parent] > data[i])) break; // parent.tick <= child.tick: OK
+				std::swap(data[i], data[parent]);
+				i = parent;
+			}
+		}
+
+		void sift_down(size_t i)
+		{
+			size_t n = data.size();
+			while (true)
+			{
+				size_t smallest = i;
+				size_t left  = 2 * i + 1;
+				size_t right = 2 * i + 2;
+				if (left  < n && data[smallest] > data[left])  smallest = left;
+				if (right < n && data[smallest] > data[right]) smallest = right;
+				if (smallest == i) break;
+				std::swap(data[i], data[smallest]);
+				i = smallest;
+			}
+		}
+	};
 
 	struct playback_state
 	{
@@ -640,8 +614,8 @@ struct simple_player
 		std::atomic<uint64_t> seek_target_us{0};
 		std::atomic<bool> seek_resume_paused{false};
 
-		// Lookahead buffer for pre-parsed MIDI messages
-		lookahead_buffer send_buffer;
+		// Lookahead buffer for pre-parsed MIDI messages (unbounded SPSC - never stalls parser)
+		buffered_queue_spsc<send_event> send_buffer;
 		std::atomic<bool> seeking_ff{false};        // parser is fast-forwarding (sender drains immediately)
 		std::atomic<bool> parser_done{false};       // parser finished all events
 		std::atomic<uint64_t> parsed_up_to_us{0};   // how far ahead the parser has reached (in us)
@@ -669,7 +643,7 @@ struct simple_player
 			parsed_up_to_us = 0;
 			sender_position_us = 0;
 			track_states.clear();
-			send_buffer.reset();
+			send_buffer.clear();
 			visuals.reset();
 		}
 	};
@@ -973,7 +947,7 @@ struct simple_player
 			state.seeking_ff.store(true, std::memory_order_release);
 
 		// initialize track states and build priority queue
-		event_queue_type event_queue;
+		track_event_heap event_queue;
 		state.track_states.resize(info.tracks.size());
 
 		for (size_t i = 0; i < info.tracks.size(); ++i)
@@ -1057,7 +1031,7 @@ struct simple_player
 					break;
 
 				auto ref = event_queue.top();
-				event_queue.pop();
+				// pop deferred: see replace_top/pop at bottom of loop body
 
 				auto& track = state.track_states[ref.track_index];
 
@@ -1068,6 +1042,7 @@ struct simple_player
 						track.done = true;
 						--state.active_tracks;
 					}
+					event_queue.pop();
 					continue;
 				}
 
@@ -1097,6 +1072,7 @@ struct simple_player
 				{
 					track.done = true;
 					--state.active_tracks;
+					event_queue.pop();
 					continue;
 				}
 
@@ -1164,6 +1140,7 @@ struct simple_player
 						{
 							track.done = true;
 							--state.active_tracks;
+							event_queue.pop();
 							continue;
 						}
 
@@ -1174,28 +1151,26 @@ struct simple_player
 					}
 				}
 
-				// Push message to lookahead buffer (wait if buffer is full)
+				// Push message to lookahead buffer (unbounded - never stalls)
 				if (msg_to_send != 0)
-				{
-					while (!state.send_buffer.try_push(batch_tick, batch_time_us, msg_to_send))
-					{
-						if (state.stop_requested)
-							break;
-						std::this_thread::yield();
-					}
-				}
+					state.send_buffer.push({batch_tick, batch_time_us, msg_to_send});
 
-				// read next delta time and re-queue track if it has more events
+				// Re-schedule track or remove from heap.
+				// replace_top = one sift-down vs pop+push = O(log n) instead of O(2 log n).
 				if (track.position < track.end && !track.done)
 				{
 					auto delta = get_vlv(track.position, track.end);
 					track.next_event_tick = batch_tick + delta;
-					event_queue.push({track.next_event_tick, ref.track_index});
+					event_queue.replace_top({track.next_event_tick, ref.track_index});
 				}
-				else if (!track.done)
+				else
 				{
-					track.done = true;
-					--state.active_tracks;
+					if (!track.done)
+					{
+						track.done = true;
+						--state.active_tracks;
+					}
+					event_queue.pop();
 				}
 			}
 		}
@@ -1212,11 +1187,11 @@ struct simple_player
 			// Fast-forward mode: drain buffer immediately, no timing
 			if (state.seeking_ff.load(std::memory_order_acquire))
 			{
-				const send_event* ev = state.send_buffer.peek();
-				if (ev)
+				if (!state.send_buffer.empty())
 				{
-					if (short_msg && ev->short_msg != 0)
-						short_msg(ev->short_msg);
+					auto& ev = state.send_buffer.front();
+					if (short_msg && ev.short_msg != 0)
+						short_msg(ev.short_msg);
 					state.send_buffer.pop();
 					continue;
 				}
@@ -1246,10 +1221,7 @@ struct simple_player
 			if (state.stop_requested)
 				break;
 
-			// peek at next event
-			const send_event* ev = state.send_buffer.peek();
-
-			if (!ev)
+			if (state.send_buffer.empty())
 			{
 				// buffer empty - check if parser is done
 				if (state.parser_done.load(std::memory_order_acquire))
@@ -1260,12 +1232,13 @@ struct simple_player
 				continue;
 			}
 
-			uint64_t target_us = ev->time_us - state.start_offset_us;
+			auto& ev = state.send_buffer.front();
+			uint64_t target_us = ev.time_us - state.start_offset_us;
 
 			// update current position for UI and parser throttling
-			state.current_time_us = ev->time_us;
-			state.current_tick = ev->tick;
-			state.sender_position_us.store(ev->time_us, std::memory_order_release);
+			state.current_time_us = ev.time_us;
+			state.current_tick = ev.tick;
+			state.sender_position_us.store(ev.time_us, std::memory_order_release);
 
 			// wait until it's time to send this event
 			auto elapsed = std::chrono::steady_clock::now() - state.start_time;
@@ -1291,8 +1264,8 @@ struct simple_player
 			}
 
 			// send the event
-			if (short_msg && ev->short_msg != 0) [[likely]]
-				short_msg(ev->short_msg);
+			if (short_msg && ev.short_msg != 0) [[likely]]
+				short_msg(ev.short_msg);
 
 			state.send_buffer.pop();
 		}
@@ -1319,7 +1292,7 @@ struct simple_player
 			state.parser_done.store(false, std::memory_order_relaxed);
 			state.parsed_up_to_us.store(0, std::memory_order_relaxed);
 			state.sender_position_us.store(0, std::memory_order_relaxed);
-			state.send_buffer.reset();
+			state.send_buffer.clear();
 			state.visuals.reset();
 			state.track_states.clear();
 
@@ -1520,7 +1493,7 @@ struct simple_player
 				if (end_y < -0.01f || begin_y > 1.01f)
 					continue;
 
-				auto color_value = rotate(0xFF7F008F, note.color_id);
+				auto color_value = rotate(0xFF7F008F, note.track_id);
 
 				if (begin_y <= 0 && end_y >= 0)
 				{
@@ -1608,6 +1581,21 @@ struct simple_player
 			glVertex2f(key.bl.x, key.bl.y);
 			glVertex2f(key.tl.x, key.tl.y);
 		}
+		glEnd();
+
+
+		glColor3ub(0, 0, 0);
+		glLineWidth(4);
+		glBegin(GL_LINES);
+		glVertex2f(data.keyboard->tl.x, data.keyboard->tl.y);
+		glVertex2f(data.keyboard[total_white - 1].br.x, data.keyboard[total_white - 1].tr.y);
+		glEnd();
+
+		glColor3ub(191, 31, 0);
+		glLineWidth(2);
+		glBegin(GL_LINES);
+		glVertex2f(data.keyboard->tl.x, data.keyboard->tl.y);
+		glVertex2f(data.keyboard[total_white - 1].tr.x, data.keyboard[total_white - 1].tr.y);
 		glEnd();
 	}
 
@@ -1871,14 +1859,14 @@ private:
 		return true;
 	}
 
-	inline static uint8_t get_value_and_increment(const uint8_t*& cur, const uint8_t* end)
+	SIMPLE_PLAYER_FORCE_NO_INLINE static uint8_t get_value_and_increment(const uint8_t*& cur, const uint8_t* end)
 	{
 		if (cur < end)
 			return *(cur++);
 		return 0;
 	}
 
-	static uint64_t get_vlv(const uint8_t*& cur, const uint8_t* end)
+	SIMPLE_PLAYER_FORCE_NO_INLINE static uint64_t get_vlv(const uint8_t*& cur, const uint8_t* end)
 	{
 		uint64_t value = 0;
 
