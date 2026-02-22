@@ -29,6 +29,7 @@ struct Slider : HandleableUIPart
 
 	bool Hovered;
 	bool Dragging;
+	bool FireOnRelease; // if true, OnValueChange fires only on mouse release, not on every drag move
 	float DragOffsetX, DragOffsetY;
 
 	void(*OnValueChange)(float);
@@ -76,6 +77,7 @@ struct Slider : HandleableUIPart
 
 		this->Hovered = false;
 		this->Dragging = false;
+		this->FireOnRelease = false;
 		this->DragOffsetX = 0.0f;
 		this->DragOffsetY = 0.0f;
 
@@ -195,6 +197,9 @@ struct Slider : HandleableUIPart
 			if (Button == -1 && State == 1) // Left button released
 			{
 				Dragging = false;
+				// FireOnRelease: callback deferred until here
+				if (FireOnRelease && OnValueChange)
+					OnValueChange(CurrentValue);
 			}
 			else // Continue dragging
 			{
@@ -219,8 +224,8 @@ struct Slider : HandleableUIPart
 				float oldValue = CurrentValue;
 				CurrentValue = MinValue + NormalizedPosition * (MaxValue - MinValue);
 
-				// Call callback if value changed
-				if (OnValueChange && oldValue != CurrentValue)
+				// Call callback if value changed (skipped if FireOnRelease - fires on release instead)
+				if (!FireOnRelease && OnValueChange && oldValue != CurrentValue)
 					OnValueChange(CurrentValue);
 
 				SetCursor(HandCursor);

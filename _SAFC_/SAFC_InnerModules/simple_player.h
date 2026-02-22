@@ -409,6 +409,10 @@ struct simple_player
 		// Parser-private: only accessed by parser thread
 		std::array<pending_list, key_count> pending;
 
+		// Mutex held by render thread during cull+iteration and by playback_thread during reset().
+		// Prevents data race between visuals.reset() (clear) and concurrent render iteration.
+		mutable std::mutex access_mutex;
+
 		// Generate unique track_id from track index and channel
 		static uint32_t make_color_id(size_t track_index, uint8_t channel)
 		{
@@ -491,8 +495,10 @@ struct simple_player
 		}
 
 		// Reset for new playback
+		// Acquires access_mutex to synchronize with render thread iteration.
 		void reset()
 		{
+			std::lock_guard<std::mutex> lock(access_mutex);
 			clear();
 		}
 	};
@@ -1452,8 +1458,6 @@ struct simple_player
 			current_us = 0;
 		}
 
-		// Lock-free: no mutex needed
-
 		if (data.enable_simulated_lag)
 		{
 			uint64_t max = state.parsed_up_to_us.load(std::memory_order_relaxed);
@@ -1462,73 +1466,78 @@ struct simple_player
 				current_us = max - data.scroll_window_us;
 		}
 
-		visuals.cull_expired(int64_t(current_us) - data.scroll_window_us);
-
 		// Draw falling notes
 		draw_data::color keyboard_colors[128];
 		memset(keyboard_colors, 0xFF, sizeof(draw_data::color) * total_white);
 		memset(keyboard_colors + total_white, 0x00, sizeof(draw_data::color) * (128 - total_white));
 
-		for (uint8_t index = 0; index < 128; ++index)
 		{
-			uint8_t key = data.key_n[index];
+			// Lock against visuals.reset() which may be called by playback_thread on seek/restart.
+			std::lock_guard<std::mutex> visuals_lock(visuals.access_mutex);
 
-			for (auto it = visuals.falling_notes[key].begin();
-				it != visuals.falling_notes[key].end(); ++it)
+			visuals.cull_expired(int64_t(current_us) - data.scroll_window_us);
+
+			for (uint8_t index = 0; index < 128; ++index)
 			{
-				auto& note = *it;
+				uint8_t key = data.key_n[index];
 
-				// Atomic load for end_time_us (may be updated by parser)
-				uint64_t end_time = note.end_time_us.load(std::memory_order_acquire);
-
-				int64_t start_offset = note.start_time_us - current_us;
-				int64_t end_offset = end_time - current_us;
-
-				float begin_y = float(start_offset) / float(data.scroll_window_us);
-				float end_y = 1;
-
-				if (end_time != ~0ULL)
-					end_y = float(end_offset) / float(data.scroll_window_us);
-
-				if (end_y < -0.01f || begin_y > 1.01f)
-					continue;
-
-				auto color_value = rotate(0xFF7F008F, note.track_id);
-
-				if (begin_y <= 0 && end_y >= 0)
+				for (auto it = visuals.falling_notes[key].begin();
+					it != visuals.falling_notes[key].end(); ++it)
 				{
-					keyboard_colors[index] = draw_data::color{
-						.r = uint8_t(color_value >> 24),
-						.g = uint8_t(color_value >> 16),
-						.b = uint8_t(color_value >> 8),
-					};
+					auto& note = *it;
+
+					// Atomic load for end_time_us (may be updated by parser)
+					uint64_t end_time = note.end_time_us.load(std::memory_order_acquire);
+
+					int64_t start_offset = note.start_time_us - current_us;
+					int64_t end_offset = end_time - current_us;
+
+					float begin_y = float(start_offset) / float(data.scroll_window_us);
+					float end_y = 1;
+
+					if (end_time != ~0ULL)
+						end_y = float(end_offset) / float(data.scroll_window_us);
+
+					if (end_y < -0.01f || begin_y > 1.01f)
+						continue;
+
+					auto color_value = rotate(0xFF7F008F, note.track_id);
+
+					if (begin_y <= 0 && end_y >= 0)
+					{
+						keyboard_colors[index] = draw_data::color{
+							.r = uint8_t(color_value >> 24),
+							.g = uint8_t(color_value >> 16),
+							.b = uint8_t(color_value >> 8),
+						};
+					}
+
+					begin_y = std::clamp(begin_y, 0.f, 1.f);
+					end_y = std::clamp(end_y, 0.f, 1.f);
+
+					begin_y = data.keyboard->tr.y + data.height * begin_y;
+					end_y = data.keyboard->tr.y + data.height * end_y;
+
+					//begin_y = (data.keyboard->tr.y + draw_data::HEIGHT) * (1 - begin_y) + (begin_y)*data.keyboard->tr.y;
+					//end_y = (data.keyboard->tr.y + draw_data::HEIGHT) * (1 - end_y) + (end_y)*data.keyboard->tr.y;
+
+					__glcolor(color_value | 0xFF);
+
+					glBegin(GL_QUADS);
+					glVertex2f(data.keyboard[index].tl.x, begin_y);
+					glVertex2f(data.keyboard[index].tl.x, end_y);
+					glVertex2f(data.keyboard[index].tr.x, end_y);
+					glVertex2f(data.keyboard[index].tr.x, begin_y);
+					glEnd();
+
+					__glcolor(mul255_div_by_factor(color_value, 2) | 0xFF);
+					glBegin(GL_LINE_LOOP);
+					glVertex2f(data.keyboard[index].tl.x, begin_y);
+					glVertex2f(data.keyboard[index].tl.x, end_y);
+					glVertex2f(data.keyboard[index].tr.x, end_y);
+					glVertex2f(data.keyboard[index].tr.x, begin_y);
+					glEnd();
 				}
-
-				begin_y = std::clamp(begin_y, 0.f, 1.f);
-				end_y = std::clamp(end_y, 0.f, 1.f);
-
-				begin_y = data.keyboard->tr.y + data.height * begin_y;
-				end_y = data.keyboard->tr.y + data.height * end_y;
-
-				//begin_y = (data.keyboard->tr.y + draw_data::HEIGHT) * (1 - begin_y) + (begin_y)*data.keyboard->tr.y;
-				//end_y = (data.keyboard->tr.y + draw_data::HEIGHT) * (1 - end_y) + (end_y)*data.keyboard->tr.y;
-
-				__glcolor(color_value | 0xFF);
-
-				glBegin(GL_QUADS);
-				glVertex2f(data.keyboard[index].tl.x, begin_y);
-				glVertex2f(data.keyboard[index].tl.x, end_y);
-				glVertex2f(data.keyboard[index].tr.x, end_y);
-				glVertex2f(data.keyboard[index].tr.x, begin_y);
-				glEnd();
-
-				__glcolor(mul255_div_by_factor(color_value, 2) | 0xFF);
-				glBegin(GL_LINE_LOOP);
-				glVertex2f(data.keyboard[index].tl.x, begin_y);
-				glVertex2f(data.keyboard[index].tl.x, end_y);
-				glVertex2f(data.keyboard[index].tr.x, end_y);
-				glVertex2f(data.keyboard[index].tr.x, begin_y);
-				glEnd();
 			}
 		}
 		

@@ -2276,6 +2276,8 @@ void OnUnbufferedSwitch()
 
 void OnPlaybackSeekTo(float value)
 {
+	if (!player || !player->is_playing())
+		return;
 	player->seek_to(value);
 }
 
