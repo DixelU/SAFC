@@ -1,430 +1,452 @@
 #pragma once
 #ifndef SAFGUIF_SNPLIST
 #define SAFGUIF_SNPLIST
+
 #include <deque>
 #include <algorithm>
+#include <functional>
+#include <memory>
 
 #include "header_utils.h"
 #include "handleable_ui_part.h"
 #include "button_settings.h"
 
-constexpr int ARROW_STICK_HEIGHT = 10;
-struct SelectablePropertedList : HandleableUIPart
+struct selectable_properted_list : handleable_ui_part
 {
-	_Align TextInButtonsAlign;
-	void(*OnSelect)(int ID);
-	void(*OnGetProperties)(int ID);
-	float HeaderCXPos, HeaderYPos, CalculatedHeight, SpaceBetween, Width;
-	ButtonSettings* ButtSettings;
-	std::deque<std::string> SelectorsText;
-	std::deque<Button*> Selectors;
-	std::deque<std::uint32_t> SelectedID;
-	std::uint32_t MaxVisibleLines, CurrentTopLineID, MaxCharsInLine;
-	std::uint8_t TopArrowHovered, BottomArrowHovered;
-	~SelectablePropertedList() override
+	inline static constexpr int arrow_stick_height = 10;
+
+	_Align text_in_buttons_align;
+	std::function<void(int)> on_select;
+	std::function<void(int)> on_get_properties;
+	float header_cx_pos, header_y_pos, calculated_height, space_between, width;
+	button_settings* butt_settings; // non-owning
+	// Backward-compat aliases
+	float& Width = width;
+	float& HeaderCXPos = header_cx_pos;
+	float& HeaderYPos = header_y_pos;
+	std::deque<std::string> selectors_text;
+	std::deque<std::unique_ptr<button>> selectors;
+	std::deque<std::uint32_t> selected_id;
+	// More backward-compat aliases (must come after their referenced members)
+	std::deque<std::string>& SelectorsText = selectors_text;
+	std::deque<std::uint32_t>& SelectedID = selected_id;
+	std::uint32_t max_visible_lines, current_top_line_id, max_chars_in_line;
+	std::uint8_t top_arrow_hovered, bottom_arrow_hovered;
+
+	~selectable_properted_list() override
 	{
-		std::lock_guard<std::recursive_mutex> locker(Lock);
-		for (auto Y = Selectors.begin(); Y != Selectors.end(); ++Y)
-			delete (*Y);
+		std::lock_guard locker(lock);
+		selectors.clear();
 	}
-	SelectablePropertedList(ButtonSettings* ButtSettings, void(*OnSelect)(int SelectedID), void(*OnGetProperties)(int ID), float HeaderCXPos, float HeaderYPos, float Width, float SpaceBetween, std::uint32_t MaxCharsInLine = 0, std::uint32_t MaxVisibleLines = 0, _Align TextInButtonsAlign = _Align::left)
+
+	selectable_properted_list(button_settings* butt_settings,
+		std::function<void(int)> on_select, std::function<void(int)> on_get_properties,
+		float header_cx_pos, float header_y_pos, float width, float space_between,
+		std::uint32_t max_chars_in_line = 0, std::uint32_t max_visible_lines = 0,
+		_Align text_in_buttons_align = _Align::left)
 	{
-		this->MaxCharsInLine = MaxCharsInLine;
-		this->MaxVisibleLines = MaxVisibleLines;
-		this->ButtSettings = ButtSettings;
-		this->OnSelect = OnSelect;
-		this->OnGetProperties = OnGetProperties;
-		this->HeaderCXPos = HeaderCXPos;
-		this->Width = Width;
-		this->SpaceBetween = SpaceBetween;
-		this->HeaderCXPos = HeaderCXPos;
-		this->HeaderYPos = HeaderYPos;
-		this->CurrentTopLineID = 0;
-		this->TextInButtonsAlign = TextInButtonsAlign;
-		this->BottomArrowHovered = this->TopArrowHovered = false;
-		this->CalculatedHeight = 0;
-		//SelectedID = 0xFFFFFFFF;
+		this->max_chars_in_line = max_chars_in_line;
+		this->max_visible_lines = max_visible_lines;
+		this->butt_settings = butt_settings;
+		this->on_select = std::move(on_select);
+		this->on_get_properties = std::move(on_get_properties);
+		this->header_cx_pos = header_cx_pos;
+		this->width = width;
+		this->space_between = space_between;
+		this->header_y_pos = header_y_pos;
+		this->current_top_line_id = 0;
+		this->text_in_buttons_align = text_in_buttons_align;
+		this->bottom_arrow_hovered = this->top_arrow_hovered = false;
+		this->calculated_height = 0;
 	}
-	void RecalculateCurrentHeight()
+
+	void recalculate_current_height()
 	{
-		std::lock_guard<std::recursive_mutex> locker(Lock);
-		CalculatedHeight = SpaceBetween * Selectors.size();
+		std::lock_guard locker(lock);
+		calculated_height = space_between * selectors.size();
 	}
-	bool MouseHandler(float mx, float my, CHAR Button/*-1 left, 1 right, 0 move*/, CHAR State /*-1 down, 1 up*/) override
+
+	[[nodiscard]] bool mouse_handler(float mx, float my, char button_btn, char state) override
 	{
-		std::lock_guard<std::recursive_mutex> locker(Lock);
-		TopArrowHovered = BottomArrowHovered = 0;
-		if (fabsf(mx - HeaderCXPos) < 0.5 * Width && my < HeaderYPos && my > HeaderYPos - CalculatedHeight)
+		std::lock_guard locker(lock);
+		top_arrow_hovered = bottom_arrow_hovered = 0;
+		if (fabsf(mx - header_cx_pos) < 0.5f * width && my < header_y_pos && my > header_y_pos - calculated_height)
 		{
-			if (Button == 2 /*UP*/) 
+			if (button_btn == 2 /*UP*/)
 			{
-				if (State == -1)
-				{
-					SafeRotateList(-3);
-				}
+				if (state == -1)
+					safe_rotate_list(-3);
 			}
-			else if (Button == 3 /*DOWN*/)
+			else if (button_btn == 3 /*DOWN*/)
 			{
-				if (State == -1)
+				if (state == -1)
+					safe_rotate_list(3);
+			}
+		}
+		if (max_visible_lines && selectors.size() < selectors_text.size())
+		{
+			if (fabsf(mx - header_cx_pos) < 0.5f * width)
+			{
+				if (my > header_y_pos && my < header_y_pos + arrow_stick_height)
 				{
-					SafeRotateList(3);
+					top_arrow_hovered = 1;
+					if (button_btn == -1 && state == -1)
+					{
+						safe_rotate_list(-1);
+						return true;
+					}
+				}
+				else if (my < header_y_pos - calculated_height && my > header_y_pos - calculated_height - arrow_stick_height)
+				{
+					bottom_arrow_hovered = 1;
+					if (button_btn == -1 && state == -1)
+					{
+						safe_rotate_list(1);
+						return true;
+					}
 				}
 			}
 		}
-		if (MaxVisibleLines && Selectors.size() < SelectorsText.size())
+		if (button_btn)
 		{
-			if (fabsf(mx - HeaderCXPos) < 0.5 * Width)
+			bool flag = true;
+			for (int i = 0; i < (int)selectors.size(); i++)
 			{
-				if (my > HeaderYPos && my < HeaderYPos + ARROW_STICK_HEIGHT)
+				if (selectors[i]->mouse_handler(mx, my, button_btn, state) && flag)
 				{
-					TopArrowHovered = 1;
-					if (Button == -1 && State == -1)
+					if (button_btn == -1)
 					{
-						SafeRotateList(-1);
-						return 1;
-					}
-				}
-				else if (my < HeaderYPos - CalculatedHeight && my > HeaderYPos - CalculatedHeight - ARROW_STICK_HEIGHT)
-				{
-					BottomArrowHovered = 1;
-					if (Button == -1 && State == -1)
-					{
-						SafeRotateList(1);
-						return 1;
-					}
-				}
-			}
-		}
-		if (Button)
-		{
-			bool flag = 1;
-			for (int i = 0; i < Selectors.size(); i++)
-			{
-				if (Selectors[i]->MouseHandler(mx, my, Button, State) && flag)
-				{
-					if (Button == -1)
-					{
-						if (SHIFT_HELD)
-							SelectedID.clear();
-						auto it = std::find(SelectedID.begin(), SelectedID.end(), i + CurrentTopLineID);
-						if (!(it != SelectedID.end()))
-							SelectedID.push_back(i + CurrentTopLineID);
+						if (shift_held)
+							selected_id.clear();
+						auto it = std::find(selected_id.begin(), selected_id.end(), i + current_top_line_id);
+						if (it == selected_id.end())
+							selected_id.push_back(i + current_top_line_id);
 						else
-							SelectedID.erase(it);
-						if (OnSelect)
-							OnSelect(i + CurrentTopLineID);
+							selected_id.erase(it);
+						if (on_select)
+							on_select(i + current_top_line_id);
 					}
-					if (Button == 1)
+					if (button_btn == 1)
 					{
-						//cout << "PROP\n";
-						if (OnGetProperties)
-							OnGetProperties(i + CurrentTopLineID);
+						if (on_get_properties)
+							on_get_properties(i + current_top_line_id);
 					}
-					flag = 0;
-					return 1;
+					flag = false;
+					return true;
 				}
 			}
 		}
 		else
 		{
-			for (int i = 0; i < Selectors.size(); i++)
-				Selectors[i]->MouseHandler(mx, my, 0, 0);
+			for (int i = 0; i < (int)selectors.size(); i++)
+				selectors[i]->mouse_handler(mx, my, 0, 0);
 		}
-		for (auto ID : SelectedID)
-			if (ID < SelectorsText.size())
-				if (ID >= CurrentTopLineID && ID < CurrentTopLineID + MaxVisibleLines)
-					Selectors[ID - CurrentTopLineID]->MouseHandler(Selectors[ID - CurrentTopLineID]->Xpos, Selectors[ID - CurrentTopLineID]->Ypos, 0, 0);
-		return 0;
+		for (auto id : selected_id)
+			if (id < selectors_text.size())
+				if (id >= current_top_line_id && id < current_top_line_id + max_visible_lines)
+					selectors[id - current_top_line_id]->mouse_handler(selectors[id - current_top_line_id]->x_pos, selectors[id - current_top_line_id]->y_pos, 0, 0);
+		return false;
 	}
-	void SafeStringReplace(std::string NewString) override
+
+	void safe_string_replace(std::string new_string) override
 	{
-		std::lock_guard<std::recursive_mutex> locker(Lock);
-		this->SafeStringReplace(NewString, 0xFFFFFFFF);
+		std::lock_guard locker(lock);
+		safe_string_replace(new_string, 0xFFFFFFFF);
 	}
-	void SafeStringReplace(const std::string& NewString, std::uint32_t LineID)
+
+	void safe_string_replace(const std::string& new_string, std::uint32_t line_id)
 	{
-		std::lock_guard<std::recursive_mutex> locker(Lock);
-		if (LineID == 0xFFFFFFFF)
+		std::lock_guard locker(lock);
+		if (line_id == 0xFFFFFFFF)
 		{
-			SafeStringReplace(NewString, SelectedID.front());
+			safe_string_replace(new_string, selected_id.front());
 		}
-		else 
+		else
 		{
-			SelectorsText[LineID] = NewString;
-			if (LineID > CurrentTopLineID && LineID - CurrentTopLineID < MaxVisibleLines)
-				Selectors[LineID - CurrentTopLineID]->SafeStringReplace(NewString);
+			selectors_text[line_id] = new_string;
+			if (line_id > current_top_line_id && line_id - current_top_line_id < max_visible_lines)
+				selectors[line_id - current_top_line_id]->safe_string_replace(new_string);
 		}
 	}
-	void SafeUpdateLines()
+
+	void safe_update_lines()
 	{
-		std::lock_guard<std::recursive_mutex> locker(Lock);
-		while (SelectorsText.size() < Selectors.size())
+		std::lock_guard locker(lock);
+		while (selectors_text.size() < selectors.size())
+			selectors.pop_back();
+		if (current_top_line_id + max_visible_lines > selectors_text.size())
 		{
-			delete Selectors.back();
-			Selectors.pop_back();
+			if (selectors_text.size() >= max_visible_lines) current_top_line_id = selectors_text.size() - max_visible_lines;
+			else current_top_line_id = 0;
 		}
-		if (CurrentTopLineID + MaxVisibleLines > SelectorsText.size())
+		for (int i = 0; i < (int)selectors.size(); i++)
 		{
-			if (SelectorsText.size() >= MaxVisibleLines) CurrentTopLineID = SelectorsText.size() - MaxVisibleLines;
-			else CurrentTopLineID = 0;
-		}
-		for (int i = 0; i < Selectors.size(); i++)
-		{
-			if (i + CurrentTopLineID < SelectorsText.size())
-				Selectors[i]->SafeStringReplace(
-					(MaxCharsInLine) ?
-					(SelectorsText[i + CurrentTopLineID].substr(0, MaxCharsInLine))
+			if (i + current_top_line_id < selectors_text.size())
+				selectors[i]->safe_string_replace(
+					(max_chars_in_line) ?
+					(selectors_text[i + current_top_line_id].substr(0, max_chars_in_line))
 					:
-					(SelectorsText[i + CurrentTopLineID])
-			);
+					(selectors_text[i + current_top_line_id])
+				);
 		}
-		ResetAlign_All(TextInButtonsAlign);
+		reset_align_all(text_in_buttons_align);
 	}
-	bool IsResizeable() override
-	{
-		return true;
-	}
-	void SafeResize(float NewHeight, float NewWidth) override
-	{
-		std::lock_guard<std::recursive_mutex> locker(Lock);
-		float dCX = (NewWidth - Width) * 0.5;
-		HeaderCXPos += dCX;
-		float OldWidth = Width;
-		Width = NewWidth;
-		float Lines = std::floor(NewHeight / SpaceBetween);
-		int difference = (int)Lines - (int)MaxVisibleLines;
 
-		float YSpace = ButtSettings->STLS->SpaceWidth + 2 * ButtSettings->STLS->XUnitSize;
-		int NewMaxCharsInLine = Width / YSpace;
-		int ImportantDifference = OldWidth / YSpace - MaxCharsInLine;
-		MaxCharsInLine = NewMaxCharsInLine - ImportantDifference;
+	[[nodiscard]] bool is_resizeable() override { return true; }
 
-		if (Selectors.size())
+	void safe_resize(float new_height, float new_width) override
+	{
+		std::lock_guard locker(lock);
+		float dcx = (new_width - width) * 0.5f;
+		header_cx_pos += dcx;
+		float old_width = width;
+		width = new_width;
+		float lines = std::floor(new_height / space_between);
+		int difference = (int)lines - (int)max_visible_lines;
+
+		float y_space = butt_settings->stls->space_width + 2 * butt_settings->stls->x_unit_size;
+		int new_max_chars = (int)(width / y_space);
+		int important_diff = (int)(old_width / y_space) - (int)max_chars_in_line;
+		max_chars_in_line = new_max_chars - important_diff;
+
+		if (!selectors.empty())
 		{
 			if (difference < 0)
 			{
-				while (difference && Selectors.size()) 
+				while (difference && !selectors.empty())
 				{
-					delete Selectors.back();
-					Selectors.pop_back();
-					if (CurrentTopLineID && Selectors.size() + CurrentTopLineID == SelectorsText.size())
-						CurrentTopLineID--;
+					selectors.pop_back();
+					if (current_top_line_id && selectors.size() + current_top_line_id == selectors_text.size())
+						current_top_line_id--;
 					difference++;
 				}
 			}
 			else if (difference > 0)
 			{
-				ButtSettings->Height = SpaceBetween;
-				ButtSettings->Width = NewWidth;
-				ButtSettings->OnClick = NULL;
-				while (difference && Selectors.size() + CurrentTopLineID < SelectorsText.size() + 1) 
+				butt_settings->height = space_between;
+				butt_settings->width = new_width;
+				butt_settings->on_click = nullptr;
+				while (difference && selectors.size() + current_top_line_id < selectors_text.size() + 1)
 				{
-					ButtSettings->ChangePosition(HeaderCXPos, HeaderYPos - (Selectors.size() + 0.5f) * SpaceBetween);
-					Selectors.push_back(ButtSettings->CreateOne(SelectorsText[Selectors.size() + CurrentTopLineID - 1]));
+					butt_settings->change_position(header_cx_pos, header_y_pos - (selectors.size() + 0.5f) * space_between);
+					selectors.push_back(butt_settings->create_one(selectors_text[selectors.size() + current_top_line_id - 1]));
 					difference--;
 				}
 			}
 		}
 
-		for (auto& button : Selectors)
+		for (auto& btn : selectors)
 		{
-			button->Width = Width;
-			button->SafeChangePosition(HeaderCXPos, button->Ypos);
+			btn->width = width;
+			btn->safe_change_position(header_cx_pos, btn->y_pos);
 		}
-		MaxVisibleLines = Lines;
-		SafeUpdateLines();
-		RecalculateCurrentHeight();
+		max_visible_lines = (std::uint32_t)lines;
+		safe_update_lines();
+		recalculate_current_height();
 	}
-	void SafeRotateList(std::int32_t Delta)
+
+	void safe_rotate_list(std::int32_t delta)
 	{
-		std::lock_guard<std::recursive_mutex> locker(Lock);
-		if (!MaxVisibleLines)
+		std::lock_guard locker(lock);
+		if (!max_visible_lines)
 			return;
-		if (Delta < 0 && CurrentTopLineID < 0 - Delta)
-			CurrentTopLineID = 0;
-		else if (Delta > 0 && CurrentTopLineID + Delta + MaxVisibleLines > SelectorsText.size())
-			CurrentTopLineID = SelectorsText.size() - MaxVisibleLines;
-		else CurrentTopLineID += Delta;
-		SafeUpdateLines();
+		if (delta < 0 && current_top_line_id < (std::uint32_t)(0 - delta))
+			current_top_line_id = 0;
+		else if (delta > 0 && current_top_line_id + delta + max_visible_lines > selectors_text.size())
+			current_top_line_id = (std::uint32_t)selectors_text.size() - max_visible_lines;
+		else current_top_line_id += delta;
+		safe_update_lines();
 	}
-	void SafeRemoveStringByID(std::uint32_t ID)
+
+	void safe_remove_string_by_id(std::uint32_t id)
 	{
-		std::lock_guard<std::recursive_mutex> locker(Lock);
-		if (ID >= SelectorsText.size()) 
-			return;
-		if (SelectorsText.empty()) 
-			return;
-		if (MaxVisibleLines)
+		std::lock_guard locker(lock);
+		if (id >= selectors_text.size()) return;
+		if (selectors_text.empty()) return;
+		if (max_visible_lines)
 		{
-			if (ID < CurrentTopLineID)
-				CurrentTopLineID--;
-			else if (ID == CurrentTopLineID)
-				if (CurrentTopLineID == SelectorsText.size() - 1)
-					CurrentTopLineID--;
+			if (id < current_top_line_id)
+				current_top_line_id--;
+			else if (id == current_top_line_id)
+				if (current_top_line_id == selectors_text.size() - 1)
+					current_top_line_id--;
 		}
-		SelectorsText.erase(SelectorsText.begin() + ID);
-		SafeUpdateLines();
-		SelectedID.clear();
+		selectors_text.erase(selectors_text.begin() + id);
+		safe_update_lines();
+		selected_id.clear();
 	}
-	void RemoveSelected()
+
+	void remove_selected()
 	{
-		std::lock_guard<std::recursive_mutex> locker(Lock);
-		std::sort(SelectedID.begin(), SelectedID.end());
-		while (SelectedID.size())
+		std::lock_guard locker(lock);
+		std::sort(selected_id.begin(), selected_id.end());
+		while (!selected_id.empty())
 		{
-			if (MaxVisibleLines) {
-				if (SelectedID.back() < CurrentTopLineID)
-					CurrentTopLineID--;
-				else if (SelectedID.back() == CurrentTopLineID)
-					if (CurrentTopLineID == SelectorsText.size() - 1)
-						CurrentTopLineID--;
-			}
-			SelectorsText.erase(SelectorsText.begin() + SelectedID.back());
-			SelectedID.pop_back();
-		}
-		SafeUpdateLines();
-		SelectedID.clear();
-	}
-	void ResetAlignFor(std::uint32_t ID, _Align Align)
-	{
-		std::lock_guard<std::recursive_mutex> locker(Lock);
-		if (ID >= Selectors.size()) 
-			return;
-		float nx = HeaderCXPos - ((Align == _Align::left) ? 0.5f : ((Align == _Align::right) ? 0 - 0.5f : 0)) * (Width - SpaceBetween);
-		Selectors[ID]->STL->SafeChangePosition_Argumented(Align, nx, Selectors[ID]->Ypos);
-	}
-	void ResetAlign_All(_Align Align)
-	{
-		std::lock_guard<std::recursive_mutex> locker(Lock);
-		if (Align == _Align::center) 
-			return;
-		float nx = HeaderCXPos - ((Align == _Align::left) ? 0.5f : ((Align == _Align::right) ? 0 - 0.5f : 0)) * (Width - SpaceBetween);
-		for (int i = 0; i < Selectors.size(); i++)
-			Selectors[i]->STL->SafeChangePosition_Argumented(Align, nx, Selectors[i]->Ypos);
-	}
-	void SafePushBackNewString(std::string ButtonText)
-	{
-		std::lock_guard<std::recursive_mutex> locker(Lock);
-		if (MaxCharsInLine)ButtonText = ButtonText.substr(0, MaxCharsInLine);
-		SelectorsText.push_back(ButtonText);
-		if (MaxVisibleLines && SelectorsText.size() > MaxVisibleLines)
-		{
-			SafeUpdateLines(); 
-			return;
-		}
-		ButtSettings->ChangePosition(HeaderCXPos, HeaderYPos - (SelectorsText.size() - 0.5f) * SpaceBetween);
-		ButtSettings->Height = SpaceBetween;
-		ButtSettings->Width = Width;
-		ButtSettings->OnClick = NULL;
-		Button* ptr;
-		Selectors.push_back(ptr = ButtSettings->CreateOne(ButtonText));
-		RecalculateCurrentHeight();
-		ResetAlignFor(SelectorsText.size() - 1, this->TextInButtonsAlign);
-	}
-	void PushStrings(std::vector<std::string> LStrings)
-	{
-		std::lock_guard<std::recursive_mutex> locker(Lock);
-		for (auto Y = LStrings.begin(); Y != LStrings.end(); ++Y)
-			SafePushBackNewString(*Y);
-	}
-	void PushStrings(std::initializer_list<std::string> LStrings)
-	{
-		std::lock_guard<std::recursive_mutex> locker(Lock);
-		for (auto Y = LStrings.begin(); Y != LStrings.end(); ++Y)
-			SafePushBackNewString(*Y);
-	}
-	void SafeChangePosition_Argumented(std::uint8_t Arg, float NewX, float NewY)
-	{
-		std::lock_guard<std::recursive_mutex> locker(Lock);
-		float CW = 0.5f * (
-			(std::int32_t)((bool)(GLOBAL_LEFT & Arg))
-			- (std::int32_t)((bool)(GLOBAL_RIGHT & Arg))
-			) * Width,
-			CH = 0.5f * (
-				(std::int32_t)((bool)(GLOBAL_BOTTOM & Arg))
-				- (std::int32_t)((bool)(GLOBAL_TOP & Arg))
-				) * CalculatedHeight;
-		SafeChangePosition(NewX + CW, NewY - 0.5f * CalculatedHeight + CH);
-	}
-	void KeyboardHandler(CHAR CH) override
-	{
-		return;
-	}
-	void SafeChangePosition(float NewCXPos, float NewHeaderYPos) override
-	{
-		std::lock_guard<std::recursive_mutex> locker(Lock);
-		NewCXPos -= HeaderCXPos;
-		NewHeaderYPos -= HeaderYPos;
-		SafeMove(NewCXPos, NewHeaderYPos);
-	}
-	void SafeMove(float dx, float dy) override
-	{
-		std::lock_guard<std::recursive_mutex> locker(Lock);
-		HeaderCXPos += dx;
-		HeaderYPos += dy;
-		for (auto Y = Selectors.begin(); Y != Selectors.end(); ++Y)
-			(*Y)->SafeMove(dx, dy);
-	}
-	void Draw() override
-	{
-		std::lock_guard<std::recursive_mutex> locker(Lock);
-		if (Selectors.size() < SelectorsText.size())
-		{
-			///TOP BAR
-			if (TopArrowHovered)
-				__glcolor(ButtSettings->HoveredRGBABorder);
-			else 
-				__glcolor(ButtSettings->RGBABorder);
-			glBegin(GL_QUADS);
-			glVertex2f(HeaderCXPos - 0.5f * Width, HeaderYPos);
-			glVertex2f(HeaderCXPos + 0.5f * Width, HeaderYPos);
-			glVertex2f(HeaderCXPos + 0.5f * Width, HeaderYPos + ARROW_STICK_HEIGHT);
-			glVertex2f(HeaderCXPos - 0.5f * Width, HeaderYPos + ARROW_STICK_HEIGHT);
-			///BOTTOM BAR
-			if (BottomArrowHovered)
-				__glcolor(ButtSettings->HoveredRGBABorder);
-			else 
-				__glcolor(ButtSettings->RGBABorder);
-			glVertex2f(HeaderCXPos - 0.5f * Width, HeaderYPos - CalculatedHeight);
-			glVertex2f(HeaderCXPos + 0.5f * Width, HeaderYPos - CalculatedHeight);
-			glVertex2f(HeaderCXPos + 0.5f * Width, HeaderYPos - CalculatedHeight - ARROW_STICK_HEIGHT);
-			glVertex2f(HeaderCXPos - 0.5f * Width, HeaderYPos - CalculatedHeight - ARROW_STICK_HEIGHT);
-			glEnd();
-			///TOP ARROW
-			if (TopArrowHovered)
+			if (max_visible_lines)
 			{
-				if (ButtSettings->HoveredRGBAColor & 0xFF)
-					__glcolor(ButtSettings->HoveredRGBAColor);
-				else 
-					__glcolor(ButtSettings->RGBAColor);
+				if (selected_id.back() < current_top_line_id)
+					current_top_line_id--;
+				else if (selected_id.back() == current_top_line_id)
+					if (current_top_line_id == selectors_text.size() - 1)
+						current_top_line_id--;
 			}
-			else 
-				__glcolor(ButtSettings->RGBAColor);
+			selectors_text.erase(selectors_text.begin() + selected_id.back());
+			selected_id.pop_back();
+		}
+		safe_update_lines();
+		selected_id.clear();
+	}
+
+	void reset_align_for(std::uint32_t id, _Align align)
+	{
+		std::lock_guard locker(lock);
+		if (id >= selectors.size()) return;
+		float nx = header_cx_pos - ((align == _Align::left) ? 0.5f : ((align == _Align::right) ? -0.5f : 0)) * (width - space_between);
+		selectors[id]->stl->safe_change_position_argumented(align, nx, selectors[id]->y_pos);
+	}
+
+	void reset_align_all(_Align align)
+	{
+		std::lock_guard locker(lock);
+		if (align == _Align::center) return;
+		float nx = header_cx_pos - ((align == _Align::left) ? 0.5f : ((align == _Align::right) ? -0.5f : 0)) * (width - space_between);
+		for (int i = 0; i < (int)selectors.size(); i++)
+			selectors[i]->stl->safe_change_position_argumented(align, nx, selectors[i]->y_pos);
+	}
+
+	void safe_push_back_new_string(std::string button_text)
+	{
+		std::lock_guard locker(lock);
+		if (max_chars_in_line) button_text = button_text.substr(0, max_chars_in_line);
+		selectors_text.push_back(button_text);
+		if (max_visible_lines && selectors_text.size() > max_visible_lines)
+		{
+			safe_update_lines();
+			return;
+		}
+		butt_settings->change_position(header_cx_pos, header_y_pos - (selectors_text.size() - 0.5f) * space_between);
+		butt_settings->height = space_between;
+		butt_settings->width = width;
+		butt_settings->on_click = nullptr;
+		selectors.push_back(butt_settings->create_one(button_text));
+		recalculate_current_height();
+		reset_align_for((std::uint32_t)selectors_text.size() - 1, text_in_buttons_align);
+	}
+
+	void push_strings(std::vector<std::string> strings)
+	{
+		std::lock_guard locker(lock);
+		for (auto& s : strings)
+			safe_push_back_new_string(s);
+	}
+
+	void push_strings(std::initializer_list<std::string> strings)
+	{
+		std::lock_guard locker(lock);
+		for (auto& s : strings)
+			safe_push_back_new_string(s);
+	}
+
+	void safe_change_position_argumented(std::uint8_t arg, float new_x, float new_y) override
+	{
+		std::lock_guard locker(lock);
+		float cw = 0.5f * (
+			(std::int32_t)((bool)(GLOBAL_LEFT & arg))
+			- (std::int32_t)((bool)(GLOBAL_RIGHT & arg))
+			) * width,
+			ch = 0.5f * (
+				(std::int32_t)((bool)(GLOBAL_BOTTOM & arg))
+				- (std::int32_t)((bool)(GLOBAL_TOP & arg))
+				) * calculated_height;
+		safe_change_position(new_x + cw, new_y - 0.5f * calculated_height + ch);
+	}
+
+	void keyboard_handler(char) override {}
+
+	void safe_change_position(float new_cx_pos, float new_header_y_pos) override
+	{
+		std::lock_guard locker(lock);
+		new_cx_pos -= header_cx_pos;
+		new_header_y_pos -= header_y_pos;
+		safe_move(new_cx_pos, new_header_y_pos);
+	}
+
+	void safe_move(float dx, float dy) override
+	{
+		std::lock_guard locker(lock);
+		header_cx_pos += dx;
+		header_y_pos += dy;
+		for (auto& btn : selectors)
+			btn->safe_move(dx, dy);
+	}
+
+	void draw() override
+	{
+		std::lock_guard locker(lock);
+		if (selectors.size() < selectors_text.size())
+		{
+			// TOP BAR
+			if (top_arrow_hovered)
+				__glcolor(butt_settings->hovered_rgba_border);
+			else
+				__glcolor(butt_settings->rgba_border);
+			glBegin(GL_QUADS);
+			glVertex2f(header_cx_pos - 0.5f * width, header_y_pos);
+			glVertex2f(header_cx_pos + 0.5f * width, header_y_pos);
+			glVertex2f(header_cx_pos + 0.5f * width, header_y_pos + arrow_stick_height);
+			glVertex2f(header_cx_pos - 0.5f * width, header_y_pos + arrow_stick_height);
+			// BOTTOM BAR
+			if (bottom_arrow_hovered)
+				__glcolor(butt_settings->hovered_rgba_border);
+			else
+				__glcolor(butt_settings->rgba_border);
+			glVertex2f(header_cx_pos - 0.5f * width, header_y_pos - calculated_height);
+			glVertex2f(header_cx_pos + 0.5f * width, header_y_pos - calculated_height);
+			glVertex2f(header_cx_pos + 0.5f * width, header_y_pos - calculated_height - arrow_stick_height);
+			glVertex2f(header_cx_pos - 0.5f * width, header_y_pos - calculated_height - arrow_stick_height);
+			glEnd();
+			// TOP ARROW
+			if (top_arrow_hovered)
+			{
+				if (butt_settings->hovered_rgba_color & 0xFF)
+					__glcolor(butt_settings->hovered_rgba_color);
+				else
+					__glcolor(butt_settings->rgba_color);
+			}
+			else
+				__glcolor(butt_settings->rgba_color);
 			glBegin(GL_TRIANGLES);
-			glVertex2f(HeaderCXPos, HeaderYPos + 9 * ARROW_STICK_HEIGHT / 10);
-			glVertex2f(HeaderCXPos + ARROW_STICK_HEIGHT * 0.5f, HeaderYPos + ARROW_STICK_HEIGHT / 10);
-			glVertex2f(HeaderCXPos - ARROW_STICK_HEIGHT * 0.5f, HeaderYPos + ARROW_STICK_HEIGHT / 10);
-			///BOTTOM ARROW
-			if (BottomArrowHovered)
-			{ 
-				if (ButtSettings->HoveredRGBAColor & 0xFF)
-					__glcolor(ButtSettings->HoveredRGBAColor);
-				else 
-					__glcolor(ButtSettings->RGBAColor);
+			glVertex2f(header_cx_pos, header_y_pos + 9 * arrow_stick_height / 10);
+			glVertex2f(header_cx_pos + arrow_stick_height * 0.5f, header_y_pos + arrow_stick_height / 10);
+			glVertex2f(header_cx_pos - arrow_stick_height * 0.5f, header_y_pos + arrow_stick_height / 10);
+			// BOTTOM ARROW
+			if (bottom_arrow_hovered)
+			{
+				if (butt_settings->hovered_rgba_color & 0xFF)
+					__glcolor(butt_settings->hovered_rgba_color);
+				else
+					__glcolor(butt_settings->rgba_color);
 			}
-			else 
-				__glcolor(ButtSettings->RGBAColor);
-			glVertex2f(HeaderCXPos, HeaderYPos - CalculatedHeight - 9 * ARROW_STICK_HEIGHT / 10);
-			glVertex2f(HeaderCXPos + ARROW_STICK_HEIGHT * 0.5f, HeaderYPos - CalculatedHeight - ARROW_STICK_HEIGHT / 10);
-			glVertex2f(HeaderCXPos - ARROW_STICK_HEIGHT * 0.5f, HeaderYPos - CalculatedHeight - ARROW_STICK_HEIGHT / 10);
+			else
+				__glcolor(butt_settings->rgba_color);
+			glVertex2f(header_cx_pos, header_y_pos - calculated_height - 9 * arrow_stick_height / 10);
+			glVertex2f(header_cx_pos + arrow_stick_height * 0.5f, header_y_pos - calculated_height - arrow_stick_height / 10);
+			glVertex2f(header_cx_pos - arrow_stick_height * 0.5f, header_y_pos - calculated_height - arrow_stick_height / 10);
 			glEnd();
 		}
-		for (auto Y = Selectors.begin(); Y != Selectors.end(); ++Y)
-			(*Y)->Draw();
+		for (auto& btn : selectors)
+			btn->draw();
 	}
-	inline std::uint32_t TellType() override
-	{
-		return TT_SELPROPLIST;
-	}
+
+	[[nodiscard]] inline std::uint32_t tell_type() override { return TT_SELPROPLIST; }
+
+	// Backward-compat method wrappers
+	void SafePushBackNewString(std::string s) { safe_push_back_new_string(std::move(s)); }
+	void RemoveSelected() { remove_selected(); }
+	void SafeRemoveStringByID(std::uint32_t id) { safe_remove_string_by_id(id); }
+	void SafeUpdateLines() { safe_update_lines(); }
 };
+
+using SelectablePropertedList = selectable_properted_list;
+
 #endif // !SAFGUIF_SNPLIST

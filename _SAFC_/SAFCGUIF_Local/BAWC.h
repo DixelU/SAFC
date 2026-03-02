@@ -1,89 +1,93 @@
 #pragma once
 
 #ifndef SAFGUIF_L_BAWC
-#define SAFGUIF_L_BAWC 
+#define SAFGUIF_L_BAWC
 
 #include "../SAFGUIF/SAFGUIF.h"
 // #include "../SAFC_InnerModules/include_all.h"
 
 template<typename bool_type, typename number_type>
-struct BoolAndWORDChecker : HandleableUIPart
+struct BoolAndWORDChecker : handleable_ui_part
 {
-	float XPos, YPos;
-	bool_type* Flag;
-	number_type* Number;
-	SingleTextLine* STL_Info;
-	BoolAndWORDChecker(float XPos, float YPos, SingleTextLineSettings* STLS,
-		bool_type* Flag, number_type* Number)
+	float x_pos, y_pos;
+	bool_type* flag;
+	number_type* number;
+	std::unique_ptr<single_text_line> stl_info;
+
+	BoolAndWORDChecker(float x_pos, float y_pos, single_text_line_settings* stls,
+		bool_type* flag, number_type* number)
 	{
-		this->XPos = XPos;
-		this->YPos = YPos;
-		this->Flag = Flag;
-		this->Number = Number;
-		STLS->SetNewPos(XPos, YPos + 40);
-		this->STL_Info = STLS->CreateOne("_");
+		this->x_pos = x_pos;
+		this->y_pos = y_pos;
+		this->flag = flag;
+		this->number = number;
+		stls->set_new_pos(x_pos, y_pos + 40);
+		this->stl_info.reset(stls->create_one("_"));
 	}
-	~BoolAndWORDChecker() override
+
+	~BoolAndWORDChecker() override = default;
+
+	void safe_move(float dx, float dy) override
 	{
-		delete this->STL_Info;
+		std::lock_guard locker(lock);
+		x_pos += dx;
+		y_pos += dy;
+		stl_info->safe_move(dx, dy);
 	}
-	void SafeMove(float dx, float dy) override
+
+	void safe_change_position(float new_x, float new_y) override
 	{
-		std::lock_guard<std::recursive_mutex> locker(Lock);
-		XPos += dx;
-		YPos += dy;
-		STL_Info->SafeMove(dx, dy);
+		std::lock_guard locker(lock);
+		new_x -= x_pos;
+		new_y -= y_pos;
+		safe_move(new_x, new_y);
 	}
-	void SafeChangePosition(float NewX, float NewY) override
-	{
-		std::lock_guard<std::recursive_mutex> locker(Lock);
-		NewX -= XPos;
-		NewY -= YPos;
-		SafeMove(NewX, NewY);
-	}
-	void SafeChangePosition_Argumented(std::uint8_t Arg, float NewX, float NewY) override
+
+	void safe_change_position_argumented(std::uint8_t, float, float) override
 	{
 		return;
 	}
-	void KeyboardHandler(CHAR CH) override
+
+	void keyboard_handler(char) override
 	{
 		return;
 	}
-	void SafeStringReplace(std::string Meaningless) override
+
+	void safe_string_replace(std::string) override
 	{
 		return;
 	}
-	void SetInfoString(std::string NewInfoString)
+
+	void update_info()
 	{
-		return;
-	}
-	void UpdateInfo()
-	{
-		std::lock_guard<std::recursive_mutex> locker(Lock);
-		if (Number)
+		std::lock_guard locker(lock);
+		if (number)
 		{
-			std::string T = std::to_string(*Number);
-			if (T != STL_Info->_CurrentText)STL_Info->SafeStringReplace(T);
+			std::string t = std::to_string(*number);
+			if (t != stl_info->current_text)
+				stl_info->safe_string_replace(t);
 		}
 	}
-	void Draw() override
+
+	void draw() override
 	{
-		std::lock_guard<std::recursive_mutex> locker(Lock);
-		UpdateInfo();
-		if (Flag)
+		std::lock_guard locker(lock);
+		update_info();
+		if (flag)
 		{
-			if (*Flag)
-				SpecialSigns::DrawOK(XPos, YPos, 15, 0x00FFFFFF);
+			if (*flag)
+				special_signs::draw_ok(x_pos, y_pos, 15, 0x00FFFFFF);
 			else
-				SpecialSigns::DrawWait(XPos, YPos, 15, 0x007FFFFF, 20);
+				special_signs::draw_wait(x_pos, y_pos, 15, 0x007FFFFF, 20);
 		}
-		else SpecialSigns::DrawNo(XPos, YPos, 15, 0xFF0000FF);
-		STL_Info->Draw();
+		else special_signs::draw_no(x_pos, y_pos, 15, 0xFF0000FF);
+		stl_info->draw();
 	}
-	bool MouseHandler(float mx, float my, CHAR Button, CHAR State) override
+
+	[[nodiscard]] bool mouse_handler(float, float, char, char) override
 	{
-		return 0;
+		return false;
 	}
 };
 
-#endif 
+#endif

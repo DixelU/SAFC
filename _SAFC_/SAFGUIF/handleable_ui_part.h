@@ -5,46 +5,60 @@
 #include <mutex>
 #include "header_utils.h"
 
-struct HandleableUIPart
+struct handleable_ui_part
 {
-	std::recursive_mutex Lock;
-	bool Enabled;
-	HandleableUIPart() { Enabled = true; }
-	//HandleableUIPart(HandleableUIPart&&) = delete;
-	virtual ~HandleableUIPart() {}
-	bool virtual MouseHandler(float mx, float my, CHAR Button/*-1 left, 1 right*/, CHAR State /*-1 down, 1 up*/) = 0;
-	void virtual Draw() = 0;
-	void virtual SafeMove(float, float) = 0;
-	void virtual SafeChangePosition(float, float) = 0;
-	void virtual SafeChangePosition_Argumented(std::uint8_t, float, float) = 0;
-	void virtual SafeStringReplace(std::string) = 0;
-	void virtual KeyboardHandler(char CH) = 0;
-	void Enable()
+	std::recursive_mutex lock;
+	bool enabled;
+	// Backward-compat aliases
+	bool& Enabled = enabled;
+	std::recursive_mutex& Lock = lock;
+
+	handleable_ui_part() { enabled = true; }
+	virtual ~handleable_ui_part() {}
+	[[nodiscard]] virtual bool mouse_handler(float mx, float my, char button/*-1 left, 1 right*/, char state /*-1 down, 1 up*/) = 0;
+	virtual void draw() = 0;
+	virtual void safe_move(float, float) = 0;
+	virtual void safe_change_position(float, float) = 0;
+	virtual void safe_change_position_argumented(std::uint8_t, float, float) = 0;
+	virtual void safe_string_replace(std::string) = 0;
+	virtual void keyboard_handler(char ch) = 0;
+	void enable()
 	{
-		Enabled = true;
+		enabled = true;
 	}
-	void Disable()
+	void disable()
 	{
-		Enabled = false;
+		enabled = false;
 	}
-	void Invert_Enable()
+	void invert_enable()
 	{
-		Enabled ^= true;
+		enabled ^= true;
 	}
-	bool virtual IsResizeable()
+	[[nodiscard]] virtual bool is_resizeable()
 	{
 		return false;
 	}
 	/* relative to right-bottom corner */
-	void virtual SafeResize(float NewHeight, float NewWidth)
+	virtual void safe_resize(float new_height, float new_width)
 	{
 		return;
 	}
-	inline std::uint32_t virtual TellType()
+	[[nodiscard]] inline virtual std::uint32_t tell_type()
 	{
 		return TT_UNSPECIFIED;
 	}
+
+	// Backward-compat method wrappers
+	void SafeMove(float dx, float dy) { safe_move(dx, dy); }
+	void SafeStringReplace(std::string s) { safe_string_replace(std::move(s)); }
+	void SafeChangePosition(float x, float y) { safe_change_position(x, y); }
+	void SafeChangePosition_Argumented(std::uint8_t a, float x, float y) { safe_change_position_argumented(a, x, y); }
+	void SafeResize(float h, float w) { safe_resize(h, w); }
+	void Enable() { enable(); }
+	void Disable() { disable(); }
 };
 
+
+using HandleableUIPart = handleable_ui_part;
 
 #endif

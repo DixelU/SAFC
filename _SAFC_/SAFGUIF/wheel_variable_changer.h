@@ -2,167 +2,175 @@
 #ifndef SAFGUIF_WVC
 #define SAFGUIF_WVC
 
+#include <functional>
+#include <memory>
 #include "header_utils.h"
 #include "input_field.h"
 
-struct WheelVariableChanger :HandleableUIPart
+struct wheel_variable_changer : handleable_ui_part
 {
 	enum class Type { exponential, addictable };
 	enum class Sensitivity { on_enter, on_click, on_wheel };
+
 	Type type;
-	Sensitivity Sen;
-	InputField* var_if, * fac_if;
-	float Width, Height;
-	float Xpos, Ypos;
-	std::string var_s, fact_s;
+	Sensitivity sen;
+	std::unique_ptr<input_field> var_if, fac_if;
+	float width, height;
+	float x_pos, y_pos;
 	double variable;
 	double factor;
-	bool IsHovered, WheelFieldHovered;
-	void(*OnApply)(double);
-	~WheelVariableChanger() override
+	bool is_hovered, wheel_field_hovered;
+	std::function<void(double)> on_apply;
+
+	~wheel_variable_changer() override = default;
+
+	wheel_variable_changer(std::function<void(double)> on_apply, float x_pos, float y_pos, double default_var, double default_fact,
+		single_text_line_settings* stls, std::string var_string = " ", std::string fac_string = " ",
+		Type type = Type::exponential)
+		: width(100), height(50)
 	{
-		delete var_if;
-		delete fac_if;
-	}
-	WheelVariableChanger(void(*OnApply)(double), float Xpos, float Ypos, double default_var, double default_fact, SingleTextLineSettings* STLS, std::string var_string = " ", std::string fac_string = " ", Type type = Type::exponential) : Width(100), Height(50)
-	{
-		this->OnApply = OnApply;
-		this->Xpos = Xpos;
-		this->Ypos = Ypos;
+		this->on_apply = std::move(on_apply);
+		this->x_pos = x_pos;
+		this->y_pos = y_pos;
 		this->variable = default_var;
 		this->factor = default_fact;
-		this->IsHovered = WheelFieldHovered = false;
+		this->is_hovered = wheel_field_hovered = false;
 		this->type = type;
-		this->Sen = Sensitivity::on_wheel;
-		var_if = new InputField(std::to_string(default_var).substr(0, 8), Xpos - 25., Ypos + 15, 10, 40, STLS, nullptr, 0x007FFFFF, STLS, var_string, 8, _Align::center, _Align::center, InputField::Type::FP_PositiveNumbers);
-		fac_if = new InputField(std::to_string(default_fact).substr(0, 8), Xpos - 25., Ypos - 10, 10, 40, STLS, nullptr, 0x007FFFFF, STLS, fac_string, 8, _Align::center, _Align::center, InputField::Type::FP_PositiveNumbers);
+		this->sen = Sensitivity::on_wheel;
+		var_if.reset(new input_field(std::to_string(default_var).substr(0, 8), x_pos - 25.f, y_pos + 15, 10, 40, stls, nullptr, 0x007FFFFF, stls, var_string, 8, _Align::center, _Align::center, input_field::Type::FP_PositiveNumbers));
+		fac_if.reset(new input_field(std::to_string(default_fact).substr(0, 8), x_pos - 25.f, y_pos - 10, 10, 40, stls, nullptr, 0x007FFFFF, stls, fac_string, 8, _Align::center, _Align::center, input_field::Type::FP_PositiveNumbers));
 	}
-	void Draw() override
+
+	void draw() override
 	{
-		std::lock_guard<std::recursive_mutex> locker(Lock);
-		__glcolor(0xFFFFFF3F + WheelFieldHovered * 0x3F);
+		std::lock_guard locker(lock);
+		__glcolor(0xFFFFFF3F + wheel_field_hovered * 0x3F);
 		glBegin(GL_QUADS);
-		glVertex2f(Xpos, Ypos + Height * 0.5f);
-		glVertex2f(Xpos, Ypos - Height * 0.5f);
-		glVertex2f(Xpos + Width * 0.5f, Ypos - Height * 0.5f);
-		glVertex2f(Xpos + Width * 0.5f, Ypos + Height * 0.5f);
+		glVertex2f(x_pos, y_pos + height * 0.5f);
+		glVertex2f(x_pos, y_pos - height * 0.5f);
+		glVertex2f(x_pos + width * 0.5f, y_pos - height * 0.5f);
+		glVertex2f(x_pos + width * 0.5f, y_pos + height * 0.5f);
 		glEnd();
-		__glcolor(0x007FFF3F + WheelFieldHovered * 0x3F);
+		__glcolor(0x007FFF3F + wheel_field_hovered * 0x3F);
 		glBegin(GL_LINE_LOOP);
-		glVertex2f(Xpos, Ypos + Height * 0.5f);
-		glVertex2f(Xpos, Ypos - Height * 0.5f);
-		glVertex2f(Xpos + Width * 0.5f, Ypos - Height * 0.5f);
-		glVertex2f(Xpos + Width * 0.5f, Ypos + Height * 0.5f);
+		glVertex2f(x_pos, y_pos + height * 0.5f);
+		glVertex2f(x_pos, y_pos - height * 0.5f);
+		glVertex2f(x_pos + width * 0.5f, y_pos - height * 0.5f);
+		glVertex2f(x_pos + width * 0.5f, y_pos + height * 0.5f);
 		glEnd();
 		glBegin(GL_LINE_LOOP);
-		glVertex2f(Xpos - Width * 0.5f, Ypos + Height * 0.5f);
-		glVertex2f(Xpos - Width * 0.5f, Ypos - Height * 0.5f);
-		glVertex2f(Xpos + Width * 0.5f, Ypos - Height * 0.5f);
-		glVertex2f(Xpos + Width * 0.5f, Ypos + Height * 0.5f);
+		glVertex2f(x_pos - width * 0.5f, y_pos + height * 0.5f);
+		glVertex2f(x_pos - width * 0.5f, y_pos - height * 0.5f);
+		glVertex2f(x_pos + width * 0.5f, y_pos - height * 0.5f);
+		glVertex2f(x_pos + width * 0.5f, y_pos + height * 0.5f);
 		glEnd();
-		var_if->Draw();
-		fac_if->Draw();
+		var_if->draw();
+		fac_if->draw();
 	}
-	void SafeMove(float dx, float dy) override
+
+	void safe_move(float dx, float dy) override
 	{
-		std::lock_guard<std::recursive_mutex> locker(Lock);
-		Xpos += dx;
-		Ypos += dy;
-		var_if->SafeMove(dx, dy);
-		fac_if->SafeMove(dx, dy);
+		std::lock_guard locker(lock);
+		x_pos += dx;
+		y_pos += dy;
+		var_if->safe_move(dx, dy);
+		fac_if->safe_move(dx, dy);
 	}
-	void SafeChangePosition(float NewX, float NewY) override
+
+	void safe_change_position(float new_x, float new_y) override
 	{
-		std::lock_guard<std::recursive_mutex> locker(Lock);
-		NewX -= Xpos;
-		NewY -= Ypos;
-		SafeMove(NewX, NewY);
+		std::lock_guard locker(lock);
+		new_x -= x_pos;
+		new_y -= y_pos;
+		safe_move(new_x, new_y);
 	}
-	void SafeChangePosition_Argumented(std::uint8_t Arg, float NewX, float NewY) override
+
+	void safe_change_position_argumented(std::uint8_t arg, float new_x, float new_y) override
 	{
-		std::lock_guard<std::recursive_mutex> locker(Lock);
-		float CW = 0.5f * (
-			(std::int32_t)((bool)(GLOBAL_LEFT & Arg))
-			- (std::int32_t)((bool)(GLOBAL_RIGHT & Arg))
-			) * Width,
-			CH = 0.5f * (
-				(std::int32_t)((bool)(GLOBAL_BOTTOM & Arg))
-				- (std::int32_t)((bool)(GLOBAL_TOP & Arg))
-				) * Height;
-		SafeChangePosition(NewX + CW, NewY + CH);
+		std::lock_guard locker(lock);
+		float cw = 0.5f * (
+			(std::int32_t)((bool)(GLOBAL_LEFT & arg))
+			- (std::int32_t)((bool)(GLOBAL_RIGHT & arg))
+			) * width,
+			ch = 0.5f * (
+				(std::int32_t)((bool)(GLOBAL_BOTTOM & arg))
+				- (std::int32_t)((bool)(GLOBAL_TOP & arg))
+				) * height;
+		safe_change_position(new_x + cw, new_y + ch);
 	}
-	void CheckupInputs()
+
+	void checkup_inputs()
 	{
-		std::lock_guard<std::recursive_mutex> locker(Lock);
-		variable = stod(var_if->GetCurrentInput("0"));
-		factor = stod(fac_if->GetCurrentInput("0"));
+		std::lock_guard locker(lock);
+		variable = std::stod(var_if->get_current_input("0"));
+		factor = std::stod(fac_if->get_current_input("0"));
 	}
-	void KeyboardHandler(CHAR CH) override
+
+	void keyboard_handler(char ch) override
 	{
-		std::lock_guard<std::recursive_mutex> locker(Lock);
-		fac_if->KeyboardHandler(CH);
-		var_if->KeyboardHandler(CH);
-		if (IsHovered)
+		std::lock_guard locker(lock);
+		fac_if->keyboard_handler(ch);
+		var_if->keyboard_handler(ch);
+		if (is_hovered)
 		{
-			if (CH == 13)
+			if (ch == 13)
 			{
-				CheckupInputs();
-				if (OnApply)
-					OnApply(variable);
+				checkup_inputs();
+				if (on_apply)
+					on_apply(variable);
 			}
 		}
 	}
-	void SafeStringReplace(std::string Meaningless) override
-	{
 
-	}
-	bool MouseHandler(float mx, float my, CHAR Button, CHAR State) override
+	void safe_string_replace(std::string) override {}
+
+	[[nodiscard]] bool mouse_handler(float mx, float my, char button_btn, char state) override
 	{
-		std::lock_guard<std::recursive_mutex> locker(Lock);
-		this->fac_if->MouseHandler(mx, my, Button, State);
-		this->var_if->MouseHandler(mx, my, Button, State);
-		mx -= Xpos;
-		my -= Ypos;
-		if (fabsf(mx) < Width * 0.5 && fabsf(my) < Height * 0.5)
+		std::lock_guard locker(lock);
+		fac_if->mouse_handler(mx, my, button_btn, state);
+		var_if->mouse_handler(mx, my, button_btn, state);
+		mx -= x_pos;
+		my -= y_pos;
+		if (fabsf(mx) < width * 0.5f && fabsf(my) < height * 0.5f)
 		{
-			IsHovered = true;
-			if (mx >= 0 && mx <= Width * 0.5 && fabsf(my) < Height * 0.5)
+			is_hovered = true;
+			if (mx >= 0 && mx <= width * 0.5f && fabsf(my) < height * 0.5f)
 			{
-				if (Sen == Sensitivity::on_click && State == 1)
-					if (OnApply)
-						OnApply(variable);
-				WheelFieldHovered = true;
-				if (Button)
+				if (sen == Sensitivity::on_click && state == 1)
+					if (on_apply)
+						on_apply(variable);
+				wheel_field_hovered = true;
+				if (button_btn)
 				{
-					CheckupInputs();
-					if (Button == 2 /*UP*/)
+					checkup_inputs();
+					if (button_btn == 2 /*UP*/)
 					{
-						if (State == -1)
+						if (state == -1)
 						{
 							switch (type)
 							{
-							case WheelVariableChanger::Type::exponential: {variable *= factor; break; }
-							case WheelVariableChanger::Type::addictable: {variable += factor;	break; }
+							case wheel_variable_changer::Type::exponential: { variable *= factor; break; }
+							case wheel_variable_changer::Type::addictable:  { variable += factor; break; }
 							}
-							var_if->UpdateInputString(std::to_string(variable));
-							if (Sen == Sensitivity::on_wheel)
-								if (OnApply)
-									OnApply(variable);
+							var_if->update_input_string(std::to_string(variable));
+							if (sen == Sensitivity::on_wheel)
+								if (on_apply)
+									on_apply(variable);
 						}
 					}
-					else if (Button == 3 /*DOWN*/)
+					else if (button_btn == 3 /*DOWN*/)
 					{
-						if (State == -1)
+						if (state == -1)
 						{
 							switch (type)
 							{
-							case WheelVariableChanger::Type::exponential: {variable /= factor; break; }
-							case WheelVariableChanger::Type::addictable: {variable -= factor;	break; }
+							case wheel_variable_changer::Type::exponential: { variable /= factor; break; }
+							case wheel_variable_changer::Type::addictable:  { variable -= factor; break; }
 							}
-							var_if->UpdateInputString(std::to_string(variable));
-							if (Sen == Sensitivity::on_wheel)
-								if (OnApply)
-									OnApply(variable);
+							var_if->update_input_string(std::to_string(variable));
+							if (sen == Sensitivity::on_wheel)
+								if (on_apply)
+									on_apply(variable);
 						}
 					}
 				}
@@ -170,10 +178,13 @@ struct WheelVariableChanger :HandleableUIPart
 		}
 		else
 		{
-			IsHovered = false;
-			WheelFieldHovered = false;
+			is_hovered = false;
+			wheel_field_hovered = false;
 		}
-		return 0;
+		return false;
 	}
 };
+
+using WheelVariableChanger = wheel_variable_changer;
+
 #endif

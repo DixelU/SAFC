@@ -5,159 +5,174 @@
 #include "../SAFGUIF/SAFGUIF.h"
 #include "../SAFC_InnerModules/include_all.h"
 
-struct SMRP_Vis : HandleableUIPart 
+struct SMRP_Vis : handleable_ui_part
 {
 	std::pair<
-		midi_collection_threaded_merger::proc_data_ptr, 
+		midi_collection_threaded_merger::proc_data_ptr,
 		midi_collection_threaded_merger::message_buffer_ptr> SMRP;
 
-	float _xpos, _ypos;
-	bool _processing, _finished, _hovered;
+	float x_pos, y_pos;
+	bool processing, finished, hovered;
 
-	std::unique_ptr<SingleTextLine> _stl_log, _stl_warn, _stl_err, _stl_info;
+	std::unique_ptr<single_text_line> stl_log, stl_warn, stl_err, stl_info;
 
-	SMRP_Vis(float XPos, float YPos, SingleTextLineSettings* STLS)
+	SMRP_Vis(float xpos, float ypos, single_text_line_settings* stls)
 	{
-		std::lock_guard<std::recursive_mutex> locker(Lock);
-		this->_processing = this->_hovered = this->_finished = 0;
-		this->_xpos = XPos;
-		this->_ypos = YPos;
-		auto base_rgba = STLS->RGBAColor;
-		STLS->RGBAColor = 0xFFFFFFFF;
-		STLS->SetNewPos(XPos, YPos - 20);
-		this->_stl_log.reset(STLS->CreateOne("_"));
-		STLS->RGBAColor = 0xFFFF00FF;
-		STLS->SetNewPos(XPos, YPos - 30);
-		this->_stl_warn.reset(STLS->CreateOne("_"));
-		STLS->RGBAColor = 0xFF3F00FF;
-		STLS->SetNewPos(XPos, YPos - 40);
-		this->_stl_err.reset(STLS->CreateOne("_"));
-		STLS->RGBAColor = 0xFFFFFFFF;
-		STLS->SetNewPos(XPos, YPos + 40);
-		this->_stl_info.reset(STLS->CreateOne("_"));
-		STLS->RGBAColor = base_rgba;
+		std::lock_guard locker(lock);
+		this->processing = this->hovered = this->finished = false;
+		this->x_pos = xpos;
+		this->y_pos = ypos;
+		auto base_rgba = stls->rgba_color;
+		stls->rgba_color = 0xFFFFFFFF;
+		stls->set_new_pos(xpos, ypos - 20);
+		this->stl_log.reset(stls->create_one("_"));
+		stls->rgba_color = 0xFFFF00FF;
+		stls->set_new_pos(xpos, ypos - 30);
+		this->stl_warn.reset(stls->create_one("_"));
+		stls->rgba_color = 0xFF3F00FF;
+		stls->set_new_pos(xpos, ypos - 40);
+		this->stl_err.reset(stls->create_one("_"));
+		stls->rgba_color = 0xFFFFFFFF;
+		stls->set_new_pos(xpos, ypos + 40);
+		this->stl_info.reset(stls->create_one("_"));
+		stls->rgba_color = base_rgba;
 	}
-	~SMRP_Vis() override 
+
+	~SMRP_Vis() override = default;
+
+	void safe_move(float dx, float dy) override
 	{
+		std::lock_guard locker(lock);
+		x_pos += dx;
+		y_pos += dy;
+		stl_err->safe_move(dx, dy);
+		stl_warn->safe_move(dx, dy);
+		stl_log->safe_move(dx, dy);
+		stl_info->safe_move(dx, dy);
 	}
-	void SafeMove(float dx, float dy) override
+
+	void safe_change_position(float new_x, float new_y) override
 	{
-		std::lock_guard<std::recursive_mutex> locker(Lock);
-		_xpos += dx;
-		_ypos += dy;
-		_stl_err->SafeMove(dx, dy);
-		_stl_warn->SafeMove(dx, dy);
-		_stl_log->SafeMove(dx, dy);
-		_stl_info->SafeMove(dx, dy);
+		new_x -= x_pos;
+		new_y -= y_pos;
+		safe_move(new_x, new_y);
 	}
-	void SafeChangePosition(float NewX, float NewY) override 
-	{
-		NewX -= _xpos;
-		NewY -= _ypos;
-		SafeMove(NewX, NewY);
-	}
-	void SafeChangePosition_Argumented(std::uint8_t Arg, float NewX, float NewY) override 
-	{
-		return;
-	}
-	void KeyboardHandler(CHAR CH) override
+
+	void safe_change_position_argumented(std::uint8_t, float, float) override
 	{
 		return;
 	}
-	void SafeStringReplace(std::string Meaningless) override
+
+	void keyboard_handler(char) override
 	{
 		return;
 	}
-	void SetInfoString(const std::string& NewInfoString) 
+
+	void safe_string_replace(std::string) override
 	{
-		std::lock_guard<std::recursive_mutex> locker(Lock);
-		this->_stl_info->SafeStringReplace(NewInfoString);
+		return;
 	}
-	void SetSMRP(std::pair<
+
+	void set_info_string(const std::string& new_info_string)
+	{
+		std::lock_guard locker(lock);
+		this->stl_info->safe_string_replace(new_info_string);
+	}
+
+	void set_smrp(std::pair<
 		midi_collection_threaded_merger::proc_data_ptr,
 		midi_collection_threaded_merger::message_buffer_ptr>& smrp)
 	{
-		std::lock_guard<std::recursive_mutex> locker(Lock);
+		std::lock_guard locker(lock);
 		SMRP = smrp;
 	}
-	void UpdateInfo()
+
+	// Backward-compat method wrappers
+	void SetSMRP(std::pair<
+		midi_collection_threaded_merger::proc_data_ptr,
+		midi_collection_threaded_merger::message_buffer_ptr>& smrp) { set_smrp(smrp); }
+	void SetInfoString(const std::string& s) { set_info_string(s); }
+
+	void update_info()
 	{
 		if (!SMRP.first || !SMRP.second)
 			return;
 
-		std::lock_guard<std::recursive_mutex> locker(Lock);
+		std::lock_guard locker(lock);
 		auto& logger_ptr = SMRP.second;
 
 		auto last_logger_line = logger_ptr->log->getLast();
-		if (last_logger_line != _stl_log->_CurrentText)
-			_stl_log->SafeStringReplace(last_logger_line);
+		if (last_logger_line != stl_log->current_text)
+			stl_log->safe_string_replace(last_logger_line);
 
 		auto last_warning_line = logger_ptr->warning->getLast();
-		if (last_warning_line != _stl_warn->_CurrentText)
-			_stl_warn->SafeStringReplace(last_warning_line);
+		if (last_warning_line != stl_warn->current_text)
+			stl_warn->safe_string_replace(last_warning_line);
 
 		auto last_error_line = logger_ptr->error->getLast();
-		if (last_error_line != _stl_err->_CurrentText)
-			_stl_err->SafeStringReplace(last_error_line);
+		if (last_error_line != stl_err->current_text)
+			stl_err->safe_string_replace(last_error_line);
 
-		if (_processing != SMRP.second->processing)
-			_processing = SMRP.second->processing;
-		if (_finished != SMRP.second->finished)
-			_finished = SMRP.second->finished;
-		auto T = std::to_string((SMRP.second->last_input_position * 100.) / (SMRP.first->settings.details.initial_filesize)).substr(0, 5) + "%";
+		if (processing != SMRP.second->processing)
+			processing = SMRP.second->processing;
+		if (finished != SMRP.second->finished)
+			finished = SMRP.second->finished;
+		auto t = std::to_string((SMRP.second->last_input_position * 100.) / (SMRP.first->settings.details.initial_filesize)).substr(0, 5) + "%";
 
-		if (_hovered && _processing)
+		if (hovered && processing)
 		{
-			T = SMRP.first->appearance_filename.substr(0, 30) + " " + T;
-			_stl_info->SafeColorChange(0x9FCFFFFF);
+			t = SMRP.first->appearance_filename.substr(0, 30) + " " + t;
+			stl_info->safe_color_change(0x9FCFFFFF);
 		}
 		else
 		{
-			_stl_info->SafeColorChange(0xFFFFFFFF);
+			stl_info->safe_color_change(0xFFFFFFFF);
 		}
 
-		if (_stl_info->_CurrentText != T)
-			_stl_info->SafeStringReplace(T);
+		if (stl_info->current_text != t)
+			stl_info->safe_string_replace(t);
 	}
-	void Draw() override 
+
+	void draw() override
 	{
-		std::lock_guard<std::recursive_mutex> locker(Lock);
+		std::lock_guard locker(lock);
 		if (!SMRP.first || !SMRP.second)
 		{
-			if (_stl_err->_CurrentText != "SMRP is NULL!")
-				_stl_err->SafeStringReplace("SMRP is NULL!");
+			if (stl_err->current_text != "SMRP is NULL!")
+				stl_err->safe_string_replace("SMRP is NULL!");
 		}
 		else
 		{
-			if (_stl_err->_CurrentText == "SMRP is NULL!")
-				_stl_err->SafeStringReplace("_");
-			UpdateInfo();
+			if (stl_err->current_text == "SMRP is NULL!")
+				stl_err->safe_string_replace("_");
+			update_info();
 		}
 
-		this->_stl_err->Draw();
-		this->_stl_warn->Draw();
-		this->_stl_log->Draw();
-		this->_stl_info->Draw();
+		this->stl_err->draw();
+		this->stl_warn->draw();
+		this->stl_log->draw();
+		this->stl_info->draw();
 
-		if (_processing && !_finished)
-			SpecialSigns::DrawWait(_xpos, _ypos, 15, 0x007FFF7F, 20);
-		else 
+		if (processing && !finished)
+			special_signs::draw_wait(x_pos, y_pos, 15, 0x007FFF7F, 20);
+		else
 		{
-			if (_finished)
-				SpecialSigns::DrawOK(_xpos, _ypos, 20, 0x00FFFFFF);
-			else SpecialSigns::DrawNo(_xpos, _ypos, 20, 0xFF3F00FF);
+			if (finished)
+				special_signs::draw_ok(x_pos, y_pos, 20, 0x00FFFFFF);
+			else special_signs::draw_no(x_pos, y_pos, 20, 0xFF3F00FF);
 		}
 	}
-	bool MouseHandler(float mx, float my, CHAR Button, CHAR State) override
+
+	[[nodiscard]] bool mouse_handler(float mx, float my, char, char) override
 	{
-		std::lock_guard<std::recursive_mutex> locker(Lock);
-		mx -= _xpos;
-		my -= _ypos;
+		std::lock_guard locker(lock);
+		mx -= x_pos;
+		my -= y_pos;
 		if (mx * mx + my * my < 900)
-			_hovered = 1;
+			hovered = true;
 		else
-			_hovered = 0;
-		return 0;
+			hovered = false;
+		return false;
 	}
 };
 

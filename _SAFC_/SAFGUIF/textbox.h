@@ -2,217 +2,224 @@
 #ifndef SAFGUIF_TEXTBOX
 #define SAFGUIF_TEXTBOX
 
+#include <memory>
 #include "header_utils.h"
 #include "handleable_ui_part.h"
 #include "single_text_line_settings.h"
 
 // todo: if i plan to continue using SAFGUIF - i'll have to refactor this mess
 
-struct TextBox : HandleableUIPart
+struct text_box : handleable_ui_part
 {
 	enum class VerticalOverflow { cut, display, recalibrate };
-	_Align TextAlign;
-	VerticalOverflow VOverflow;
-	std::string Text;
-	std::vector<std::unique_ptr<SingleTextLine>> Lines;
-	float Xpos, Ypos;
-	float Width, Height;
-	float VerticalOffset, CalculatedTextHeight;
-	SingleTextLineSettings* STLS;
-	std::uint8_t BorderWidth;
-	std::uint32_t RGBABorder, RGBABackground, SymbolsPerLine;
-	~TextBox() override 
-	{
-		std::lock_guard<std::recursive_mutex> locker(Lock);
-		Lines.clear();
-	}
-	TextBox(std::string Text, SingleTextLineSettings* STLS, float Xpos, float Ypos, float Height, float Width, float VerticalOffset, std::uint32_t RGBABackground, std::uint32_t RGBABorder, std::uint8_t BorderWidth, _Align TextAlign = _Align::left, VerticalOverflow VOverflow = VerticalOverflow::cut)
-	{
-		this->TextAlign = TextAlign;
-		this->VOverflow = VOverflow;
-		this->BorderWidth = BorderWidth;
-		this->VerticalOffset = VerticalOffset;
-		this->STLS = STLS;
-		this->Xpos = Xpos;
-		this->Ypos = Ypos;
-		this->Width = Width;
-		this->RGBABorder = RGBABorder;
-		this->RGBABackground = RGBABackground;
-		this->Height = Height;
-		this->Text = (Text.size()) ? Text : " ";
-		RecalculateAvailableSpaceForText();
-		TextReformat();
-	}
-	void TextReformat()
-	{
-		std::lock_guard<std::recursive_mutex> locker(Lock);
-		std::vector<std::vector<std::string>>SplitText;
-		std::vector<std::string> Paragraph;
-		std::string Line;
-		STLS->SetNewPos(Xpos, Ypos + 0.5f * Height + 0.5f * VerticalOffset);
+	_Align text_align;
+	VerticalOverflow v_overflow;
+	std::string text;
+	std::vector<std::unique_ptr<single_text_line>> lines;
+	float x_pos, y_pos;
+	float width, height;
+	float vertical_offset, calculated_text_height;
+	single_text_line_settings* stls; // non-owning
+	// Backward-compat aliases
+	std::string& Text = text;
+	float& Xpos = x_pos;
+	float& Ypos = y_pos;
+	std::uint8_t border_width;
+	std::uint32_t rgba_border, rgba_background, symbols_per_line;
 
-		for (int i = 0; i < Text.size(); i++)
+	~text_box() override
+	{
+		std::lock_guard locker(lock);
+		lines.clear();
+	}
+	text_box(std::string txt, single_text_line_settings* stls, float x_pos, float y_pos, float height, float width, float vertical_offset, std::uint32_t rgba_background, std::uint32_t rgba_border, std::uint8_t border_width, _Align text_align = _Align::left, VerticalOverflow v_overflow = VerticalOverflow::cut)
+	{
+		this->text_align = text_align;
+		this->v_overflow = v_overflow;
+		this->border_width = border_width;
+		this->vertical_offset = vertical_offset;
+		this->stls = stls;
+		this->x_pos = x_pos;
+		this->y_pos = y_pos;
+		this->width = width;
+		this->rgba_border = rgba_border;
+		this->rgba_background = rgba_background;
+		this->height = height;
+		this->text = txt.size() ? txt : " ";
+		recalculate_available_space_for_text();
+		text_reformat();
+	}
+	void text_reformat()
+	{
+		std::lock_guard locker(lock);
+		std::vector<std::vector<std::string>> split_text;
+		std::vector<std::string> paragraph;
+		std::string line;
+		stls->set_new_pos(x_pos, y_pos + 0.5f * height + 0.5f * vertical_offset);
+
+		for (int i = 0; i < (int)text.size(); i++)
 		{
-			if (Text[i] == ' ')
+			if (text[i] == ' ')
 			{
-				Paragraph.push_back(Line);
-				Line.clear();
+				paragraph.push_back(line);
+				line.clear();
 			}
-			else if (Text[i] == '\n')
+			else if (text[i] == '\n')
 			{
-				Paragraph.push_back(Line);
-				Line.clear();
-				SplitText.push_back(Paragraph);
-				Paragraph.clear();
+				paragraph.push_back(line);
+				line.clear();
+				split_text.push_back(paragraph);
+				paragraph.clear();
 			}
-			else Line.push_back(Text[i]);
-			if (i == Text.size() - 1)
+			else line.push_back(text[i]);
+			if (i == (int)text.size() - 1)
 			{
-				Paragraph.push_back(Line);
-				SplitText.push_back(Paragraph);
-				Line.clear();
-				Paragraph.clear();
+				paragraph.push_back(line);
+				split_text.push_back(paragraph);
+				line.clear();
+				paragraph.clear();
 			}
 		}
 
-		for (int i = 0; i < SplitText.size(); i++)
+		for (int i = 0; i < (int)split_text.size(); i++)
 		{
-#define Para SplitText[i]
-#define LINES Paragraph
-			for (int q = 0; q < Para.size(); q++)
+			auto& para = split_text[i];
+			auto& lines_ref = paragraph;
+			for (int q = 0; q < (int)para.size(); q++)
 			{
-				if ((Para[q].size() + 1 + Line.size()) < SymbolsPerLine)
+				if ((para[q].size() + 1 + line.size()) < symbols_per_line)
 				{
-					if (Line.size())Line = (Line + " " + Para[q]);
-					else Line = Para[q];
+					if (line.size()) line = (line + " " + para[q]);
+					else line = para[q];
 				}
 				else
 				{
-					if (Line.size())LINES.push_back(Line);
-					Line = Para[q];
+					if (line.size()) lines_ref.push_back(line);
+					line = para[q];
 				}
-				while (Line.size() >= SymbolsPerLine)
+				while (line.size() >= symbols_per_line)
 				{
-					Paragraph.emplace_back(Line.substr(0, SymbolsPerLine));
-					Line = Line.erase(0, SymbolsPerLine);
+					paragraph.emplace_back(line.substr(0, symbols_per_line));
+					line = line.erase(0, symbols_per_line);
 				}
 			}
-			Paragraph.push_back(Line);
-			Line.clear();
-#undef LINES	
-#undef Para
+			paragraph.push_back(line);
+			line.clear();
 		}
 
-		for (int i = 0; i < Paragraph.size(); i++)
+		for (int i = 0; i < (int)paragraph.size(); i++)
 		{
-			STLS->Move(0, 0 - VerticalOffset);
-			if (VOverflow == VerticalOverflow::cut && STLS->CYpos < Ypos - Height)
+			stls->move(0, 0 - vertical_offset);
+			if (v_overflow == VerticalOverflow::cut && stls->cy_pos < y_pos - height)
 				break;
 
-			auto& new_line = Lines.emplace_back(STLS->CreateOne(Paragraph[i]));
+			auto& new_line = lines.emplace_back(stls->create_one(paragraph[i]));
 
-			if (TextAlign == _Align::right)
-				new_line->SafeChangePosition_Argumented(GLOBAL_RIGHT, ((this->Xpos) + (0.5f * Width) - this->STLS->XUnitSize), Lines.back()->CYpos);
-			else if (TextAlign == _Align::left)
-				new_line->SafeChangePosition_Argumented(GLOBAL_LEFT, ((this->Xpos) - (0.5f * Width) + this->STLS->XUnitSize), Lines.back()->CYpos);
+			if (text_align == _Align::right)
+				new_line->safe_change_position_argumented(GLOBAL_RIGHT, ((this->x_pos) + (0.5f * width) - this->stls->x_unit_size), lines.back()->cy_pos);
+			else if (text_align == _Align::left)
+				new_line->safe_change_position_argumented(GLOBAL_LEFT, ((this->x_pos) - (0.5f * width) + this->stls->x_unit_size), lines.back()->cy_pos);
 		}
-		CalculatedTextHeight = (Lines.front()->CYpos - Lines.back()->CYpos) + Lines.front()->CalculatedHeight;
+		calculated_text_height = (lines.front()->cy_pos - lines.back()->cy_pos) + lines.front()->calculated_height;
 
-		if (VOverflow == VerticalOverflow::recalibrate)
+		if (v_overflow == VerticalOverflow::recalibrate)
 		{
-			float dy = (CalculatedTextHeight - this->Height);
-			for (auto& line_ptr : Lines)
-				line_ptr->SafeMove(0, (dy + Lines.front()->CalculatedHeight) * 0.5f);
+			float dy = (calculated_text_height - this->height);
+			for (auto& line_ptr : lines)
+				line_ptr->safe_move(0, (dy + lines.front()->calculated_height) * 0.5f);
 		}
 	}
-	void SafeTextColorChange(std::uint32_t NewColor)
+	void safe_text_color_change(std::uint32_t new_color)
 	{
-		std::lock_guard<std::recursive_mutex> locker(Lock);
-		for (auto& line_ptr : Lines)
-			line_ptr->SafeColorChange(NewColor);
+		std::lock_guard locker(lock);
+		for (auto& line_ptr : lines)
+			line_ptr->safe_color_change(new_color);
 	}
-	bool MouseHandler(float mx, float my, CHAR Button/*-1 left, 1 right, 0 move*/, CHAR State /*-1 down, 1 up*/)  override
+	[[nodiscard]] bool mouse_handler(float mx, float my, char button/*-1 left, 1 right, 0 move*/, char state /*-1 down, 1 up*/) override
 	{
-		return 0;
+		return false;
 	}
-	void SafeStringReplace(std::string NewString) override
+	void safe_string_replace(std::string new_string) override
 	{
-		std::lock_guard<std::recursive_mutex> locker(Lock);
-		this->Text = (NewString.size()) ? NewString : " ";
-
-		Lines.clear();
-		RecalculateAvailableSpaceForText();
-		TextReformat();
+		std::lock_guard locker(lock);
+		this->text = new_string.size() ? new_string : " ";
+		lines.clear();
+		recalculate_available_space_for_text();
+		text_reformat();
 	}
-	void KeyboardHandler(char CH)
+	void keyboard_handler(char ch) override
 	{
 		return;
 	}
-	void RecalculateAvailableSpaceForText()
+	void recalculate_available_space_for_text()
 	{
-		std::lock_guard<std::recursive_mutex> locker(Lock);
-		SymbolsPerLine = std::floor((Width + STLS->XUnitSize * 2) / (STLS->XUnitSize * 2 + STLS->SpaceWidth));
+		std::lock_guard locker(lock);
+		symbols_per_line = std::floor((width + stls->x_unit_size * 2) / (stls->x_unit_size * 2 + stls->space_width));
 	}
-	void SafeMove(float dx, float dy)
+	void safe_move(float dx, float dy) override
 	{
-		std::lock_guard<std::recursive_mutex> locker(Lock);
-		Xpos += dx;
-		Ypos += dy;
-		STLS->Move(dx, dy);
-		for (auto& line_ptr : Lines)
-			line_ptr->SafeMove(dx, dy);
+		std::lock_guard locker(lock);
+		x_pos += dx;
+		y_pos += dy;
+		stls->move(dx, dy);
+		for (auto& line_ptr : lines)
+			line_ptr->safe_move(dx, dy);
 	}
-	void SafeChangePosition(float NewX, float NewY)
+	void safe_change_position(float new_x, float new_y) override
 	{
-		std::lock_guard<std::recursive_mutex> locker(Lock);
-		NewX -= Xpos;
-		NewY -= Ypos;
-		SafeMove(NewX, NewY);
+		std::lock_guard locker(lock);
+		new_x -= x_pos;
+		new_y -= y_pos;
+		safe_move(new_x, new_y);
 	}
-	void SafeChangePosition_Argumented(std::uint8_t Arg, float NewX, float NewY)
+	void safe_change_position_argumented(std::uint8_t arg, float new_x, float new_y) override
 	{
-		std::lock_guard<std::recursive_mutex> locker(Lock);
-		float CW = 0.5f * (
-			(std::int32_t)((bool)(GLOBAL_LEFT & Arg))
-			- (std::int32_t)((bool)(GLOBAL_RIGHT & Arg))
-			) * Width,
-			CH = 0.5f * (
-				(std::int32_t)((bool)(GLOBAL_BOTTOM & Arg))
-				- (std::int32_t)((bool)(GLOBAL_TOP & Arg))
-				) * Height;
-		SafeChangePosition(NewX + CW, NewY + CH);
+		std::lock_guard locker(lock);
+		float cw = 0.5f * (
+			(std::int32_t)((bool)(GLOBAL_LEFT & arg))
+			- (std::int32_t)((bool)(GLOBAL_RIGHT & arg))
+			) * width,
+			ch = 0.5f * (
+				(std::int32_t)((bool)(GLOBAL_BOTTOM & arg))
+				- (std::int32_t)((bool)(GLOBAL_TOP & arg))
+				) * height;
+		safe_change_position(new_x + cw, new_y + ch);
 	}
-	void Draw() override
+	void draw() override
 	{
-		std::lock_guard<std::recursive_mutex> locker(Lock);
-		if ((std::uint8_t)RGBABackground)
+		std::lock_guard locker(lock);
+		if ((std::uint8_t)rgba_background)
 		{
-			__glcolor(RGBABackground);
+			__glcolor(rgba_background);
 			glBegin(GL_QUADS);
-			glVertex2f(Xpos - (Width * 0.5f), Ypos + (0.5f * Height));
-			glVertex2f(Xpos + (Width * 0.5f), Ypos + (0.5f * Height));
-			glVertex2f(Xpos + (Width * 0.5f), Ypos - (0.5f * Height));
-			glVertex2f(Xpos - (Width * 0.5f), Ypos - (0.5f * Height));
+			glVertex2f(x_pos - (width * 0.5f), y_pos + (0.5f * height));
+			glVertex2f(x_pos + (width * 0.5f), y_pos + (0.5f * height));
+			glVertex2f(x_pos + (width * 0.5f), y_pos - (0.5f * height));
+			glVertex2f(x_pos - (width * 0.5f), y_pos - (0.5f * height));
 			glEnd();
 		}
-		if ((std::uint8_t)RGBABorder)
+		if ((std::uint8_t)rgba_border)
 		{
-			__glcolor(RGBABorder);
-			glLineWidth(BorderWidth);
+			__glcolor(rgba_border);
+			glLineWidth(border_width);
 			glBegin(GL_LINE_LOOP);
-			glVertex2f(Xpos - (Width * 0.5f), Ypos + (0.5f * Height));
-			glVertex2f(Xpos + (Width * 0.5f), Ypos + (0.5f * Height));
-			glVertex2f(Xpos + (Width * 0.5f), Ypos - (0.5f * Height));
-			glVertex2f(Xpos - (Width * 0.5f), Ypos - (0.5f * Height));
+			glVertex2f(x_pos - (width * 0.5f), y_pos + (0.5f * height));
+			glVertex2f(x_pos + (width * 0.5f), y_pos + (0.5f * height));
+			glVertex2f(x_pos + (width * 0.5f), y_pos - (0.5f * height));
+			glVertex2f(x_pos - (width * 0.5f), y_pos - (0.5f * height));
 			glEnd();
 		}
-		for (auto& line_ptr : Lines)
-			line_ptr->Draw();
+		for (auto& line_ptr : lines)
+			line_ptr->draw();
 	}
-	inline std::uint32_t TellType() override
+	[[nodiscard]] inline std::uint32_t tell_type() override
 	{
 		return TT_TEXTBOX;
 	}
+	void SafeTextColorChange(std::uint32_t c) { safe_text_color_change(c); }
 };
+
+// Backward-compat alias
+using TextBox = text_box;
 
 #endif

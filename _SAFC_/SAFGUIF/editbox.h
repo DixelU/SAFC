@@ -7,55 +7,60 @@
 #include <vector>
 #include <utility>
 #include <algorithm>
+#include <memory>
 
 constexpr int eb_cursor_flash_fraction = 30;
 constexpr int eb_cursor_flash_subcycle = eb_cursor_flash_fraction / 2;
 
 // doesn't work with fonted mode anymore!
-struct EditBox : HandleableUIPart
+struct edit_box : handleable_ui_part
 {
 private:
-	using char_pos = std::pair<std::deque<SingleTextLine*>::iterator, size_t>;
+	using char_pos = std::pair<std::deque<std::unique_ptr<single_text_line>>::iterator, size_t>;
 public:
 private:
-	std::string BufferedCurText;
-	std::uint8_t VisibilityCountDown;
+	std::string buffered_cur_text;
+	std::uint8_t visibility_countdown;
 public:
-	std::deque<SingleTextLine*> Words;
-	char_pos CursorPosition;/*points at the symbol after the cursor in current word?*/
-	//void (*OnEdit)();
-	SingleTextLineSettings* STLS;
-	float Xpos, Ypos, Height, Width, VerticalOffset;
-	std::uint32_t RGBABackground, RGBABorder;
-	std::uint8_t BorderWidth;
+	std::deque<std::unique_ptr<single_text_line>> words;
+	char_pos cursor_position; // points at the symbol after the cursor in current word
+	single_text_line_settings* stls; // non-owning
+	float x_pos, y_pos, height, width, vertical_offset;
+	std::uint32_t rgba_background, rgba_border;
+	std::uint8_t border_width;
 
-#define CursorWordIter (*CursorPosition.first)
-
-	EditBox(std::string Text, SingleTextLineSettings* STLS, float Xpos, float Ypos, float Height, float Width, float VerticalOffset, std::uint32_t RGBABackground, std::uint32_t RGBABorder, std::uint8_t BorderWidth): STLS(STLS),Xpos(Xpos),Ypos(Ypos),Height(Height), Width(Width), VerticalOffset(VerticalOffset), RGBABackground(RGBABackground), RGBABorder(RGBABorder), BorderWidth(BorderWidth), BufferedCurText(Text), VisibilityCountDown(0)
+	edit_box(std::string text, single_text_line_settings* stls,
+		float x_pos, float y_pos, float height, float width, float vertical_offset,
+		std::uint32_t rgba_background, std::uint32_t rgba_border, std::uint8_t border_width)
+		: stls(stls), x_pos(x_pos), y_pos(y_pos), height(height), width(width),
+		  vertical_offset(vertical_offset), rgba_background(rgba_background),
+		  rgba_border(rgba_border), border_width(border_width),
+		  buffered_cur_text(text), visibility_countdown(0)
 	{
-		Words.push_back(STLS->CreateOne(" "));
-		CursorPosition = { Words.begin(), 0 };
-		RearrangePositions();
-		for (auto& ch : Text)
-			WriteSymbolAtCursorPos(ch);
+		words.push_back(std::unique_ptr<single_text_line>(stls->create_one(" ")));
+		cursor_position = { words.begin(), 0 };
+		rearrange_positions();
+		for (auto& ch : text)
+			write_symbol_at_cursor_pos(ch);
 	}
-	void WriteSymbolAtCursorPos(char ch, bool rearrange=true) 
+
+	void write_symbol_at_cursor_pos(char ch, bool rearrange = true)
 	{
-		std::lock_guard<std::recursive_mutex> locker(Lock);
-		std::string cur_word = (CursorPosition.first != Words.end()) ? CursorWordIter->_CurrentText : "";
-		float char_width = STLS->XUnitSize*2;
-		float fixed_width = (Width - 2*char_width);
-		size_t maximal_whole_word_size = (fixed_width / (char_width + STLS->SpaceWidth));
-		if (CursorPosition.second) 
+		std::lock_guard locker(lock);
+		std::string cur_word = (cursor_position.first != words.end()) ? (*cursor_position.first)->current_text : "";
+		float char_width = stls->x_unit_size * 2;
+		float fixed_width = (width - 2 * char_width);
+		size_t maximal_whole_word_size = (size_t)(fixed_width / (char_width + stls->space_width));
+		if (cursor_position.second)
 		{
-			if (ch == '\n' || ch == ' ') 
+			if (ch == '\n' || ch == ' ')
 			{
 				std::string str = " ";
 				str[0] = ch;
-				CursorWordIter->SafeStringReplace(cur_word.substr(0, CursorPosition.second));
-				CursorPosition.first = Words.insert(CursorPosition.first + 1, STLS->CreateOne(str));
-				CursorPosition.first = Words.insert(CursorPosition.first + 1, STLS->CreateOne(cur_word.substr(CursorPosition.second, 0x7FFFFFFF)));
-				CursorPosition.second = 0;
+				(*cursor_position.first)->safe_string_replace(cur_word.substr(0, cursor_position.second));
+				cursor_position.first = words.insert(cursor_position.first + 1, std::unique_ptr<single_text_line>(stls->create_one(str)));
+				cursor_position.first = words.insert(cursor_position.first + 1, std::unique_ptr<single_text_line>(stls->create_one(cur_word.substr(cursor_position.second, 0x7FFFFFFF))));
+				cursor_position.second = 0;
 			}
 			else if (ch < 32 || ch == 127)
 			{
@@ -63,342 +68,338 @@ public:
 			}
 			else if (cur_word.size() >= maximal_whole_word_size)
 			{
-				cur_word.insert(cur_word.begin() + CursorPosition.second, ch);
-				CursorWordIter->SafeStringReplace(cur_word.substr(0, maximal_whole_word_size-1));
-				CursorPosition.first = Words.insert(CursorPosition.first + 1, STLS->CreateOne(cur_word.substr(maximal_whole_word_size-1, 0x7FFFFFFF)));
-				CursorPosition.second++;
-				if (CursorPosition.second < maximal_whole_word_size) 
-					--CursorPosition.first;
-				else 
-					CursorPosition.second -= maximal_whole_word_size - 1;
+				cur_word.insert(cur_word.begin() + cursor_position.second, ch);
+				(*cursor_position.first)->safe_string_replace(cur_word.substr(0, maximal_whole_word_size - 1));
+				cursor_position.first = words.insert(cursor_position.first + 1, std::unique_ptr<single_text_line>(stls->create_one(cur_word.substr(maximal_whole_word_size - 1, 0x7FFFFFFF))));
+				cursor_position.second++;
+				if (cursor_position.second < maximal_whole_word_size)
+					--cursor_position.first;
+				else
+					cursor_position.second -= maximal_whole_word_size - 1;
 			}
 			else
 			{
-				cur_word.insert(cur_word.begin() + CursorPosition.second, ch);
-				CursorWordIter->SafeStringReplace(cur_word);
-				CursorPosition.second++;
+				cur_word.insert(cur_word.begin() + cursor_position.second, ch);
+				(*cursor_position.first)->safe_string_replace(cur_word);
+				cursor_position.second++;
 			}
 		}
-		else 
+		else
 		{
 			if (ch == '\n' || ch == ' ')
 			{
 				std::string str = " ";
 				str[0] = ch;
-				CursorPosition.first = Words.insert(CursorPosition.first, STLS->CreateOne(str));
-				++CursorPosition.first;
-				CursorPosition.second = 0;
+				cursor_position.first = words.insert(cursor_position.first, std::unique_ptr<single_text_line>(stls->create_one(str)));
+				++cursor_position.first;
+				cursor_position.second = 0;
 			}
 			else if (ch < 32 || ch == 127)
 				return;
-			else if (cur_word.size() >= maximal_whole_word_size) 
+			else if (cur_word.size() >= maximal_whole_word_size)
 			{
 				cur_word.insert(cur_word.begin() + 1, ch);
-				CursorWordIter->SafeStringReplace(cur_word.substr(0, maximal_whole_word_size - 1));
-				auto itt = CursorPosition.first;
-				CursorPosition.first = Words.insert(CursorPosition.first + 1, STLS->CreateOne(cur_word.substr(maximal_whole_word_size - 1, 0x7FFFFFFF))),itt;
-				CursorPosition.second++;
-				--CursorPosition.first;
+				(*cursor_position.first)->safe_string_replace(cur_word.substr(0, maximal_whole_word_size - 1));
+				cursor_position.first = words.insert(cursor_position.first + 1, std::unique_ptr<single_text_line>(stls->create_one(cur_word.substr(maximal_whole_word_size - 1, 0x7FFFFFFF))));
+				cursor_position.second++;
+				--cursor_position.first;
 			}
-			else 
+			else
 			{
 				cur_word.insert(cur_word.begin(), ch);
-				CursorWordIter->SafeStringReplace(cur_word);
-				CursorPosition.second++;
+				(*cursor_position.first)->safe_string_replace(cur_word);
+				cursor_position.second++;
 			}
 		}
 
-		VisibilityCountDown = eb_cursor_flash_subcycle;
-		if(rearrange)
-			RearrangePositions();
+		visibility_countdown = eb_cursor_flash_subcycle;
+		if (rearrange)
+			rearrange_positions();
 	}
-	void RemoveSymbolBeforeCursorPos()
+
+	void remove_symbol_before_cursor_pos()
 	{
-		std::lock_guard<std::recursive_mutex> locker(Lock);
-		//auto cur_pos = CursorPosition;
-		if (CursorPosition.second) 
+		std::lock_guard locker(lock);
+		if (cursor_position.second)
 		{
-			std::string cur_word = CursorWordIter->_CurrentText;
-			cur_word.erase(cur_word.begin() + CursorPosition.second - 1);
-			CursorWordIter->SafeStringReplace(cur_word);
-			CursorPosition.second--;
-			RearrangePositions();
+			std::string cur_word = (*cursor_position.first)->current_text;
+			cur_word.erase(cur_word.begin() + cursor_position.second - 1);
+			(*cursor_position.first)->safe_string_replace(cur_word);
+			cursor_position.second--;
+			rearrange_positions();
 		}
-		else if(CursorPosition.first!=Words.begin())
+		else if (cursor_position.first != words.begin())
 		{
-			std::string cur_word;
-			auto it = CursorPosition.first - 1;
-			if ((*it)->_CurrentText.size() > 1)
+			auto it = cursor_position.first - 1;
+			if ((*it)->current_text.size() > 1)
 			{
-				cur_word = (*it)->_CurrentText;
+				std::string cur_word = (*it)->current_text;
 				cur_word.pop_back();
-				(*it)->SafeStringReplace(cur_word);
+				(*it)->safe_string_replace(cur_word);
 			}
-			else 
+			else
 			{
-				delete (*it);
-				CursorPosition.first = Words.erase(it);
+				cursor_position.first = words.erase(it);
 			}
-			RearrangePositions();
+			rearrange_positions();
 		}
 	}
-	void RemoveSymbolAfterCursorPos()
+
+	void remove_symbol_after_cursor_pos()
 	{
-		std::lock_guard<std::recursive_mutex> locker(Lock);
-		if (CursorPosition.first == Words.end() - 1 && CursorPosition.second == Words.back()->_CurrentText.size() - 1) 
+		std::lock_guard locker(lock);
+		if (cursor_position.first == words.end() - 1 && cursor_position.second == words.back()->current_text.size() - 1)
 			return;
-		MoveCursorBy1(_Align::right);
-		RemoveSymbolBeforeCursorPos();
+		move_cursor_by1(_Align::right);
+		remove_symbol_before_cursor_pos();
 	}
-	void UpdateBufferedCurText() 
+
+	void update_buffered_cur_text()
 	{
-		std::lock_guard<std::recursive_mutex> locker(Lock);
-		BufferedCurText.clear();
-		for (auto& word : Words) 
-			if (word->_CurrentText != "\t")
-				BufferedCurText += word->_CurrentText;
+		std::lock_guard locker(lock);
+		buffered_cur_text.clear();
+		for (auto& word : words)
+			if (word->current_text != "\t")
+				buffered_cur_text += word->current_text;
 	}
-	void RearrangePositions() 
+
+	void rearrange_positions()
 	{
-		float char_width = STLS->XUnitSize*2;
-		float char_height = VerticalOffset;
-		float fixed_height = Height - VerticalOffset;
-		float space_width = STLS->SpaceWidth;
-		float fixed_width = (Width - char_width);
-		float top_line = Ypos + fixed_height * 0.5;
-		float left_line = Xpos - fixed_width * 0.5;
+		float char_width = stls->x_unit_size * 2;
+		float char_height = vertical_offset;
+		float fixed_height = height - vertical_offset;
+		float space_width = stls->space_width;
+		float fixed_width = (width - char_width);
+		float top_line = y_pos + fixed_height * 0.5f;
+		float left_line = x_pos - fixed_width * 0.5f;
 		size_t line_no = 0, col_no = 1;
-		for (auto& word : Words) 
+		for (auto& word : words)
 		{
-			if (word->_CurrentText == "\n")
+			if (word->current_text == "\n")
 			{
 				col_no++;
-				word->SafeChangePosition_Argumented(_Align::right | _Align::center, left_line + col_no * char_width + (col_no - 1) * space_width, top_line - char_height * line_no);
+				word->safe_change_position_argumented(_Align::right | _Align::center, left_line + col_no * char_width + (col_no - 1) * space_width, top_line - char_height * line_no);
 				line_no++;
 				col_no = 1;
 				continue;
 			}
-			else if (word->CalculatedWidth + col_no * char_width + (col_no - 1) * space_width > fixed_width)
+			else if (word->calculated_width + col_no * char_width + (col_no - 1) * space_width > fixed_width)
 			{
 				line_no++;
-				col_no = word->Chars.size();
+				col_no = word->chars.size();
 			}
 			else
 			{
-				col_no += word->Chars.size();
+				col_no += word->chars.size();
 			}
-			word->SafeChangePosition_Argumented(_Align::right | _Align::center, left_line + col_no * char_width + (col_no - 1) * space_width, top_line - char_height * line_no);
+			word->safe_change_position_argumented(_Align::right | _Align::center, left_line + col_no * char_width + (col_no - 1) * space_width, top_line - char_height * line_no);
 		}
 	}
-	void Clear() 
+
+	void clear()
 	{
-		std::lock_guard<std::recursive_mutex> locker(Lock);
-		for (auto& word : Words) 
-			delete word;
-		Words.clear();
-		Words.push_back(STLS->CreateOne("\t"));
-		Words.push_back(STLS->CreateOne("\n"));
-		CursorPosition = { Words.begin(), 0 };
+		std::lock_guard locker(lock);
+		words.clear();
+		words.push_back(std::unique_ptr<single_text_line>(stls->create_one("\t")));
+		words.push_back(std::unique_ptr<single_text_line>(stls->create_one("\n")));
+		cursor_position = { words.begin(), 0 };
 	}
-	void ReparseCurrentTextFromScratch()
+
+	void reparse_current_text_from_scratch()
 	{
-		std::lock_guard<std::recursive_mutex> locker(Lock);
-		Clear();
-		for (auto& ch : BufferedCurText)
-			WriteSymbolAtCursorPos(ch);
+		std::lock_guard locker(lock);
+		clear();
+		for (auto& ch : buffered_cur_text)
+			write_symbol_at_cursor_pos(ch);
 	}
-	~EditBox() override
+
+	~edit_box() override
 	{
-		std::lock_guard<std::recursive_mutex> locker(Lock);
-		for (auto& line : Words)
-			delete line;
+		std::lock_guard locker(lock);
+		words.clear();
 	}
-	bool MouseHandler(float mx, float my, CHAR Button/*-1 left, 1 right, 0 move*/, CHAR State /*-1 down, 1 up*/) override 
+
+	[[nodiscard]] bool mouse_handler(float, float, char, char) override { return false; }
+
+	void safe_string_replace(std::string new_string) override
 	{
-		return 0;
+		std::lock_guard locker(lock);
+		buffered_cur_text = std::move(new_string);
+		reparse_current_text_from_scratch();
 	}
-	void SafeStringReplace(std::string NewString) override
+
+	[[nodiscard]] inline std::string unsafe_get_current_text() const
 	{
-		std::lock_guard<std::recursive_mutex> locker(Lock);
-		BufferedCurText = std::move(NewString);
-		ReparseCurrentTextFromScratch();
+		return buffered_cur_text;
 	}
-	inline std::string _UnsafeGetCurrentText() const
+
+	void move_cursor_by1(_Align move)
 	{
-		return BufferedCurText;
-	}
-	void MoveCursorBy1(_Align Move)
-	{
-		std::lock_guard<std::recursive_mutex> locker(Lock);
-		if ((CursorPosition.first == Words.end())) 
+		std::lock_guard locker(lock);
+		if (cursor_position.first == words.end())
 			return;
-		auto Y = CursorPosition.first;
-		auto cur_y_coord = (*Y)->CYpos;
-		auto cur_x_coord = (*Y)->Chars[CursorPosition.second]->Xpos;
-		switch (Move)
+		auto y = cursor_position.first;
+		auto cur_y_coord = (*y)->cy_pos;
+		auto cur_x_coord = (*y)->chars[cursor_position.second]->x_pos;
+		switch (move)
 		{
 		case _Align::left:
-			//printf("left %i %i\n", (*CursorPosition.first), CursorPosition.second);
-			if (CursorPosition.second>0)
+			if (cursor_position.second > 0)
+				--cursor_position.second;
+			else if (cursor_position.first != words.begin())
 			{
-				--CursorPosition.second;
-			}
-			else if (CursorPosition.first != Words.begin()) 
-			{
-				--CursorPosition.first;
-				CursorPosition.second = (*CursorPosition.first)->_CurrentText.size()-1;
+				--cursor_position.first;
+				cursor_position.second = (*cursor_position.first)->current_text.size() - 1;
 			}
 			break;
 		case _Align::right:
-			//printf("right %i %i\n", (*CursorPosition.first), CursorPosition.second);
-			if (CursorPosition.second < (*CursorPosition.first)->_CurrentText.size() - 1)
+			if (cursor_position.second < (*cursor_position.first)->current_text.size() - 1)
+				++cursor_position.second;
+			else if (cursor_position.first != words.end() - 1)
 			{
-				++CursorPosition.second;
-			}
-			else if (CursorPosition.first != Words.end() - 1)
-			{
-				++CursorPosition.first;
-				CursorPosition.second = 0;
+				++cursor_position.first;
+				cursor_position.second = 0;
 			}
 			break;
 		case _Align::top:
-			//printf("top %i %i\n", (*CursorPosition.first), CursorPosition.second);
-			do { MoveCursorBy1(_Align::left); } while (
-				!(CursorPosition.first == Words.begin() && CursorPosition.second == 0) && (
-					cur_x_coord + STLS->XUnitSize * 0.5 < (*CursorPosition.first)->Chars[CursorPosition.second]->Xpos ||
-					cur_y_coord == (*CursorPosition.first)->CYpos
+			do { move_cursor_by1(_Align::left); } while (
+				!(cursor_position.first == words.begin() && cursor_position.second == 0) && (
+					cur_x_coord + stls->x_unit_size * 0.5f < (*cursor_position.first)->chars[cursor_position.second]->x_pos ||
+					cur_y_coord == (*cursor_position.first)->cy_pos
 				));
 			break;
 		case _Align::bottom:
-			//printf("bottom %i %i\n", (*CursorPosition.first), CursorPosition.second);
-			do { MoveCursorBy1(_Align::right); } while (
-				//printf("%f %f\n", cur_x_coord - STLS->XUnitSize * 0.5, (*CursorPosition.first)->Chars[CursorPosition.second - 1]->Xpos);
-				!(CursorPosition.first == Words.end() - 1 && CursorPosition.second == Words.back()->_CurrentText.size()-1) && (
-					cur_x_coord - STLS->XUnitSize*0.5 > (*CursorPosition.first)->Chars[CursorPosition.second]->Xpos ||
-					cur_y_coord == (*CursorPosition.first)->CYpos
+			do { move_cursor_by1(_Align::right); } while (
+				!(cursor_position.first == words.end() - 1 && cursor_position.second == words.back()->current_text.size() - 1) && (
+					cur_x_coord - stls->x_unit_size * 0.5f > (*cursor_position.first)->chars[cursor_position.second]->x_pos ||
+					cur_y_coord == (*cursor_position.first)->cy_pos
 				));
 			break;
 		case _Align::center:
 			break;
 		}
 	}
-	void KeyboardHandler(char CH) override 
+
+	void keyboard_handler(char ch) override
 	{
-		std::lock_guard<std::recursive_mutex> locker(Lock);
-		switch (CH)
+		std::lock_guard locker(lock);
+		switch (ch)
 		{
 		case 13:
-			CH = '\n'; 
-			VisibilityCountDown = eb_cursor_flash_subcycle;
+			ch = '\n';
+			visibility_countdown = eb_cursor_flash_subcycle;
 			break;
 		case 8:
-			VisibilityCountDown = eb_cursor_flash_subcycle;
-			RemoveSymbolBeforeCursorPos();
-			break;//erase?
+			visibility_countdown = eb_cursor_flash_subcycle;
+			remove_symbol_before_cursor_pos();
+			return;
 		case 127:
-			VisibilityCountDown = eb_cursor_flash_subcycle;
-			RemoveSymbolAfterCursorPos();
-			break;//erase?
+			visibility_countdown = eb_cursor_flash_subcycle;
+			remove_symbol_after_cursor_pos();
+			return;
 		case 1:
-			MoveCursorBy1(_Align::bottom);
-			VisibilityCountDown = eb_cursor_flash_subcycle;
-			break;
+			move_cursor_by1(_Align::bottom);
+			visibility_countdown = eb_cursor_flash_subcycle;
+			return;
 		case 2:
-			MoveCursorBy1(_Align::top); 
-			VisibilityCountDown = eb_cursor_flash_subcycle;
-			break;
+			move_cursor_by1(_Align::top);
+			visibility_countdown = eb_cursor_flash_subcycle;
+			return;
 		case 3:
-			MoveCursorBy1(_Align::left); 
-			VisibilityCountDown = eb_cursor_flash_subcycle;
-			break;
+			move_cursor_by1(_Align::left);
+			visibility_countdown = eb_cursor_flash_subcycle;
+			return;
 		case 4:
-			MoveCursorBy1(_Align::right); 
-			VisibilityCountDown = eb_cursor_flash_subcycle;
-			break;
+			move_cursor_by1(_Align::right);
+			visibility_countdown = eb_cursor_flash_subcycle;
+			return;
 		}
-		WriteSymbolAtCursorPos(CH);
+		write_symbol_at_cursor_pos(ch);
 	}
-	void SafeMove(float dx, float dy) override
+
+	void safe_move(float dx, float dy) override
 	{
-		std::lock_guard<std::recursive_mutex> locker(Lock);
-		Xpos += dx;
-		Ypos += dy;
-		STLS->Move(dx, dy);
-		for (auto& line : Words)
-			line->SafeMove(dx, dy);
+		std::lock_guard locker(lock);
+		x_pos += dx;
+		y_pos += dy;
+		stls->move(dx, dy);
+		for (auto& word : words)
+			word->safe_move(dx, dy);
 	}
-	void SafeChangePosition(float NewX, float NewY) override
+
+	void safe_change_position(float new_x, float new_y) override
 	{
-		std::lock_guard<std::recursive_mutex> locker(Lock);
-		NewX -= Xpos;
-		NewY -= Ypos;
-		SafeMove(NewX, NewY);
+		std::lock_guard locker(lock);
+		new_x -= x_pos;
+		new_y -= y_pos;
+		safe_move(new_x, new_y);
 	}
-	void SafeChangePosition_Argumented(std::uint8_t Arg, float NewX, float NewY) override
+
+	void safe_change_position_argumented(std::uint8_t arg, float new_x, float new_y) override
 	{
-		std::lock_guard<std::recursive_mutex> locker(Lock);
-		float CW = 0.5f * (
-			(std::int32_t)((bool)(GLOBAL_LEFT & Arg))
-			- (std::int32_t)((bool)(GLOBAL_RIGHT & Arg))
-			) * Width,
-		CH = 0.5f * (
-			(std::int32_t)((bool)(GLOBAL_BOTTOM & Arg))
-			- (std::int32_t)((bool)(GLOBAL_TOP & Arg))
-			) * Height;
-		SafeChangePosition(NewX + CW, NewY + CH);
+		std::lock_guard locker(lock);
+		float cw = 0.5f * (
+			(std::int32_t)((bool)(GLOBAL_LEFT & arg))
+			- (std::int32_t)((bool)(GLOBAL_RIGHT & arg))
+			) * width,
+			ch = 0.5f * (
+				(std::int32_t)((bool)(GLOBAL_BOTTOM & arg))
+				- (std::int32_t)((bool)(GLOBAL_TOP & arg))
+				) * height;
+		safe_change_position(new_x + cw, new_y + ch);
 	}
-	void Draw() override
+
+	void draw() override
 	{
-		std::lock_guard<std::recursive_mutex> locker(Lock);
-		if (VisibilityCountDown)
-			VisibilityCountDown--;
-		if ((std::uint8_t)RGBABackground)
+		std::lock_guard locker(lock);
+		if (visibility_countdown)
+			visibility_countdown--;
+		if ((std::uint8_t)rgba_background)
 		{
-			__glcolor(RGBABackground);
+			__glcolor(rgba_background);
 			glBegin(GL_QUADS);
-			glVertex2f(Xpos - (Width * 0.5f), Ypos + (0.5f * Height));
-			glVertex2f(Xpos + (Width * 0.5f), Ypos + (0.5f * Height));
-			glVertex2f(Xpos + (Width * 0.5f), Ypos - (0.5f * Height));
-			glVertex2f(Xpos - (Width * 0.5f), Ypos - (0.5f * Height));
+			glVertex2f(x_pos - (width * 0.5f), y_pos + (0.5f * height));
+			glVertex2f(x_pos + (width * 0.5f), y_pos + (0.5f * height));
+			glVertex2f(x_pos + (width * 0.5f), y_pos - (0.5f * height));
+			glVertex2f(x_pos - (width * 0.5f), y_pos - (0.5f * height));
 			glEnd();
 		}
-		if ((TimerV % eb_cursor_flash_fraction > eb_cursor_flash_subcycle) || VisibilityCountDown)
+		if ((timer_v % eb_cursor_flash_fraction > eb_cursor_flash_subcycle) || visibility_countdown)
 		{
-			if (CursorPosition.first != Words.end())
+			if (cursor_position.first != words.end())
 			{
 				const float fonted_fix = (is_fonted ? 0.75f : 1.5f);
-				auto t = (*CursorPosition.first)->Chars[CursorPosition.second];
-				__glcolor(STLS->RGBAColor);
+				auto& t = (*cursor_position.first)->chars[cursor_position.second];
+				__glcolor(stls->rgba_color);
 				glBegin(GL_LINES);
-				glVertex2f(t->Xpos - STLS->XUnitSize - STLS->SpaceWidth * 0.5f, t->Ypos + STLS->YUnitSize * fonted_fix);
-				glVertex2f(t->Xpos - STLS->XUnitSize - STLS->SpaceWidth * 0.5f, t->Ypos - STLS->YUnitSize * fonted_fix);
+				glVertex2f(t->x_pos - stls->x_unit_size - stls->space_width * 0.5f, t->y_pos + stls->y_unit_size * fonted_fix);
+				glVertex2f(t->x_pos - stls->x_unit_size - stls->space_width * 0.5f, t->y_pos - stls->y_unit_size * fonted_fix);
 				glEnd();
 			}
 		}
-		if ((std::uint8_t)RGBABorder)
+		if ((std::uint8_t)rgba_border)
 		{
-			__glcolor(RGBABorder);
-			glLineWidth(BorderWidth);
+			__glcolor(rgba_border);
+			glLineWidth(border_width);
 			glBegin(GL_LINE_LOOP);
-			glVertex2f(Xpos - (Width * 0.5f), Ypos + (0.5f * Height));
-			glVertex2f(Xpos + (Width * 0.5f), Ypos + (0.5f * Height));
-			glVertex2f(Xpos + (Width * 0.5f), Ypos - (0.5f * Height));
-			glVertex2f(Xpos - (Width * 0.5f), Ypos - (0.5f * Height));
+			glVertex2f(x_pos - (width * 0.5f), y_pos + (0.5f * height));
+			glVertex2f(x_pos + (width * 0.5f), y_pos + (0.5f * height));
+			glVertex2f(x_pos + (width * 0.5f), y_pos - (0.5f * height));
+			glVertex2f(x_pos - (width * 0.5f), y_pos - (0.5f * height));
 			glEnd();
 		}
-		float bottom_y = Ypos - 0.5 * Height;
-		for (auto& line : Words)
+		float bottom_y = y_pos - 0.5f * height;
+		for (auto& word : words)
 		{
-			if (line->CYpos < bottom_y)
+			if (word->cy_pos < bottom_y)
 				break;
-			line->Draw();
+			word->draw();
 		}
 	}
-	inline std::uint32_t TellType() override
-	{
-		return TT_EDITBOX;
-	}
-#undef CursorWordIter
+
+	[[nodiscard]] inline std::uint32_t tell_type() override { return TT_EDITBOX; }
 };
+
+using EditBox = edit_box;
 
 #endif

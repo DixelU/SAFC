@@ -1,261 +1,248 @@
 #pragma once
-#ifndef SAFGUIF_STL 
+#ifndef SAFGUIF_STL
 #define SAFGUIF_STL
 
+#include <memory>
 #include "header_utils.h"
 #include "symbols.h"
 
 
-struct SingleTextLine 
+struct single_text_line
 {
-	std::string _CurrentText;
-	float CXpos, CYpos;
-	float SpaceWidth;
-	std::uint32_t RGBAColor, gRGBAColor;
-	float CalculatedWidth, CalculatedHeight;
-	bool isBicolored, isListedFont;
-	float _XUnitSize, _YUnitSize;
-	std::vector<DottedSymbol*> Chars;
+	std::string current_text;
+	float cx_pos, cy_pos;
+	float space_width;
+	std::uint32_t rgba_color, g_rgba_color;
+	float calculated_width, calculated_height;
+	bool is_bicolored, is_listed_font;
+	float x_unit_size, y_unit_size;
+	std::vector<std::unique_ptr<dotted_symbol>> chars;
+	// Backward-compat aliases
+	float& CXpos = cx_pos;
+	float& CYpos = cy_pos;
+	std::string& _CurrentText = current_text;
 
-	~SingleTextLine() 
+	~single_text_line() = default;
+	single_text_line(const single_text_line&) = delete;
+
+	single_text_line(std::string text, float cx_pos, float cy_pos, float x_unit_sz, float y_unit_sz, float space_width, std::uint8_t line_width = 2, std::uint32_t rgba_color = 0xFFFFFFFF, std::optional<std::uint32_t> g_rgba_color_opt = std::nullopt, std::uint8_t orig_n_grad_points = ((5 << 4) | 5), bool is_listed_font = false)
 	{
-		for (auto i = Chars.begin(); i != Chars.end(); ++i)
-			delete *i;
-		Chars.clear();
-	}
-	SingleTextLine(const SingleTextLine&) = delete;
-	SingleTextLine(std::string Text, float CXpos, float CYpos, float XUnitSize, float YUnitSize, float SpaceWidth, std::uint8_t LineWidth = 2, std::uint32_t RGBAColor = 0xFFFFFFFF, std::uint32_t* RGBAGradColor = NULL, std::uint8_t OrigNGradPoints = ((5 << 4) | 5), bool isListedFont = false) 
-	{
-		if (!Text.size())Text = " ";
-		this->_CurrentText = Text;
-		CalculatedHeight = 2 * YUnitSize;
-		CalculatedWidth = Text.size() * 2.f * XUnitSize + (Text.size() - 1) * SpaceWidth;
-		this->CXpos = CXpos;
-		this->CYpos = CYpos;
-		this->RGBAColor = RGBAColor;
-		this->gRGBAColor = 0;
-		if (RGBAGradColor)
-			this->gRGBAColor = *RGBAGradColor;
-		this->SpaceWidth = SpaceWidth;
-		this->_XUnitSize = XUnitSize;
-		this->_YUnitSize = YUnitSize;
-		this->isListedFont = isListedFont;
-		float CharXPosition = CXpos - (CalculatedWidth * 0.5) + XUnitSize, CharXPosIncrement = 2.f * XUnitSize + SpaceWidth;
-		for (int i = 0; i < Text.size(); i++)
+		if (!text.size()) text = " ";
+		this->current_text = text;
+		calculated_height = 2 * y_unit_sz;
+		calculated_width = text.size() * 2.f * x_unit_sz + (text.size() - 1) * space_width;
+		this->cx_pos = cx_pos;
+		this->cy_pos = cy_pos;
+		this->rgba_color = rgba_color;
+		this->g_rgba_color = 0;
+		if (g_rgba_color_opt)
+			this->g_rgba_color = *g_rgba_color_opt;
+		this->space_width = space_width;
+		this->x_unit_size = x_unit_sz;
+		this->y_unit_size = y_unit_sz;
+		this->is_listed_font = is_listed_font;
+		float char_x_position = cx_pos - (calculated_width * 0.5f) + x_unit_sz, char_x_pos_increment = 2.f * x_unit_sz + space_width;
+		for (int i = 0; i < (int)text.size(); i++)
 		{
-			if (!RGBAGradColor && !isListedFont)Chars.push_back(
-				new DottedSymbol(Text[i], CharXPosition, CYpos, XUnitSize, YUnitSize, LineWidth, new std::uint32_t{RGBAColor})
-				);
-			else if (RGBAGradColor && !isListedFont) Chars.push_back(
-				new BiColoredDottedSymbol(Text[i], CharXPosition, CYpos, XUnitSize, YUnitSize, LineWidth, new std::uint32_t{ RGBAColor }, new std::uint32_t{ this->gRGBAColor }, (std::uint8_t)(OrigNGradPoints >> 4), (std::uint8_t)(OrigNGradPoints & 0xF))
-				);
-			else Chars.push_back(
-				new lFontSymbol(Text[i], CharXPosition, CYpos, XUnitSize, YUnitSize, RGBAColor)
-				);
-			CharXPosition += CharXPosIncrement;
+			if (!g_rgba_color_opt && !is_listed_font)
+				chars.push_back(std::make_unique<dotted_symbol>(text[i], char_x_position, cy_pos, x_unit_sz, y_unit_sz, line_width, rgba_color));
+			else if (g_rgba_color_opt && !is_listed_font)
+				chars.push_back(std::make_unique<bi_colored_dotted_symbol>(text[i], char_x_position, cy_pos, x_unit_sz, y_unit_sz, line_width, rgba_color, this->g_rgba_color, (std::uint8_t)(orig_n_grad_points >> 4), (std::uint8_t)(orig_n_grad_points & 0xF)));
+			else
+				chars.push_back(std::make_unique<lfontsymbol>(text[i], char_x_position, cy_pos, x_unit_sz, y_unit_sz, rgba_color));
+			char_x_position += char_x_pos_increment;
 		}
-		if (RGBAGradColor)
+		if (g_rgba_color_opt)
 		{
-			this->isBicolored = true;
-			this->gRGBAColor = *RGBAGradColor;
-			delete RGBAGradColor;
+			this->is_bicolored = true;
+			this->g_rgba_color = *g_rgba_color_opt;
 		}
 		else
-			this->isBicolored = false;
+			this->is_bicolored = false;
 
-		RecalculateWidth();
+		recalculate_width();
 	}
-	void SafeColorChange(std::uint32_t NewRGBAColor)
+
+	void safe_color_change(std::uint32_t new_rgba_color)
 	{
-		if (isBicolored)
+		if (is_bicolored)
 		{
-			SafeColorChange(NewRGBAColor, gRGBAColor,
-				((BiColoredDottedSymbol*)(this->Chars.front()))->_PointData >> 4,
-				((BiColoredDottedSymbol*)(this->Chars.front()))->_PointData & 0xF
-				);
+			safe_color_change(new_rgba_color, g_rgba_color,
+				static_cast<bi_colored_dotted_symbol*>(chars.front().get())->_point_data >> 4,
+				static_cast<bi_colored_dotted_symbol*>(chars.front().get())->_point_data & 0xF
+			);
 			return;
 		}
-		std::uint8_t R = (NewRGBAColor >> 24), G = (NewRGBAColor >> 16) & 0xFF, B = (NewRGBAColor >> 8) & 0xFF, A = (NewRGBAColor) & 0xFF;
-		RGBAColor = NewRGBAColor;
-		for (int i = 0; i < Chars.size(); i++)
+		std::uint8_t r = (new_rgba_color >> 24), g = (new_rgba_color >> 16) & 0xFF, b = (new_rgba_color >> 8) & 0xFF, a = (new_rgba_color) & 0xFF;
+		rgba_color = new_rgba_color;
+		for (auto& ch : chars)
 		{
-			Chars[i]->R = R;
-			Chars[i]->G = G;
-			Chars[i]->B = B;
-			Chars[i]->A = A;
+			ch->R = r;
+			ch->G = g;
+			ch->B = b;
+			ch->A = a;
 		}
 	}
-	void SafeColorChange(std::uint32_t NewBaseRGBAColor, std::uint32_t NewGRGBAColor, std::uint8_t BasePoint, std::uint8_t gPoint)
+	void safe_color_change(std::uint32_t new_base_rgba_color, std::uint32_t new_g_rgba_color, std::uint8_t base_point, std::uint8_t g_point)
 	{
-		if (!isBicolored)
-			return SafeColorChange(NewBaseRGBAColor);
-		for (int i = 0; i < Chars.size(); i++)
-			Chars[i]->RefillGradient(new std::uint32_t{ NewBaseRGBAColor }, new std::uint32_t{ NewGRGBAColor }, BasePoint, gPoint);
+		if (!is_bicolored)
+			return safe_color_change(new_base_rgba_color);
+		for (auto& ch : chars)
+			ch->refill_gradient(new_base_rgba_color, new_g_rgba_color, base_point, g_point);
 	}
-	void SafeChangePosition(float NewCXPos, float NewCYPos)
+	void safe_change_position(float new_cx_pos, float new_cy_pos)
 	{
-		NewCXPos = NewCXPos - CXpos;
-		NewCYPos = NewCYPos - CYpos;
-		SafeMove(NewCXPos, NewCYPos);
+		new_cx_pos = new_cx_pos - cx_pos;
+		new_cy_pos = new_cy_pos - cy_pos;
+		safe_move(new_cx_pos, new_cy_pos);
 	}
-	void SafeMove(float dx, float dy)
+	void safe_move(float dx, float dy)
 	{
-		CXpos += dx;
-		CYpos += dy;
-		for (int i = 0; i < Chars.size(); i++)
-			Chars[i]->SafeCharMove(dx, dy);
+		cx_pos += dx;
+		cy_pos += dy;
+		for (auto& ch : chars)
+			ch->safe_char_move(dx, dy);
 	}
-	bool SafeReplaceChar(int i, char CH)
+	bool safe_replace_char(int i, char ch_val)
 	{
-		if (i >= Chars.size()) return 0;
-		if (isListedFont)
+		if (i >= (int)chars.size()) return false;
+		if (is_listed_font)
 		{
-			auto ch = dynamic_cast<lFontSymbol*>(Chars[i]);
-
+			auto ch = dynamic_cast<lfontsymbol*>(chars[i].get());
 			if (!ch)
 			{
 				std::cerr << "Error during safe char replacement [1]" << std::endl;
-				return 0;
+				return false;
 			}
-
-			ch->Symb = CH;
-			ch->ReinitGlyphMetrics();
+			ch->symb = ch_val;
+			ch->reinit_glyph_metrics();
 		}
 		else
 		{
-			Chars[i]->RenderWay = ASCII[CH];
-			Chars[i]->UpdatePointPlacementPositions();
+			chars[i]->render_way = ASCII[ch_val];
+			chars[i]->update_point_placement_positions();
 		}
-		return 1;
+		return true;
 	}
-	bool SafeReplaceChar(int i, const std::string& CHrenderway)
+	bool safe_replace_char(int i, const std::string& ch_render_way)
 	{
-		if (i >= Chars.size())return 0;
-		if (isListedFont) return 0;
-		Chars[i]->RenderWay = CHrenderway;
-		Chars[i]->UpdatePointPlacementPositions();
-		return 1;
+		if (i >= (int)chars.size()) return false;
+		if (is_listed_font) return false;
+		chars[i]->render_way = ch_render_way;
+		chars[i]->update_point_placement_positions();
+		return true;
 	}
-	void RecalculateWidth()
+	void recalculate_width()
 	{
-		CalculatedWidth = (isListedFont) ? 
-			HorizontallyRepositionFontedSymbols() :
-			LegacyCalculateWidthAndRepositionNonfonteds();
+		calculated_width = is_listed_font ?
+			horizontally_reposition_fonted_symbols() :
+			legacy_calculate_width_and_reposition_nonfonteds();
 	}
-	void SafeChangePosition_Argumented(std::uint8_t Arg, float newX, float newY)
+	void safe_change_position_argumented(std::uint8_t arg, float new_x, float new_y)
 	{
-		///STL_CHANGE_POSITION_ARGUMENT_LEFT
-		float CW = 0.5f * (
-			(std::int32_t)((bool)(GLOBAL_LEFT & Arg))
-			- (std::int32_t)((bool)(GLOBAL_RIGHT & Arg))
-			) * CalculatedWidth,
-			CH = 0.5f * (
-				(std::int32_t)((bool)(GLOBAL_BOTTOM & Arg))
-				- (std::int32_t)((bool)(GLOBAL_TOP & Arg))
-				) * CalculatedHeight;
-		SafeChangePosition(newX + CW, newY + CH);
+		float cw = 0.5f * (
+			(std::int32_t)((bool)(GLOBAL_LEFT & arg))
+			- (std::int32_t)((bool)(GLOBAL_RIGHT & arg))
+			) * calculated_width,
+			ch = 0.5f * (
+				(std::int32_t)((bool)(GLOBAL_BOTTOM & arg))
+				- (std::int32_t)((bool)(GLOBAL_TOP & arg))
+				) * calculated_height;
+		safe_change_position(new_x + cw, new_y + ch);
 	}
-	void SafeStringReplace(std::string NewString)
+	void safe_string_replace(std::string new_string)
 	{
-		if (!NewString.size()) NewString = " ";
-		_CurrentText = NewString;
-		while (NewString.size() > Chars.size())
+		if (!new_string.size()) new_string = " ";
+		current_text = new_string;
+		while (new_string.size() > chars.size())
 		{
-			if (isBicolored)
-				Chars.push_back(new BiColoredDottedSymbol((*((BiColoredDottedSymbol*)(Chars.front())))));
-			else if (isListedFont)
-				Chars.push_back(new lFontSymbol(*((lFontSymbol*)(Chars.front()))));
+			if (is_bicolored)
+				chars.push_back(std::make_unique<bi_colored_dotted_symbol>(*static_cast<bi_colored_dotted_symbol*>(chars.front().get())));
+			else if (is_listed_font)
+				chars.push_back(std::make_unique<lfontsymbol>(*static_cast<lfontsymbol*>(chars.front().get())));
 			else
-				Chars.push_back(new DottedSymbol(*(Chars.front())));
+				chars.push_back(std::make_unique<dotted_symbol>(*chars.front()));
 		}
-		while (NewString.size() < Chars.size())
-		{
-			delete Chars.back();
-			Chars.pop_back();
-		}
-		for (int i = 0; i < Chars.size(); i++)
-			SafeReplaceChar(i, NewString[i]);
-		RecalculateWidth();
+		while (new_string.size() < chars.size())
+			chars.pop_back();
+		for (int i = 0; i < (int)chars.size(); i++)
+			safe_replace_char(i, new_string[i]);
+		recalculate_width();
 	}
 
-	inline float DefaultWidthFormulae()
+	inline float default_width_formulae()
 	{
-		return Chars.size() * (2.f * _XUnitSize) + (Chars.size() - 1) * SpaceWidth;
+		return chars.size() * (2.f * x_unit_size) + (chars.size() - 1) * space_width;
 	}
 
-	float LegacyCalculateWidthAndRepositionNonfonteds()
+	float legacy_calculate_width_and_reposition_nonfonteds()
 	{
-		auto width = DefaultWidthFormulae();
-		float CharXPosition = CXpos - (width * 0.5f) + _XUnitSize, CharXPosIncrement = 2.f * _XUnitSize + SpaceWidth;
-
-		for (auto& ch : Chars)
+		auto width = default_width_formulae();
+		float char_x_position = cx_pos - (width * 0.5f) + x_unit_size, char_x_pos_increment = 2.f * x_unit_size + space_width;
+		for (auto& ch : chars)
 		{
-			ch->Xpos = CharXPosition;
-			CharXPosition += CharXPosIncrement;
+			ch->x_pos = char_x_position;
+			char_x_position += char_x_pos_increment;
 		}
 		return width;
 	}
 
-	float HorizontallyRepositionFontedSymbols()
+	float horizontally_reposition_fonted_symbols()
 	{
-		float PixelSize = (internal_range * 2) / window_base_width;
-		float TotalWidth = 0;
-		ptrdiff_t TotalPixelWidth = 0;
+		float pixel_size = (internal_range * 2) / window_base_width;
+		float total_width = 0;
+		ptrdiff_t total_pixel_width = 0;
 
-		for (auto& ch : Chars)
+		for (auto& ch : chars)
 		{
-			auto fontedSymb = dynamic_cast<lFontSymbol*>(ch);
-			if (!fontedSymb)
+			auto fonted_symb = dynamic_cast<lfontsymbol*>(ch.get());
+			if (!fonted_symb)
 			{
 				std::cerr << "Error during repositionment of a character [1]" << std::endl;
-				return TotalPixelWidth * PixelSize;
+				return total_pixel_width * pixel_size;
 			}
-			TotalPixelWidth += fontedSymb->GM.gmCellIncX;
+			total_pixel_width += fonted_symb->gm.gmCellIncX;
 		}
 
-		if (Chars.size())
+		if (chars.size())
 		{
-			auto lastChar = dynamic_cast<lFontSymbol*>(Chars.back());
-			if (!lastChar)
+			auto last_char = dynamic_cast<lfontsymbol*>(chars.back().get());
+			if (!last_char)
 			{
 				std::cerr << "Error during repositionment of a character [2]" << std::endl;
-				return TotalPixelWidth * PixelSize;
+				return total_pixel_width * pixel_size;
 			}
-
-			TotalPixelWidth -= ((ptrdiff_t)lastChar->GM.gmCellIncX - (ptrdiff_t)lastChar->GM.gmBlackBoxX);
+			total_pixel_width -= ((ptrdiff_t)last_char->gm.gmCellIncX - (ptrdiff_t)last_char->gm.gmBlackBoxX);
 		}
 
-		TotalWidth = TotalPixelWidth * PixelSize;
-		ptrdiff_t LinearPixelHorizontalPosition = 0;
-		float LinearHorizontalPosition = CXpos - (TotalWidth * 0.5f);
+		total_width = total_pixel_width * pixel_size;
+		ptrdiff_t linear_pixel_h_pos = 0;
+		float linear_h_pos = cx_pos - (total_width * 0.5f);
 
-		for (auto& ch : Chars)
+		for (auto& ch : chars)
 		{
-			auto fontedSymb = dynamic_cast<lFontSymbol*>(ch);
-			fontedSymb->SafePositionChange(
-				LinearHorizontalPosition + (LinearPixelHorizontalPosition * PixelSize),
-				fontedSymb->Ypos);
-			LinearPixelHorizontalPosition += fontedSymb->GM.gmCellIncX;
-			/*std::cout << fontedSymb->Symb << "(" << std::hex << std::setw(2) << (int)fontedSymb->Symb << ")" << std::dec << std::setw(0)
-				<< " gmCellIncX: " << fontedSymb->GM.gmCellIncX
-				<< " gmBlackBoxX: " << fontedSymb->GM.gmBlackBoxX
-				<< "\t gmptGlyphOrigin.x: " << fontedSymb->GM.gmptGlyphOrigin.x
-				<< "\t LPHP: " << LinearPixelHorizontalPosition << std::endl;*/
+			auto fonted_symb = dynamic_cast<lfontsymbol*>(ch.get());
+			fonted_symb->safe_position_change(
+				linear_h_pos + (linear_pixel_h_pos * pixel_size),
+				fonted_symb->y_pos);
+			linear_pixel_h_pos += fonted_symb->gm.gmCellIncX;
 		}
-		/*std::cout << "Width: " << TotalPixelWidth << std::endl;
-		std::cout << "====" << std::endl;*/
-
-		return TotalWidth;
+		return total_width;
 	}
 
-	void Draw()
+	void draw()
 	{
-		if (CalculatedWidth < std::numeric_limits<float>::epsilon())
-			RecalculateWidth();
-
-		for (auto& ch: Chars)
-			ch->Draw();
+		if (calculated_width < std::numeric_limits<float>::epsilon())
+			recalculate_width();
+		for (auto& ch : chars)
+			ch->draw();
 	}
+
+	// Backward-compat method wrappers
+	void SafeMove(float dx, float dy) { safe_move(dx, dy); }
+	void SafeStringReplace(std::string s) { safe_string_replace(std::move(s)); }
+	void SafeChangePosition(float x, float y) { safe_change_position(x, y); }
+	void SafeChangePosition_Argumented(std::uint8_t a, float x, float y) { safe_change_position_argumented(a, x, y); }
 };
 
 #endif

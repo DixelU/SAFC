@@ -2030,34 +2030,34 @@ struct PlayerViewer : public HandleableUIPart
 		data->move(xpos - 0.5f * data->width, ypos);
 	}
 
-	void Draw() override
+	void draw() override
 	{
-		std::lock_guard<std::recursive_mutex> locker(Lock);
+		std::lock_guard<std::recursive_mutex> locker(lock);
 
 		player->draw(*data);
 	}
 
-	void SafeMove(float dx, float dy) override
+	void safe_move(float dx, float dy) override
 	{
-		std::lock_guard<std::recursive_mutex> locker(Lock);
-		
+		std::lock_guard<std::recursive_mutex> locker(lock);
+
 		xpos += dx;
 		ypos += dy;
 
 		data->move(dx, dy);
 	}
-	void SafeChangePosition(float NewX, float NewY) override
+	void safe_change_position(float NewX, float NewY) override
 	{
-		std::lock_guard<std::recursive_mutex> locker(Lock);
-		
+		std::lock_guard<std::recursive_mutex> locker(lock);
+
 		NewX -= xpos;
 		NewY -= ypos;
 
-		SafeMove(NewX, NewY);
+		safe_move(NewX, NewY);
 	}
-	void SafeChangePosition_Argumented(std::uint8_t Arg, float NewX, float NewY) override
+	void safe_change_position_argumented(std::uint8_t Arg, float NewX, float NewY) override
 	{
-		std::lock_guard<std::recursive_mutex> locker(Lock);
+		std::lock_guard<std::recursive_mutex> locker(lock);
 		float CW = 0.5f * (
 			(std::int32_t)((bool)(GLOBAL_LEFT & Arg))
 			- (std::int32_t)((bool)(GLOBAL_RIGHT & Arg))
@@ -2066,12 +2066,12 @@ struct PlayerViewer : public HandleableUIPart
 				(std::int32_t)((bool)(GLOBAL_BOTTOM & Arg))
 				- (std::int32_t)((bool)(GLOBAL_TOP & Arg))
 				) * data->height;
-		SafeChangePosition(NewX + CW, NewY + CH);
+		safe_change_position(NewX + CW, NewY + CH);
 	}
 	void RescaleAndReposition(float new_xpos, float new_ypos, float new_width, float new_height)
 	{
-		std::lock_guard<std::recursive_mutex> locker(Lock);
-		
+		std::lock_guard<std::recursive_mutex> locker(lock);
+
 		float width_factor_change = new_width / data->width;
 		constexpr float black_relative_height = 22.5f / 40.f;
 
@@ -2080,17 +2080,17 @@ struct PlayerViewer : public HandleableUIPart
 		data->reinit(new_width, new_height, data->last_keyboard_height * width_factor_change, data->last_keyboard_height * width_factor_change * black_relative_height, 0.f);
 		data->move(new_xpos - 0.5f * data->width, new_ypos);
 	}
-	void KeyboardHandler(CHAR CH) override
+	void keyboard_handler(char) override
 	{
 		return;
 	}
-	void SafeStringReplace(std::string Meaningless) override
+	void safe_string_replace(std::string) override
 	{
 		return;
 	}
-	bool MouseHandler(float mx, float my, CHAR Button, CHAR State) override
+	[[nodiscard]] bool mouse_handler(float, float, char, char) override
 	{
-		return 0;
+		return false;
 	}
 };
 

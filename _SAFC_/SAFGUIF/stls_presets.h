@@ -4,12 +4,33 @@
 
 #include "single_text_line_settings.h"
 
-SingleTextLineSettings
-	* Legacy_White = new SingleTextLineSettings("_", 0, 0, 5, 0xFFFFFFFF),
-	* Legacy_Black = new SingleTextLineSettings("_", 0, 0, 5, 0x000000FF),
+// Inline preset instances — no dynamic allocation, no leaks.
+// Callers that need a pointer should use &system_white etc.
+inline single_text_line_settings legacy_white("_", 0, 0, 5, 0xFFFFFFFF);
+inline single_text_line_settings legacy_black("_", 0, 0, 5, 0x000000FF);
 
-	* System_Black = (is_fonted) ? new SingleTextLineSettings(10, 0x000000FF) : new SingleTextLineSettings("_", 0, 0, 5, 0x000000FF),
-	* System_White = (is_fonted) ? new SingleTextLineSettings(10, 0xFFFFFFFF) : new SingleTextLineSettings("_", 0, 0, 5, 0xFFFFFFFF),
-	* System_Red = (is_fonted) ? new SingleTextLineSettings(10, 0xFF7F3FFF) : new SingleTextLineSettings("_", 0, 0, 5, 0xFF7F3FFF),
-	* System_Blue = (is_fonted) ? new SingleTextLineSettings(10, 0x9FCFFFFF) : new SingleTextLineSettings("_", 0, 0, 5, 0x9FCFFFFF);
+inline single_text_line_settings system_black = is_fonted
+    ? single_text_line_settings(10, 0x000000FF)
+    : single_text_line_settings("_", 0, 0, 5, 0x000000FF);
+
+inline single_text_line_settings system_white = is_fonted
+    ? single_text_line_settings(10, 0xFFFFFFFF)
+    : single_text_line_settings("_", 0, 0, 5, 0xFFFFFFFF);
+
+inline single_text_line_settings system_red = is_fonted
+    ? single_text_line_settings(10, 0xFF7F3FFF)
+    : single_text_line_settings("_", 0, 0, 5, 0xFF7F3FFF);
+
+inline single_text_line_settings system_blue = is_fonted
+    ? single_text_line_settings(10, 0x9FCFFFFF)
+    : single_text_line_settings("_", 0, 0, 5, 0x9FCFFFFF);
+
+// Compatibility pointer aliases (old code passes these as pointers to constructors)
+inline single_text_line_settings* Legacy_White = &legacy_white;
+inline single_text_line_settings* Legacy_Black = &legacy_black;
+inline single_text_line_settings* System_Black = &system_black;
+inline single_text_line_settings* System_White = &system_white;
+inline single_text_line_settings* System_Red   = &system_red;
+inline single_text_line_settings* System_Blue  = &system_blue;
+
 #endif

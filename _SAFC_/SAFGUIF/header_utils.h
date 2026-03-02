@@ -46,14 +46,14 @@ inline float rotation_angle()
 	return angle_to_radians(dumb_rotation_angle);
 }
 
-inline float rand_float(float range) 
+inline float rand_float(float range)
 {
 	return ((0 - range) + ((float)rand() / ((float)RAND_MAX / (2 * range))));
 }
 
 inline float rand_sign()
-{ 
-	return ((rand() & 1) ? -1.f : 1.f); 
+{
+	return ((rand() & 1) ? -1.f : 1.f);
 }
 
 inline float __slowdprog(float a, float b, float progressrate)
@@ -67,21 +67,32 @@ inline void __glcolor(std::uint32_t uINT)
 }
 
 
-float WindX = window_base_width, WindY = window_base_height;
+float wind_x = window_base_width, wind_y = window_base_height;
 
-bool ANIMATION_IS_ACTIVE = false, 
-	 FIRSTBOOT = true,
-	 DRAG_OVER = false, 
-	 APRIL_FOOL = false,
-	 SHIFT_HELD = false,
-	 MONTH_BEGINING = false;
+bool animation_is_active = false,
+	 firstboot = true,
+	 drag_over = false,
+	 april_fool = false,
+	 shift_held = false,
+	 month_beginning = false;
 
-std::uint32_t TimerV = 0;
-std::int16_t YearsOld = -1;
+std::uint32_t timer_v = 0;
+std::int16_t years_old = -1;
+
+// Backward-compat aliases for renamed globals
+auto& WindX = wind_x;
+auto& WindY = wind_y;
+auto& FIRSTBOOT = firstboot;
+auto& DRAG_OVER = drag_over;
+auto& APRIL_FOOL = april_fool;
+auto& MONTH_BEGINING = month_beginning;
+auto& ANIMATION_IS_ACTIVE = animation_is_active;
+auto& TimerV = timer_v;
+auto& YearsOld = years_old;
 
 HWND hWnd;
 HDC hDc;
-auto HandCursor = ::LoadCursor(NULL, IDC_HAND), AllDirectCursor = ::LoadCursor(NULL, IDC_CROSS), NWSECursor = ::LoadCursor(NULL, IDC_SIZENWSE);///AAAAAAAAAAA
+auto hand_cursor = ::LoadCursor(NULL, IDC_HAND), all_direct_cursor = ::LoadCursor(NULL, IDC_CROSS), nwse_cursor = ::LoadCursor(NULL, IDC_SIZENWSE);
 
 //const float singlepixwidth = (float)RANGE / WINDXSIZE;
 
@@ -97,13 +108,13 @@ int TIMESEED()
 {
 	SYSTEMTIME t;
 	GetLocalTime(&t);
-	
+
 	if (t.wMonth == 4 && t.wDay == 1)
-		APRIL_FOOL = true;
+		april_fool = true;
 	if (t.wMonth == 8 && t.wDay == 31)
-		YearsOld = t.wYear - 2018;
+		years_old = t.wYear - 2018;
 	if (t.wDay == 1)
-		MONTH_BEGINING = true;
+		month_beginning = true;
 
 	return t.wMilliseconds + (t.wSecond * 1000) + t.wMinute * 60000;
 }

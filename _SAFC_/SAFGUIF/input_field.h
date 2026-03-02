@@ -2,105 +2,102 @@
 #ifndef SAFGUIF_IF
 #define SAFGUIF_IF
 
+#include <memory>
 #include "header_utils.h"
 #include "handleable_ui_part.h"
 #include "single_text_line_settings.h"
 
-struct InputField : HandleableUIPart
+struct input_field : handleable_ui_part
 {
-	enum PassCharsType
+	enum class pass_chars_type
 	{
-		PassNumbers = 0b1,
-		PassFirstPoint = 0b10,
-		PassFrontMinusSign = 0b100,
-		PassAll = 0xFF
+		pass_numbers        = 0b1,
+		pass_first_point    = 0b10,
+		pass_front_minus    = 0b100,
+		pass_all            = 0xFF
 	};
 
-	enum Type
+	enum class Type
 	{
-		NaturalNumbers = PassCharsType::PassNumbers,
-		WholeNumbers = PassCharsType::PassNumbers | PassCharsType::PassFrontMinusSign,
-		FP_PositiveNumbers = PassCharsType::PassNumbers | PassCharsType::PassFirstPoint,
-		FP_Any = PassCharsType::PassNumbers | PassCharsType::PassFirstPoint | PassCharsType::PassFrontMinusSign,
-		Text = PassCharsType::PassAll,
+		NaturalNumbers  = (int)pass_chars_type::pass_numbers,
+		WholeNumbers    = (int)pass_chars_type::pass_numbers | (int)pass_chars_type::pass_front_minus,
+		FP_PositiveNumbers = (int)pass_chars_type::pass_numbers | (int)pass_chars_type::pass_first_point,
+		FP_Any          = (int)pass_chars_type::pass_numbers | (int)pass_chars_type::pass_first_point | (int)pass_chars_type::pass_front_minus,
+		Text            = (int)pass_chars_type::pass_all,
 	};
 
-	_Align InputAlign, TipAlign;
-	Type InputType;
-	std::string CurrentString, DefaultString;
-	std::string* OutputSource;
-	std::uint32_t MaxChars, BorderRGBAColor;
-	float Xpos, Ypos, Height, Width;
-	bool Focused, FirstInput;
-	SingleTextLine* STL;
-	SingleTextLine* Tip;
+	_Align input_align, tip_align_val;
+	Type input_type;
+	std::string current_string, default_string;
+	std::string* output_source;
+	// Backward-compat alias
+	std::string& CurrentString = current_string;
+	std::uint32_t max_chars, border_rgba_color;
+	float x_pos, y_pos, height, width;
+	bool focused, first_input;
+	std::unique_ptr<single_text_line> stl;
+	std::unique_ptr<single_text_line> tip;
 
-	InputField(std::string DefaultString, float Xpos, float Ypos, float Height, float Width, SingleTextLineSettings* DefaultStringSettings, std::string* OutputSource, std::uint32_t BorderRGBAColor, SingleTextLineSettings* TipLineSettings = NULL, std::string TipLineText = " ", std::uint32_t MaxChars = 0, _Align InputAlign = _Align::left, _Align TipAlign = _Align::center, Type InputType = Type::Text)
+	input_field(std::string default_str, float x_pos, float y_pos, float height, float width, single_text_line_settings* default_string_settings, std::string* output_source, std::uint32_t border_rgba_color, single_text_line_settings* tip_line_settings = nullptr, std::string tip_line_text = " ", std::uint32_t max_chars = 0, _Align input_align = _Align::left, _Align tip_align = _Align::center, Type input_type = Type::Text)
 	{
-		this->DefaultString = DefaultString;
-		DefaultStringSettings->SetNewPos(Xpos, Ypos);
-		this->STL = DefaultStringSettings->CreateOne(DefaultString);
-		if (TipLineSettings)
+		this->default_string = default_str;
+		default_string_settings->set_new_pos(x_pos, y_pos);
+		this->stl.reset(default_string_settings->create_one(default_str));
+		if (tip_line_settings)
 		{
-			this->Tip = TipLineSettings->CreateOne(TipLineText);
-			this->Tip->SafeChangePosition_Argumented(TipAlign, Xpos - ((TipAlign == _Align::left) ? 0.5f : ((TipAlign == _Align::right) ? -0.5f : 0)) * Width, Ypos - Height);
+			this->tip.reset(tip_line_settings->create_one(tip_line_text));
+			this->tip->safe_change_position_argumented(tip_align, x_pos - ((tip_align == _Align::left) ? 0.5f : ((tip_align == _Align::right) ? -0.5f : 0)) * width, y_pos - height);
 		}
-		else this->Tip = NULL;
-		this->InputAlign = InputAlign;
-		this->InputType = InputType;
-		this->TipAlign = TipAlign;
+		this->input_align = input_align;
+		this->input_type = input_type;
+		this->tip_align_val = tip_align;
 
-		this->MaxChars = MaxChars;
-		this->BorderRGBAColor = BorderRGBAColor;
-		this->Xpos = Xpos;
-		this->Ypos = Ypos;
-		this->Height = (DefaultStringSettings->YUnitSize * 2 > Height) ? DefaultStringSettings->YUnitSize * 2 : Height;
-		this->Width = Width;
-		this->CurrentString.clear();//DefaultString;
-		this->FirstInput = this->Focused = false;
-		this->OutputSource = OutputSource;
+		this->max_chars = max_chars;
+		this->border_rgba_color = border_rgba_color;
+		this->x_pos = x_pos;
+		this->y_pos = y_pos;
+		this->height = (default_string_settings->y_unit_size * 2 > height) ? default_string_settings->y_unit_size * 2 : height;
+		this->width = width;
+		this->current_string.clear();
+		this->first_input = this->focused = false;
+		this->output_source = output_source;
 	}
 
-	~InputField() override
-	{
-		delete STL;
-		delete Tip;
-	}
+	~input_field() override = default;
 
-	bool MouseHandler(float mx, float my, CHAR Button/*-1 left, 1 right, 0 move*/, CHAR State /*-1 down, 1 up*/) override
+	[[nodiscard]] bool mouse_handler(float mx, float my, char button/*-1 left, 1 right, 0 move*/, char state /*-1 down, 1 up*/) override
 	{
-		if (!Enabled)
+		if (!enabled)
 			return false;
 
-		if (abs(mx - Xpos) < 0.5 * Width && abs(my - Ypos) < 0.5 * Height)
+		if (abs(mx - x_pos) < 0.5f * width && abs(my - y_pos) < 0.5f * height)
 		{
-			if (!Focused)
-				FocusChange();
-			
-			return Button;
+			if (!focused)
+				focus_change();
+			return (bool)button;
 		}
 		else
 		{
-			if (Focused)
-				FocusChange();
-			return 0;
+			if (focused)
+				focus_change();
+			return false;
 		}
 	}
 
-	inline static bool CheckStringOnType(const std::string& String, InputField::Type CheckType) 
+	inline static bool check_string_on_type(const std::string& string, input_field::Type check_type)
 	{
 		bool first_symb = true;
 		bool met_minus = false;
 		bool met_point = false;
-		for (const auto& ch : String) 
+		for (const auto& ch : string)
 		{
-			switch (CheckType) 
+			switch (check_type)
 			{
-			case InputField::NaturalNumbers:
+			case input_field::Type::NaturalNumbers:
 				if (!(ch >= '0' && ch <= '9'))
 					return false;
 				break;
-			case InputField::WholeNumbers:
+			case input_field::Type::WholeNumbers:
 				if (!((ch >= '0' && ch <= '9')))
 				{
 					if (first_symb && !met_minus && ch == '-')
@@ -109,7 +106,7 @@ struct InputField : HandleableUIPart
 						return false;
 				}
 				break;
-			case InputField::FP_PositiveNumbers:
+			case input_field::Type::FP_PositiveNumbers:
 				if (!((ch >= '0' && ch <= '9')))
 				{
 					if (!met_point && ch == '.')
@@ -118,7 +115,7 @@ struct InputField : HandleableUIPart
 						return false;
 				}
 				break;
-			case InputField::FP_Any:
+			case input_field::Type::FP_Any:
 				if (!((ch >= '0' && ch <= '9')))
 				{
 					if (!met_point && ch == '.')
@@ -129,7 +126,7 @@ struct InputField : HandleableUIPart
 						return false;
 				}
 				break;
-			case InputField::Text:
+			case input_field::Type::Text:
 				break;
 			default:
 				break;
@@ -139,197 +136,205 @@ struct InputField : HandleableUIPart
 		return !first_symb;
 	}
 
-	void SafeMove(float dx, float dy) 
+	void safe_move(float dx, float dy) override
 	{
-		std::lock_guard<std::recursive_mutex> locker(Lock);
-		STL->SafeMove(dx, dy);
-		if (Tip)Tip->SafeMove(dx, dy);
-		Xpos += dx;
-		Ypos += dy;
+		std::lock_guard locker(lock);
+		stl->safe_move(dx, dy);
+		if (tip) tip->safe_move(dx, dy);
+		x_pos += dx;
+		y_pos += dy;
 	}
 
-	void SafeChangePosition(float NewX, float NewY)
+	void safe_change_position(float new_x, float new_y) override
 	{
-		std::lock_guard<std::recursive_mutex> locker(Lock);
-		NewX = Xpos - NewX;
-		NewY = Ypos - NewY;
-		SafeMove(NewX, NewY);
+		std::lock_guard locker(lock);
+		new_x = x_pos - new_x;
+		new_y = y_pos - new_y;
+		safe_move(new_x, new_y);
 	}
 
-	void FocusChange() 
+	void focus_change()
 	{
-		std::lock_guard<std::recursive_mutex> locker(Lock);
-		this->Focused = !this->Focused;
-		BorderRGBAColor = (((~(BorderRGBAColor >> 8)) << 8) | (BorderRGBAColor & 0xFF));
+		std::lock_guard locker(lock);
+		this->focused = !this->focused;
+		border_rgba_color = (((~(border_rgba_color >> 8)) << 8) | (border_rgba_color & 0xFF));
 	}
 
-	void UpdateInputString(const std::string& NewString = "")
+	void update_input_string(const std::string& new_string = "")
 	{
-		std::lock_guard<std::recursive_mutex> locker(Lock);
-		if (NewString.size())
-			CurrentString.clear();
-		float x = Xpos - ((InputAlign == _Align::left) ? 1 : ((InputAlign == _Align::right) ? -1 : 0)) * (0.5f * Width - STL->_XUnitSize);
-		this->STL->SafeStringReplace((NewString.size()) ? NewString.substr(0, this->MaxChars) : CurrentString);
-		this->STL->SafeChangePosition_Argumented(InputAlign, x, Ypos);
+		std::lock_guard locker(lock);
+		if (new_string.size())
+			current_string.clear();
+		float x = x_pos - ((input_align == _Align::left) ? 1 : ((input_align == _Align::right) ? -1 : 0)) * (0.5f * width - stl->x_unit_size);
+		this->stl->safe_string_replace(new_string.size() ? new_string.substr(0, this->max_chars) : current_string);
+		this->stl->safe_change_position_argumented(input_align, x, y_pos);
 	}
 
-	void BackSpace()
+	void backspace()
 	{
-		std::lock_guard<std::recursive_mutex> locker(Lock);
-		ProcessFirstInput();
-		if (CurrentString.size()) 
+		std::lock_guard locker(lock);
+		process_first_input();
+		if (current_string.size())
 		{
-			CurrentString.pop_back();
-			UpdateInputString();
+			current_string.pop_back();
+			update_input_string();
 		}
-		else 
-			this->STL->SafeStringReplace(" ");
+		else
+			this->stl->safe_string_replace(" ");
 	}
 
-	void FlushCurrentStringWithoutGUIUpdate(bool SetDefault = false)
+	void flush_current_string_without_gui_update(bool set_default = false)
 	{
-		std::lock_guard<std::recursive_mutex> locker(Lock);
-		this->CurrentString = (SetDefault) ? this->DefaultString : "";
+		std::lock_guard locker(lock);
+		this->current_string = set_default ? this->default_string : "";
 	}
 
-	void PutIntoSource(std::string* AnotherSource = NULL)
+	void put_into_source(std::string* another_source = nullptr)
 	{
-		std::lock_guard<std::recursive_mutex> locker(Lock);
-		if (OutputSource) 
+		std::lock_guard locker(lock);
+		if (output_source)
 		{
-			if (CurrentString.size())
-				*OutputSource = CurrentString;
+			if (current_string.size())
+				*output_source = current_string;
 		}
-		else if (AnotherSource)
-			if (CurrentString.size())
-				*AnotherSource = CurrentString;
+		else if (another_source)
+			if (current_string.size())
+				*another_source = current_string;
 	}
 
-	void ProcessFirstInput() 
+	void process_first_input()
 	{
-		std::lock_guard<std::recursive_mutex> locker(Lock);
-		if (FirstInput) 
+		std::lock_guard locker(lock);
+		if (first_input)
 		{
-			FirstInput = false;
-			CurrentString.clear();
+			first_input = false;
+			current_string.clear();
 		}
 	}
 
-	std::string GetCurrentInput(const std::string& Replacement)
+	[[nodiscard]] std::string get_current_input(const std::string& replacement)
 	{
-		if (InputField::CheckStringOnType(CurrentString, InputType))
-			return CurrentString;
-		if (STL && InputField::CheckStringOnType(STL->_CurrentText, InputType))
-			return STL->_CurrentText;
-		if (InputField::CheckStringOnType(Replacement, InputType))
-			return Replacement;
+		if (input_field::check_string_on_type(current_string, input_type))
+			return current_string;
+		if (stl && input_field::check_string_on_type(stl->current_text, input_type))
+			return stl->current_text;
+		if (input_field::check_string_on_type(replacement, input_type))
+			return replacement;
 		else
 			return "0";
 	}
 
-	void KeyboardHandler(char CH) 
+	// Legacy alias used by existing callers
+	[[nodiscard]] std::string GetCurrentInput(const std::string& replacement) { return get_current_input(replacement); }
+
+	void keyboard_handler(char ch) override
 	{
-		std::lock_guard<std::recursive_mutex> locker(Lock);
+		std::lock_guard locker(lock);
 
-		if (!Enabled)
+		if (!enabled)
+			return;
+		if (!focused)
 			return;
 
-		if (!Focused)
-			return;
-
-		if (CH >= 32)
+		if (ch >= 32)
 		{
-			if (InputType & PassCharsType::PassNumbers)
+			if ((int)input_type & (int)pass_chars_type::pass_numbers)
 			{
-				if (CH >= '0' && CH <= '9')
+				if (ch >= '0' && ch <= '9')
 				{
-					Input(CH);
+					input_char(ch);
 					return;
 				}
 			}
-			if (InputType & PassCharsType::PassFrontMinusSign)
+			if ((int)input_type & (int)pass_chars_type::pass_front_minus)
 			{
-				if (CH == '-' && CurrentString.empty())
+				if (ch == '-' && current_string.empty())
 				{
-					Input(CH);
+					input_char(ch);
 					return;
 				}
 			}
-			if (InputType & PassCharsType::PassFirstPoint)
+			if ((int)input_type & (int)pass_chars_type::pass_first_point)
 			{
-				if (CH == '.' && CurrentString.find('.') >= CurrentString.size())
+				if (ch == '.' && current_string.find('.') >= current_string.size())
 				{
-					Input(CH);
+					input_char(ch);
 					return;
 				}
 			}
-
-			if ((InputType & PassCharsType::PassAll) == PassCharsType::PassAll)
-				Input(CH);
+			if (((int)input_type & (int)pass_chars_type::pass_all) == (int)pass_chars_type::pass_all)
+				input_char(ch);
 		}
-		else if (CH == 13)
-			PutIntoSource();
-		else if (CH == 8)
-			BackSpace();
+		else if (ch == 13)
+			put_into_source();
+		else if (ch == 8)
+			backspace();
 	}
 
-	void Input(char CH) 
+	void input_char(char ch)
 	{
-		std::lock_guard<std::recursive_mutex> locker(Lock);
-		ProcessFirstInput();
-		if (!MaxChars || CurrentString.size() < MaxChars)
+		std::lock_guard locker(lock);
+		process_first_input();
+		if (!max_chars || current_string.size() < max_chars)
 		{
-			CurrentString.push_back(CH);
-			UpdateInputString();
+			current_string.push_back(ch);
+			update_input_string();
 		}
 	}
 
-	void SafeChangePosition_Argumented(std::uint8_t Arg, float NewX, float NewY)
+	void safe_change_position_argumented(std::uint8_t arg, float new_x, float new_y) override
 	{
-		std::lock_guard<std::recursive_mutex> locker(Lock);
-		float CW = 0.5f * (
-			(std::int32_t)((bool)(GLOBAL_LEFT & Arg))
-			- (std::int32_t)((bool)(GLOBAL_RIGHT & Arg))
-			) * Width,
-			CH = 0.5f * (
-				(std::int32_t)((bool)(GLOBAL_BOTTOM & Arg))
-				- (std::int32_t)((bool)(GLOBAL_TOP & Arg))
-				) * Height;
-		SafeChangePosition(NewX + CW, NewY + CH);
+		std::lock_guard locker(lock);
+		float cw = 0.5f * (
+			(std::int32_t)((bool)(GLOBAL_LEFT & arg))
+			- (std::int32_t)((bool)(GLOBAL_RIGHT & arg))
+			) * width,
+			ch = 0.5f * (
+				(std::int32_t)((bool)(GLOBAL_BOTTOM & arg))
+				- (std::int32_t)((bool)(GLOBAL_TOP & arg))
+				) * height;
+		safe_change_position(new_x + cw, new_y + ch);
 	}
 
-	void SafeStringReplace(std::string NewString) override 
+	void safe_string_replace(std::string new_string) override
 	{
-		std::lock_guard<std::recursive_mutex> locker(Lock);
-		CurrentString = NewString.substr(0, this->MaxChars);
-		UpdateInputString(NewString);
-		FirstInput = true;
+		std::lock_guard locker(lock);
+		current_string = new_string.substr(0, this->max_chars);
+		update_input_string(new_string);
+		first_input = true;
 	}
 
-	void Draw() override
+	void draw() override
 	{
-		std::lock_guard<std::recursive_mutex> locker(Lock);
+		std::lock_guard locker(lock);
 
-		if (!Enabled)
+		if (!enabled)
 			return;
 
-		__glcolor(BorderRGBAColor);
+		__glcolor(border_rgba_color);
 		glLineWidth(1);
 		glBegin(GL_LINE_LOOP);
-		glVertex2f(Xpos + 0.5f * Width, Ypos + 0.5f * Height);
-		glVertex2f(Xpos - 0.5f * Width, Ypos + 0.5f * Height);
-		glVertex2f(Xpos - 0.5f * Width, Ypos - 0.5f * Height);
-		glVertex2f(Xpos + 0.5f * Width, Ypos - 0.5f * Height);
+		glVertex2f(x_pos + 0.5f * width, y_pos + 0.5f * height);
+		glVertex2f(x_pos - 0.5f * width, y_pos + 0.5f * height);
+		glVertex2f(x_pos - 0.5f * width, y_pos - 0.5f * height);
+		glVertex2f(x_pos + 0.5f * width, y_pos - 0.5f * height);
 		glEnd();
-		this->STL->Draw();
-		if (Focused && Tip)
-			Tip->Draw();
+		this->stl->draw();
+		if (focused && tip)
+			tip->draw();
 	}
 
-	inline std::uint32_t TellType() override
+	[[nodiscard]] inline std::uint32_t tell_type() override
 	{
 		return TT_INPUT_FIELD;
 	}
+
+	// Backward-compat method wrappers
+	void UpdateInputString(const std::string& s = "") { update_input_string(s); }
+	void PutIntoSource(std::string* src = nullptr) { put_into_source(src); }
 };
 
-#endif // !SAFGUIF_IF 
+// Keep old name alias for backward compat in windows_handler
+using InputField = input_field;
+
+#endif // !SAFGUIF_IF

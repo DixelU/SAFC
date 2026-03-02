@@ -12,18 +12,19 @@
 #define TT_EDITBOX 0b10000000
 #define TT_SLIDER 0b100000000
 
-enum _TellType
+// Scoped enum to avoid polluting global namespace with names matching snake_case structs
+enum class _TellType
 {
-	unspecified = TT_UNSPECIFIED,
-	input_field = TT_INPUT_FIELD,
-	moveable_window = TT_MOVEABLE_WINDOW,
-	button = TT_BUTTON,
-	textbox = TT_TEXTBOX,
+	unspecified              = TT_UNSPECIFIED,
+	input_field              = TT_INPUT_FIELD,
+	moveable_window          = TT_MOVEABLE_WINDOW,
+	button                   = TT_BUTTON,
+	textbox                  = TT_TEXTBOX,
 	selectable_properted_list = TT_SELPROPLIST,
-	checkbox = TT_CHECKBOX,
-	graph = TT_GRAPH,
-	editbox = TT_EDITBOX,
-	slider = TT_SLIDER
+	checkbox                 = TT_CHECKBOX,
+	graph                    = TT_GRAPH,
+	editbox                  = TT_EDITBOX,
+	slider                   = TT_SLIDER
 };
 
 #define GLOBAL_LEFT 0b0001

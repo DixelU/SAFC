@@ -1,147 +1,148 @@
 #pragma once
-#ifndef SAFGUIF_SYMBOLS 
+#ifndef SAFGUIF_SYMBOLS
 #define SAFGUIF_SYMBOLS
 
 #include "header_utils.h"
 #include "charmap.h"
 
-struct Coords
+struct coords
 {
 	float x, y;
-	void Set(float newx, float newy)
+	void set(float newx, float newy)
 	{
 		x = newx; y = newy;
 	}
 };
 
-struct DottedSymbol
+struct dotted_symbol
 {
-	float Xpos, Ypos;
-	std::uint8_t R, G, B, A, LineWidth;
-	Coords Points[9];
-	std::string RenderWay;
-	std::vector<char> PointPlacement;
-	DottedSymbol(std::string RenderWay, float Xpos, float Ypos, float XUnitSize, float YUnitSize, std::uint8_t LineWidth = 2, std::uint8_t Red = 255, std::uint8_t Green = 255, std::uint8_t Blue = 255, std::uint8_t Alpha = 255)
+	float x_pos, y_pos;
+	std::uint8_t R, G, B, A, line_width;
+	coords points[9];
+	std::string render_way;
+	std::vector<char> point_placement;
+
+	dotted_symbol(std::string render_way, float x_pos, float y_pos, float x_unit_size, float y_unit_size, std::uint8_t line_width = 2, std::uint8_t red = 255, std::uint8_t green = 255, std::uint8_t blue = 255, std::uint8_t alpha = 255)
 	{
-		if (!RenderWay.size())RenderWay = " ";
-		this->RenderWay = std::move(RenderWay);
-		this->Xpos = Xpos;
-		this->LineWidth = LineWidth;
-		this->Ypos = Ypos;
-		this->R = Red; this->G = Green; this->B = Blue; this->A = Alpha;
+		if (!render_way.size()) render_way = " ";
+		this->render_way = std::move(render_way);
+		this->x_pos = x_pos;
+		this->line_width = line_width;
+		this->y_pos = y_pos;
+		this->R = red; this->G = green; this->B = blue; this->A = alpha;
 		for (int x = -1; x <= 1; x++)
 			for (int y = -1; y <= 1; y++)
-				Points[x + 1 + 3 * (y + 1)].Set(XUnitSize * x, YUnitSize * y);
-		UpdatePointPlacementPositions();
+				points[x + 1 + 3 * (y + 1)].set(x_unit_size * x, y_unit_size * y);
+		update_point_placement_positions();
 	}
-	DottedSymbol(char Symbol, float Xpos, float Ypos, float XUnitSize, float YUnitSize, std::uint8_t LineWidth = 2, std::uint8_t Red = 255, std::uint8_t Green = 255, std::uint8_t Blue = 255, std::uint8_t Alpha = 255) :
-		DottedSymbol(ASCII[Symbol], Xpos, Ypos, XUnitSize, YUnitSize, LineWidth, Red, Green, Blue, Alpha) {}
+	dotted_symbol(char symbol, float x_pos, float y_pos, float x_unit_size, float y_unit_size, std::uint8_t line_width = 2, std::uint8_t red = 255, std::uint8_t green = 255, std::uint8_t blue = 255, std::uint8_t alpha = 255) :
+		dotted_symbol(ASCII[symbol], x_pos, y_pos, x_unit_size, y_unit_size, line_width, red, green, blue, alpha) {}
 
-	DottedSymbol(std::string RenderWay, float Xpos, float Ypos, float XUnitSize, float YUnitSize, std::uint8_t LineWidth, std::uint32_t* RGBAColor) :
-		DottedSymbol(RenderWay, Xpos, Ypos, XUnitSize, YUnitSize, LineWidth, *RGBAColor >> 24, (*RGBAColor >> 16) & 0xFF, (*RGBAColor >> 8) & 0xFF, (*RGBAColor) & 0xFF)
+	// Value-by-value RGBA constructor (replaces the old raw-pointer owning constructors)
+	dotted_symbol(std::string render_way, float x_pos, float y_pos, float x_unit_size, float y_unit_size, std::uint8_t line_width, std::uint32_t rgba_color) :
+		dotted_symbol(render_way, x_pos, y_pos, x_unit_size, y_unit_size, line_width, rgba_color >> 24, (rgba_color >> 16) & 0xFF, (rgba_color >> 8) & 0xFF, rgba_color & 0xFF) {}
+
+	dotted_symbol(char symbol, float x_pos, float y_pos, float x_unit_size, float y_unit_size, std::uint8_t line_width, std::uint32_t rgba_color) :
+		dotted_symbol(ASCII[symbol], x_pos, y_pos, x_unit_size, y_unit_size, line_width, rgba_color >> 24, (rgba_color >> 16) & 0xFF, (rgba_color >> 8) & 0xFF, rgba_color & 0xFF) {}
+
+	virtual ~dotted_symbol() = default;
+
+	inline static bool is_renderway_symb(char c)
 	{
-		delete RGBAColor;
+		return (c <= '9' && c >= '0' || c == ' ');
 	}
-	DottedSymbol(char Symbol, float Xpos, float Ypos, float XUnitSize, float YUnitSize, std::uint8_t LineWidth, std::uint32_t* RGBAColor) :
-		DottedSymbol(ASCII[Symbol], Xpos, Ypos, XUnitSize, YUnitSize, LineWidth, *RGBAColor >> 24, (*RGBAColor >> 16) & 0xFF, (*RGBAColor >> 8) & 0xFF, (*RGBAColor) & 0xFF)
+	inline static bool is_number(char c)
 	{
-		delete RGBAColor;
-	}
-	virtual ~DottedSymbol() {}
-	inline static bool IsRenderwaySymb(CHAR C)
-	{
-		return (C <= '9' && C >= '0' || C == ' ');
-	}
-	inline static bool IsNumber(CHAR C)
-	{
-		return (C <= '9' && C >= '0');
+		return (c <= '9' && c >= '0');
 	}
 
-	void UpdatePointPlacementPositions()
+	void update_point_placement_positions()
 	{
-		PointPlacement.clear();
-		if (RenderWay.size() > 1)
+		point_placement.clear();
+		if (render_way.size() > 1)
 		{
-			if (IsNumber(RenderWay[0]) && !IsNumber(RenderWay[1]))
-				PointPlacement.push_back(RenderWay[0]);
-			if (IsNumber(RenderWay.back()) && !IsNumber(RenderWay[RenderWay.size() - 2]))PointPlacement.push_back(RenderWay.back());
-			for (int i = 1; i < RenderWay.size() - 1; ++i)
+			if (is_number(render_way[0]) && !is_number(render_way[1]))
+				point_placement.push_back(render_way[0]);
+			if (is_number(render_way.back()) && !is_number(render_way[render_way.size() - 2]))
+				point_placement.push_back(render_way.back());
+			for (int i = 1; i < (int)render_way.size() - 1; ++i)
 			{
-				if (IsNumber(RenderWay[i]) && !IsNumber(RenderWay[i - 1]) && !IsNumber(RenderWay[i + 1]))
-					PointPlacement.push_back(RenderWay[i]);
+				if (is_number(render_way[i]) && !is_number(render_way[i - 1]) && !is_number(render_way[i + 1]))
+					point_placement.push_back(render_way[i]);
 			}
 		}
-		else if (RenderWay.size() && IsNumber(RenderWay[0]))
+		else if (render_way.size() && is_number(render_way[0]))
 		{
-			PointPlacement.push_back(RenderWay[0]);
+			point_placement.push_back(render_way[0]);
 		}
 	}
-	void virtual Draw()
+	virtual void draw()
 	{
-		if (RenderWay == " ")return;
-		float VerticalShift = 0.f;
-		CHAR BACK = 0;
-		if (RenderWay.back() == '#' || RenderWay.back() == '~')
+		if (render_way == " ") return;
+		float vertical_shift = 0.f;
+		char back = 0;
+		if (render_way.back() == '#' || render_way.back() == '~')
 		{
-			BACK = RenderWay.back();
-			RenderWay.back() = ' ';
-			switch (BACK)
+			back = render_way.back();
+			render_way.back() = ' ';
+			switch (back)
 			{
 			case '#':
-				VerticalShift = Points[0].y - Points[3].y;
+				vertical_shift = points[0].y - points[3].y;
 				break;
 			case '~':
-				VerticalShift = (Points[0].y - Points[3].y) / 2;
+				vertical_shift = (points[0].y - points[3].y) / 2;
 				break;
 			}
 		}
 		glColor4ub(R, G, B, A);
-		glLineWidth(LineWidth);
-		glPointSize(LineWidth);
+		glLineWidth(line_width);
+		glPointSize(line_width);
 		glBegin(GL_LINE_STRIP);
-		std::uint8_t IO;
-		for (int i = 0; i < RenderWay.length(); i++)
+		std::uint8_t io;
+		for (int i = 0; i < (int)render_way.length(); i++)
 		{
-			if (RenderWay[i] == ' ')
+			if (render_way[i] == ' ')
 			{
 				glEnd();
 				glBegin(GL_LINE_STRIP);
 				continue;
 			}
-			IO = RenderWay[i] - '1';
-			glVertex2f(Xpos + Points[IO].x, Ypos + Points[IO].y + VerticalShift);
+			io = render_way[i] - '1';
+			glVertex2f(x_pos + points[io].x, y_pos + points[io].y + vertical_shift);
 		}
 		glEnd();
 		glBegin(GL_POINTS);
-		for (int i = 0; i < PointPlacement.size(); ++i)
-			glVertex2f(Xpos + Points[PointPlacement[i] - '1'].x, Ypos + Points[PointPlacement[i] - '1'].y + VerticalShift);
+		for (int i = 0; i < (int)point_placement.size(); ++i)
+			glVertex2f(x_pos + points[point_placement[i] - '1'].x, y_pos + points[point_placement[i] - '1'].y + vertical_shift);
 		glEnd();
-		if (BACK)
-			RenderWay.back() = BACK;
+		if (back)
+			render_way.back() = back;
 	}
-	void SafePositionChange(float NewXPos, float NewYPos)
+	void safe_position_change(float new_x_pos, float new_y_pos)
 	{
-		SafeCharMove(NewXPos - Xpos, NewYPos - Ypos);
+		safe_char_move(new_x_pos - x_pos, new_y_pos - y_pos);
 	}
-	void SafeCharMove(float dx, float dy)
+	void safe_char_move(float dx, float dy)
 	{
-		Xpos += dx; Ypos += dy;
+		x_pos += dx; y_pos += dy;
 	}
-	inline float _XUnitSize() const
+	inline float x_unit_size() const
 	{
-		return Points[1].x - Points[0].x;
+		return points[1].x - points[0].x;
 	}
-	inline float _YUnitSize() const
+	inline float y_unit_size() const
 	{
-		return Points[3].y - Points[0].y;
+		return points[3].y - points[0].y;
 	}
-	void virtual RefillGradient(std::uint32_t* RGBAColor, std::uint32_t* gRGBAColor, std::uint8_t BaseColorPoint, std::uint8_t GradColorPoint)
+	// Value-by-value refill gradient (replaces raw-pointer version)
+	virtual void refill_gradient(std::uint32_t rgba_color, std::uint32_t g_rgba_color, std::uint8_t base_color_point, std::uint8_t grad_color_point)
 	{
 		return;
 	}
-	void virtual RefillGradient(std::uint8_t Red = 255, std::uint8_t Green = 255, std::uint8_t Blue = 255, std::uint8_t Alpha = 255,
-		std::uint8_t gRed = 255, std::uint8_t gGreen = 255, std::uint8_t gBlue = 255, std::uint8_t gAlpha = 255,
-		std::uint8_t BaseColorPoint = 5, std::uint8_t GradColorPoint = 8)
+	virtual void refill_gradient(std::uint8_t red = 255, std::uint8_t green = 255, std::uint8_t blue = 255, std::uint8_t alpha = 255,
+		std::uint8_t g_red = 255, std::uint8_t g_green = 255, std::uint8_t g_blue = 255, std::uint8_t g_alpha = 255,
+		std::uint8_t base_color_point = 5, std::uint8_t grad_color_point = 8)
 	{
 		return;
 	}
@@ -206,13 +207,8 @@ namespace lFontSymbolsInfo
 		{
 			auto hdiobj = SelectObject(hDc, SelectedFont);
 			auto status = wglUseFontBitmaps(hDc, 0, 255, CurrentFont);
-
 			SetMapMode(hDc, MM_TEXT);
-
 		}
-
-		//if (!force)
-		//	InitialiseFont(FontName, true);
 	}
 	inline void CallListOnChar(char C)
 	{
@@ -235,222 +231,192 @@ namespace lFontSymbolsInfo
 			glPopAttrib();
 		}
 	}
-	const _MAT2 MT = { {0, 1}, {0, 0}, {0, 0}, {0, 1} };;
+	const _MAT2 MT = { {0, 1}, {0, 0}, {0, 0}, {0, 1} };
 }
 
-struct lFontSymbol : DottedSymbol
+struct lfontsymbol : dotted_symbol
 {
-	char Symb;
-	GLYPHMETRICS GM;
-	lFontSymbol(char Symb, float CXpos, float CYpos, float XUnitSize, float YUnitSize, std::uint32_t RGBA) :
-		DottedSymbol(" ", CXpos, CYpos, XUnitSize, YUnitSize, 1, RGBA >> 24, (RGBA >> 16) & 0xFF, (RGBA >> 8) & 0xFF, RGBA & 0xFF)
+	char symb;
+	GLYPHMETRICS gm;
+	lfontsymbol(char symb, float cx_pos, float cy_pos, float x_unit_sz, float y_unit_sz, std::uint32_t rgba) :
+		dotted_symbol(" ", cx_pos, cy_pos, x_unit_sz, y_unit_sz, 1, rgba >> 24, (rgba >> 16) & 0xFF, (rgba >> 8) & 0xFF, rgba & 0xFF)
 	{
-		GM.gmBlackBoxX = 0;
-		GM.gmBlackBoxY = 0;
-		GM.gmCellIncX = 0;
-		GM.gmCellIncY = 0;
-		GM.gmptGlyphOrigin.x = 0;
-		GM.gmptGlyphOrigin.y = 0;
+		gm.gmBlackBoxX = 0;
+		gm.gmBlackBoxY = 0;
+		gm.gmCellIncX = 0;
+		gm.gmCellIncY = 0;
+		gm.gmptGlyphOrigin.x = 0;
+		gm.gmptGlyphOrigin.y = 0;
 
-		this->Symb = Symb;
-		ReinitGlyphMetrics();
+		this->symb = symb;
+		reinit_glyph_metrics();
 	}
-	~lFontSymbol() override = default;
-	void ReinitGlyphMetrics()
+	~lfontsymbol() override = default;
+	void reinit_glyph_metrics()
 	{
-		//SelectObject(hDc, lFontSymbolsInfo::SelectedFont);
-
-		/*auto gmdata = reinterpret_cast<std::uint8_t*>(&GM);
-		std::cout << "Symb: " << Symb << std::endl;
-		std::cout << "ReinitGlyphMetrics b4: ";
-		for (size_t i = 0; i < sizeof(GM); ++i)
-			std::cout << std::hex << std::setw(2) << std::setfill('0') << (int)gmdata[i];
-		std::cout << std::endl;*/
-
-		auto result = GetGlyphOutline(hDc, Symb, GGO_GRAY8_BITMAP, &GM, 0, NULL, &lFontSymbolsInfo::MT);
-
-		/*std::cout << "ReinitGlyphMetrics ar: ";
-		for (size_t i = 0; i < sizeof(GM); ++i)
-			std::cout << std::hex << std::setw(2) << std::setfill('0') << (int)gmdata[i];
-		std::cout << std::dec << std::setw(0) << std::setfill(' ') << std::endl;
-		std::cout << "res: " << result << std::endl;
-
-		if (result == GDI_ERROR)
-			throw "idkman";*/
+		auto result = GetGlyphOutline(hDc, symb, GGO_GRAY8_BITMAP, &gm, 0, NULL, &lFontSymbolsInfo::MT);
 	}
-	void Draw() override
+	void draw() override
 	{
 		if (!lFontSymbolsInfo::SelectedFont || !hDc)
 			return;
 
-		float PixelSize = (internal_range * 2) / window_base_width;
+		float pixel_size = (internal_range * 2) / window_base_width;
 
-		if (fabsf(Xpos) + lFONT_HEIGHT_TO_WIDTH > PixelSize * WindX / 2 ||
-			fabsf(Ypos) + lFONT_HEIGHT_TO_WIDTH > PixelSize * WindY / 2)
+		if (fabsf(x_pos) + lFONT_HEIGHT_TO_WIDTH > pixel_size * wind_x / 2 ||
+			fabsf(y_pos) + lFONT_HEIGHT_TO_WIDTH > pixel_size * wind_y / 2)
 			return;
 
 		glColor4ub(R, G, B, A);
-		glRasterPos2f(Xpos, Ypos - _YUnitSize() * 0.5);
-		lFontSymbolsInfo::CallListOnChar(Symb);
+		glRasterPos2f(x_pos, y_pos - y_unit_size() * 0.5);
+		lFontSymbolsInfo::CallListOnChar(symb);
 	}
 };
 
-struct BiColoredDottedSymbol : DottedSymbol 
+struct bi_colored_dotted_symbol : dotted_symbol
 {
 	std::uint8_t gR[9], gG[9], gB[9], gA[9];
-	std::uint8_t _PointData;
-	BiColoredDottedSymbol(std::string RenderWay, float Xpos, float Ypos, float XUnitSize, float YUnitSize, std::uint8_t LineWidth = 2,
-		std::uint8_t Red = 255, std::uint8_t Green = 255, std::uint8_t Blue = 255, std::uint8_t Alpha = 255,
-		std::uint8_t gRed = 255, std::uint8_t gGreen = 255, std::uint8_t gBlue = 255, std::uint8_t gAlpha = 255,
-		std::uint8_t BaseColorPoint = 5, std::uint8_t GradColorPoint = 8) :
-		DottedSymbol(RenderWay, Xpos, Ypos, XUnitSize, YUnitSize, LineWidth, new std::uint32_t(0)) {
-		this->_PointData = (((BaseColorPoint & 0xF) << 4) | (GradColorPoint & 0xF));
-		if (BaseColorPoint == GradColorPoint)
+	std::uint8_t _point_data;
+
+	bi_colored_dotted_symbol(std::string render_way, float x_pos, float y_pos, float x_unit_size, float y_unit_size, std::uint8_t line_width = 2,
+		std::uint8_t red = 255, std::uint8_t green = 255, std::uint8_t blue = 255, std::uint8_t alpha = 255,
+		std::uint8_t g_red = 255, std::uint8_t g_green = 255, std::uint8_t g_blue = 255, std::uint8_t g_alpha = 255,
+		std::uint8_t base_color_point = 5, std::uint8_t grad_color_point = 8) :
+		dotted_symbol(render_way, x_pos, y_pos, x_unit_size, y_unit_size, line_width, 0u)
+	{
+		this->_point_data = (((base_color_point & 0xF) << 4) | (grad_color_point & 0xF));
+		if (base_color_point == grad_color_point)
 		{
 			for (int i = 0; i < 9; i++)
 			{
-				gR[i] = Red;
-				gG[i] = Green;
-				gB[i] = Blue;
-				gA[i] = Alpha;
+				gR[i] = red;
+				gG[i] = green;
+				gB[i] = blue;
+				gA[i] = alpha;
 			}
 		}
 		else
 		{
-			BaseColorPoint--;
-			GradColorPoint--;
-			RefillGradient(Red, Green, Blue, Alpha, gRed, gGreen, gBlue, gAlpha, BaseColorPoint, GradColorPoint);
+			base_color_point--;
+			grad_color_point--;
+			refill_gradient(red, green, blue, alpha, g_red, g_green, g_blue, g_alpha, base_color_point, grad_color_point);
 		}
 	}
-	BiColoredDottedSymbol(char Symbol, float Xpos, float Ypos, float XUnitSize, float YUnitSize, std::uint8_t LineWidth = 2,
-		std::uint8_t Red = 255, std::uint8_t Green = 255, std::uint8_t Blue = 255, std::uint8_t Alpha = 255,
-		std::uint8_t gRed = 255, std::uint8_t gGreen = 255, std::uint8_t gBlue = 255, std::uint8_t gAlpha = 255,
-		std::uint8_t BaseColorPoint = 5, std::uint8_t GradColorPoint = 8) : BiColoredDottedSymbol(ASCII[Symbol], Xpos, Ypos, XUnitSize, YUnitSize, LineWidth, Red, Green, Blue, Alpha, gRed, gGreen, gBlue, gAlpha, BaseColorPoint, GradColorPoint) {}
+	bi_colored_dotted_symbol(char symbol, float x_pos, float y_pos, float x_unit_size, float y_unit_size, std::uint8_t line_width = 2,
+		std::uint8_t red = 255, std::uint8_t green = 255, std::uint8_t blue = 255, std::uint8_t alpha = 255,
+		std::uint8_t g_red = 255, std::uint8_t g_green = 255, std::uint8_t g_blue = 255, std::uint8_t g_alpha = 255,
+		std::uint8_t base_color_point = 5, std::uint8_t grad_color_point = 8) :
+		bi_colored_dotted_symbol(ASCII[symbol], x_pos, y_pos, x_unit_size, y_unit_size, line_width, red, green, blue, alpha, g_red, g_green, g_blue, g_alpha, base_color_point, grad_color_point) {}
 
-	BiColoredDottedSymbol(char Symbol, float Xpos, float Ypos, float XUnitSize, float YUnitSize, std::uint8_t LineWidth,
-		std::uint32_t* RGBAColor, std::uint32_t* gRGBAColor,
-		std::uint8_t BaseColorPoint = 5, std::uint8_t GradColorPoint = 8) : BiColoredDottedSymbol(ASCII[Symbol], Xpos, Ypos, XUnitSize, YUnitSize, LineWidth, *RGBAColor >> 24, (*RGBAColor >> 16) & 0xFF, (*RGBAColor >> 8) & 0xFF, (*RGBAColor) & 0xFF, *gRGBAColor >> 24, (*gRGBAColor >> 16) & 0xFF, (*gRGBAColor >> 8) & 0xFF, *gRGBAColor & 0xFF, BaseColorPoint, GradColorPoint) {
-		delete RGBAColor;
-		delete gRGBAColor;
-	}
-	BiColoredDottedSymbol(std::string RenderWay, float Xpos, float Ypos, float XUnitSize, float YUnitSize, std::uint8_t LineWidth,
-		std::uint32_t* RGBAColor, std::uint32_t* gRGBAColor,
-		std::uint8_t BaseColorPoint = 5, std::uint8_t GradColorPoint = 8) : BiColoredDottedSymbol(RenderWay, Xpos, Ypos, XUnitSize, YUnitSize, LineWidth, *RGBAColor >> 24, (*RGBAColor >> 16) & 0xFF, (*RGBAColor >> 8) & 0xFF, (*RGBAColor) & 0xFF, *gRGBAColor >> 24, (*gRGBAColor >> 16) & 0xFF, (*gRGBAColor >> 8) & 0xFF, *gRGBAColor & 0xFF, BaseColorPoint, GradColorPoint) {
-		delete RGBAColor;
-		delete gRGBAColor;
-	}
-	~BiColoredDottedSymbol() override = default;
-	void RefillGradient(std::uint8_t Red = 255, std::uint8_t Green = 255, std::uint8_t Blue = 255, std::uint8_t Alpha = 255,
-		std::uint8_t gRed = 255, std::uint8_t gGreen = 255, std::uint8_t gBlue = 255, std::uint8_t gAlpha = 255,
-		std::uint8_t BaseColorPoint = 5, std::uint8_t GradColorPoint = 8) override
+	// Value-based constructors (replace old raw-pointer owning constructors)
+	bi_colored_dotted_symbol(char symbol, float x_pos, float y_pos, float x_unit_size, float y_unit_size, std::uint8_t line_width,
+		std::uint32_t rgba_color, std::uint32_t g_rgba_color,
+		std::uint8_t base_color_point = 5, std::uint8_t grad_color_point = 8) :
+		bi_colored_dotted_symbol(ASCII[symbol], x_pos, y_pos, x_unit_size, y_unit_size, line_width,
+			rgba_color >> 24, (rgba_color >> 16) & 0xFF, (rgba_color >> 8) & 0xFF, rgba_color & 0xFF,
+			g_rgba_color >> 24, (g_rgba_color >> 16) & 0xFF, (g_rgba_color >> 8) & 0xFF, g_rgba_color & 0xFF,
+			base_color_point, grad_color_point) {}
+
+	bi_colored_dotted_symbol(std::string render_way, float x_pos, float y_pos, float x_unit_size, float y_unit_size, std::uint8_t line_width,
+		std::uint32_t rgba_color, std::uint32_t g_rgba_color,
+		std::uint8_t base_color_point = 5, std::uint8_t grad_color_point = 8) :
+		bi_colored_dotted_symbol(render_way, x_pos, y_pos, x_unit_size, y_unit_size, line_width,
+			rgba_color >> 24, (rgba_color >> 16) & 0xFF, (rgba_color >> 8) & 0xFF, rgba_color & 0xFF,
+			g_rgba_color >> 24, (g_rgba_color >> 16) & 0xFF, (g_rgba_color >> 8) & 0xFF, g_rgba_color & 0xFF,
+			base_color_point, grad_color_point) {}
+
+	~bi_colored_dotted_symbol() override = default;
+
+	void refill_gradient(std::uint8_t red = 255, std::uint8_t green = 255, std::uint8_t blue = 255, std::uint8_t alpha = 255,
+		std::uint8_t g_red = 255, std::uint8_t g_green = 255, std::uint8_t g_blue = 255, std::uint8_t g_alpha = 255,
+		std::uint8_t base_color_point = 5, std::uint8_t grad_color_point = 8) override
 	{
-		float xbase = (((float)(BaseColorPoint % 3)) - 1.f), ybase = (((float)(BaseColorPoint / 3)) - 1.f),
-			xgrad = (((float)(GradColorPoint % 3)) - 1.f), ygrad = (((float)(GradColorPoint / 3)) - 1.f);
+		float xbase = (((float)(base_color_point % 3)) - 1.f), ybase = (((float)(base_color_point / 3)) - 1.f),
+			xgrad = (((float)(grad_color_point % 3)) - 1.f), ygrad = (((float)(grad_color_point / 3)) - 1.f);
 		float ax = xgrad - xbase, ay = ygrad - ybase, t;
 		float ial = 1.f / (ax * ax + ay * ay);
-		///R
 		for (int x = -1; x <= 1; x++)
-		{
-			for (int y = -1; y <= 1; y++) 
+			for (int y = -1; y <= 1; y++)
 			{
 				t = (ax * (x - xbase) + ay * (y - ybase)) * ial;
-				t = (Red * t + (1.f - t) * gRed);
-				if (t < 0)t = 0;
-				if (t > 255)t = 255;
+				t = std::clamp(red * t + (1.f - t) * g_red, 0.f, 255.f);
 				gR[(x + 1) + (3 * (y + 1))] = std::round(t);
 			}
-		}
-		///G
 		for (int x = -1; x <= 1; x++)
-		{
 			for (int y = -1; y <= 1; y++)
 			{
 				t = (ax * (x - xbase) + ay * (y - ybase)) * ial;
-				t = (Green * t + (1.f - t) * gGreen);
-				if (t < 0)t = 0;
-				if (t > 255)t = 255;
+				t = std::clamp(green * t + (1.f - t) * g_green, 0.f, 255.f);
 				gG[(x + 1) + (3 * (y + 1))] = std::round(t);
 			}
-		}
-		///B
 		for (int x = -1; x <= 1; x++)
-		{
 			for (int y = -1; y <= 1; y++)
 			{
 				t = (ax * (x - xbase) + ay * (y - ybase)) * ial;
-				t = (Blue * t + (1.f - t) * gBlue);
-				if (t < 0)t = 0;
-				if (t > 255)t = 255;
+				t = std::clamp(blue * t + (1.f - t) * g_blue, 0.f, 255.f);
 				gB[(x + 1) + (3 * (y + 1))] = std::round(t);
 			}
-		}
-		///A
 		for (int x = -1; x <= 1; x++)
-		{
 			for (int y = -1; y <= 1; y++)
 			{
 				t = (ax * (x - xbase) + ay * (y - ybase)) * ial;
-				t = (Alpha * t + (1.f - t) * gAlpha);
-				if (t < 0)t = 0;
-				if (t > 255)t = 255;
+				t = std::clamp(alpha * t + (1.f - t) * g_alpha, 0.f, 255.f);
 				gA[(x + 1) + (3 * (y + 1))] = std::round(t);
 			}
-		}
 	}
-	void RefillGradient(std::uint32_t* RGBAColor, std::uint32_t* gRGBAColor, std::uint8_t BaseColorPoint, std::uint8_t GradColorPoint) override 
+	void refill_gradient(std::uint32_t rgba_color, std::uint32_t g_rgba_color, std::uint8_t base_color_point, std::uint8_t grad_color_point) override
 	{
-		RefillGradient(*RGBAColor >> 24, (*RGBAColor >> 16) & 0xFF, (*RGBAColor >> 8) & 0xFF, (*RGBAColor) & 0xFF, *gRGBAColor >> 24, (*gRGBAColor >> 16) & 0xFF, (*gRGBAColor >> 8) & 0xFF, *gRGBAColor & 0xFF, BaseColorPoint, GradColorPoint);
-		delete RGBAColor;
-		delete gRGBAColor;
+		refill_gradient(rgba_color >> 24, (rgba_color >> 16) & 0xFF, (rgba_color >> 8) & 0xFF, rgba_color & 0xFF,
+			g_rgba_color >> 24, (g_rgba_color >> 16) & 0xFF, (g_rgba_color >> 8) & 0xFF, g_rgba_color & 0xFF,
+			base_color_point, grad_color_point);
 	}
-	void Draw() override
+	void draw() override
 	{
-		if (RenderWay == " ")
+		if (render_way == " ")
 			return;
-		float VerticalShift = 0.;
-		CHAR BACK = 0;
-		if (RenderWay.back() == '#' || RenderWay.back() == '~') 
+		float vertical_shift = 0.f;
+		char back = 0;
+		if (render_way.back() == '#' || render_way.back() == '~')
 		{
-			BACK = RenderWay.back();
-			RenderWay.back() = ' ';
-			switch (BACK)
+			back = render_way.back();
+			render_way.back() = ' ';
+			switch (back)
 			{
 			case '#':
-				VerticalShift = Points[0].y - Points[3].y;
+				vertical_shift = points[0].y - points[3].y;
 				break;
 			case '~':
-				VerticalShift = (Points[0].y - Points[3].y) / 2;
+				vertical_shift = (points[0].y - points[3].y) / 2;
 				break;
 			}
 		}
-		std::uint8_t IO;
-		glLineWidth(LineWidth);
-		glPointSize(LineWidth);
+		std::uint8_t io;
+		glLineWidth(line_width);
+		glPointSize(line_width);
 		glBegin(GL_LINE_STRIP);
-		for (int i = 0; i < RenderWay.length(); i++)
+		for (int i = 0; i < (int)render_way.length(); i++)
 		{
-			if (RenderWay[i] == ' ')
+			if (render_way[i] == ' ')
 			{
 				glEnd();
 				glBegin(GL_LINE_STRIP);
 				continue;
 			}
-			IO = RenderWay[i] - '1';
-			//printf("%x %x %x %x\n", gR[IO], gG[IO], gB[IO], gA[IO]);
-			glColor4ub(gR[IO], gG[IO], gB[IO], gA[IO]);
-			glVertex2f(Xpos + Points[IO].x, Ypos + Points[IO].y + VerticalShift);
+			io = render_way[i] - '1';
+			glColor4ub(gR[io], gG[io], gB[io], gA[io]);
+			glVertex2f(x_pos + points[io].x, y_pos + points[io].y + vertical_shift);
 		}
 		glEnd();
 		glBegin(GL_POINTS);
-		for (int i = 0; i < PointPlacement.size(); ++i)
+		for (int i = 0; i < (int)point_placement.size(); ++i)
 		{
-			IO = PointPlacement[i] - '1';
-			glColor4ub(gR[IO], gG[IO], gB[IO], gA[IO]);
-			glVertex2f(Xpos + Points[IO].x, Ypos + Points[IO].y + VerticalShift);
+			io = point_placement[i] - '1';
+			glColor4ub(gR[io], gG[io], gB[io], gA[io]);
+			glVertex2f(x_pos + points[io].x, y_pos + points[io].y + vertical_shift);
 		}
 		glEnd();
-		if (BACK)
-			RenderWay.back() = BACK;
+		if (back)
+			render_way.back() = back;
 	}
 };
 

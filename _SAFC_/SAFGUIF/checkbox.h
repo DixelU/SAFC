@@ -2,145 +2,147 @@
 #ifndef SAFGUIF_CHECKBOX
 #define SAFGUIF_CHECKBOX
 
+#include <memory>
 #include "header_utils.h"
 #include "handleable_ui_part.h"
 #include "single_text_line_settings.h"
 
-struct CheckBox : HandleableUIPart 
+struct checkbox : handleable_ui_part
 {
-	float Xpos, Ypos, SideSize;
-	std::uint32_t BorderRGBAColor, UncheckedRGBABackground, CheckedRGBABackground;
-	SingleTextLine* Tip;
-	bool State, Focused;
-	std::uint8_t BorderWidth;
-	~CheckBox() override 
+	float x_pos, y_pos, side_size;
+	std::uint32_t border_rgba_color, unchecked_rgba_background, checked_rgba_background;
+	std::unique_ptr<single_text_line> tip;
+	bool state, focused;
+	std::uint8_t border_width;
+	// Backward-compat aliases
+	bool& State = state;
+	std::unique_ptr<single_text_line>& Tip = tip;
+
+	~checkbox() override = default;
+
+	checkbox(float x_pos, float y_pos, float side_size, std::uint32_t border_rgba_color, std::uint32_t unchecked_rgba_background, std::uint32_t checked_rgba_background, std::uint8_t border_width, bool start_state = false, single_text_line_settings* tip_settings = nullptr, _Align tip_align = _Align::left, std::string tip_text = " ")
 	{
-		std::lock_guard<std::recursive_mutex> locker(Lock);
-		delete Tip;
-	}
-	CheckBox(float Xpos, float Ypos, float SideSize, std::uint32_t BorderRGBAColor, std::uint32_t UncheckedRGBABackground, std::uint32_t CheckedRGBABackground, std::uint8_t BorderWidth, bool StartState = false, SingleTextLineSettings* TipSettings = NULL, _Align TipAlign = _Align::left, std::string TipText = " ")
-	{
-		this->Xpos = Xpos;
-		this->Tip = nullptr;
-		this->Ypos = Ypos;
-		this->SideSize = SideSize;
-		this->BorderRGBAColor = BorderRGBAColor;
-		this->UncheckedRGBABackground = UncheckedRGBABackground;
-		this->CheckedRGBABackground = CheckedRGBABackground;
-		this->State = StartState;
-		this->Focused = 0;
-		this->BorderWidth = BorderWidth;
-		if (TipSettings)
+		this->x_pos = x_pos;
+		this->y_pos = y_pos;
+		this->side_size = side_size;
+		this->border_rgba_color = border_rgba_color;
+		this->unchecked_rgba_background = unchecked_rgba_background;
+		this->checked_rgba_background = checked_rgba_background;
+		this->state = start_state;
+		this->focused = false;
+		this->border_width = border_width;
+		if (tip_settings)
 		{
-			this->Tip = TipSettings->CreateOne(TipText);
-			this->Tip->SafeChangePosition_Argumented(TipAlign, Xpos - ((TipAlign & _Align::left) ? 0.5f : ((TipAlign & _Align::right) ? -0.5f : 0)) * SideSize, Ypos - SideSize);
+			this->tip.reset(tip_settings->create_one(tip_text));
+			this->tip->safe_change_position_argumented(tip_align, x_pos - ((tip_align & _Align::left) ? 0.5f : ((tip_align & _Align::right) ? -0.5f : 0)) * side_size, y_pos - side_size);
 		}
 	}
-	void Draw() override 
+	void draw() override
 	{
-		std::lock_guard<std::recursive_mutex> locker(Lock);
-		float hSideSize = 0.5f * SideSize;
-		if (State)
-			__glcolor(CheckedRGBABackground);
+		std::lock_guard locker(lock);
+		float h_side_size = 0.5f * side_size;
+		if (state)
+			__glcolor(checked_rgba_background);
 		else
-			__glcolor(UncheckedRGBABackground);
+			__glcolor(unchecked_rgba_background);
 		glBegin(GL_QUADS);
-		glVertex2f(Xpos + hSideSize, Ypos + hSideSize);
-		glVertex2f(Xpos - hSideSize, Ypos + hSideSize);
-		glVertex2f(Xpos - hSideSize, Ypos - hSideSize);
-		glVertex2f(Xpos + hSideSize, Ypos - hSideSize);
+		glVertex2f(x_pos + h_side_size, y_pos + h_side_size);
+		glVertex2f(x_pos - h_side_size, y_pos + h_side_size);
+		glVertex2f(x_pos - h_side_size, y_pos - h_side_size);
+		glVertex2f(x_pos + h_side_size, y_pos - h_side_size);
 		glEnd();
-		if ((std::uint8_t)BorderRGBAColor && BorderWidth) 
+		if ((std::uint8_t)border_rgba_color && border_width)
 		{
-			__glcolor(BorderRGBAColor);
-			glLineWidth(BorderWidth);
+			__glcolor(border_rgba_color);
+			glLineWidth(border_width);
 			glBegin(GL_LINE_LOOP);
-			glVertex2f(Xpos + hSideSize, Ypos + hSideSize);
-			glVertex2f(Xpos - hSideSize, Ypos + hSideSize);
-			glVertex2f(Xpos - hSideSize, Ypos - hSideSize);
-			glVertex2f(Xpos + hSideSize, Ypos - hSideSize);
+			glVertex2f(x_pos + h_side_size, y_pos + h_side_size);
+			glVertex2f(x_pos - h_side_size, y_pos + h_side_size);
+			glVertex2f(x_pos - h_side_size, y_pos - h_side_size);
+			glVertex2f(x_pos + h_side_size, y_pos - h_side_size);
 			glEnd();
-			glPointSize(BorderWidth);
+			glPointSize(border_width);
 			glBegin(GL_POINTS);
-			glVertex2f(Xpos + hSideSize, Ypos + hSideSize);
-			glVertex2f(Xpos - hSideSize, Ypos + hSideSize);
-			glVertex2f(Xpos - hSideSize, Ypos - hSideSize);
-			glVertex2f(Xpos + hSideSize, Ypos - hSideSize);
+			glVertex2f(x_pos + h_side_size, y_pos + h_side_size);
+			glVertex2f(x_pos - h_side_size, y_pos + h_side_size);
+			glVertex2f(x_pos - h_side_size, y_pos - h_side_size);
+			glVertex2f(x_pos + h_side_size, y_pos - h_side_size);
 			glEnd();
 		}
-		if (Focused && Tip)
-			Tip->Draw();
+		if (focused && tip)
+			tip->draw();
 	}
-	void SafeMove(float dx, float dy) override 
+	void safe_move(float dx, float dy) override
 	{
-		std::lock_guard<std::recursive_mutex> locker(Lock);
-		Xpos += dx;
-		Ypos += dy;
-		if (Tip)Tip->SafeMove(dx, dy);
+		std::lock_guard locker(lock);
+		x_pos += dx;
+		y_pos += dy;
+		if (tip) tip->safe_move(dx, dy);
 	}
-	void SafeChangePosition(float NewX, float NewY) override
+	void safe_change_position(float new_x, float new_y) override
 	{
-		std::lock_guard<std::recursive_mutex> locker(Lock);
-		NewX -= Xpos;
-		NewY -= Ypos;
-		SafeMove(NewX, NewY);
+		std::lock_guard locker(lock);
+		new_x -= x_pos;
+		new_y -= y_pos;
+		safe_move(new_x, new_y);
 	}
-	void SafeChangePosition_Argumented(std::uint8_t Arg, float NewX, float NewY) override 
+	void safe_change_position_argumented(std::uint8_t arg, float new_x, float new_y) override
 	{
-		std::lock_guard<std::recursive_mutex> locker(Lock);
-		float CW = 0.5f * (
-			(std::int32_t)((bool)(GLOBAL_LEFT & Arg))
-			- (std::int32_t)((bool)(GLOBAL_RIGHT & Arg))
-			) * SideSize,
-			CH = 0.5f * (
-				(std::int32_t)((bool)(GLOBAL_BOTTOM & Arg))
-				- (std::int32_t)((bool)(GLOBAL_TOP & Arg))
-				) * SideSize;
-		SafeChangePosition(NewX + CW, NewY + CH);
+		std::lock_guard locker(lock);
+		float cw = 0.5f * (
+			(std::int32_t)((bool)(GLOBAL_LEFT & arg))
+			- (std::int32_t)((bool)(GLOBAL_RIGHT & arg))
+			) * side_size,
+			ch = 0.5f * (
+				(std::int32_t)((bool)(GLOBAL_BOTTOM & arg))
+				- (std::int32_t)((bool)(GLOBAL_TOP & arg))
+				) * side_size;
+		safe_change_position(new_x + cw, new_y + ch);
 	}
-	void KeyboardHandler(CHAR CH) override
+	void keyboard_handler(char ch) override
 	{
 		return;
 	}
-	void SafeStringReplace(std::string TipString) override
+	void safe_string_replace(std::string tip_string) override
 	{
-		std::lock_guard<std::recursive_mutex> locker(Lock);
-		if (Tip)
-			Tip->SafeStringReplace(TipString);
+		std::lock_guard locker(lock);
+		if (tip)
+			tip->safe_string_replace(tip_string);
 	}
-	void FocusChange()
+	void focus_change()
 	{
-		std::lock_guard<std::recursive_mutex> locker(Lock);
-		this->Focused = !this->Focused;
-		BorderRGBAColor = (((~(BorderRGBAColor >> 8)) << 8) | (BorderRGBAColor & 0xFF));
+		std::lock_guard locker(lock);
+		this->focused = !this->focused;
+		border_rgba_color = (((~(border_rgba_color >> 8)) << 8) | (border_rgba_color & 0xFF));
 	}
-	bool MouseHandler(float mx, float my, CHAR Button, CHAR State) override
+	[[nodiscard]] bool mouse_handler(float mx, float my, char button, char state_val) override
 	{
-		std::lock_guard<std::recursive_mutex> locker(Lock);
-		if (fabsf(mx - Xpos) < 0.5 * SideSize && fabsf(my - Ypos) < 0.5 * SideSize)
+		std::lock_guard locker(lock);
+		if (fabsf(mx - x_pos) < 0.5f * side_size && fabsf(my - y_pos) < 0.5f * side_size)
 		{
-			if (!Focused)
-				FocusChange();
-			if (Button)
+			if (!focused)
+				focus_change();
+			if (button)
 			{
-				//cout << "State switch from " << State << endl;
-				if (State == 1)
-					this->State = !this->State;
-				return 1;
+				if (state_val == 1)
+					this->state = !this->state;
+				return true;
 			}
-			else 
-				return 0;
+			else
+				return false;
 		}
-		else 
+		else
 		{
-			if (Focused)
-				FocusChange();
-			return 0;
+			if (focused)
+				focus_change();
+			return false;
 		}
 	}
-	inline std::uint32_t TellType() override
+	[[nodiscard]] inline std::uint32_t tell_type() override
 	{
-		return _TellType::checkbox;
+		return TT_CHECKBOX;
 	}
 };
+using CheckBox = checkbox;
+
 #endif // !SAFGUIF_CHECKBOX
