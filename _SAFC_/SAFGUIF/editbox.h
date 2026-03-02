@@ -3,6 +3,7 @@
 #define SAF_EBOX
 
 #include "textbox.h"
+
 #include <deque>
 #include <vector>
 #include <utility>

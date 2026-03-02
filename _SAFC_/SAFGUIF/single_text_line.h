@@ -3,9 +3,9 @@
 #define SAFGUIF_STL
 
 #include <memory>
+
 #include "header_utils.h"
 #include "symbols.h"
-
 
 struct single_text_line
 {

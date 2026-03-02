@@ -2,12 +2,9 @@
 #ifndef SAFGUIF_WH
 #define SAFGUIF_WH
 
-#include "handleable_ui_part.h"
-#include "movable_resizeable_window.h"
 #include "textbox.h"
 #include "special_signs.h"
 #include "input_field.h"
-#include "button_settings.h"
 #include "stls_presets.h"
 
 // Proxy returned by windows_handler::operator[] to allow both ownership transfer

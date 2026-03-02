@@ -2,9 +2,10 @@
 #ifndef SAFGUIF_CHARMAP
 #define SAFGUIF_CHARMAP
 
-#include "header_utils.h"
 #include <unordered_map>
 #include <fstream>
+
+#include "header_utils.h"
 
 std::unordered_map<char, std::string> ASCII;
 void InitASCIIMap()

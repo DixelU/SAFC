@@ -3,6 +3,7 @@
 #define SAFGUIF_STLS
 
 #include <memory>
+
 #include "header_utils.h"
 #include "single_text_line.h"
 

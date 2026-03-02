@@ -3,6 +3,7 @@
 #define SAFGUIF_MRW_H
 
 #include <functional>
+
 #include "moveable_window.h"
 
 struct moveable_resizeable_window : moveable_window

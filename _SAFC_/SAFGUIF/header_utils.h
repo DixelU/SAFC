@@ -2,7 +2,6 @@
 #ifndef SAFGUIF_HEADER
 #define SAFGUIF_HEADER
 
-// #include <GL/glew.h>
 #include <GL/freeglut.h>
 
 #include "consts.h"

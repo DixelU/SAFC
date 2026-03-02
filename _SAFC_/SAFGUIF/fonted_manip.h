@@ -3,6 +3,7 @@
 #define SAFGUIF_FM
 
 #include <iostream>
+
 #include "../WinRegWrappers.h"
 #include "header_utils.h"
 

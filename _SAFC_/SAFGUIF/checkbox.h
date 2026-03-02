@@ -3,6 +3,7 @@
 #define SAFGUIF_CHECKBOX
 
 #include <memory>
+
 #include "header_utils.h"
 #include "handleable_ui_part.h"
 #include "single_text_line_settings.h"

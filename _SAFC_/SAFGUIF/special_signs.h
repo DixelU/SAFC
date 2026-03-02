@@ -3,6 +3,7 @@
 #define SAFGUIF_SPECIALSIGNS
 
 #include <functional>
+
 #include "header_utils.h"
 #include "handleable_ui_part.h"
 
