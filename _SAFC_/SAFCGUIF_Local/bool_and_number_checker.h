@@ -7,14 +7,14 @@
 // #include "../SAFC_InnerModules/include_all.h"
 
 template<typename bool_type, typename number_type>
-struct BoolAndWORDChecker : handleable_ui_part
+struct bool_and_number_checker : handleable_ui_part
 {
 	float x_pos, y_pos;
 	bool_type* flag;
 	number_type* number;
 	std::unique_ptr<single_text_line> stl_info;
 
-	BoolAndWORDChecker(float x_pos, float y_pos, single_text_line_settings* stls,
+	bool_and_number_checker(float x_pos, float y_pos, single_text_line_settings* stls,
 		bool_type* flag, number_type* number)
 	{
 		this->x_pos = x_pos;
@@ -25,7 +25,7 @@ struct BoolAndWORDChecker : handleable_ui_part
 		this->stl_info.reset(stls->create_one("_"));
 	}
 
-	~BoolAndWORDChecker() override = default;
+	~bool_and_number_checker() override = default;
 
 	void safe_move(float dx, float dy) override
 	{

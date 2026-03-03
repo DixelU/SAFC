@@ -3,9 +3,8 @@
 #define SAFGUIF_L_PLCV
 
 #include "../SAFGUIF/SAFGUIF.h"
-// #include "../SAFC_InnerModules/include_all.h"
 
-struct PLC_VolumeWorker : handleable_ui_part
+struct volume_graph : handleable_ui_part
 {
 	std::shared_ptr<polyline_converter<std::uint8_t, std::uint8_t>> plc_bb;
 	std::pair<std::uint8_t, std::uint8_t> hovered_point;
@@ -21,9 +20,9 @@ struct PLC_VolumeWorker : handleable_ui_part
 	std::uint8_t xcp, ycp;
 	std::uint8_t fpx, fpy;
 
-	~PLC_VolumeWorker() override = default;
+	~volume_graph() override = default;
 
-	PLC_VolumeWorker(float cx_pos, float cy_pos, float width, float height,
+	volume_graph(float cx_pos, float cy_pos, float width, float height,
 		std::shared_ptr<polyline_converter<std::uint8_t, std::uint8_t>> plc_bb = nullptr)
 	{
 		this->plc_bb = std::move(plc_bb);

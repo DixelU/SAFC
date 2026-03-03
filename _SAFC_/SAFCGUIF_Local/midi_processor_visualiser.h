@@ -5,7 +5,7 @@
 #include "../SAFGUIF/SAFGUIF.h"
 #include "../SAFC_InnerModules/include_all.h"
 
-struct SMRP_Vis : handleable_ui_part
+struct midi_processor_visualiser : handleable_ui_part
 {
 	std::pair<
 		midi_collection_threaded_merger::proc_data_ptr,
@@ -16,7 +16,7 @@ struct SMRP_Vis : handleable_ui_part
 
 	std::unique_ptr<single_text_line> stl_log, stl_warn, stl_err, stl_info;
 
-	SMRP_Vis(float xpos, float ypos, single_text_line_settings* stls)
+	midi_processor_visualiser(float xpos, float ypos, single_text_line_settings* stls)
 	{
 		std::lock_guard locker(lock);
 		this->processing = this->hovered = this->finished = false;
@@ -38,7 +38,7 @@ struct SMRP_Vis : handleable_ui_part
 		stls->rgba_color = base_rgba;
 	}
 
-	~SMRP_Vis() override = default;
+	~midi_processor_visualiser() override = default;
 
 	void safe_move(float dx, float dy) override
 	{

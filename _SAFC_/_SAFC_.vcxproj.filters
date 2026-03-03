@@ -36,7 +36,7 @@
     <ClInclude Include="allocator.h">
       <Filter>Файлы заголовков</Filter>
     </ClInclude>
-    <ClInclude Include="SAFCGUIF_Local\DND.h">
+    <ClInclude Include="SAFCGUIF_Local\drag_n_drop_handler.h">
       <Filter>Файлы заголовков</Filter>
     </ClInclude>
     <ClInclude Include="SAFGUIF\button.h">
@@ -117,19 +117,19 @@
     <ClInclude Include="SAFC_InnerModules\single_midi_info_collector.h">
       <Filter>Файлы заголовков\MIDI Processing</Filter>
     </ClInclude>
-    <ClInclude Include="SAFCGUIF_Local\CATh.h">
+    <ClInclude Include="SAFCGUIF_Local\cut_and_transpose_piano.h">
       <Filter>Файлы заголовков\SAFGUIF\Specific</Filter>
     </ClInclude>
-    <ClInclude Include="SAFCGUIF_Local\PLC_Vol.h">
+    <ClInclude Include="SAFCGUIF_Local\volume_graph.h">
       <Filter>Файлы заголовков\SAFGUIF\Specific</Filter>
     </ClInclude>
     <ClInclude Include="SAFCGUIF_Local\SAFGUIF_L.h">
       <Filter>Файлы заголовков\SAFGUIF\Specific</Filter>
     </ClInclude>
-    <ClInclude Include="SAFCGUIF_Local\SMRPVis.h">
+    <ClInclude Include="SAFCGUIF_Local\midi_processor_visualiser.h">
       <Filter>Файлы заголовков\SAFGUIF\Specific</Filter>
     </ClInclude>
-    <ClInclude Include="SAFCGUIF_Local\BAWC.h">
+    <ClInclude Include="SAFCGUIF_Local\bool_and_number_checker.h">
       <Filter>Файлы заголовков\SAFGUIF\Specific</Filter>
     </ClInclude>
     <ClInclude Include="SAFGUIF\fonted_manip.h">

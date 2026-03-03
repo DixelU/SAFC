@@ -4,11 +4,12 @@
 
 #include <utility>
 
+#include "../SAFC_InnerModules/cut_and_transpose.h"
 #include "../SAFGUIF/SAFGUIF.h"
 
 // #include "../SAFC_InnerModules/include_all.h"
 
-struct CAT_Piano : handleable_ui_part
+struct cut_and_transpose_piano : handleable_ui_part
 {
 	std::shared_ptr<cut_and_transpose> piano_transform;
 	std::unique_ptr<single_text_line> min_cont, max_cont, transp;
@@ -18,9 +19,9 @@ struct CAT_Piano : handleable_ui_part
 	// Backward-compat aliases
 	std::shared_ptr<cut_and_transpose>& PianoTransform = piano_transform;
 
-	~CAT_Piano() override = default;
+	~cut_and_transpose_piano() override = default;
 
-	CAT_Piano(float base_x_pos, float base_y_pos, float key_width, float piano_height, std::shared_ptr<cut_and_transpose> piano_transform)
+	cut_and_transpose_piano(float base_x_pos, float base_y_pos, float key_width, float piano_height, std::shared_ptr<cut_and_transpose> piano_transform)
 	{
 		this->base_x_pos = base_x_pos;
 		this->base_y_pos = base_y_pos;

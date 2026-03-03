@@ -1413,7 +1413,7 @@ namespace PropsAndSets
 		void OnCaT()
 		{
 			auto Wptr = (*WH)["CAT"];
-			auto CATptr = (CAT_Piano*)((*Wptr)["CAT_ITSELF"]);
+			auto CATptr = (cut_and_transpose_piano*)((*Wptr)["CAT_ITSELF"]);
 			if (!_Data[currentID].KeyMap)
 				_Data[currentID].KeyMap = std::make_shared<cut_and_transpose>(0, 127, 0);
 			CATptr->PianoTransform = _Data[currentID].KeyMap;
@@ -1424,7 +1424,7 @@ namespace PropsAndSets
 		void OnReset()
 		{
 			auto Wptr = (*WH)["CAT"];
-			auto CATptr = (CAT_Piano*)((*Wptr)["CAT_ITSELF"]);
+			auto CATptr = (cut_and_transpose_piano*)((*Wptr)["CAT_ITSELF"]);
 			CATptr->PianoTransform->max_val = 255;
 			CATptr->PianoTransform->min_val = 0;
 			CATptr->PianoTransform->transpose_val = 0;
@@ -1434,7 +1434,7 @@ namespace PropsAndSets
 		void OnCDT128()
 		{
 			auto Wptr = (*WH)["CAT"];
-			auto CATptr = (CAT_Piano*)((*Wptr)["CAT_ITSELF"]);
+			auto CATptr = (cut_and_transpose_piano*)((*Wptr)["CAT_ITSELF"]);
 			CATptr->PianoTransform->max_val = 127;
 			CATptr->PianoTransform->min_val = 0;
 			CATptr->PianoTransform->transpose_val = 0;
@@ -1444,7 +1444,7 @@ namespace PropsAndSets
 		void On0_127to128_255()
 		{
 			auto Wptr = (*WH)["CAT"];
-			auto CATptr = (CAT_Piano*)((*Wptr)["CAT_ITSELF"]);
+			auto CATptr = (cut_and_transpose_piano*)((*Wptr)["CAT_ITSELF"]);
 			CATptr->PianoTransform->max_val = 127;
 			CATptr->PianoTransform->min_val = 0;
 			CATptr->PianoTransform->transpose_val = 128;
@@ -1454,7 +1454,7 @@ namespace PropsAndSets
 		void OnCopy()
 		{
 			auto Wptr = (*WH)["CAT"];
-			auto CATptr = (CAT_Piano*)((*Wptr)["CAT_ITSELF"]);
+			auto CATptr = (cut_and_transpose_piano*)((*Wptr)["CAT_ITSELF"]);
 			TMax = CATptr->PianoTransform->max_val;
 			TMin = CATptr->PianoTransform->min_val;
 			TTransp = CATptr->PianoTransform->transpose_val;
@@ -1463,7 +1463,7 @@ namespace PropsAndSets
 		void OnPaste()
 		{
 			auto Wptr = (*WH)["CAT"];
-			auto CATptr = (CAT_Piano*)((*Wptr)["CAT_ITSELF"]);
+			auto CATptr = (cut_and_transpose_piano*)((*Wptr)["CAT_ITSELF"]);
 			CATptr->PianoTransform->max_val = TMax;
 			CATptr->PianoTransform->min_val = TMin;
 			CATptr->PianoTransform->transpose_val = TTransp;
@@ -1473,7 +1473,7 @@ namespace PropsAndSets
 		void OnDelete()
 		{
 			auto Wptr = (*WH)["CAT"];
-			((CAT_Piano*)((*Wptr)["CAT_ITSELF"]))->PianoTransform = nullptr;
+			((cut_and_transpose_piano*)((*Wptr)["CAT_ITSELF"]))->PianoTransform = nullptr;
 			WH->DisableWindow("CAT");
 			_Data[currentID].KeyMap = nullptr;
 		}
@@ -1484,7 +1484,7 @@ namespace PropsAndSets
 		void OnVolMap()
 		{
 			auto Wptr = (*WH)["VM"];
-			auto VM = ((PLC_VolumeWorker*)(*Wptr)["VM_PLC"]);
+			auto VM = ((volume_graph*)(*Wptr)["VM_PLC"]);
 			auto IFDeg = ((InputField*)(*Wptr)["VM_DEGREE"]);
 			((Button*)(*Wptr)["VM_SETMODE"])->SafeStringReplace("Single");
 			IFDeg->UpdateInputString("1");
@@ -1501,7 +1501,7 @@ namespace PropsAndSets
 		void OnDegreeShape()
 		{
 			auto Wptr = (*WH)["VM"];
-			auto VM = ((PLC_VolumeWorker*)(*Wptr)["VM_PLC"]);
+			auto VM = ((volume_graph*)(*Wptr)["VM_PLC"]);
 			if (VM->PLC_bb)
 			{
 				auto IFDeg = ((InputField*)(*Wptr)["VM_DEGREE"]);
@@ -1518,7 +1518,7 @@ namespace PropsAndSets
 		void OnSimplify()
 		{
 			auto Wptr = (*WH)["VM"];
-			auto VM = ((PLC_VolumeWorker*)(*Wptr)["VM_PLC"]);
+			auto VM = ((volume_graph*)(*Wptr)["VM_PLC"]);
 			if (VM->PLC_bb)
 			{
 				VM->_MakeMapMoreSimple();
@@ -1530,7 +1530,7 @@ namespace PropsAndSets
 		void OnTrace()
 		{
 			auto Wptr = (*WH)["VM"];
-			auto VM = ((PLC_VolumeWorker*)(*Wptr)["VM_PLC"]);
+			auto VM = ((volume_graph*)(*Wptr)["VM_PLC"]);
 			if (VM->PLC_bb)
 			{
 				if (VM->PLC_bb->map.empty())return;
@@ -1547,7 +1547,7 @@ namespace PropsAndSets
 		void OnSetModeChange() 
 		{
 			auto Wptr = (*WH)["VM"];
-			auto VM = ((PLC_VolumeWorker*)(*Wptr)["VM_PLC"]);
+			auto VM = ((volume_graph*)(*Wptr)["VM_PLC"]);
 			if (VM->PLC_bb)
 			{
 				VM->RePutMode = !VM->RePutMode;
@@ -1560,7 +1560,7 @@ namespace PropsAndSets
 		void OnErase()
 		{
 			auto Wptr = (*WH)["VM"];
-			auto VM = ((PLC_VolumeWorker*)(*Wptr)["VM_PLC"]);
+			auto VM = ((volume_graph*)(*Wptr)["VM_PLC"]);
 			if (VM->PLC_bb)
 				VM->PLC_bb->map.clear();
 			else
@@ -1572,7 +1572,7 @@ namespace PropsAndSets
 			if (_Data[currentID].VolumeMap)
 				_Data[currentID].VolumeMap = nullptr;
 			auto Wptr = (*WH)["VM"];
-			auto VM = ((PLC_VolumeWorker*)(*Wptr)["VM_PLC"]);
+			auto VM = ((volume_graph*)(*Wptr)["VM_PLC"]);
 			VM->PLC_bb = nullptr;
 			WH->DisableWindow("VM");
 		}
@@ -1675,7 +1675,7 @@ void _OnResolve()
 
 void OnRemVolMaps()
 {
-	((PLC_VolumeWorker*)(*((*WH)["VM"]))["VM_PLC"])->PLC_bb = NULL;
+	((volume_graph*)(*((*WH)["VM"]))["VM_PLC"])->PLC_bb = NULL;
 	WH->DisableWindow("VM");
 	for (int i = 0; i < _Data.Files.size(); i++)
 		_Data[i].VolumeMap = nullptr;
@@ -1902,12 +1902,12 @@ void OnStart()
 		for (size_t ID = 0; ID < currently_processed_copy.size(); ID++)
 		{
 			auto position = GetPositionForOneOf(ID, currently_processed_copy.size(), 140, 0.7);
-			auto visualiser = new SMRP_Vis(position.first, position.second, System_White);
+			auto visualiser = new midi_processor_visualiser(position.first, position.second, System_White);
 
 			std::string element_id;
 			merge_preview_container->AddUIElement(element_id = "SMRP_C" + std::to_string(ID), visualiser);
 
-			std::thread([](std::shared_ptr<midi_collection_threaded_merger> pMCTM, SMRP_Vis* pVIS, std::uint32_t ID)
+			std::thread([](std::shared_ptr<midi_collection_threaded_merger> pMCTM, midi_processor_visualiser* pVIS, std::uint32_t ID)
 			{
 				std::string SID = "SMRP_C" + std::to_string(ID);
 				std::cout << SID << " Processing started" << std::endl;
@@ -1936,9 +1936,9 @@ void OnStart()
 				merge_preview_container->DeleteUIElementByName("SMRP_C" + std::to_string(i));
 
 			merge_preview_container->SafeChangePosition_Argumented(0, 0, 0);
-			(*merge_preview_container)["IM"] = new BoolAndWORDChecker<decltype(GlobalMCTM->IntermediateInplaceFlag), decltype(GlobalMCTM->IITrackCount)>
+			(*merge_preview_container)["IM"] = new bool_and_number_checker<decltype(GlobalMCTM->IntermediateInplaceFlag), decltype(GlobalMCTM->IITrackCount)>
 				(-100., 0., System_White, &(GlobalMCTM->IntermediateInplaceFlag), &(GlobalMCTM->IITrackCount));
-			(*merge_preview_container)["RM"] = new BoolAndWORDChecker<decltype(GlobalMCTM->IntermediateInplaceFlag), decltype(GlobalMCTM->IRTrackCount)>
+			(*merge_preview_container)["RM"] = new bool_and_number_checker<decltype(GlobalMCTM->IntermediateInplaceFlag), decltype(GlobalMCTM->IRTrackCount)>
 				(100., 0., System_White, &(GlobalMCTM->IntermediateRegularFlag), &(GlobalMCTM->IRTrackCount));
 			
 			worker_singleton<struct merge_ri_stage_cleanup>::instance().push([safc_data_pointer, merge_preview_container]()
@@ -1950,7 +1950,7 @@ void OnStart()
 				merge_preview_container->DeleteUIElementByName("IM");
 				merge_preview_container->DeleteUIElementByName("RM");
 				merge_preview_container->SafeChangePosition_Argumented(0, 0, 0);
-				(*merge_preview_container)["FM"] = new BoolAndWORDChecker<decltype(GlobalMCTM->CompleteFlag), int>
+				(*merge_preview_container)["FM"] = new bool_and_number_checker<decltype(GlobalMCTM->CompleteFlag), int>
 					(0., 0., System_White, &(GlobalMCTM->CompleteFlag), NULL);
 			});
 		});
@@ -2590,7 +2590,7 @@ void Init()
 	(*WH)["OTHER_SETS"] = T; // Other settings
 
 	T = new MoveableFuiWindow("Cut and Transpose.", System_White, -200, 50, 400, 100, 300, 2.5f, 15, 15, 2.5f, BACKGROUND_OPQ, HEADER, BORDER);
-	(*T)["CAT_ITSELF"] = new CAT_Piano(0, 20 - WindowHeaderSize, 1, 10, nullptr);
+	(*T)["CAT_ITSELF"] = new cut_and_transpose_piano(0, 20 - WindowHeaderSize, 1, 10, nullptr);
 	(*T)["CAT_SET_DEFAULT"] = new Button("Reset", System_White, PropsAndSets::CutAndTranspose::OnReset, -150, -10 - WindowHeaderSize, 40, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, nullptr, " ");
 	(*T)["CAT_+128"] = new Button("0-127 -> 128-255", System_White, PropsAndSets::CutAndTranspose::On0_127to128_255, -85, -10 - WindowHeaderSize, 80, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, nullptr, " ");
 	(*T)["CAT_CDT128"] = new Button("Cut down to 128", System_White, PropsAndSets::CutAndTranspose::OnCDT128, 0, -10 - WindowHeaderSize, 80, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, nullptr, " ");
@@ -2601,7 +2601,7 @@ void Init()
 	(*WH)["CAT"] = T;
 
 	T = new MoveableFuiWindow("Volume map.", System_White, -150, 150, 300, 350, 200, 2.5f, 100, 100, 2.5f, BACKGROUND_OPQ, HEADER, BORDER);
-	(*T)["VM_PLC"] = new PLC_VolumeWorker(0, 0 - WindowHeaderSize, 300 - WindowHeaderSize * 2, 300 - WindowHeaderSize * 2, std::make_shared<polyline_converter<std::uint8_t, std::uint8_t>>());///todo: interface
+	(*T)["VM_PLC"] = new volume_graph(0, 0 - WindowHeaderSize, 300 - WindowHeaderSize * 2, 300 - WindowHeaderSize * 2, std::make_shared<polyline_converter<std::uint8_t, std::uint8_t>>());///todo: interface
 	(*T)["VM_SSBDIIF"] = Butt = new Button("Shape alike x^y", System_White, PropsAndSets::VolumeMap::OnDegreeShape, -110 + WindowHeaderSize, -150 - WindowHeaderSize, 80, 10, 1, 0xFFFFFF3F, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFAFFF3F, 0xFFAFFFFF, System_White, "Where y is from frame bellow");///Set shape by degree in input field;
 	Butt->Tip->SafeChangePosition_Argumented(_Align::left, -150 + WindowHeaderSize, -160 - WindowHeaderSize);
 	(*T)["VM_DEGREE"] = new InputField("1", -140 + WindowHeaderSize, -170 - WindowHeaderSize, 10, 20, System_White, nullptr, 0x007FFFFF, nullptr, " ", 4, _Align::center, _Align::center, InputField::Type::FP_PositiveNumbers);
