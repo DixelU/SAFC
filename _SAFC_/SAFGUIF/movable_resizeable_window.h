@@ -12,6 +12,7 @@ struct moveable_resizeable_window : moveable_window
 	{
 		left, right, bottom, top, center
 	};
+
 	bool resize_corner_is_active = false;
 	bool resize_corner_is_hovered = false;
 	float min_height = 0, min_width = 0;
@@ -36,38 +37,42 @@ struct moveable_resizeable_window : moveable_window
 	void safe_resize(float new_height, float new_width) override
 	{
 		std::lock_guard locker(lock);
+
 		if (new_height < min_height && new_width < min_width)
 			return;
 		else if (new_height < min_height)
 			new_height = min_height;
 		else if (new_width < min_width)
 			new_width = min_width;
+
 		float dh = new_height - height, dw = new_width - width;
 		on_resize(dh, dw, new_height, new_width);
+
 		not_safe_resize(new_height, new_width);
+
 		for (auto& [ui_part_name, pin_side_val] : pinned_window_activities)
 		{
 			switch (pin_side_val)
 			{
-			case PinSide::left:
-			case PinSide::top:
-				break;
-			case PinSide::right:
-			case PinSide::bottom:
-			{
-				int is_bottom = (int)pin_side_val - (int)PinSide::right;
-				auto cur_activity = window_activities.find(ui_part_name);
-				if (cur_activity != window_activities.end())
-					cur_activity->second->safe_move(dw * (!is_bottom), -dh * (!!is_bottom));
-			}
-			break;
-			case PinSide::center:
-			{
-				auto cur_activity = window_activities.find(ui_part_name);
-				if (cur_activity != window_activities.end())
-					cur_activity->second->safe_move(dw * 0.5f, -dh * 0.5f);
-			}
-			break;
+				case PinSide::left:
+				case PinSide::top:
+					break;
+				case PinSide::right:
+				case PinSide::bottom:
+				{
+					int is_bottom = (int)pin_side_val - (int)PinSide::right;
+					auto cur_activity = window_activities.find(ui_part_name);
+					if (cur_activity != window_activities.end())
+						cur_activity->second->safe_move(dw * (!is_bottom), -dh * (!!is_bottom));
+					break;
+				}
+				case PinSide::center:
+				{
+					auto cur_activity = window_activities.find(ui_part_name);
+					if (cur_activity != window_activities.end())
+						cur_activity->second->safe_move(dw * 0.5f, -dh * 0.5f);
+					break;
+				}
 			}
 		}
 	}
@@ -75,6 +80,7 @@ struct moveable_resizeable_window : moveable_window
 	void assign_min_dimensions(float new_min_height, float new_min_width)
 	{
 		std::lock_guard locker(lock);
+
 		min_height = new_min_height;
 		min_width = new_min_width;
 	}
@@ -89,8 +95,10 @@ struct moveable_resizeable_window : moveable_window
 	[[nodiscard]] bool mouse_handler(float mx, float my, char button_btn, char state) override
 	{
 		std::lock_guard locker(lock);
+
 		if (!drawable)
 			return false;
+
 		float center_draggable_x = x_window_pos + width, center_draggable_y = y_window_pos - height;
 		float dw = mx - center_draggable_x, dh = center_draggable_y - my;
 
@@ -111,14 +119,17 @@ struct moveable_resizeable_window : moveable_window
 			safe_resize(height + dh, width + dw);
 			return true;
 		}
+
 		return moveable_window::mouse_handler(mx, my, button_btn, state);
 	}
 
 	void draw() override
 	{
 		std::lock_guard locker(lock);
+
 		if (!drawable)
 			return;
+
 		float center_draggable_x = x_window_pos + width, center_draggable_y = y_window_pos - height;
 
 		__glcolor(rgba_theme_color | (std::uint32_t)(0xFFFFFFFF * resize_corner_is_active));
@@ -131,10 +142,6 @@ struct moveable_resizeable_window : moveable_window
 
 		moveable_window::draw();
 	}
-
-	// Legacy compat
-	void AssignMinDimentions(float h, float w) { assign_min_dimensions(h, w); }
-	void AssignPinnedActivities(const std::initializer_list<std::string>& l, PinSide s) { assign_pinned_activities(l, s); }
 };
 
 using MoveableResizeableWindow = moveable_resizeable_window;

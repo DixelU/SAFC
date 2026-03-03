@@ -17,10 +17,6 @@ struct slider : handleable_ui_part
 	Orientation orientation;
 	float x_pos, y_pos;
 	float track_length;
-	// Backward-compat aliases
-	float& Xpos = x_pos;
-	float& Ypos = y_pos;
-	float& TrackLength = track_length;
 	float handle_size;
 	float track_thickness;
 
@@ -36,7 +32,6 @@ struct slider : handleable_ui_part
 
 	bool hovered;
 	bool dragging;
-	bool& Dragging = dragging;
 	bool fire_on_release;
 	float drag_offset_x, drag_offset_y;
 
@@ -123,6 +118,7 @@ struct slider : handleable_ui_part
 	void draw() override
 	{
 		std::lock_guard locker(lock);
+
 		if (!enabled)
 			return;
 
@@ -170,6 +166,7 @@ struct slider : handleable_ui_part
 	[[nodiscard]] bool mouse_handler(float mx, float my, char button/*-1 left, 1 right, 0 move, 2 wheel up, 3 wheel down*/, char state /*-1 down, 1 up*/) override
 	{
 		std::lock_guard locker(lock);
+
 		if (!enabled)
 			return false;
 
@@ -232,8 +229,10 @@ struct slider : handleable_ui_part
 	void safe_move(float dx, float dy) override
 	{
 		std::lock_guard locker(lock);
+
 		x_pos += dx;
 		y_pos += dy;
+
 		if (label)
 			label->safe_move(dx, dy);
 	}
@@ -241,12 +240,14 @@ struct slider : handleable_ui_part
 	void safe_change_position(float new_x, float new_y) override
 	{
 		std::lock_guard locker(lock);
+
 		safe_move(new_x - x_pos, new_y - y_pos);
 	}
 
 	void safe_change_position_argumented(std::uint8_t arg, float new_x, float new_y) override
 	{
 		std::lock_guard locker(lock);
+
 		float cw = 0.5f * (
 			(std::int32_t)((bool)(GLOBAL_LEFT & arg))
 			- (std::int32_t)((bool)(GLOBAL_RIGHT & arg))
@@ -255,12 +256,14 @@ struct slider : handleable_ui_part
 				(std::int32_t)((bool)(GLOBAL_BOTTOM & arg))
 				- (std::int32_t)((bool)(GLOBAL_TOP & arg))
 				) * (orientation == Orientation::vertical ? track_length : 0);
+
 		safe_change_position(new_x + cw, new_y + ch);
 	}
 
 	void safe_string_replace(std::string new_string) override
 	{
 		std::lock_guard locker(lock);
+
 		if (label)
 			label->safe_string_replace(new_string);
 	}
@@ -270,6 +273,7 @@ struct slider : handleable_ui_part
 	void set_value(float value, bool with_trigger = true)
 	{
 		std::lock_guard locker(lock);
+
 		current_value = std::clamp(value, min_value, max_value);
 
 		if (max_value != min_value)
@@ -284,6 +288,7 @@ struct slider : handleable_ui_part
 	[[nodiscard]] float get_value()
 	{
 		std::lock_guard locker(lock);
+
 		return current_value;
 	}
 
@@ -291,11 +296,6 @@ struct slider : handleable_ui_part
 	{
 		return TT_SLIDER;
 	}
-
-	// Backward-compat method wrapper
-	void SetValue(float value, bool trigger = true) { set_value(value, trigger); }
 };
-
-using Slider = slider;
 
 #endif // !SAFGUIF_SLIDER

@@ -54,14 +54,6 @@ struct moveable_window : handleable_ui_part
 	bool cursor_follow_mode;
 	bool map_was_changed;
 	float pc_cur_x, pc_cur_y;
-	// Backward-compat aliases
-	float& XWindowPos = x_window_pos;
-	float& YWindowPos = y_window_pos;
-	float& Width = width;
-	float& Height = height;
-	std::uint32_t& RGBABackground = rgba_background;
-	std::unique_ptr<single_text_line>& WindowName = window_name;
-	std::map<std::string, std::unique_ptr<handleable_ui_part>>& WindowActivities = window_activities;
 
 	~moveable_window() override
 	{
@@ -79,6 +71,7 @@ struct moveable_window : handleable_ui_part
 			this->window_name.reset(win_name_settings->create_one(win_name));
 			this->window_name->safe_move(this->window_name->calculated_width * 0.5f + window_header_size * 0.5f, 0.f - window_header_size * 0.5f);
 		}
+
 		this->map_was_changed = false;
 		this->x_window_pos = x_pos;
 		this->y_window_pos = y_pos;
@@ -97,21 +90,26 @@ struct moveable_window : handleable_ui_part
 	void keyboard_handler(char ch) override
 	{
 		std::lock_guard locker(lock);
-		for (auto& [_, elem] : window_activities)
+		for (auto& elem : window_activities | std::views::values)
 		{
-			if (elem) elem->keyboard_handler(ch);
-			if (map_was_changed)
-			{
-				map_was_changed = false;
-				break;
-			}
+			if (elem)
+				elem->keyboard_handler(ch);
+
+			if (!map_was_changed)
+				continue;
+			
+			map_was_changed = false;
+			break;
 		}
 	}
 
 	[[nodiscard]] bool mouse_handler(float mx, float my, char button_btn, char state) override
 	{
 		std::lock_guard locker(lock);
-		if (!drawable) return false;
+
+		if (!drawable)
+			return false;
+
 		hovered_close_button = false;
 		if (mx > x_window_pos + width - window_header_size && mx < x_window_pos + width
 			&& my < y_window_pos && my > y_window_pos - window_header_size)
@@ -142,6 +140,7 @@ struct moveable_window : handleable_ui_part
 					cursor_follow_mode = !cursor_follow_mode;
 			}
 		}
+
 		if (cursor_follow_mode)
 		{
 			safe_move(mx - pc_cur_x, my - pc_cur_y);
@@ -177,65 +176,89 @@ struct moveable_window : handleable_ui_part
 	void safe_change_position(float new_x, float new_y) override
 	{
 		std::lock_guard locker(lock);
+
 		new_x -= x_window_pos;
 		new_y -= y_window_pos;
+
 		safe_move(new_x, new_y);
 	}
 
 	bool delete_ui_element_by_name(const std::string& element_name)
 	{
 		std::lock_guard locker(lock);
-		map_was_changed = true;
+
 		auto ptr = window_activities.find(element_name);
-		if (ptr == window_activities.end()) return false;
+		if (ptr == window_activities.end())
+			return false;
+
+		map_was_changed = true;
 		window_activities.erase(element_name);
+
 		return true;
 	}
 
 	bool add_ui_element(const std::string& element_name, std::unique_ptr<handleable_ui_part> elem)
 	{
 		std::lock_guard locker(lock);
+
 		map_was_changed = true;
 		auto ans = window_activities.insert_or_assign(element_name, std::move(elem));
+
 		return ans.second;
 	}
 
 	void safe_move(float dx, float dy) override
 	{
 		std::lock_guard locker(lock);
+
 		x_window_pos += dx;
 		y_window_pos += dy;
-		if (window_name) window_name->safe_move(dx, dy);
-		for (auto& [_, elem] : window_activities)
-			if (elem) elem->safe_move(dx, dy);
+
+		if (window_name)
+			window_name->safe_move(dx, dy);
+
+		for (auto& elem : window_activities | std::views::values)
+		{
+			if (!elem)
+				continue;
+
+			elem->safe_move(dx, dy);
+		}
 	}
 
 	void safe_change_position_argumented(std::uint8_t arg, float new_x, float new_y) override
 	{
 		std::lock_guard locker(lock);
-		float cw = 0.5f * (
-			(std::int32_t)(!!(GLOBAL_LEFT & arg))
-			- (std::int32_t)(!!(GLOBAL_RIGHT & arg))
-			- 1) * width,
+
+		float	cw = 0.5f * (
+				(std::int32_t)(!!(GLOBAL_LEFT & arg))
+				- (std::int32_t)(!!(GLOBAL_RIGHT & arg))
+				- 1) * width,
 			ch = 0.5f * (
 				(std::int32_t)(!!(GLOBAL_BOTTOM & arg))
 				- (std::int32_t)(!!(GLOBAL_TOP & arg))
 				+ 1) * height;
+
 		safe_change_position(new_x + cw, new_y + ch);
 	}
 
 	void draw() override
 	{
 		std::lock_guard locker(lock);
-		if (!drawable) return;
+
+		if (!drawable)
+			return;
+
 		__glcolor(rgba_background);
 		glBegin(GL_QUADS);
 		glVertex2f(x_window_pos, y_window_pos);
 		glVertex2f(x_window_pos + width, y_window_pos);
-		if (rgba_grad_background) __glcolor(rgba_grad_background);
+		if (rgba_grad_background)
+			__glcolor(rgba_grad_background);
 		glVertex2f(x_window_pos + width, y_window_pos - height);
 		glVertex2f(x_window_pos, y_window_pos - height);
 		glEnd();
+
 		__glcolor(rgba_theme_color);
 		glLineWidth(1);
 		glBegin(GL_LINE_LOOP);
@@ -244,6 +267,7 @@ struct moveable_window : handleable_ui_part
 		glVertex2f(x_window_pos + width, y_window_pos - height);
 		glVertex2f(x_window_pos, y_window_pos - height);
 		glEnd();
+
 		glBegin(GL_QUADS);
 		glVertex2f(x_window_pos, y_window_pos);
 		glVertex2f(x_window_pos + width, y_window_pos);
@@ -256,15 +280,22 @@ struct moveable_window : handleable_ui_part
 		glVertex2f(x_window_pos + width - window_header_size, y_window_pos);
 		glEnd();
 
-		if (window_name) window_name->draw();
+		if (window_name)
+			window_name->draw();
 
-		for (auto& [_, elem] : window_activities)
-			if (elem) elem->draw();
+		for (auto& elem : window_activities | std::views::values)
+		{
+			if (!elem)
+				continue;
+
+			elem->draw();
+		}
 	}
 
 	void not_safe_resize(float new_height, float new_width)
 	{
 		std::lock_guard locker(lock);
+
 		height = new_height;
 		width = new_width;
 	}
@@ -272,10 +303,14 @@ struct moveable_window : handleable_ui_part
 	void not_safe_resize_centered(float new_height, float new_width)
 	{
 		std::lock_guard locker(lock);
+
 		float dx, dy;
 		x_window_pos += (dx = -0.5f * (new_width - width));
 		y_window_pos += (dy = 0.5f * (new_height - height));
-		if (window_name) window_name->safe_move(dx, dy);
+
+		if (window_name)
+			window_name->safe_move(dx, dy);
+
 		width = new_width;
 		height = new_height;
 	}
@@ -283,15 +318,21 @@ struct moveable_window : handleable_ui_part
 	void safe_string_replace(std::string new_window_title) override
 	{
 		std::lock_guard locker(lock);
+
 		safe_window_rename(new_window_title);
 	}
 
 	virtual void safe_window_rename(const std::string& new_window_title, bool force_no_shift = false)
 	{
 		std::lock_guard locker(lock);
-		if (!window_name) return;
+
+		if (!window_name)
+			return;
+
 		window_name->safe_string_replace(new_window_title);
-		if (force_no_shift) return;
+		if (force_no_shift)
+			return;
+
 		window_name->safe_change_position_argumented(GLOBAL_LEFT, x_window_pos + window_header_size * 0.5f, y_window_pos - window_header_size * 0.5f);
 	}
 
@@ -301,18 +342,6 @@ struct moveable_window : handleable_ui_part
 	}
 
 	[[nodiscard]] inline std::uint32_t tell_type() override { return TT_MOVEABLE_WINDOW; }
-
-	// Legacy method names for backward compat
-	void _NotSafeResize(float new_height, float new_width) { not_safe_resize(new_height, new_width); }
-	void _NotSafeResize_Centered(float new_height, float new_width) { not_safe_resize_centered(new_height, new_width); }
-	void SafeWindowRename(const std::string& t, bool f = false) { safe_window_rename(t, f); }
-	bool DeleteUIElementByName(const std::string& name) { return delete_ui_element_by_name(name); }
-	bool AddUIElement(const std::string& name, handleable_ui_part* raw_elem) { return add_ui_element(name, std::unique_ptr<handleable_ui_part>(raw_elem)); }
 };
-
-using MoveableWindow = moveable_window;
-
-// Backward-compat global constant (was a macro/global in old code)
-inline constexpr int WindowHeaderSize = moveable_window::window_header_size;
 
 #endif

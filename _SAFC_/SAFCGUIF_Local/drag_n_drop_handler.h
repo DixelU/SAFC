@@ -107,13 +107,13 @@ struct drag_n_drop_handler : IDropTarget
 					}
 				}
 
-				AddFiles(wide_char_buffer);
+				add_files(wide_char_buffer);
 			}
 			else
-				ThrowAlert_Error("drag_and_drop: GetData");
+				throw_alert_error("drag_and_drop: GetData");
 		}
 		else
-			ThrowAlert_Error("drag_and_drop: QueryGetData");
+			throw_alert_error("drag_and_drop: QueryGetData");
 
 		DRAG_OVER = 0;
 		*effect = DROPEFFECT_COPY;

@@ -35,7 +35,7 @@ struct volume_graph : handleable_ui_part
 		this->re_put_mode = false;
 		this->stl_msg = std::make_unique<single_text_line>(
 			"_", cx_pos, cy_pos,
-			System_White->x_unit_size, System_White->y_unit_size, System_White->space_width,
+			system_white->x_unit_size, system_white->y_unit_size, system_white->space_width,
 			2, 0xFFAFFFCF, std::optional<std::uint32_t>{0xAFFFAFCF}, (7 << 4) | 3);
 		this->mouse_x = this->mouse_y = 0.f;
 		this->hovered_point = std::pair<std::uint8_t, std::uint8_t>(0, 0);

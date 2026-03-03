@@ -15,9 +15,6 @@ struct checkbox : handleable_ui_part
 	std::unique_ptr<single_text_line> tip;
 	bool state, focused;
 	std::uint8_t border_width;
-	// Backward-compat aliases
-	bool& State = state;
-	std::unique_ptr<single_text_line>& Tip = tip;
 
 	~checkbox() override = default;
 
@@ -38,6 +35,7 @@ struct checkbox : handleable_ui_part
 			this->tip->safe_change_position_argumented(tip_align, x_pos - ((tip_align & _Align::left) ? 0.5f : ((tip_align & _Align::right) ? -0.5f : 0)) * side_size, y_pos - side_size);
 		}
 	}
+
 	void draw() override
 	{
 		std::lock_guard locker(lock);
@@ -73,23 +71,32 @@ struct checkbox : handleable_ui_part
 		if (focused && tip)
 			tip->draw();
 	}
+
 	void safe_move(float dx, float dy) override
 	{
 		std::lock_guard locker(lock);
+
 		x_pos += dx;
 		y_pos += dy;
-		if (tip) tip->safe_move(dx, dy);
+
+		if (tip)
+			tip->safe_move(dx, dy);
 	}
+
 	void safe_change_position(float new_x, float new_y) override
 	{
 		std::lock_guard locker(lock);
+
 		new_x -= x_pos;
 		new_y -= y_pos;
+
 		safe_move(new_x, new_y);
 	}
+
 	void safe_change_position_argumented(std::uint8_t arg, float new_x, float new_y) override
 	{
 		std::lock_guard locker(lock);
+
 		float cw = 0.5f * (
 			(std::int32_t)((bool)(GLOBAL_LEFT & arg))
 			- (std::int32_t)((bool)(GLOBAL_RIGHT & arg))
@@ -98,24 +105,32 @@ struct checkbox : handleable_ui_part
 				(std::int32_t)((bool)(GLOBAL_BOTTOM & arg))
 				- (std::int32_t)((bool)(GLOBAL_TOP & arg))
 				) * side_size;
+
 		safe_change_position(new_x + cw, new_y + ch);
 	}
+
 	void keyboard_handler(char ch) override
 	{
 		return;
 	}
+
 	void safe_string_replace(std::string tip_string) override
 	{
 		std::lock_guard locker(lock);
+
 		if (tip)
 			tip->safe_string_replace(tip_string);
 	}
+
 	void focus_change()
 	{
 		std::lock_guard locker(lock);
+
 		this->focused = !this->focused;
+
 		border_rgba_color = (((~(border_rgba_color >> 8)) << 8) | (border_rgba_color & 0xFF));
 	}
+
 	[[nodiscard]] bool mouse_handler(float mx, float my, char button, char state_val) override
 	{
 		std::lock_guard locker(lock);
@@ -123,6 +138,7 @@ struct checkbox : handleable_ui_part
 		{
 			if (!focused)
 				focus_change();
+
 			if (button)
 			{
 				if (state_val == 1)
@@ -136,14 +152,15 @@ struct checkbox : handleable_ui_part
 		{
 			if (focused)
 				focus_change();
+
 			return false;
 		}
 	}
+
 	[[nodiscard]] inline std::uint32_t tell_type() override
 	{
 		return TT_CHECKBOX;
 	}
 };
-using CheckBox = checkbox;
 
 #endif // !SAFGUIF_CHECKBOX

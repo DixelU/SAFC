@@ -17,17 +17,15 @@ struct single_text_line
 	bool is_bicolored, is_listed_font;
 	float x_unit_size, y_unit_size;
 	std::vector<std::unique_ptr<dotted_symbol>> chars;
-	// Backward-compat aliases
-	float& CXpos = cx_pos;
-	float& CYpos = cy_pos;
-	std::string& _CurrentText = current_text;
 
 	~single_text_line() = default;
 	single_text_line(const single_text_line&) = delete;
 
 	single_text_line(std::string text, float cx_pos, float cy_pos, float x_unit_sz, float y_unit_sz, float space_width, std::uint8_t line_width = 2, std::uint32_t rgba_color = 0xFFFFFFFF, std::optional<std::uint32_t> g_rgba_color_opt = std::nullopt, std::uint8_t orig_n_grad_points = ((5 << 4) | 5), bool is_listed_font = false)
 	{
-		if (!text.size()) text = " ";
+		if (!text.size())
+			text = " ";
+
 		this->current_text = text;
 		calculated_height = 2 * y_unit_sz;
 		calculated_width = text.size() * 2.f * x_unit_sz + (text.size() - 1) * space_width;
@@ -37,11 +35,13 @@ struct single_text_line
 		this->g_rgba_color = 0;
 		if (g_rgba_color_opt)
 			this->g_rgba_color = *g_rgba_color_opt;
+
 		this->space_width = space_width;
 		this->x_unit_size = x_unit_sz;
 		this->y_unit_size = y_unit_sz;
 		this->is_listed_font = is_listed_font;
 		float char_x_position = cx_pos - (calculated_width * 0.5f) + x_unit_sz, char_x_pos_increment = 2.f * x_unit_sz + space_width;
+
 		for (int i = 0; i < (int)text.size(); i++)
 		{
 			if (!g_rgba_color_opt && !is_listed_font)
@@ -52,6 +52,7 @@ struct single_text_line
 				chars.push_back(std::make_unique<lfontsymbol>(text[i], char_x_position, cy_pos, x_unit_sz, y_unit_sz, rgba_color));
 			char_x_position += char_x_pos_increment;
 		}
+
 		if (g_rgba_color_opt)
 		{
 			this->is_bicolored = true;
@@ -73,8 +74,10 @@ struct single_text_line
 			);
 			return;
 		}
+
 		std::uint8_t r = (new_rgba_color >> 24), g = (new_rgba_color >> 16) & 0xFF, b = (new_rgba_color >> 8) & 0xFF, a = (new_rgba_color) & 0xFF;
 		rgba_color = new_rgba_color;
+
 		for (auto& ch : chars)
 		{
 			ch->R = r;
@@ -87,6 +90,7 @@ struct single_text_line
 	{
 		if (!is_bicolored)
 			return safe_color_change(new_base_rgba_color);
+
 		for (auto& ch : chars)
 			ch->refill_gradient(new_base_rgba_color, new_g_rgba_color, base_point, g_point);
 	}
@@ -94,18 +98,22 @@ struct single_text_line
 	{
 		new_cx_pos = new_cx_pos - cx_pos;
 		new_cy_pos = new_cy_pos - cy_pos;
+
 		safe_move(new_cx_pos, new_cy_pos);
 	}
 	void safe_move(float dx, float dy)
 	{
 		cx_pos += dx;
 		cy_pos += dy;
+
 		for (auto& ch : chars)
 			ch->safe_char_move(dx, dy);
 	}
 	bool safe_replace_char(int i, char ch_val)
 	{
-		if (i >= (int)chars.size()) return false;
+		if (i >= (int)chars.size())
+			return false;
+
 		if (is_listed_font)
 		{
 			auto ch = dynamic_cast<lfontsymbol*>(chars[i].get());
@@ -119,17 +127,22 @@ struct single_text_line
 		}
 		else
 		{
-			chars[i]->render_way = ASCII[ch_val];
+			chars[i]->render_way = legacy_draw_map[ch_val];
 			chars[i]->update_point_placement_positions();
 		}
+
 		return true;
 	}
 	bool safe_replace_char(int i, const std::string& ch_render_way)
 	{
-		if (i >= (int)chars.size()) return false;
-		if (is_listed_font) return false;
+		if (i >= (int)chars.size())
+			return false;
+		if (is_listed_font)
+			return false;
+
 		chars[i]->render_way = ch_render_way;
 		chars[i]->update_point_placement_positions();
+
 		return true;
 	}
 	void recalculate_width()
@@ -148,12 +161,16 @@ struct single_text_line
 				(std::int32_t)((bool)(GLOBAL_BOTTOM & arg))
 				- (std::int32_t)((bool)(GLOBAL_TOP & arg))
 				) * calculated_height;
+
 		safe_change_position(new_x + cw, new_y + ch);
 	}
 	void safe_string_replace(std::string new_string)
 	{
-		if (!new_string.size()) new_string = " ";
+		if (!new_string.size())
+			new_string = " ";
+
 		current_text = new_string;
+
 		while (new_string.size() > chars.size())
 		{
 			if (is_bicolored)
@@ -163,10 +180,13 @@ struct single_text_line
 			else
 				chars.push_back(std::make_unique<dotted_symbol>(*chars.front()));
 		}
+
 		while (new_string.size() < chars.size())
 			chars.pop_back();
+
 		for (int i = 0; i < (int)chars.size(); i++)
 			safe_replace_char(i, new_string[i]);
+
 		recalculate_width();
 	}
 
@@ -179,11 +199,13 @@ struct single_text_line
 	{
 		auto width = default_width_formulae();
 		float char_x_position = cx_pos - (width * 0.5f) + x_unit_size, char_x_pos_increment = 2.f * x_unit_size + space_width;
+
 		for (auto& ch : chars)
 		{
 			ch->x_pos = char_x_position;
 			char_x_position += char_x_pos_increment;
 		}
+
 		return width;
 	}
 
@@ -234,15 +256,10 @@ struct single_text_line
 	{
 		if (calculated_width < std::numeric_limits<float>::epsilon())
 			recalculate_width();
+
 		for (auto& ch : chars)
 			ch->draw();
 	}
-
-	// Backward-compat method wrappers
-	void SafeMove(float dx, float dy) { safe_move(dx, dy); }
-	void SafeStringReplace(std::string s) { safe_string_replace(std::move(s)); }
-	void SafeChangePosition(float x, float y) { safe_change_position(x, y); }
-	void SafeChangePosition_Argumented(std::uint8_t a, float x, float y) { safe_change_position_argumented(a, x, y); }
 };
 
 #endif

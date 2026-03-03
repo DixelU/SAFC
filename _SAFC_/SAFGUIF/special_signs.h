@@ -25,6 +25,7 @@ struct special_signs
 		glVertex2f(x - sz_param * 0.1f, y + sz_param * 0.25f);
 		glEnd();
 	}
+
 	static void draw_ex_triangle(float x, float y, float sz_param, std::uint32_t rgba_color, std::uint32_t secondary_rgba_color)
 	{
 		__glcolor(rgba_color);
@@ -48,6 +49,7 @@ struct special_signs
 		glVertex2f(x, y + sz_param * 0.4f);
 		glEnd();
 	}
+
 	static void draw_file_sign(float x, float y, float sz_param, std::uint32_t rgba_color, std::uint32_t secondary_rgba_color)
 	{
 		__glcolor(rgba_color);
@@ -75,6 +77,7 @@ struct special_signs
 		glVertex2f(x + sz_param, y + sz_param);
 		glEnd();
 	}
+
 	static void draw_a_circle(float x, float y, float sz_param, std::uint32_t rgba_color, std::uint32_t secondary_rgba_color)
 	{
 		__glcolor(secondary_rgba_color);
@@ -89,6 +92,7 @@ struct special_signs
 			glVertex2f(sz_param * 1.25f * (cos(angle_to_radians(a))) + x, sz_param * 1.25f * (sin(angle_to_radians(a))) + y + sz_param * 0.75f);
 		glEnd();
 	}
+
 	static void draw_no(float x, float y, float sz_param, std::uint32_t rgba_color, std::uint32_t = 0)
 	{
 		__glcolor(rgba_color);
@@ -100,6 +104,7 @@ struct special_signs
 		glVertex2f(x - sz_param * 0.5f, y + sz_param * 1.25f);
 		glEnd();
 	}
+
 	static void draw_wait(float x, float y, float sz_param, std::uint32_t rgba_color, std::uint32_t total_stages)
 	{
 		float start = ((float)((timer_v % total_stages) * 360)) / (float)(total_stages), t;
@@ -119,14 +124,6 @@ struct special_signs
 		}
 		glEnd();
 	}
-
-	// Backward-compat PascalCase aliases for static draw functions
-	static void DrawOk(float x, float y, float s, std::uint32_t r1, std::uint32_t r2) { draw_ok(x, y, s, r1, r2); }
-	static void DrawExTriangle(float x, float y, float s, std::uint32_t r1, std::uint32_t r2) { draw_ex_triangle(x, y, s, r1, r2); }
-	static void DrawNo(float x, float y, float s, std::uint32_t r1, std::uint32_t r2) { draw_no(x, y, s, r1, r2); }
-	static void DrawWait(float x, float y, float s, std::uint32_t r1, std::uint32_t r2) { draw_wait(x, y, s, r1, r2); }
-	static void DrawACircle(float x, float y, float s, std::uint32_t r1, std::uint32_t r2) { draw_a_circle(x, y, s, r1, r2); }
-	static void DrawFileSign(float x, float y, float s, std::uint32_t r1, std::uint32_t r2) { draw_file_sign(x, y, s, r1, r2); }
 };
 
 struct special_sign_handler : handleable_ui_part
@@ -180,9 +177,5 @@ struct special_sign_handler : handleable_ui_part
 	void safe_string_replace(std::string) override {}
 	[[nodiscard]] bool mouse_handler(float, float, char, char) override { return false; }
 };
-
-// Backward compat aliases
-using SpecialSigns = special_signs;
-using SpecialSignHandler = special_sign_handler;
 
 #endif // !SAFGUIF_SPECIALSIGNS

@@ -15,6 +15,7 @@ struct button_settings
 	std::uint32_t rgba_color, g_rgba_color, rgba_background, rgba_border, hovered_rgba_color, hovered_rgba_background, hovered_rgba_border;
 	std::uint8_t base_point, grad_point, border_width;
 	bool stls_based_settings;
+
 	single_text_line_settings* tip;  // non-owning
 	single_text_line_settings* stls; // non-owning (or owned via owned_stls)
 	std::unique_ptr<single_text_line_settings> owned_stls; // only set when constructed from button*
@@ -197,6 +198,6 @@ struct button_settings
 	}
 };
 
-using ButtonSettings = button_settings;
+using button_settings = button_settings;
 
 #endif // !SAFGUIF_BS

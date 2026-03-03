@@ -25,7 +25,7 @@
 // __declspec(noinline)
 // __declspec(noinline)
 
-// Lock-free SPSC slab-based queue
+// lock-free SPSC slab-based queue
 // Producer (parser): push, back
 // Consumer (renderer): pop, front, empty, iteration
 template<typename T>
@@ -98,7 +98,7 @@ private:
 	// Consumer-owned
 	alignas(64) slab* head_ = nullptr;
 
-	// Lock-free recycle stack: consumer pushes, producer pops
+	// lock-free recycle stack: consumer pushes, producer pops
 	alignas(64) std::atomic<slab*> recycle_head_{nullptr};
 
 	slab* producer_get_slab()
@@ -120,7 +120,7 @@ private:
 
 	void consumer_recycle_slab(slab* s)
 	{
-		// Lock-free push to recycle stack
+		// lock-free push to recycle stack
 		slab* old_head = recycle_head_.load(std::memory_order_relaxed);
 		do {
 			s->next_slab.store(old_head, std::memory_order_relaxed);
@@ -345,7 +345,7 @@ struct simple_player
 		buffered_note(uint64_t start, uint64_t end, uint32_t track)
 			: start_time_us(start), end_time_us(end), track_id(track) {}
 
-		// Move constructor for queue operations
+		// move constructor for queue operations
 		buffered_note(buffered_note&& other) noexcept
 			: start_time_us(other.start_time_us)
 			, end_time_us(other.end_time_us.load(std::memory_order_relaxed))
@@ -361,7 +361,7 @@ struct simple_player
 	};
 
 	// Visuals viewport: manages notes display and keyboard state
-	// Lock-free SPSC: parser thread pushes notes, render thread reads state
+	// lock-free SPSC: parser thread pushes notes, render thread reads state
 	struct visuals_viewport
 	{
 		static constexpr size_t key_count = 128;
@@ -494,7 +494,7 @@ struct simple_player
 				p.clear();
 		}
 
-		// Reset for new playback
+		// reset for new playback
 		// Acquires access_mutex to synchronize with render thread iteration.
 		void reset()
 		{
@@ -765,7 +765,7 @@ struct simple_player
 
 		if (!res)
 		{
-			ThrowAlert_Error("Playback failed");
+			throw_alert_error("Playback failed");
 			return;
 		}
 
@@ -879,7 +879,7 @@ struct simple_player
 
 		if (!mmap || !mmap->good())
 		{
-			ThrowAlert_Warning("Unable to open MIDI file for playback");
+			throw_alert_warning("Unable to open MIDI file for playback");
 			return false;
 		}
 
@@ -1292,7 +1292,7 @@ struct simple_player
 
 		for (;;)
 		{
-			// Reset per-iteration state
+			// reset per-iteration state
 			state.stop_requested.store(false, std::memory_order_relaxed);
 			state.seeking_ff.store(false, std::memory_order_relaxed);
 			state.parser_done.store(false, std::memory_order_relaxed);
@@ -1472,7 +1472,7 @@ struct simple_player
 		memset(keyboard_colors + total_white, 0x00, sizeof(draw_data::color) * (128 - total_white));
 
 		{
-			// Lock against visuals.reset() which may be called by playback_thread on seek/restart.
+			// lock against visuals.reset() which may be called by playback_thread on seek/restart.
 			std::lock_guard<std::mutex> visuals_lock(visuals.access_mutex);
 
 			visuals.cull_expired(int64_t(current_us) - data.scroll_window_us);
@@ -1796,7 +1796,7 @@ private:
 
 			if (command < 0x80 || cur >= end)
 			{
-				ThrowAlert_Error("Byte " + std::to_string(cur - mmap->begin()) + ": Unexpected 0 RSB\nAt least one track was skipped!");
+				throw_alert_error("Byte " + std::to_string(cur - mmap->begin()) + ": Unexpected 0 RSB\nAt least one track was skipped!");
 				is_good = false;
 				break;
 			}
@@ -1844,7 +1844,7 @@ private:
 				}
 				default:
 				{
-					ThrowAlert_Warning("Byte " + (std::to_string(cur - mmap->begin()) + ": Unknown event type " + std::to_string(command)));
+					throw_alert_warning("Byte " + (std::to_string(cur - mmap->begin()) + ": Unknown event type " + std::to_string(command)));
 					is_good = false;
 					break;
 				}
@@ -1930,7 +1930,7 @@ private:
 			std::this_thread::sleep_for(std::chrono::milliseconds(250));
 
 		if (attempts == 8)
-			ThrowAlert_Error("Unable to close the MIDI out");
+			throw_alert_error("Unable to close the MIDI out");
 	}
 
 	void set_short_msg_noop()
@@ -1956,7 +1956,7 @@ private:
 			{
 				std::wstring name = devices[device].szPname;
 				auto readable_name = std::string(name.begin(), name.end());
-				ThrowAlert_Error("Unable to open MIDI out '" + readable_name + "'!");
+				throw_alert_error("Unable to open MIDI out '" + readable_name + "'!");
 				hout = nullptr;
 			}
 			else
@@ -1970,7 +1970,7 @@ private:
 		}
 		catch (...)
 		{
-			ThrowAlert_Error("midiOutOpen() horribly failed...\n");
+			throw_alert_error("midiOutOpen() horribly failed...\n");
 		}
 	}
 
@@ -2016,7 +2016,7 @@ private:
 	constexpr static std::uint32_t MThd_header = 1297377380;
 };
 
-struct PlayerViewer : public HandleableUIPart
+struct PlayerViewer : public handleable_ui_part
 {
 	float xpos, ypos;
 	std::unique_ptr<simple_player::draw_data> data;

@@ -17,26 +17,45 @@ struct Graphing : handleable_ui_part
 	local_fp_type assigned_x_selection_by_key;
 	ordered_map_type* graph;
 	std::unique_ptr<single_text_line> stl_info;
-	// Backward-compat aliases
-	ordered_map_type*& Graph = graph;
 	local_fp_type width, target_height, scale_coef, shift;
 	bool auto_adjusting, is_hovered;
 	std::uint32_t color, nearest_line_color, point_color, selection_color;
 
-	Graphing(float cx_pos, float cy_pos, float width, float target_height, float scale_coef,
-		bool auto_adjusting, std::uint32_t color, std::uint32_t text_color,
-		std::uint32_t nearest_line_color, std::uint32_t point_color, std::uint32_t selection_color,
-		ordered_map_type* graph, single_text_line_settings* stls, bool initial_enabled) :
-		cx_pos(cx_pos), cy_pos(cy_pos), width(width), target_height(target_height),
-		scale_coef(scale_coef), color(color), auto_adjusting(auto_adjusting), graph(graph),
-		nearest_line_color(nearest_line_color), point_color(point_color), selection_color(selection_color)
+	Graphing(float cx_pos,
+		float cy_pos,
+		float width,
+		float target_height,
+		float scale_coef,
+		bool auto_adjusting,
+		std::uint32_t color,
+		std::uint32_t text_color,
+		std::uint32_t nearest_line_color,
+		std::uint32_t point_color,
+		std::uint32_t selection_color,
+		ordered_map_type* graph,
+		single_text_line_settings* stls,
+		bool initial_enabled):
+			cx_pos(cx_pos),
+			cy_pos(cy_pos),
+			width(width),
+			target_height(target_height),
+			scale_coef(scale_coef),
+			color(color),
+			auto_adjusting(auto_adjusting),
+			graph(graph), 
+			nearest_line_color(nearest_line_color),
+			point_color(point_color),
+			selection_color(selection_color),
+			enabled(initial_enabled),
+			horizontal_scaling(1),
+			central_point(0),
+			is_hovered(false),
+			my_pos(0),
+			mx_pow(0),
+			shift(0),
+			assigned_x_selection_by_key(0),
+
 	{
-		this->enabled = initial_enabled;
-		horizontal_scaling = 1;
-		central_point = 0;
-		is_hovered = false;
-		my_pos = mx_pos = shift = 0;
-		assigned_x_selection_by_key = 0;
 		stls->rgba_color = text_color;
 		stls->set_new_pos(cx_pos, cy_pos - 0.5f * target_height + 5.f);
 		stl_info.reset(stls->create_one("_"));
@@ -47,6 +66,7 @@ struct Graphing : handleable_ui_part
 	void reset()
 	{
 		std::lock_guard locker(lock);
+
 		horizontal_scaling = 1;
 		central_point = 0;
 		is_hovered = false;
@@ -55,6 +75,7 @@ struct Graphing : handleable_ui_part
 	void draw() override
 	{
 		std::lock_guard locker(lock);
+
 		if (enabled && graph && graph->size())
 		{
 			local_fp_type begin = graph->begin()->first;
@@ -164,8 +185,8 @@ struct Graphing : handleable_ui_part
 		}
 		else if (enabled)
 		{
-			if (stl_info->current_text != "NULL Graph")
-				stl_info->safe_string_replace("NULL Graph");
+			if (stl_info->current_text != "NULL graph")
+				stl_info->safe_string_replace("NULL graph");
 		}
 		else
 		{
@@ -176,31 +197,37 @@ struct Graphing : handleable_ui_part
 			glVertex2f(cx_pos + 0.5f * width, cy_pos - target_height * 0.5f);
 			glVertex2f(cx_pos - 0.5f * width, cy_pos - target_height * 0.5f);
 			glEnd();
-			if (stl_info->current_text != "Graph disabled")
-				stl_info->safe_string_replace("Graph disabled");
+			if (stl_info->current_text != "graph disabled")
+				stl_info->safe_string_replace("graph disabled");
 		}
+
 		stl_info->draw();
 	}
 
 	void safe_move(float dx, float dy) override
 	{
 		std::lock_guard locker(lock);
+
 		cx_pos += dx;
 		cy_pos += dy;
+
 		stl_info->safe_move(dx, dy);
 	}
 
 	void safe_change_position(float new_x, float new_y) override
 	{
 		std::lock_guard locker(lock);
+
 		new_x -= cx_pos;
 		new_y -= cy_pos;
+
 		safe_move(new_x, new_y);
 	}
 
 	void safe_change_position_argumented(std::uint8_t arg, float new_x, float new_y) override
 	{
 		std::lock_guard locker(lock);
+
 		float cw = 0.5f * (
 			(std::int32_t)((bool)(GLOBAL_LEFT & arg))
 			- (std::int32_t)((bool)(GLOBAL_RIGHT & arg))
@@ -209,6 +236,7 @@ struct Graphing : handleable_ui_part
 				(std::int32_t)((bool)(GLOBAL_BOTTOM & arg))
 				- (std::int32_t)((bool)(GLOBAL_TOP & arg))
 				) * target_height;
+
 		safe_change_position(new_x + cw, new_y + ch);
 	}
 
@@ -216,35 +244,38 @@ struct Graphing : handleable_ui_part
 	{
 		if (!is_hovered || !enabled)
 			return;
+
 		std::lock_guard locker(lock);
-		switch (ch) {
-		case 'W':
-		case 'w':
-			horizontal_scaling *= 1.1f;
-			if (horizontal_scaling < 1)
+
+		switch (ch)
+		{
+			case 'W':
+			case 'w':
+				horizontal_scaling *= 1.1f;
+				if (horizontal_scaling < 1)
+					horizontal_scaling = 1;
+				break;
+			case 'S':
+			case 's':
+				horizontal_scaling /= 1.1f;
+				if (horizontal_scaling < 1)
+					horizontal_scaling = 1;
+				break;
+			case 'D':
+			case 'd':
+				central_point -= 0.05f / horizontal_scaling;
+				break;
+			case 'A':
+			case 'a':
+				central_point += 0.05f / horizontal_scaling;
+				break;
+			case 'r':
+			case 'R':
+				central_point = 0;
 				horizontal_scaling = 1;
-			break;
-		case 'S':
-		case 's':
-			horizontal_scaling /= 1.1f;
-			if (horizontal_scaling < 1)
-				horizontal_scaling = 1;
-			break;
-		case 'D':
-		case 'd':
-			central_point -= 0.05f / horizontal_scaling;
-			break;
-		case 'A':
-		case 'a':
-			central_point += 0.05f / horizontal_scaling;
-			break;
-		case 'r':
-		case 'R':
-			central_point = 0;
-			horizontal_scaling = 1;
-			scale_coef = 0.001f;
-			shift = 0;
-			break;
+				scale_coef = 0.001f;
+				shift = 0;
+				break;
 		}
 	}
 
@@ -256,16 +287,17 @@ struct Graphing : handleable_ui_part
 	[[nodiscard]] bool mouse_handler(float mx, float my, char, char) override
 	{
 		std::lock_guard locker(lock);
+
 		if (abs(mx - cx_pos) <= 0.5f * width && abs(my - cy_pos) <= 0.5f * target_height)
 			is_hovered = true;
 		else
 			is_hovered = false;
+
 		mx_pos = mx;
 		my_pos = my;
+
 		return false;
 	}
-
-	void Reset() { reset(); }
 };
 
 #endif

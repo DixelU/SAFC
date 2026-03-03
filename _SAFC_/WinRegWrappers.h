@@ -114,7 +114,7 @@ namespace WinReg {
 		// The input key handle wrapper is reset to an empty state.
 		RegKey(RegKey&& other) noexcept;
 
-		// Move-assign from the input key handle.
+		// move-assign from the input key handle.
 		// Properly check against self-move-assign (which is safe and does nothing).
 		RegKey& operator=(RegKey&& other) noexcept;
 
@@ -384,7 +384,7 @@ namespace WinReg {
 			// Close current
 			Close();
 
-			// Move from other (i.e. take ownership of other's raw handle)
+			// move from other (i.e. take ownership of other's raw handle)
 			m_hKey = other.m_hKey;
 			other.m_hKey = nullptr;
 		}
@@ -483,7 +483,7 @@ namespace WinReg {
 
 	inline void RegKey::SwapWith(RegKey& other) noexcept
 	{
-		// Enable ADL (not necessary in this case, but good practice)
+		// enable ADL (not necessary in this case, but good practice)
 		using std::swap;
 
 		// Swap the raw handle members
@@ -993,7 +993,7 @@ namespace WinReg {
 			// Add current string to the result vector
 			result.emplace_back(currStringPtr, currStringLength);
 
-			// Move to the next string
+			// move to the next string
 			currStringPtr += currStringLength + 1;
 		}
 

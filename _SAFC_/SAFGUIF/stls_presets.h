@@ -25,12 +25,4 @@ inline single_text_line_settings system_blue = is_fonted
     ? single_text_line_settings(10, 0x9FCFFFFF)
     : single_text_line_settings("_", 0, 0, 5, 0x9FCFFFFF);
 
-// Compatibility pointer aliases (old code passes these as pointers to constructors)
-inline single_text_line_settings* Legacy_White = &legacy_white;
-inline single_text_line_settings* Legacy_Black = &legacy_black;
-inline single_text_line_settings* System_Black = &system_black;
-inline single_text_line_settings* System_White = &system_white;
-inline single_text_line_settings* System_Red   = &system_red;
-inline single_text_line_settings* System_Blue  = &system_blue;
-
 #endif

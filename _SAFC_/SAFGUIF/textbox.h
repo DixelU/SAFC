@@ -23,8 +23,8 @@ struct text_box : handleable_ui_part
 	single_text_line_settings* stls; // non-owning
 	// Backward-compat aliases
 	std::string& Text = text;
-	float& Xpos = x_pos;
-	float& Ypos = y_pos;
+	float& x_pos = x_pos;
+	float& y_pos = y_pos;
 	std::uint8_t border_width;
 	std::uint32_t rgba_border, rgba_background, symbols_per_line;
 

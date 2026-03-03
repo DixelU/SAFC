@@ -37,12 +37,16 @@ struct single_text_line_settings
 		this->grad_point = grad_point;
 		this->is_fonted = false;
 	}
+
 	single_text_line_settings(std::string text, float cx_pos, float cy_pos, float x_unit_sz, float y_unit_sz, std::uint8_t line_width, std::uint8_t space_width, std::uint32_t rgba_color) :
 		single_text_line_settings(text, cx_pos, cy_pos, x_unit_sz, y_unit_sz, line_width, space_width, rgba_color, 0, 255, 255) {}
+
 	single_text_line_settings(std::string text, float cx_pos, float cy_pos, float char_height, std::uint32_t rgba_color, std::uint32_t g_rgba_color, std::uint8_t base_point, std::uint8_t grad_point) :
 		single_text_line_settings(text, cx_pos, cy_pos, char_height * char_width_per_height / 2, char_height / 2, (std::uint8_t)char_line_width(char_height), (std::uint8_t)char_space_between(char_height), rgba_color, g_rgba_color, base_point, grad_point) {}
+
 	single_text_line_settings(std::string text, float cx_pos, float cy_pos, float char_height, std::uint32_t rgba_color) :
 		single_text_line_settings(text, cx_pos, cy_pos, char_height, rgba_color, 0, 255, 255) {}
+
 	single_text_line_settings(float x_unit_sz, float y_unit_sz, std::uint32_t rgba_color) :
 		single_text_line_settings("_", 0, 0, y_unit_sz, rgba_color)
 	{
@@ -53,6 +57,7 @@ struct single_text_line_settings
 	}
 	single_text_line_settings(float char_height, std::uint32_t rgba_color) :
 		single_text_line_settings(char_height * char_width_per_height / 4, char_height / 2, rgba_color) {}
+
 	single_text_line_settings(single_text_line* example, bool keep_text = false) :
 		single_text_line_settings(
 			keep_text ? example->current_text : " ", example->cx_pos, example->cy_pos, example->x_unit_size, example->y_unit_size,
@@ -78,6 +83,7 @@ struct single_text_line_settings
 		g_rgba_color = default_g_rgba_c;
 		return ptr;
 	}
+
 	[[nodiscard]] single_text_line* create_one(const std::string& text_override)
 	{
 		single_text_line* ptr = nullptr;
@@ -91,19 +97,18 @@ struct single_text_line_settings
 		g_rgba_color = default_g_rgba_c;
 		return ptr;
 	}
+
 	void set_new_pos(float new_x_pos, float new_y_pos)
 	{
 		this->cx_pos = new_x_pos;
 		this->cy_pos = new_y_pos;
 	}
+
 	void move(float dx, float dy)
 	{
 		this->cx_pos += dx;
 		this->cy_pos += dy;
 	}
-	// Legacy compat aliases (for callers using old names via SystemWhite->SetNewPos etc.)
-	void SetNewPos(float x, float y) { set_new_pos(x, y); }
-	void Move(float dx, float dy) { move(dx, dy); }
 };
 
 #endif

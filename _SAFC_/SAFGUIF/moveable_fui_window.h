@@ -242,7 +242,7 @@ struct moveable_fui_window : public moveable_window
 		bool in_header = false;
 
 		// close button
-		if (in_header |= PointInPoly(close_button_x, close_button_y, mx, my))
+		if (in_header |= point_in_poly(close_button_x, close_button_y, mx, my))
 		{
 			if (button_btn && state == 1)
 			{
@@ -254,7 +254,7 @@ struct moveable_fui_window : public moveable_window
 				hovered_close_button = true;
 		}
 		// window header
-		else if (in_header |= PointInPoly(header_geometry_x, header_geometry_y, mx, my))
+		else if (in_header |= point_in_poly(header_geometry_x, header_geometry_y, mx, my))
 		{
 			if (button_btn == -1)
 			{
@@ -290,7 +290,7 @@ struct moveable_fui_window : public moveable_window
 			++it;
 		}
 
-		if (in_header || PointInPoly(window_geometry_x, window_geometry_y, mx, my))
+		if (in_header || point_in_poly(window_geometry_x, window_geometry_y, mx, my))
 		{
 			if (button_btn) return true;
 			else return flag;
@@ -315,7 +315,5 @@ struct moveable_fui_window : public moveable_window
 			y_window_pos - (window_header_size - headers_hat_height) * 0.5f);
 	}
 };
-
-using MoveableFuiWindow = moveable_fui_window;
 
 #endif

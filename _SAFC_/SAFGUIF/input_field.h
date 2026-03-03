@@ -31,15 +31,27 @@ struct input_field : handleable_ui_part
 	Type input_type;
 	std::string current_string, default_string;
 	std::string* output_source;
-	// Backward-compat alias
-	std::string& CurrentString = current_string;
 	std::uint32_t max_chars, border_rgba_color;
 	float x_pos, y_pos, height, width;
 	bool focused, first_input;
 	std::unique_ptr<single_text_line> stl;
 	std::unique_ptr<single_text_line> tip;
 
-	input_field(std::string default_str, float x_pos, float y_pos, float height, float width, single_text_line_settings* default_string_settings, std::string* output_source, std::uint32_t border_rgba_color, single_text_line_settings* tip_line_settings = nullptr, std::string tip_line_text = " ", std::uint32_t max_chars = 0, _Align input_align = _Align::left, _Align tip_align = _Align::center, Type input_type = Type::Text)
+	input_field(
+		std::string default_str,
+		float x_pos,
+		float y_pos,
+		float height,
+		float width,
+		single_text_line_settings* default_string_settings,
+		std::string* output_source,
+		std::uint32_t border_rgba_color,
+		single_text_line_settings* tip_line_settings = nullptr,
+		std::string tip_line_text = " ",
+		std::uint32_t max_chars = 0,
+		_Align input_align = _Align::left,
+		_Align tip_align = _Align::center,
+		Type input_type = Type::Text)
 	{
 		this->default_string = default_str;
 		default_string_settings->set_new_pos(x_pos, y_pos);
@@ -49,6 +61,7 @@ struct input_field : handleable_ui_part
 			this->tip.reset(tip_line_settings->create_one(tip_line_text));
 			this->tip->safe_change_position_argumented(tip_align, x_pos - ((tip_align == _Align::left) ? 0.5f : ((tip_align == _Align::right) ? -0.5f : 0)) * width, y_pos - height);
 		}
+
 		this->input_align = input_align;
 		this->input_type = input_type;
 		this->tip_align_val = tip_align;
@@ -94,54 +107,58 @@ struct input_field : handleable_ui_part
 		{
 			switch (check_type)
 			{
-			case input_field::Type::NaturalNumbers:
-				if (!(ch >= '0' && ch <= '9'))
-					return false;
-				break;
-			case input_field::Type::WholeNumbers:
-				if (!((ch >= '0' && ch <= '9')))
-				{
-					if (first_symb && !met_minus && ch == '-')
-						met_minus = true;
-					else
+				case input_field::Type::NaturalNumbers:
+					if (!(ch >= '0' && ch <= '9'))
 						return false;
-				}
-				break;
-			case input_field::Type::FP_PositiveNumbers:
-				if (!((ch >= '0' && ch <= '9')))
-				{
-					if (!met_point && ch == '.')
-						met_point = true;
-					else
-						return false;
-				}
-				break;
-			case input_field::Type::FP_Any:
-				if (!((ch >= '0' && ch <= '9')))
-				{
-					if (!met_point && ch == '.')
-						met_point = true;
-					else if (first_symb && !met_minus && ch == '-')
-						met_minus = true;
-					else
-						return false;
-				}
-				break;
-			case input_field::Type::Text:
-				break;
-			default:
-				break;
+					break;
+				case input_field::Type::WholeNumbers:
+					if (!((ch >= '0' && ch <= '9')))
+					{
+						if (first_symb && !met_minus && ch == '-')
+							met_minus = true;
+						else
+							return false;
+					}
+					break;
+				case input_field::Type::FP_PositiveNumbers:
+					if (!((ch >= '0' && ch <= '9')))
+					{
+						if (!met_point && ch == '.')
+							met_point = true;
+						else
+							return false;
+					}
+					break;
+				case input_field::Type::FP_Any:
+					if (!((ch >= '0' && ch <= '9')))
+					{
+						if (!met_point && ch == '.')
+							met_point = true;
+						else if (first_symb && !met_minus && ch == '-')
+							met_minus = true;
+						else
+							return false;
+					}
+					break;
+				case input_field::Type::Text:
+					break;
+				default:
+					break;
 			}
 			first_symb = false;
 		}
+
 		return !first_symb;
 	}
 
 	void safe_move(float dx, float dy) override
 	{
 		std::lock_guard locker(lock);
+
 		stl->safe_move(dx, dy);
-		if (tip) tip->safe_move(dx, dy);
+		if (tip)
+			tip->safe_move(dx, dy);
+
 		x_pos += dx;
 		y_pos += dy;
 	}
@@ -149,14 +166,17 @@ struct input_field : handleable_ui_part
 	void safe_change_position(float new_x, float new_y) override
 	{
 		std::lock_guard locker(lock);
+
 		new_x = x_pos - new_x;
 		new_y = y_pos - new_y;
+
 		safe_move(new_x, new_y);
 	}
 
 	void focus_change()
 	{
 		std::lock_guard locker(lock);
+
 		this->focused = !this->focused;
 		border_rgba_color = (((~(border_rgba_color >> 8)) << 8) | (border_rgba_color & 0xFF));
 	}
@@ -164,9 +184,12 @@ struct input_field : handleable_ui_part
 	void update_input_string(const std::string& new_string = "")
 	{
 		std::lock_guard locker(lock);
+
 		if (new_string.size())
 			current_string.clear();
+
 		float x = x_pos - ((input_align == _Align::left) ? 1 : ((input_align == _Align::right) ? -1 : 0)) * (0.5f * width - stl->x_unit_size);
+
 		this->stl->safe_string_replace(new_string.size() ? new_string.substr(0, this->max_chars) : current_string);
 		this->stl->safe_change_position_argumented(input_align, x, y_pos);
 	}
@@ -174,6 +197,7 @@ struct input_field : handleable_ui_part
 	void backspace()
 	{
 		std::lock_guard locker(lock);
+
 		process_first_input();
 		if (current_string.size())
 		{
@@ -187,25 +211,27 @@ struct input_field : handleable_ui_part
 	void flush_current_string_without_gui_update(bool set_default = false)
 	{
 		std::lock_guard locker(lock);
+
 		this->current_string = set_default ? this->default_string : "";
 	}
 
 	void put_into_source(std::string* another_source = nullptr)
 	{
 		std::lock_guard locker(lock);
+
 		if (output_source)
 		{
 			if (current_string.size())
 				*output_source = current_string;
 		}
-		else if (another_source)
-			if (current_string.size())
-				*another_source = current_string;
+		else if (another_source && current_string.size())
+			*another_source = current_string;
 	}
 
 	void process_first_input()
 	{
 		std::lock_guard locker(lock);
+
 		if (first_input)
 		{
 			first_input = false;
@@ -217,16 +243,15 @@ struct input_field : handleable_ui_part
 	{
 		if (input_field::check_string_on_type(current_string, input_type))
 			return current_string;
+
 		if (stl && input_field::check_string_on_type(stl->current_text, input_type))
 			return stl->current_text;
+
 		if (input_field::check_string_on_type(replacement, input_type))
 			return replacement;
-		else
-			return "0";
-	}
 
-	// Legacy alias used by existing callers
-	[[nodiscard]] std::string GetCurrentInput(const std::string& replacement) { return get_current_input(replacement); }
+		return "0";
+	}
 
 	void keyboard_handler(char ch) override
 	{
@@ -275,7 +300,9 @@ struct input_field : handleable_ui_part
 	void input_char(char ch)
 	{
 		std::lock_guard locker(lock);
+
 		process_first_input();
+
 		if (!max_chars || current_string.size() < max_chars)
 		{
 			current_string.push_back(ch);
@@ -286,6 +313,7 @@ struct input_field : handleable_ui_part
 	void safe_change_position_argumented(std::uint8_t arg, float new_x, float new_y) override
 	{
 		std::lock_guard locker(lock);
+
 		float cw = 0.5f * (
 			(std::int32_t)((bool)(GLOBAL_LEFT & arg))
 			- (std::int32_t)((bool)(GLOBAL_RIGHT & arg))
@@ -294,13 +322,16 @@ struct input_field : handleable_ui_part
 				(std::int32_t)((bool)(GLOBAL_BOTTOM & arg))
 				- (std::int32_t)((bool)(GLOBAL_TOP & arg))
 				) * height;
+
 		safe_change_position(new_x + cw, new_y + ch);
 	}
 
 	void safe_string_replace(std::string new_string) override
 	{
 		std::lock_guard locker(lock);
+
 		current_string = new_string.substr(0, this->max_chars);
+
 		update_input_string(new_string);
 		first_input = true;
 	}
@@ -320,7 +351,9 @@ struct input_field : handleable_ui_part
 		glVertex2f(x_pos - 0.5f * width, y_pos - 0.5f * height);
 		glVertex2f(x_pos + 0.5f * width, y_pos - 0.5f * height);
 		glEnd();
+
 		this->stl->draw();
+
 		if (focused && tip)
 			tip->draw();
 	}
@@ -329,13 +362,6 @@ struct input_field : handleable_ui_part
 	{
 		return TT_INPUT_FIELD;
 	}
-
-	// Backward-compat method wrappers
-	void UpdateInputString(const std::string& s = "") { update_input_string(s); }
-	void PutIntoSource(std::string* src = nullptr) { put_into_source(src); }
 };
-
-// Keep old name alias for backward compat in windows_handler
-using InputField = input_field;
 
 #endif // !SAFGUIF_IF

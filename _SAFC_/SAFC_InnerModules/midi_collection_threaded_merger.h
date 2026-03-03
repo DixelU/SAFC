@@ -2,8 +2,8 @@
 #ifndef SAF_MCTM
 #define SAF_MCTM 
 
-void ThrowAlert_Error(std::string&& AlertText);
-void ThrowAlert_Warning(std::string&& AlertText);
+void throw_alert_error(std::string&& AlertText);
+void throw_alert_warning(std::string&& AlertText);
 
 #include <set>
 #include <thread>
@@ -113,7 +113,7 @@ struct midi_collection_threaded_merger
 				else if ((TrackData[CurPosition] >= 0xC0 && TrackData[CurPosition] <= 0xDF))
 					CurPosition += 2;
 				else if (true)
-					ThrowAlert_Error("DTI Failure at " + std::to_string(CurPosition) + ". Type: " + 
+					throw_alert_error("DTI Failure at " + std::to_string(CurPosition) + ". Type: " + 
 						std::to_string(TrackData[CurPosition]) + ". Tell developer about it and give him source midi\n");
 			}
 			else Processing = false;
@@ -395,7 +395,7 @@ struct midi_collection_threaded_merger
 								auto pos = pfiv.tellg();
 								std::cout << "Inplace error @" << std::hex << pos << std::dec << std::endl;
 
-								ThrowAlert_Error("DTI Failure at " + std::to_string(pos) + ". Type: " +
+								throw_alert_error("DTI Failure at " + std::to_string(pos) + ". Type: " +
 									std::to_string(EVENTTYPE) + ". Tell developer about it and give him source midis.\n");
 
 								Track.push_back(0xCA);

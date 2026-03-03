@@ -8,7 +8,7 @@
 #include "stls_presets.h"
 
 // Proxy returned by windows_handler::operator[] to allow both ownership transfer
-// (proxy = new MoveableWindow) and transparent access (proxy->method(), (Type*)proxy).
+// (proxy = new moveable_window) and transparent access (proxy->method(), (Type*)proxy).
 struct window_proxy
 {
 	std::unique_ptr<moveable_window>& ref;
@@ -16,11 +16,11 @@ struct window_proxy
 	window_proxy(const window_proxy& o) : ref(o.ref) {}
 	window_proxy& operator=(const window_proxy&) = delete;
 
-	// Ownership transfer from raw pointer: proxy = new MoveableFuiWindow(...)
+	// Ownership transfer from raw pointer: proxy = new moveable_fui_window(...)
 	template<typename T, std::enable_if_t<std::is_base_of_v<moveable_window, T>, int> = 0>
 	T* operator=(T* raw) { ref.reset(raw); return raw; }
 
-	// Ownership transfer from unique_ptr: proxy = std::make_unique<MoveableFuiWindow>(...)
+	// Ownership transfer from unique_ptr: proxy = std::make_unique<moveable_fui_window>(...)
 	template<typename T, std::enable_if_t<std::is_base_of_v<moveable_window, T>, int> = 0>
 	void operator=(std::unique_ptr<T>&& uptr) { ref = std::move(uptr); }
 
@@ -30,7 +30,7 @@ struct window_proxy
 	moveable_window* operator->() const { return ref.get(); }
 	moveable_window& operator*() const { return *ref; }
 
-	// Cast to any derived type: (MoveableFuiWindow*)proxy
+	// Cast to any derived type: (moveable_fui_window*)proxy
 	template<typename T, std::enable_if_t<std::is_base_of_v<moveable_window, T> && !std::is_same_v<T, moveable_window>, int> = 0>
 	operator T*() const { return static_cast<T*>(ref.get()); }
 
@@ -65,14 +65,14 @@ struct windows_handler
 		window_was_disabled_during_mouse_handling = false;
 
 		win_map["ALERT"] = std::make_unique<moveable_fui_window>(
-			"Alert window", System_White,
+			"Alert window", system_white,
 			-100, alertheight / 2, 200, alertheight,
 			150, 2.5f, alertheight / 8, alertheight / 8, 1.25f,
 			BACKGROUND, HEADER_ALERT, BORDER);
 		{
 			auto& ptr = win_map["ALERT"];
 			(*ptr)["AlertText"] = std::make_unique<text_box>(
-				"_", System_White, 20.f, alerttext_vert_pos,
+				"_", system_white, 20.f, alerttext_vert_pos,
 				alertheight - 12.5f, 155.f, 7.5f, 0, 0, 0,
 				_Align::left, text_box::VerticalOverflow::recalibrate);
 			(*ptr)["AlertSign"] = std::make_unique<special_sign_handler>(
@@ -81,22 +81,22 @@ struct windows_handler
 		}
 
 		win_map["PROMPT"] = std::make_unique<moveable_fui_window>(
-			"prompt", System_White,
+			"prompt", system_white,
 			-50, 50, 100, 100, 50, 2.5f, 25, 25, 2.5f,
 			BACKGROUND, HEADER_PROMPT, BORDER);
 		{
 			auto& ptr = win_map["PROMPT"];
 			(*ptr)["FLD"] = std::make_unique<input_field>(
 				"", 0.f, 35.f - moveable_window::window_header_size,
-				10.f, 80.f, System_White, nullptr, 0x007FFFFF, nullptr,
+				10.f, 80.f, system_white, nullptr, 0x007FFFFF, nullptr,
 				"", 0, _Align::center);
 			(*ptr)["TXT"] = std::make_unique<text_box>(
-				"_abc_", System_White,
+				"_abc_", system_white,
 				0.f, 2.5f - moveable_window::window_header_size,
 				10.f, 80.f, 7.5f, 0, 0, 2,
 				_Align::center, text_box::VerticalOverflow::recalibrate);
 			(*ptr)["BUTT"] = std::make_unique<button>(
-				"Submit", System_White, nullptr,
+				"Submit", system_white, nullptr,
 				0.f, -20.f - moveable_window::window_header_size, 80.f, 10.f, 1,
 				0x007FFF3F, 0x007FFFFF, 0xFF7F00FF, 0xFFFFFFFF, 0xFF7F00FF,
 				nullptr, " ");

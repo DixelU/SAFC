@@ -92,7 +92,6 @@ auto& YearsOld = years_old;
 HWND hWnd;
 HDC hDc;
 auto hand_cursor = ::LoadCursor(NULL, IDC_HAND), all_direct_cursor = ::LoadCursor(NULL, IDC_CROSS), nwse_cursor = ::LoadCursor(NULL, IDC_SIZENWSE);
-
 //const float singlepixwidth = (float)RANGE / WINDXSIZE;
 
 bool check_autoupdates = true;
@@ -100,10 +99,10 @@ bool check_autoupdates = true;
 struct simple_player;
 std::shared_ptr<simple_player> player;
 
-void absoluteToActualCoords(int ix, int iy, float& x, float& y);
+void absolute_to_actual_coords(int ix, int iy, float& x, float& y);
 void inline rotate(float& x, float& y);
 
-int TIMESEED()
+int collect_time_data()
 {
 	SYSTEMTIME t;
 	GetLocalTime(&t);
@@ -119,7 +118,7 @@ int TIMESEED()
 }
 
 template<unsigned nx, unsigned ny>
-unsigned PointInPoly(float (&vertx)[nx], float (&verty)[ny], float testx, float testy) requires (nx == ny)
+unsigned point_in_poly(float (&vertx)[nx], float (&verty)[ny], float testx, float testy) requires (nx == ny)
 {
 	constexpr unsigned nvert = (nx + ny) >> 1;
 	float minx = *vertx, miny = *verty, maxx = *vertx, maxy = *verty;
@@ -144,14 +143,9 @@ unsigned PointInPoly(float (&vertx)[nx], float (&verty)[ny], float testx, float 
 	return c;
 }
 
-void ThrowAlert_Error(std::string&& AlertText);
-void ThrowAlert_Warning(std::string&& AlertText);
-void AddFiles(const std::vector<std::wstring>& Filenames);
+void throw_alert_error(std::string&& AlertText);
+void throw_alert_warning(std::string&& AlertText);
+void add_files(const std::vector<std::wstring>& Filenames);
 #pragma warning(disable : 4996)
-
-#define MD_CASE(value) case (value): case ((value|1))
-#define MT_CASE(value) MD_CASE(value): MD_CASE((value|2))
-#define MO_CASE(value) MT_CASE(value): MT_CASE((value|4))
-#define MH_CASE(value) MO_CASE(value): MO_CASE((value|8))
 
 #endif // !SAFGUIF_HU

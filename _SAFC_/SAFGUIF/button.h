@@ -12,23 +12,38 @@
 struct button : handleable_ui_part
 {
 	std::unique_ptr<single_text_line> stl, tip;
+
 	float x_pos, y_pos;
 	float width, height;
+
 	std::uint32_t rgba_color, rgba_background, rgba_border;
 	std::uint32_t hovered_rgba_color, hovered_rgba_background, hovered_rgba_border;
 	std::uint8_t border_width;
+
 	bool hovered;
 	std::function<void()> on_click;
-	// Backward-compat aliases
-	float& Xpos = x_pos;
-	float& Ypos = y_pos;
-	float& Width = width;
-	float& Height = height;
-	std::unique_ptr<single_text_line>& Tip = tip;
 
 	~button() override = default;
 
-	button(std::string button_text, std::function<void()> on_click, float x_pos, float y_pos, float width, float height, float char_height, std::uint32_t rgba_color, std::uint32_t g_rgba_color, std::uint8_t base_point/*15 if gradient is disabled*/, std::uint8_t grad_point, std::uint8_t border_width, std::uint32_t rgba_background, std::uint32_t rgba_border, std::uint32_t hovered_rgba_color, std::uint32_t hovered_rgba_background, std::uint32_t hovered_rgba_border, single_text_line_settings* tip_stls, std::string tip_text = " ")
+	button(	std::string button_text,
+		std::function<void()> on_click,
+		float x_pos,
+		float y_pos,
+		float width,
+		float height,
+		float char_height,
+		std::uint32_t rgba_color,
+		std::uint32_t g_rgba_color,
+		std::uint8_t base_point/*15 if gradient is disabled*/,
+		std::uint8_t grad_point,
+		std::uint8_t border_width,
+		std::uint32_t rgba_background,
+		std::uint32_t rgba_border,
+		std::uint32_t hovered_rgba_color,
+		std::uint32_t hovered_rgba_background,
+		std::uint32_t hovered_rgba_border,
+		single_text_line_settings* tip_stls,
+		std::string tip_text = " ")
 	{
 		single_text_line_settings stls(button_text, x_pos, y_pos, char_height, rgba_color, g_rgba_color, base_point, grad_point);
 		this->stl.reset(stls.create_one());
@@ -52,7 +67,22 @@ struct button : handleable_ui_part
 		this->on_click = std::move(on_click);
 		this->enabled = true;
 	}
-	button(std::string button_text, single_text_line_settings* button_text_stls, std::function<void()> on_click, float x_pos, float y_pos, float width, float height, std::uint8_t border_width, std::uint32_t rgba_background, std::uint32_t rgba_border, std::uint32_t hovered_rgba_color, std::uint32_t hovered_rgba_background, std::uint32_t hovered_rgba_border, single_text_line_settings* tip_stls, std::string tip_text = " ")
+
+	button(	std::string button_text,
+		single_text_line_settings* button_text_stls,
+		std::function<void()> on_click,
+		float x_pos,
+		float y_pos,
+		float width,
+		float height,
+		std::uint8_t border_width,
+		std::uint32_t rgba_background,
+		std::uint32_t rgba_border,
+		std::uint32_t hovered_rgba_color,
+		std::uint32_t hovered_rgba_background,
+		std::uint32_t hovered_rgba_border,
+		single_text_line_settings* tip_stls,
+		std::string tip_text = " ")
 	{
 		button_text_stls->set_new_pos(x_pos, y_pos);
 		this->stl.reset(button_text_stls->create_one(button_text));
@@ -76,11 +106,14 @@ struct button : handleable_ui_part
 		this->on_click = std::move(on_click);
 		this->enabled = true;
 	}
+
 	[[nodiscard]] bool mouse_handler(float mx, float my, char button_btn/*-1 left, 1 right, 0 move*/, char state /*-1 down, 1 up*/) override
 	{
 		std::lock_guard locker(lock);
+
 		if (!enabled) [[unlikely]]
 			return false;
+
 		mx = x_pos - mx;
 		my = y_pos - my;
 		if (hovered) [[likely]]
@@ -111,31 +144,42 @@ struct button : handleable_ui_part
 		}
 		return false;
 	}
+
 	void safe_move(float dx, float dy) override
 	{
 		std::lock_guard locker(lock);
+
 		if (tip)
 			tip->safe_move(dx, dy);
+
 		stl->safe_move(dx, dy);
+
 		x_pos += dx;
 		y_pos += dy;
 	}
+
 	void keyboard_handler(char ch) override
 	{
 		return;
 	}
+
 	void safe_string_replace(std::string new_string) override
 	{
 		std::lock_guard locker(lock);
+
 		this->stl->safe_string_replace(new_string);
 	}
+
 	void safe_change_position(float new_x, float new_y) override
 	{
 		std::lock_guard locker(lock);
+
 		new_x -= x_pos;
 		new_y -= y_pos;
+
 		safe_move(new_x, new_y);
 	}
+
 	void safe_change_position_argumented(std::uint8_t arg, float new_x, float new_y) override
 	{
 		std::lock_guard locker(lock);
@@ -147,13 +191,17 @@ struct button : handleable_ui_part
 				(std::int32_t)((bool)(GLOBAL_BOTTOM & arg))
 				- (std::int32_t)((bool)(GLOBAL_TOP & arg))
 				) * height;
+
 		safe_change_position(new_x + cw, new_y + ch);
 	}
+
 	void draw() override
 	{
 		std::lock_guard locker(lock);
+
 		if (!enabled) [[unlikely]]
 			return;
+
 		if (hovered) [[likely]]
 		{
 			if ((std::uint8_t)hovered_rgba_background)
@@ -202,16 +250,17 @@ struct button : handleable_ui_part
 				glEnd();
 			}
 		}
+
 		if (tip && hovered)
 			tip->draw();
+
 		stl->draw();
 	}
+
 	[[nodiscard]] inline std::uint32_t tell_type() override
 	{
 		return TT_BUTTON;
 	}
 };
-
-using Button = button;
 
 #endif // !SAFGUIF_BUTTON

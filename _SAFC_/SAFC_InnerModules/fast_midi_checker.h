@@ -54,7 +54,7 @@ struct fast_midi_checker
 		else
 		{
 			is_midi = 0;
-			ThrowAlert_Error("Error accured while getting the MIDI file info!");
+			throw_alert_error("Error accured while getting the MIDI file info!");
 			f.close();
 		}
 		f.close();
