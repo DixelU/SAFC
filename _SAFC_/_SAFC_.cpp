@@ -2744,7 +2744,7 @@ void Init()
 	DragAcceptFiles(hWnd, TRUE);
 	OleInitialize(nullptr);
 
-	std::cout << "Registering Drag&Drop: " << (RegisterDragDrop(hWnd, &DNDH_Global)) << std::endl;
+	std::cout << "Registering Drag&Drop: " << (RegisterDragDrop(hWnd, &global_drag_and_drop_handler)) << std::endl;
 
 	SAFC_VersionCheck();
 }

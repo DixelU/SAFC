@@ -21,16 +21,16 @@ struct drag_n_drop_handler : IDropTarget
 		ref_count = 1;
 	}
 
-	HRESULT STDMETHODCALLTYPE QueryInterface(const IID& riid, void** ppvObject) override
+	HRESULT STDMETHODCALLTYPE QueryInterface(const IID& riid, void** ppv_object) override
 	{
 		if (riid == IID_IUnknown || riid == IID_IDropTarget)
 		{
-			*ppvObject = this;
+			*ppv_object = this;
 			AddRef();
 			return NOERROR;
 		}
 
-		*ppvObject = NULL;
+		*ppv_object = NULL;
 		return ResultFromScode(E_NOINTERFACE);
 	}
 
@@ -49,7 +49,7 @@ struct drag_n_drop_handler : IDropTarget
 		return ref_count;
 	}
 
-	HRESULT STDMETHODCALLTYPE DragEnter(IDataObject* dataObject, DWORD grfKeyState, POINTL mousePos, DWORD* effect) override
+	HRESULT STDMETHODCALLTYPE DragEnter(IDataObject*, DWORD, POINTL, DWORD* effect) override
 	{
 		//MessageBox(hWnd, "dragenter", "Drag", MB_ICONINFORMATION);
 		//cout << "a" << endl;
@@ -58,7 +58,7 @@ struct drag_n_drop_handler : IDropTarget
 		return NOERROR;
 	}
 
-	HRESULT STDMETHODCALLTYPE DragOver(DWORD keyState, POINTL mousePos, DWORD* effect) override
+	HRESULT STDMETHODCALLTYPE DragOver(DWORD, POINTL, DWORD* effect) override
 	{
 		//MessageBox(hWnd, "dragover", "Drag", MB_ICONINFORMATION);
 		*effect = DROPEFFECT_COPY;
@@ -78,47 +78,49 @@ struct drag_n_drop_handler : IDropTarget
 		//cout << "drop " << ref_count << endl;
 
 		FORMATETC fdrop = { CF_HDROP, 0, DVASPECT_CONTENT, -1, TYMED_HGLOBAL };
-		std::vector<std::wstring> WC(1, L"");
+		std::vector<std::wstring> wide_char_buffer(1, L"");
 
 		if (SUCCEEDED(dataObject->QueryGetData(&fdrop)))
 		{
-			STGMEDIUM stgMedium = { 0 };
-			stgMedium.tymed = TYMED_HGLOBAL;
-			HRESULT hr = dataObject->GetData(&fdrop, &stgMedium);
-			if (SUCCEEDED(hr))
+			STGMEDIUM stg_medium = { 0 };
+			stg_medium.tymed = TYMED_HGLOBAL;
+			HRESULT hresult = dataObject->GetData(&fdrop, &stg_medium);
+			if (SUCCEEDED(hresult))
 			{
-				PVOID data = GlobalLock(stgMedium.hGlobal);
+				PVOID data = GlobalLock(stg_medium.hGlobal);
 				if (!data)
 					return NOERROR;
 
 				for (int i = *((BYTE*)(data));; i += 2)
 				{
-					WC.back().push_back(((*((BYTE*)(data)+i + 1)) << 8) | (*((BYTE*)(data)+i)));
-					if (WC.back().back() == 0 && WC.back().size() > 1)
+					wide_char_buffer.back().push_back(((*((BYTE*)(data)+i + 1)) << 8) | (*((BYTE*)(data)+i)));
+					if (wide_char_buffer.back().back() == 0 && wide_char_buffer.back().size() > 1)
 					{
-						WC.back().pop_back();
-						WC.push_back(L"");
+						wide_char_buffer.back().pop_back();
+						wide_char_buffer.push_back(L"");
 						continue;
 					}
-					else if (WC.back().back() == 0)
+					else if (wide_char_buffer.back().back() == 0)
 					{
-						WC.pop_back();
+						wide_char_buffer.pop_back();
 						break;
 					}
 				}
-				AddFiles(WC);
+
+				AddFiles(wide_char_buffer);
 			}
 			else
-				ThrowAlert_Error("DND: GET_DATA");
+				ThrowAlert_Error("drag_and_drop: GetData");
 		}
 		else
-			ThrowAlert_Error("DND: QUERY_GET_DATA");
+			ThrowAlert_Error("drag_and_drop: QueryGetData");
+
 		DRAG_OVER = 0;
 		*effect = DROPEFFECT_COPY;
 		return NOERROR;
 	}
 };
 
-drag_n_drop_handler global_handler;
+drag_n_drop_handler global_drag_and_drop_handler;
 
 #endif // !SAFGUIF_L_DND
