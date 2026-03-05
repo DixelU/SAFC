@@ -92,7 +92,7 @@ struct simple_player;
 std::shared_ptr<simple_player> player;
 
 void absolute_to_actual_coords(int ix, int iy, float& x, float& y);
-void inline rotate(float& x, float& y);
+void inline rotate_view(float& x, float& y);
 
 int collect_time_data()
 {
