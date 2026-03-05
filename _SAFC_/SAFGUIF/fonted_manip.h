@@ -60,10 +60,6 @@ void set_is_fonted_var(bool val)
 	rk.Close();
 }
 
-// Legacy names
-inline bool RestoreIsFontedVar() { return restore_is_fonted_var(); }
-inline void SetIsFontedVar(bool val) { set_is_fonted_var(val); }
-
 bool _______unused = restore_is_fonted_var();
 
 #endif

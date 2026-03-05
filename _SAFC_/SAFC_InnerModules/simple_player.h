@@ -1466,7 +1466,7 @@ struct simple_player
 				current_us = max - data.scroll_window_us;
 		}
 
-		// Draw falling notes
+		// draw falling notes
 		draw_data::color keyboard_colors[128];
 		memset(keyboard_colors, 0xFF, sizeof(draw_data::color) * total_white);
 		memset(keyboard_colors + total_white, 0x00, sizeof(draw_data::color) * (128 - total_white));

@@ -2,7 +2,6 @@
 #ifndef INCLUDE_GIOVANNI_DICANIO_WINREG_HPP
 #define INCLUDE_GIOVANNI_DICANIO_WINREG_HPP
 
-
 ////////////////////////////////////////////////////////////////////////////////
 //
 //      *** Modern C++ Wrappers Around Windows Registry C API ***

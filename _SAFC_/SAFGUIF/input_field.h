@@ -24,7 +24,7 @@ struct input_field : handleable_ui_part
 		WholeNumbers    = (int)pass_chars_type::pass_numbers | (int)pass_chars_type::pass_front_minus,
 		FP_PositiveNumbers = (int)pass_chars_type::pass_numbers | (int)pass_chars_type::pass_first_point,
 		FP_Any          = (int)pass_chars_type::pass_numbers | (int)pass_chars_type::pass_first_point | (int)pass_chars_type::pass_front_minus,
-		Text            = (int)pass_chars_type::pass_all,
+		text            = (int)pass_chars_type::pass_all,
 	};
 
 	_Align input_align, tip_align_val;
@@ -51,7 +51,7 @@ struct input_field : handleable_ui_part
 		std::uint32_t max_chars = 0,
 		_Align input_align = _Align::left,
 		_Align tip_align = _Align::center,
-		Type input_type = Type::Text)
+		Type input_type = Type::text)
 	{
 		this->default_string = default_str;
 		default_string_settings->set_new_pos(x_pos, y_pos);
@@ -140,7 +140,7 @@ struct input_field : handleable_ui_part
 							return false;
 					}
 					break;
-				case input_field::Type::Text:
+				case input_field::Type::text:
 					break;
 				default:
 					break;

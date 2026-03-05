@@ -21,19 +21,30 @@ struct text_box : handleable_ui_part
 	float width, height;
 	float vertical_offset, calculated_text_height;
 	single_text_line_settings* stls; // non-owning
-	// Backward-compat aliases
-	std::string& Text = text;
-	float& x_pos = x_pos;
-	float& y_pos = y_pos;
+
 	std::uint8_t border_width;
 	std::uint32_t rgba_border, rgba_background, symbols_per_line;
 
 	~text_box() override
 	{
 		std::lock_guard locker(lock);
+
 		lines.clear();
 	}
-	text_box(std::string txt, single_text_line_settings* stls, float x_pos, float y_pos, float height, float width, float vertical_offset, std::uint32_t rgba_background, std::uint32_t rgba_border, std::uint8_t border_width, _Align text_align = _Align::left, VerticalOverflow v_overflow = VerticalOverflow::cut)
+
+	text_box(
+		std::string txt,
+		single_text_line_settings* stls,
+		float x_pos,
+		float y_pos,
+		float height,
+		float width,
+		float vertical_offset,
+		std::uint32_t rgba_background,
+		std::uint32_t rgba_border,
+		std::uint8_t border_width,
+		_Align text_align = _Align::left,
+		VerticalOverflow v_overflow = VerticalOverflow::cut)
 	{
 		this->text_align = text_align;
 		this->v_overflow = v_overflow;
@@ -47,17 +58,20 @@ struct text_box : handleable_ui_part
 		this->rgba_background = rgba_background;
 		this->height = height;
 		this->text = txt.size() ? txt : " ";
+
 		recalculate_available_space_for_text();
 		text_reformat();
 	}
+
 	void text_reformat()
 	{
 		std::lock_guard locker(lock);
+
 		std::vector<std::vector<std::string>> split_text;
 		std::vector<std::string> paragraph;
 		std::string line;
-		stls->set_new_pos(x_pos, y_pos + 0.5f * height + 0.5f * vertical_offset);
 
+		stls->set_new_pos(x_pos, y_pos + 0.5f * height + 0.5f * vertical_offset);
 		for (int i = 0; i < (int)text.size(); i++)
 		{
 			if (text[i] == ' ')
@@ -121,6 +135,7 @@ struct text_box : handleable_ui_part
 			else if (text_align == _Align::left)
 				new_line->safe_change_position_argumented(GLOBAL_LEFT, ((this->x_pos) - (0.5f * width) + this->stls->x_unit_size), lines.back()->cy_pos);
 		}
+
 		calculated_text_height = (lines.front()->cy_pos - lines.back()->cy_pos) + lines.front()->calculated_height;
 
 		if (v_overflow == VerticalOverflow::recalibrate)
@@ -130,52 +145,69 @@ struct text_box : handleable_ui_part
 				line_ptr->safe_move(0, (dy + lines.front()->calculated_height) * 0.5f);
 		}
 	}
+
 	void safe_text_color_change(std::uint32_t new_color)
 	{
 		std::lock_guard locker(lock);
+
 		for (auto& line_ptr : lines)
 			line_ptr->safe_color_change(new_color);
 	}
+
 	[[nodiscard]] bool mouse_handler(float mx, float my, char button/*-1 left, 1 right, 0 move*/, char state /*-1 down, 1 up*/) override
 	{
 		return false;
 	}
+
 	void safe_string_replace(std::string new_string) override
 	{
 		std::lock_guard locker(lock);
+
 		this->text = new_string.size() ? new_string : " ";
 		lines.clear();
+
 		recalculate_available_space_for_text();
 		text_reformat();
 	}
+
 	void keyboard_handler(char ch) override
 	{
 		return;
 	}
+
 	void recalculate_available_space_for_text()
 	{
 		std::lock_guard locker(lock);
 		symbols_per_line = std::floor((width + stls->x_unit_size * 2) / (stls->x_unit_size * 2 + stls->space_width));
 	}
+
 	void safe_move(float dx, float dy) override
 	{
 		std::lock_guard locker(lock);
+
 		x_pos += dx;
 		y_pos += dy;
+		
 		stls->move(dx, dy);
+
 		for (auto& line_ptr : lines)
 			line_ptr->safe_move(dx, dy);
 	}
+
 	void safe_change_position(float new_x, float new_y) override
 	{
 		std::lock_guard locker(lock);
+
 		new_x -= x_pos;
 		new_y -= y_pos;
+
 		safe_move(new_x, new_y);
 	}
+
 	void safe_change_position_argumented(std::uint8_t arg, float new_x, float new_y) override
 	{
 		std::lock_guard locker(lock);
+
 		float cw = 0.5f * (
 			(std::int32_t)((bool)(GLOBAL_LEFT & arg))
 			- (std::int32_t)((bool)(GLOBAL_RIGHT & arg))
@@ -184,11 +216,14 @@ struct text_box : handleable_ui_part
 				(std::int32_t)((bool)(GLOBAL_BOTTOM & arg))
 				- (std::int32_t)((bool)(GLOBAL_TOP & arg))
 				) * height;
+
 		safe_change_position(new_x + cw, new_y + ch);
 	}
+
 	void draw() override
 	{
 		std::lock_guard locker(lock);
+
 		if ((std::uint8_t)rgba_background)
 		{
 			__glcolor(rgba_background);
@@ -199,6 +234,7 @@ struct text_box : handleable_ui_part
 			glVertex2f(x_pos - (width * 0.5f), y_pos - (0.5f * height));
 			glEnd();
 		}
+
 		if ((std::uint8_t)rgba_border)
 		{
 			__glcolor(rgba_border);
@@ -210,17 +246,15 @@ struct text_box : handleable_ui_part
 			glVertex2f(x_pos - (width * 0.5f), y_pos - (0.5f * height));
 			glEnd();
 		}
+
 		for (auto& line_ptr : lines)
 			line_ptr->draw();
 	}
+
 	[[nodiscard]] inline std::uint32_t tell_type() override
 	{
 		return TT_TEXTBOX;
 	}
-	void SafeTextColorChange(std::uint32_t c) { safe_text_color_change(c); }
 };
-
-// Backward-compat alias
-using TextBox = text_box;
 
 #endif

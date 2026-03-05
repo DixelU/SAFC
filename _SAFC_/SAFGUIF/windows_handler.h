@@ -46,10 +46,8 @@ struct windows_handler
 	win_map_t win_map;
 	active_list_t active_windows;
 	std::string main_window_id, mw_id_holder;
-	bool window_was_disabled_during_mouse_handling;
+	std::atomic_bool window_was_disabled_during_mouse_handling;
 	std::recursive_mutex lock;
-	// Backward-compat alias
-	std::string& MainWindow_ID = main_window_id;
 
 	static constexpr float alerttext_vert_pos = -7.5f, alertheight = 65.f;
 
@@ -71,12 +69,13 @@ struct windows_handler
 			BACKGROUND, HEADER_ALERT, BORDER);
 		{
 			auto& ptr = win_map["ALERT"];
-			(*ptr)["AlertText"] = std::make_unique<text_box>(
-				"_", system_white, 20.f, alerttext_vert_pos,
-				alertheight - 12.5f, 155.f, 7.5f, 0, 0, 0,
+
+			(*ptr)["AlertText"] = 
+				std::make_unique<text_box>("_", system_white, 20.f, alerttext_vert_pos, alertheight - 12.5f, 155.f, 7.5f, 0, 0, 0,
 				_Align::left, text_box::VerticalOverflow::recalibrate);
-			(*ptr)["AlertSign"] = std::make_unique<special_sign_handler>(
-				special_signs::draw_a_circle, -78.5f, -17.f, 12.f, 0x000000FF, 0x001FFFFF);
+			(*ptr)["AlertSign"] = 
+				std::make_unique<special_sign_handler>(special_signs::draw_a_circle, -78.5f, -17.f, 12.f, 0x000000FF, 0x001FFFFF);
+
 			ptr->window_name->safe_move(0, 2.5f);
 		}
 
@@ -86,6 +85,7 @@ struct windows_handler
 			BACKGROUND, HEADER_PROMPT, BORDER);
 		{
 			auto& ptr = win_map["PROMPT"];
+
 			(*ptr)["FLD"] = std::make_unique<input_field>(
 				"", 0.f, 35.f - moveable_window::window_header_size,
 				10.f, 80.f, system_white, nullptr, 0x007FFFFF, nullptr,
@@ -100,6 +100,7 @@ struct windows_handler
 				0.f, -20.f - moveable_window::window_header_size, 80.f, 10.f, 1,
 				0x007FFF3F, 0x007FFFFF, 0xFF7F00FF, 0xFFFFFFFF, 0xFF7F00FF,
 				nullptr, " ");
+
 			ptr->window_name->safe_move(0, 2.5f);
 		}
 	}
@@ -109,20 +110,26 @@ struct windows_handler
 	void mouse_handler(float mx, float my, char button_btn, char state)
 	{
 		std::lock_guard locker(lock);
+
 		auto aw_iterator = active_windows.begin();
 		auto current_aw = aw_iterator;
+
 		if (!button_btn && !active_windows.empty())
+		{
 			(*active_windows.begin())->second->mouse_handler(mx, my, 0, 0);
+		}
 		else
 		{
 			while (aw_iterator != active_windows.end() &&
 				!((*aw_iterator)->second->mouse_handler(mx, my, button_btn, state)) &&
 				!window_was_disabled_during_mouse_handling)
 				++aw_iterator;
+
 			if (!window_was_disabled_during_mouse_handling && active_windows.size() > 1 &&
 				aw_iterator != active_windows.end() && aw_iterator != active_windows.begin())
 				if (current_aw == active_windows.begin())
 					enable_window(*aw_iterator);
+
 			if (window_was_disabled_during_mouse_handling)
 				window_was_disabled_during_mouse_handling = false;
 		}
@@ -138,6 +145,7 @@ struct windows_handler
 		std::uint32_t max_chars = 0)
 	{
 		std::lock_guard locker(lock);
+
 		auto& wptr = win_map["PROMPT"];
 		auto* ifptr = static_cast<input_field*>((*wptr)["FLD"].get());
 		auto* tbptr = static_cast<text_box*>((*wptr)["TXT"].get());
@@ -151,6 +159,7 @@ struct windows_handler
 		static_cast<button*>((*wptr)["BUTT"].get())->on_click = std::move(on_submit);
 
 		wptr->safe_change_position(-50, 50);
+
 		enable_window("PROMPT");
 	}
 
@@ -163,6 +172,7 @@ struct windows_handler
 		std::uint32_t srgba = 0)
 	{
 		std::lock_guard locker(lock);
+
 		auto& alert_wptr = win_map["ALERT"];
 		alert_wptr->safe_change_position_argumented(0, 0, 0);
 		alert_wptr->not_safe_resize_centered(alertheight, 200);
@@ -172,16 +182,18 @@ struct windows_handler
 
 		auto* alert_ws_ptr = static_cast<special_sign_handler*>((*alert_wptr)["AlertSign"].get());
 		alert_ws_ptr->replace_draw_func(std::move(special_signs_draw_func));
+
 		if (update)
 		{
 			alert_ws_ptr->frgba = frgba;
 			alert_ws_ptr->srgba = srgba;
 		}
+
 		enable_window("ALERT");
 	}
 
-	// Legacy overload: accepts raw function pointer for ThrowAlert
-	void ThrowAlert(
+	// Legacy overload: accepts raw function pointer for throw_alert
+	void throw_alert(
 		const std::string& alert_text,
 		const std::string& alert_header,
 		void(*special_signs_draw_func)(float, float, float, std::uint32_t, std::uint32_t),
@@ -194,8 +206,8 @@ struct windows_handler
 			update, frgba, srgba);
 	}
 
-	// Legacy overload: accepts raw function pointer for ThrowPrompt
-	void ThrowPrompt(
+	// Legacy overload: accepts raw function pointer for throw_prompt
+	void throw_prompt(
 		const std::string& static_tip_text,
 		const std::string& window_title,
 		void(*on_submit)(),
@@ -221,45 +233,57 @@ struct windows_handler
 		}
 	}
 
-	void DisableAllWindows()
+	void disable_all_windows()
 	{
 		std::lock_guard locker(lock);
+
 		window_was_disabled_during_mouse_handling = true;
 		active_windows.clear();
+
 		enable_window(main_window_id);
 	}
 
-	void TurnOnMainWindow()
+	void turn_on_main_window()
 	{
 		std::lock_guard locker(lock);
+
 		if (!this->mw_id_holder.empty())
 			swap(this->main_window_id, this->mw_id_holder);
+
 		this->enable_window(main_window_id);
 	}
 
-	void TurnOffMainWindow()
+	void turn_off_main_window()
 	{
 		std::lock_guard locker(lock);
+
 		if (this->mw_id_holder.empty())
 			swap(this->main_window_id, this->mw_id_holder);
+
 		this->disable_window(main_window_id);
 	}
 
 	void disable_window(active_list_t::iterator window)
 	{
 		std::lock_guard locker(lock);
+
 		if (window == active_windows.end())
 			return;
+
 		window_was_disabled_during_mouse_handling = true;
+
 		(*window)->second->drawable = true;
+
 		active_windows.erase(window);
 	}
 
 	void enable_window(win_map_t::iterator window)
 	{
 		std::lock_guard locker(lock);
+
 		if (window == win_map.end())
 			return;
+
 		for (auto y = active_windows.begin(); y != active_windows.end(); ++y)
 		{
 			if (*y == window)
@@ -282,18 +306,21 @@ struct windows_handler
 				}
 			}
 		}
+
 		active_windows.push_front(window);
 	}
 
 	void enable_window(const std::string& id)
 	{
 		std::lock_guard locker(lock);
+
 		this->enable_window(win_map.find(id));
 	}
 
 	void keyboard_handler(char ch)
 	{
 		std::lock_guard locker(lock);
+
 		if (active_windows.size())
 			(*active_windows.begin())->second->keyboard_handler(ch);
 	}
@@ -301,6 +328,7 @@ struct windows_handler
 	void draw()
 	{
 		std::lock_guard locker(lock);
+
 		bool met_main = false;
 		if (!active_windows.empty())
 		{
@@ -328,6 +356,7 @@ struct windows_handler
 				y--;
 			}
 		}
+
 		if (!met_main)
 			this->enable_window(main_window_id);
 	}
@@ -336,17 +365,8 @@ struct windows_handler
 	{
 		return window_proxy(win_map[id]);
 	}
-
-	// Legacy method aliases
-	void EnableWindow(const std::string& id) { enable_window(id); }
-	void DisableWindow(const std::string& id) { disable_window(id); }
-	void MouseHandler(float mx, float my, char b, char s) { mouse_handler(mx, my, b, s); }
-	void KeyboardHandler(char ch) { keyboard_handler(ch); }
-	void Draw() { draw(); }
 };
 
 inline std::shared_ptr<windows_handler> WH;
-
-using WindowsHandler = windows_handler;
 
 #endif // !SAFGUIF_WH

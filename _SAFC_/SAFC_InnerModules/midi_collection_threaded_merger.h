@@ -32,7 +32,7 @@ struct midi_collection_threaded_merger
 	std::mutex currently_processed_locker;
 	std::vector<std::pair<proc_data_ptr, message_buffer_ptr>> currently_processed;
 
-	struct DegeneratedTrackIterator
+	struct DegenerateTrackIterator
 	{
 		std::int64_t CurPosition;
 		std::int64_t CurTick;
@@ -40,7 +40,7 @@ struct midi_collection_threaded_merger
 		std::uint64_t TrackSize;
 		std::array<std::int64_t, 4096> Holded;
 		bool Processing;
-		DegeneratedTrackIterator(std::vector<std::uint8_t>& Vec) 
+		DegenerateTrackIterator(std::vector<std::uint8_t>& Vec) 
 		{
 			TrackData = Vec.data();
 			TrackSize = Vec.size();
@@ -160,7 +160,9 @@ struct midi_collection_threaded_merger
 				out.pop_back();
 		}
 	};
+
 	~midi_collection_threaded_merger() = default;
+
 	midi_collection_threaded_merger(
 		std::vector<proc_data_ptr> processing_data, 
 		std::uint16_t FinalPPQN, 
@@ -454,7 +456,7 @@ struct midi_collection_threaded_merger
 				if (Track.size() / 2 > EDGE) 
 				{
 					std::int64_t TotalShift = EDGE, PrevEdgePos = 0;
-					DegeneratedTrackIterator DTI(Track);
+					DegenerateTrackIterator DTI(Track);
 					FrontEdge.clear();
 					while (DTI.AdvanceUntilReachingPositionOf(TotalShift))
 					{
@@ -481,6 +483,7 @@ struct midi_collection_threaded_merger
 						FrontEdge.clear();
 						DTI.PutCurrentHoldedNotes(FrontEdge, true);
 					}
+
 					file_output << "MTrk";
 					std::uint64_t TotalSize = FrontEdge.size() + (DTI.CurPosition - PrevEdgePos);
 					//cout << "Outside:" << TotalSize << endl;
