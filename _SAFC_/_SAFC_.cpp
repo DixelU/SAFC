@@ -371,278 +371,278 @@ button_settings* BS_List_Black_Small = new button_settings(&system_white, 0, 0, 
 
 std::uint32_t DefaultBoolSettings = _BoolSettings::remove_remnants | _BoolSettings::remove_empty_tracks | _BoolSettings::all_instruments_to_piano;
 
-struct FileSettings
+struct file_settings
 {////per file app_settings
-	std::wstring Filename;
-	std::wstring PostprocessedFile_Name, WFileNamePostfix;
-	std::string AppearanceFilename, AppearancePath, FileNamePostfix;
-	std::uint16_t NewPPQN, OldPPQN, OldTrackNumber, MergeMultiplier;
-	std::int16_t GroupID;
-	double NewTempo;
+	std::wstring filename;
+	std::wstring postprocessed_file_name, w_file_name_postfix;
+	std::string appearance_filename, appearance_path, file_name_postfix;
+	std::uint16_t new_ppqn, old_ppqn, old_track_number, merge_multiplier;
+	std::int16_t group_id;
+	double new_tempo;
 	std::uint64_t filesize;
-	std::int64_t SelectionStart, SelectionLength;
+	std::int64_t selection_start, selection_length;
 	bool
 		is_midi,
-		InplaceMergeEnabled,
+		inplace_merge_enabled,
 		allow_legacy_rsb_meta_interaction,
-		RSBCompression,
-		ChannelsSplit,
-		CollapseMIDI,
-		AllowSysex,
-		EnableZeroVelocity,
-		ApplyOffsetAfter;
-	std::shared_ptr<cut_and_transpose> KeyMap;
-	std::shared_ptr<polyline_converter<std::uint8_t, std::uint8_t>> VolumeMap;
-	std::shared_ptr<polyline_converter<std::uint16_t, std::uint16_t>> PitchBendMap;
-	std::uint32_t BoolSettings;
-	std::int64_t OffsetTicks;
+		rsb_compression,
+		channels_split,
+		collapse_midi,
+		allow_sysex,
+		enable_zero_velocity,
+		apply_offset_after;
+	std::shared_ptr<cut_and_transpose> key_map;
+	std::shared_ptr<polyline_converter<std::uint8_t, std::uint8_t>> volume_map;
+	std::shared_ptr<polyline_converter<std::uint16_t, std::uint16_t>> pitch_bend_map;
+	std::uint32_t bool_settings;
+	std::int64_t offset_ticks;
 
-	single_midi_info_collector::time_graph TimeMap;
+	single_midi_info_collector::time_graph time_map;
 
-	FileSettings(const std::wstring& Filename) 
+	file_settings(const std::wstring& filename) 
 	{
-		this->Filename = Filename;
-		AppearanceFilename = AppearancePath = "";
-		auto pos = Filename.rfind('\\');
-		for (; pos < Filename.size(); pos++)
-			AppearanceFilename.push_back(Filename[pos] & 0xFF);
-		for (int i = 0; i < Filename.size(); i++)
-			AppearancePath.push_back((char)(Filename[i] & 0xFF));
-		//cout << AppearancePath << " ::\n";
-		fast_midi_checker FMIC(Filename);
+		this->filename = filename;
+		appearance_filename = appearance_path = "";
+		auto pos = filename.rfind('\\');
+		for (; pos < filename.size(); pos++)
+			appearance_filename.push_back(filename[pos] & 0xFF);
+		for (int i = 0; i < filename.size(); i++)
+			appearance_path.push_back((char)(filename[i] & 0xFF));
+		//cout << appearance_path << " ::\n";
+		fast_midi_checker FMIC(filename);
 		this->is_midi = FMIC.is_acssessible && FMIC.is_midi;
-		OldPPQN = FMIC.PPQN;
-		NewPPQN = FMIC.PPQN;
-		MergeMultiplier = 0;
-		OldTrackNumber = FMIC.expected_track_number;
-		OffsetTicks = InplaceMergeEnabled = 0;
-		AllowSysex = false;
-		EnableZeroVelocity = false;
+		old_ppqn = FMIC.PPQN;
+		new_ppqn = FMIC.PPQN;
+		merge_multiplier = 0;
+		old_track_number = FMIC.expected_track_number;
+		offset_ticks = inplace_merge_enabled = 0;
+		allow_sysex = false;
+		enable_zero_velocity = false;
 		filesize = FMIC.filesize;
-		GroupID = NewTempo = 0;
-		SelectionStart = 0;
-		SelectionLength = -1;
-		BoolSettings = DefaultBoolSettings;
-		FileNamePostfix = "_.mid"; //_FILENAMEWITHEXTENSIONSTRING_.mid
-		WFileNamePostfix = L"_.mid";
-		RSBCompression = ChannelsSplit = false;
-		CollapseMIDI = true;
+		group_id = new_tempo = 0;
+		selection_start = 0;
+		selection_length = -1;
+		bool_settings = DefaultBoolSettings;
+		file_name_postfix = "_.mid"; //_FILENAMEWITHEXTENSIONSTRING_.mid
+		w_file_name_postfix = L"_.mid";
+		rsb_compression = channels_split = false;
+		collapse_midi = true;
 		allow_legacy_rsb_meta_interaction = false;
-		ApplyOffsetAfter = true;
+		apply_offset_after = true;
 	}
 
-	inline void SwitchBoolSetting(std::uint32_t SMP_BoolSetting) 
+	inline void switch_bool_setting(std::uint32_t smp_bool_setting) 
 	{
-		BoolSettings ^= SMP_BoolSetting;
+		bool_settings ^= smp_bool_setting;
 	}
 
-	inline void SetBoolSetting(std::uint32_t SMP_BoolSetting, bool NewState) 
+	inline void set_bool_setting(std::uint32_t smp_bool_setting, bool new_state) 
 	{
-		if (BoolSettings & SMP_BoolSetting && NewState)
+		if (bool_settings & smp_bool_setting && new_state)
 			return;
 		
-		if (!(BoolSettings & SMP_BoolSetting) && !NewState)
+		if (!(bool_settings & smp_bool_setting) && !new_state)
 			return;
 
-		SwitchBoolSetting(SMP_BoolSetting);
+		switch_bool_setting(smp_bool_setting);
 	}
 
-	std::shared_ptr<single_midi_processor_2::processing_data> BuildSMRPProcessingData() 
+	std::shared_ptr<single_midi_processor_2::processing_data> build_smrp_processing_data() 
 	{
 		auto smrp_data = std::make_shared<single_midi_processor_2::processing_data>();
 		auto& settings = smrp_data->settings;
-		smrp_data->filename = Filename;
-		smrp_data->postfix = WFileNamePostfix;
-		if(VolumeMap)
-			settings.volume_map = std::make_shared<byte_plc_core>(VolumeMap);
-		if(PitchBendMap)
-			settings.pitch_map = std::make_shared<_14bit_plc_core>(PitchBendMap);
-		settings.key_converter = KeyMap;
-		settings.new_ppqn = NewPPQN;
-		settings.old_ppqn = OldPPQN;
-		settings.enable_imp_events_filter = (BoolSettings & _BoolSettings::enable_important_filter);
-		settings.imp_events_filter.pass_instument_cnage = settings.enable_imp_events_filter && (BoolSettings & _BoolSettings::imp_filter_allow_progc);
-		settings.imp_events_filter.pass_notes = settings.enable_imp_events_filter && (BoolSettings & _BoolSettings::imp_filter_allow_notes);
-		settings.imp_events_filter.pass_pitch = settings.enable_imp_events_filter && (BoolSettings & _BoolSettings::imp_filter_allow_pitch);
-		settings.imp_events_filter.pass_tempo = settings.enable_imp_events_filter && (BoolSettings & _BoolSettings::imp_filter_allow_tempo);
-		settings.imp_events_filter.pass_other = settings.enable_imp_events_filter && (BoolSettings & _BoolSettings::imp_filter_allow_other);
-		settings.filter.pass_notes = !(BoolSettings & _BoolSettings::ignore_notes);
-		settings.filter.pass_pitch = !(BoolSettings & _BoolSettings::ignore_pitches);
-		settings.filter.pass_tempo = !(BoolSettings & _BoolSettings::ignore_tempos);
-		settings.filter.pass_other = !(BoolSettings & _BoolSettings::ignore_all_but_tempos_notes_and_pitch);
-		settings.filter.piano_only = (BoolSettings & _BoolSettings::all_instruments_to_piano);
-		settings.proc_details.remove_remnants = BoolSettings & _BoolSettings::remove_remnants;
-		settings.proc_details.remove_empty_tracks = BoolSettings & _BoolSettings::remove_empty_tracks;
-		settings.proc_details.channel_split = ChannelsSplit;
-		settings.proc_details.whole_midi_collapse = CollapseMIDI;
-		settings.proc_details.apply_offset_after = ApplyOffsetAfter;
-		settings.legacy.enable_zero_velocity = EnableZeroVelocity;
+		smrp_data->filename = filename;
+		smrp_data->postfix = w_file_name_postfix;
+		if(volume_map)
+			settings.volume_map = std::make_shared<byte_plc_core>(volume_map);
+		if(pitch_bend_map)
+			settings.pitch_map = std::make_shared<_14bit_plc_core>(pitch_bend_map);
+		settings.key_converter = key_map;
+		settings.new_ppqn = new_ppqn;
+		settings.old_ppqn = old_ppqn;
+		settings.enable_imp_events_filter = (bool_settings & _BoolSettings::enable_important_filter);
+		settings.imp_events_filter.pass_instument_cnage = settings.enable_imp_events_filter && (bool_settings & _BoolSettings::imp_filter_allow_progc);
+		settings.imp_events_filter.pass_notes = settings.enable_imp_events_filter && (bool_settings & _BoolSettings::imp_filter_allow_notes);
+		settings.imp_events_filter.pass_pitch = settings.enable_imp_events_filter && (bool_settings & _BoolSettings::imp_filter_allow_pitch);
+		settings.imp_events_filter.pass_tempo = settings.enable_imp_events_filter && (bool_settings & _BoolSettings::imp_filter_allow_tempo);
+		settings.imp_events_filter.pass_other = settings.enable_imp_events_filter && (bool_settings & _BoolSettings::imp_filter_allow_other);
+		settings.filter.pass_notes = !(bool_settings & _BoolSettings::ignore_notes);
+		settings.filter.pass_pitch = !(bool_settings & _BoolSettings::ignore_pitches);
+		settings.filter.pass_tempo = !(bool_settings & _BoolSettings::ignore_tempos);
+		settings.filter.pass_other = !(bool_settings & _BoolSettings::ignore_all_but_tempos_notes_and_pitch);
+		settings.filter.piano_only = (bool_settings & _BoolSettings::all_instruments_to_piano);
+		settings.proc_details.remove_remnants = bool_settings & _BoolSettings::remove_remnants;
+		settings.proc_details.remove_empty_tracks = bool_settings & _BoolSettings::remove_empty_tracks;
+		settings.proc_details.channel_split = channels_split;
+		settings.proc_details.whole_midi_collapse = collapse_midi;
+		settings.proc_details.apply_offset_after = apply_offset_after;
+		settings.legacy.enable_zero_velocity = enable_zero_velocity;
 		settings.legacy.ignore_meta_rsb = allow_legacy_rsb_meta_interaction;
-		settings.legacy.rsb_compression = RSBCompression;
-		settings.filter.pass_sysex = AllowSysex;
-		InplaceMergeEnabled = 
-			settings.details.inplace_mergable = InplaceMergeEnabled && !RSBCompression;
-		settings.details.group_id = GroupID;
+		settings.legacy.rsb_compression = rsb_compression;
+		settings.filter.pass_sysex = allow_sysex;
+		inplace_merge_enabled = 
+			settings.details.inplace_mergable = inplace_merge_enabled && !rsb_compression;
+		settings.details.group_id = group_id;
 		settings.details.initial_filesize = filesize;
-		settings.offset = OffsetTicks;
+		settings.offset = offset_ticks;
 
-		if (NewTempo > 3.)
-			settings.tempo.set_override_value(NewTempo);
-		if (OffsetTicks < 0 && -OffsetTicks > SelectionStart)
-			SelectionStart = -OffsetTicks;
-		if (SelectionStart && (SelectionLength < 0))
-			SelectionLength -= SelectionStart;
+		if (new_tempo > 3.)
+			settings.tempo.set_override_value(new_tempo);
+		if (offset_ticks < 0 && -offset_ticks > selection_start)
+			selection_start = -offset_ticks;
+		if (selection_start && (selection_length < 0))
+			selection_length -= selection_start;
 
-		if (NewTempo > 3. && !TimeMap.empty())
+		if (new_tempo > 3. && !time_map.empty())
 		{
-			settings.original_time_map = TimeMap;
+			settings.original_time_map = time_map;
 			settings.flatten = true;
 		}
 
-		settings.selection_data = single_midi_processor_2::settings_obj::selection(SelectionStart, SelectionLength);
+		settings.selection_data = single_midi_processor_2::settings_obj::selection(selection_start, selection_length);
 
-		smrp_data->appearance_filename = AppearanceFilename;
+		smrp_data->appearance_filename = appearance_filename;
 
 		return smrp_data;
 	}
 };
-struct _SFD_RSP 
+struct sfd_rsp 
 {
-	std::int32_t ID;
+	std::int32_t id;
 	std::int64_t filesize;
-	_SFD_RSP(std::int32_t ID, std::int64_t filesize)
+	sfd_rsp(std::int32_t id, std::int64_t filesize)
 	{
-		this->ID = ID;
+		this->id = id;
 		this->filesize = filesize;
 	}
-	inline bool operator<(_SFD_RSP a)
+	inline bool operator<(sfd_rsp a)
 	{
 		return filesize < a.filesize;
 	}
 };
 
-struct SAFCData 
+struct safc_data 
 {
 	////overall app_settings and storing perfile settings....
-	std::vector<FileSettings> Files;
-	std::wstring SavePath;
-	std::uint16_t GlobalPPQN;
-	std::int32_t GlobalOffset;
-	float GlobalNewTempo;
-	bool IncrementalPPQN;
-	bool InplaceMergeFlag;
-	bool ChannelsSplit;
-	bool RSBCompression;
-	bool CollapseMIDI;
-	bool ApplyOffsetAfter;
-	bool IsCLIMode;
-	std::uint16_t DetectedThreads;
+	std::vector<file_settings> files;
+	std::wstring save_path;
+	std::uint16_t global_ppqn;
+	std::int32_t global_offset;
+	float global_new_tempo;
+	bool incremental_ppqn;
+	bool inplace_merge_flag;
+	bool channels_split;
+	bool rsb_compression;
+	bool collapse_midi;
+	bool apply_offset_after;
+	bool is_cli_mode;
+	std::uint16_t detected_threads;
 
-	SAFCData()
+	safc_data()
 	{
-		GlobalPPQN = GlobalOffset = GlobalNewTempo = 0;
-		DetectedThreads = 1;
-		IncrementalPPQN = true;
-		InplaceMergeFlag = false;
-		IsCLIMode = false;
-		CollapseMIDI = false;
-		SavePath = L"";
-		ChannelsSplit = RSBCompression = false;
-		ApplyOffsetAfter = true;
+		global_ppqn = global_offset = global_new_tempo = 0;
+		detected_threads = 1;
+		incremental_ppqn = true;
+		inplace_merge_flag = false;
+		is_cli_mode = false;
+		collapse_midi = false;
+		save_path = L"";
+		channels_split = rsb_compression = false;
+		apply_offset_after = true;
 	}
 
-	void ResolveSubdivisionProblem_GroupIDAssign(std::uint16_t ThreadsCount = 0)
+	void resolve_subdivision_problem_group_id_assign(std::uint16_t threads_count = 0)
 	{
-		if (!ThreadsCount)
-			ThreadsCount = DetectedThreads;
-		if (Files.empty())
+		if (!threads_count)
+			threads_count = detected_threads;
+		if (files.empty())
 		{
-			SavePath = L"";
+			save_path = L"";
 			return;
 		}
 		else
-			SavePath = Files[0].Filename + L".AfterSAFC.mid";
+			save_path = files[0].filename + L".AfterSAFC.mid";
 
-		if (Files.size() == 1)
+		if (files.size() == 1)
 		{
-			Files.front().GroupID = 0;
+			files.front().group_id = 0;
 			return;
 		}
-		std::vector<_SFD_RSP> Sizes;
-		std::vector<std::int64_t> SumSize;
+		std::vector<sfd_rsp> sizes;
+		std::vector<std::int64_t> sum_size;
 		std::int64_t T = 0;
 
-		for (int i = 0; i < Files.size(); i++)
+		for (int i = 0; i < files.size(); i++)
 		{
-			Sizes.emplace_back(i, Files[i].filesize);
+			sizes.emplace_back(i, files[i].filesize);
 		}
 
-		std::sort(Sizes.begin(), Sizes.end());
+		std::sort(sizes.begin(), sizes.end());
 
-		for (int i = 0; i < Sizes.size(); i++)
+		for (int i = 0; i < sizes.size(); i++)
 		{
-			SumSize.push_back((T += Sizes[i].filesize));
+			sum_size.push_back((T += sizes[i].filesize));
 		}
 
-		for (int i = 0; i < SumSize.size(); i++)
+		for (int i = 0; i < sum_size.size(); i++)
 		{
-			Files[Sizes[i].ID].GroupID = (std::uint16_t)(ceil(((float)SumSize[i] / ((float)SumSize.back())) * ThreadsCount) - 1.);
-			std::cout << "Thread " << Files[Sizes[i].ID].GroupID << ": " << Sizes[i].filesize << ":\t" << Sizes[i].ID << std::endl;
+			files[sizes[i].id].group_id = (std::uint16_t)(ceil(((float)sum_size[i] / ((float)sum_size.back())) * threads_count) - 1.);
+			std::cout << "Thread " << files[sizes[i].id].group_id << ": " << sizes[i].filesize << ":\t" << sizes[i].id << std::endl;
 		}
 	}
 
-	void SetGlobalPPQN(std::uint16_t NewPPQN = 0, bool ForceGlobalPPQNOverride = false)
+	void set_global_ppqn(std::uint16_t new_ppqn = 0, bool force_global_ppqn_override = false)
 	{
-		if (!NewPPQN && ForceGlobalPPQNOverride)
+		if (!new_ppqn && force_global_ppqn_override)
 			return;
-		if (!ForceGlobalPPQNOverride)
-			NewPPQN = GlobalPPQN;
-		if (!ForceGlobalPPQNOverride && (!NewPPQN || IncrementalPPQN))
+		if (!force_global_ppqn_override)
+			new_ppqn = global_ppqn;
+		if (!force_global_ppqn_override && (!new_ppqn || incremental_ppqn))
 		{
-			for (int i = 0; i < Files.size(); i++)
-				if (NewPPQN < Files[i].OldPPQN)NewPPQN = Files[i].OldPPQN;
+			for (int i = 0; i < files.size(); i++)
+				if (new_ppqn < files[i].old_ppqn)new_ppqn = files[i].old_ppqn;
 		}
-		for (int i = 0; i < Files.size(); i++)
-			Files[i].NewPPQN = NewPPQN;
-		GlobalPPQN = NewPPQN;
+		for (int i = 0; i < files.size(); i++)
+			files[i].new_ppqn = new_ppqn;
+		global_ppqn = new_ppqn;
 	}
 
-	void SetGlobalOffset(std::int32_t Offset)
+	void set_global_offset(std::int32_t Offset)
 	{
-		for (int i = 0; i < Files.size(); i++)
-			Files[i].OffsetTicks = Offset;
-		GlobalOffset = Offset;
+		for (int i = 0; i < files.size(); i++)
+			files[i].offset_ticks = Offset;
+		global_offset = Offset;
 	}
 
-	void SetGlobalTempo(float NewTempo)
+	void set_global_tempo(float new_tempo)
 	{
-		for (int i = 0; i < Files.size(); i++)
-			Files[i].NewTempo = NewTempo;
-		GlobalNewTempo = NewTempo;
+		for (int i = 0; i < files.size(); i++)
+			files[i].new_tempo = new_tempo;
+		global_new_tempo = new_tempo;
 	}
 
-	void RemoveByID(std::uint32_t ID)
+	void remove_by_id(std::uint32_t id)
 	{
-		if (ID < Files.size())
-			Files.erase(Files.begin() + ID);
+		if (id < files.size())
+			files.erase(files.begin() + id);
 	}
 
-	std::shared_ptr<midi_collection_threaded_merger> MCTM_Constructor()
+	std::shared_ptr<midi_collection_threaded_merger> mctm_constructor()
 	{
 		using proc_data_ptr = std::shared_ptr<single_midi_processor_2::processing_data>;
 		std::vector<proc_data_ptr> SMRPv;
-		for (int i = 0; i < Files.size(); i++)
-			SMRPv.push_back(Files[i].BuildSMRPProcessingData());
-		return std::make_shared<midi_collection_threaded_merger>(SMRPv, GlobalPPQN, SavePath, IsCLIMode);
+		for (int i = 0; i < files.size(); i++)
+			SMRPv.push_back(files[i].build_smrp_processing_data());
+		return std::make_shared<midi_collection_threaded_merger>(SMRPv, global_ppqn, save_path, is_cli_mode);
 	}
 
-	FileSettings& operator[](std::int32_t ID)
+	file_settings& operator[](std::int32_t id)
 	{
-		return Files[ID];
+		return files[id];
 	}
 };
 
-SAFCData _Data;
+safc_data _Data;
 std::shared_ptr<midi_collection_threaded_merger> GlobalMCTM;
 
 void throw_alert_error(std::string&& AlertText) 
@@ -673,7 +673,7 @@ std::vector<std::wstring> multiple_open_file_dialog(const wchar_t* Title)
 	ofn.lpstrFile = szFile;
 	ofn.lpstrFile[0] = '\0';
 	ofn.nMaxFile = sizeof(szFile);
-	ofn.lpstrFilter = L"MIDI Files(*.mid)\0*.mid\0";
+	ofn.lpstrFilter = L"MIDI files(*.mid)\0*.mid\0";
 	ofn.nFilterIndex = 1;
 	ofn.lpstrFileTitle = NULL;
 	ofn.lpstrTitle = Title;
@@ -735,7 +735,7 @@ std::wstring save_open_file_dialog(const wchar_t* Title)
 	ZeroMemory(&ofn, sizeof(ofn));
 	ofn.lStructSize = sizeof(ofn);
 	ofn.hwndOwner = NULL;  // If you have a merge_preview_container to center over, put its HANDLE here
-	ofn.lpstrFilter = L"MIDI Files(*.mid)\0*.mid\0";
+	ofn.lpstrFilter = L"MIDI files(*.mid)\0*.mid\0";
 	ofn.lpstrFile = filename;
 	ofn.nMaxFile = MAX_PATH;
 	ofn.lpstrTitle = Title;
@@ -790,39 +790,39 @@ void add_files(const std::vector<std::wstring>& Filenames)
 	{
 		if (Filenames[i].empty())
 			continue;
-		_Data.Files.push_back(FileSettings(Filenames[i]));
-		auto& lastFile = _Data.Files.back();
+		_Data.files.push_back(file_settings(Filenames[i]));
+		auto& lastFile = _Data.files.back();
 		if (lastFile.is_midi)
 		{
 			if (wh)
-				_WH_t<selectable_properted_list>("MAIN", "List")->safe_push_back_new_string(lastFile.AppearanceFilename);
+				_WH_t<selectable_properted_list>("MAIN", "List")->safe_push_back_new_string(lastFile.appearance_filename);
 
 			std::uint32_t Counter = 0;
-			lastFile.NewTempo = _Data.GlobalNewTempo;
-			lastFile.OffsetTicks = _Data.GlobalOffset;
-			lastFile.InplaceMergeEnabled = _Data.InplaceMergeFlag;
-			lastFile.ChannelsSplit = _Data.ChannelsSplit;
-			lastFile.RSBCompression = _Data.RSBCompression;
-			lastFile.CollapseMIDI = _Data.CollapseMIDI;
-			lastFile.ApplyOffsetAfter = _Data.ApplyOffsetAfter;
+			lastFile.new_tempo = _Data.global_new_tempo;
+			lastFile.offset_ticks = _Data.global_offset;
+			lastFile.inplace_merge_enabled = _Data.inplace_merge_flag;
+			lastFile.channels_split = _Data.channels_split;
+			lastFile.rsb_compression = _Data.rsb_compression;
+			lastFile.collapse_midi = _Data.collapse_midi;
+			lastFile.apply_offset_after = _Data.apply_offset_after;
 
-			for (int q = 0; q < _Data.Files.size(); q++)
+			for (int q = 0; q < _Data.files.size(); q++)
 			{
-				if (_Data[q].Filename == lastFile.Filename)
+				if (_Data[q].filename == lastFile.filename)
 				{
-					_Data[q].FileNamePostfix = std::to_string(Counter) + "_.mid";
-					_Data[q].WFileNamePostfix = std::to_wstring(Counter) + L"_.mid";
+					_Data[q].file_name_postfix = std::to_string(Counter) + "_.mid";
+					_Data[q].w_file_name_postfix = std::to_wstring(Counter) + L"_.mid";
 					Counter++;
 				}
 			}
 		}
 		else
 		{
-			_Data.Files.pop_back();
+			_Data.files.pop_back();
 		}
 	}
-	_Data.SetGlobalPPQN();
-	_Data.ResolveSubdivisionProblem_GroupIDAssign();
+	_Data.set_global_ppqn();
+	_Data.resolve_subdivision_problem_group_id_assign();
 }
 void on_add()
 {
@@ -840,62 +840,62 @@ namespace props_and_sets
 	single_midi_info_collector* SMICptr = nullptr;
 	std::string CSV_DELIM = ";";
 
-	void open_file_properties(int ID)
+	void open_file_properties(int id)
 	{
-		if (!(ID < _Data.Files.size() && ID >= 0))
+		if (!(id < _Data.files.size() && id >= 0))
 		{
 			currentID = -1;
 			return;
 		}
 
-		currentID = ID;
+		currentID = id;
 		auto PASWptr = (*wh)["SMPAS"];
 		auto OSptr = (*wh)["OTHER_SETS"];
 
-		((text_box*)((*PASWptr)["FileName"]))->safe_string_replace("..." + _Data[ID].AppearanceFilename);
+		((text_box*)((*PASWptr)["FileName"]))->safe_string_replace("..." + _Data[id].appearance_filename);
 		((input_field*)((*PASWptr)["PPQN"]))->update_input_string();
-		((input_field*)((*PASWptr)["PPQN"]))->safe_string_replace(std::to_string((_Data[ID].NewPPQN) ? _Data[ID].NewPPQN : _Data[ID].OldPPQN));
-		((input_field*)((*PASWptr)["TEMPO"]))->safe_string_replace(std::to_string(_Data[ID].NewTempo));
-		((input_field*)((*PASWptr)["OFFSET"]))->safe_string_replace(std::to_string(_Data[ID].OffsetTicks));
-		((input_field*)((*PASWptr)["GROUPID"]))->safe_string_replace(std::to_string(_Data[ID].GroupID));
+		((input_field*)((*PASWptr)["PPQN"]))->safe_string_replace(std::to_string((_Data[id].new_ppqn) ? _Data[id].new_ppqn : _Data[id].old_ppqn));
+		((input_field*)((*PASWptr)["TEMPO"]))->safe_string_replace(std::to_string(_Data[id].new_tempo));
+		((input_field*)((*PASWptr)["OFFSET"]))->safe_string_replace(std::to_string(_Data[id].offset_ticks));
+		((input_field*)((*PASWptr)["GROUPID"]))->safe_string_replace(std::to_string(_Data[id].group_id));
 
-		((input_field*)((*PASWptr)["SELECT_START"]))->safe_string_replace(std::to_string(_Data[ID].SelectionStart));
-		((input_field*)((*PASWptr)["SELECT_LENGTH"]))->safe_string_replace(std::to_string(_Data[ID].SelectionLength));
+		((input_field*)((*PASWptr)["SELECT_START"]))->safe_string_replace(std::to_string(_Data[id].selection_start));
+		((input_field*)((*PASWptr)["SELECT_LENGTH"]))->safe_string_replace(std::to_string(_Data[id].selection_length));
 
-		((checkbox*)((*PASWptr)["BOOL_REM_TRCKS"]))->state = _Data[ID].BoolSettings & _BoolSettings::remove_empty_tracks;
-		((checkbox*)((*PASWptr)["BOOL_REM_REM"]))->state = _Data[ID].BoolSettings & _BoolSettings::remove_remnants;
+		((checkbox*)((*PASWptr)["BOOL_REM_TRCKS"]))->state = _Data[id].bool_settings & _BoolSettings::remove_empty_tracks;
+		((checkbox*)((*PASWptr)["BOOL_REM_REM"]))->state = _Data[id].bool_settings & _BoolSettings::remove_remnants;
 
-		((checkbox*)((*OSptr)["BOOL_PIANO_ONLY"]))->state = _Data[ID].BoolSettings & _BoolSettings::all_instruments_to_piano;
-		((checkbox*)((*OSptr)["BOOL_IGN_TEMPO"]))->state = _Data[ID].BoolSettings & _BoolSettings::ignore_tempos;
-		((checkbox*)((*OSptr)["BOOL_IGN_PITCH"]))->state = _Data[ID].BoolSettings & _BoolSettings::ignore_pitches;
-		((checkbox*)((*OSptr)["BOOL_IGN_NOTES"]))->state = _Data[ID].BoolSettings & _BoolSettings::ignore_notes;
-		((checkbox*)((*OSptr)["BOOL_IGN_ALL_EX_TPS"]))->state = _Data[ID].BoolSettings & _BoolSettings::ignore_all_but_tempos_notes_and_pitch;
+		((checkbox*)((*OSptr)["BOOL_PIANO_ONLY"]))->state = _Data[id].bool_settings & _BoolSettings::all_instruments_to_piano;
+		((checkbox*)((*OSptr)["BOOL_IGN_TEMPO"]))->state = _Data[id].bool_settings & _BoolSettings::ignore_tempos;
+		((checkbox*)((*OSptr)["BOOL_IGN_PITCH"]))->state = _Data[id].bool_settings & _BoolSettings::ignore_pitches;
+		((checkbox*)((*OSptr)["BOOL_IGN_NOTES"]))->state = _Data[id].bool_settings & _BoolSettings::ignore_notes;
+		((checkbox*)((*OSptr)["BOOL_IGN_ALL_EX_TPS"]))->state = _Data[id].bool_settings & _BoolSettings::ignore_all_but_tempos_notes_and_pitch;
 
-		((checkbox*)((*OSptr)["IMP_FLT_ENABLE"]))->state = _Data[ID].BoolSettings & _BoolSettings::enable_important_filter;
-		((checkbox*)((*OSptr)["IMP_FLT_NOTES"]))->state = _Data[ID].BoolSettings & _BoolSettings::imp_filter_allow_notes;
-		((checkbox*)((*OSptr)["IMP_FLT_TEMPO"]))->state = _Data[ID].BoolSettings & _BoolSettings::imp_filter_allow_tempo;
-		((checkbox*)((*OSptr)["IMP_FLT_PITCH"]))->state = _Data[ID].BoolSettings & _BoolSettings::imp_filter_allow_pitch;
-		((checkbox*)((*OSptr)["IMP_FLT_PROGC"]))->state = _Data[ID].BoolSettings & _BoolSettings::imp_filter_allow_progc;
-		((checkbox*)((*OSptr)["IMP_FLT_OTHER"]))->state = _Data[ID].BoolSettings & _BoolSettings::imp_filter_allow_other;
+		((checkbox*)((*OSptr)["IMP_FLT_ENABLE"]))->state = _Data[id].bool_settings & _BoolSettings::enable_important_filter;
+		((checkbox*)((*OSptr)["IMP_FLT_NOTES"]))->state = _Data[id].bool_settings & _BoolSettings::imp_filter_allow_notes;
+		((checkbox*)((*OSptr)["IMP_FLT_TEMPO"]))->state = _Data[id].bool_settings & _BoolSettings::imp_filter_allow_tempo;
+		((checkbox*)((*OSptr)["IMP_FLT_PITCH"]))->state = _Data[id].bool_settings & _BoolSettings::imp_filter_allow_pitch;
+		((checkbox*)((*OSptr)["IMP_FLT_PROGC"]))->state = _Data[id].bool_settings & _BoolSettings::imp_filter_allow_progc;
+		((checkbox*)((*OSptr)["IMP_FLT_OTHER"]))->state = _Data[id].bool_settings & _BoolSettings::imp_filter_allow_other;
 
-		((checkbox*)((*OSptr)["LEGACY_META_RSB_BEHAVIOR"]))->state = _Data[ID].allow_legacy_rsb_meta_interaction;
-		((checkbox*)((*OSptr)["ALLOW_SYSEX"]))->state = _Data[ID].AllowSysex;
-		((checkbox*)((*OSptr)["ENABLE_ZERO_VELOCITY"]))->state = _Data[ID].EnableZeroVelocity;
+		((checkbox*)((*OSptr)["LEGACY_META_RSB_BEHAVIOR"]))->state = _Data[id].allow_legacy_rsb_meta_interaction;
+		((checkbox*)((*OSptr)["ALLOW_SYSEX"]))->state = _Data[id].allow_sysex;
+		((checkbox*)((*OSptr)["ENABLE_ZERO_VELOCITY"]))->state = _Data[id].enable_zero_velocity;
 
-		((checkbox*)((*PASWptr)["SPLIT_TRACKS"]))->state = _Data[ID].ChannelsSplit;
-		((checkbox*)((*PASWptr)["RSB_COMPRESS"]))->state = _Data[ID].RSBCompression;
+		((checkbox*)((*PASWptr)["SPLIT_TRACKS"]))->state = _Data[id].channels_split;
+		((checkbox*)((*PASWptr)["RSB_COMPRESS"]))->state = _Data[id].rsb_compression;
 
-		((checkbox*)((*PASWptr)["INPLACE_MERGE"]))->state = _Data[ID].InplaceMergeEnabled;
+		((checkbox*)((*PASWptr)["INPLACE_MERGE"]))->state = _Data[id].inplace_merge_enabled;
 
-		((checkbox*)((*PASWptr)["COLLAPSE_MIDI"]))->state = _Data[ID].CollapseMIDI;
-		((checkbox*)((*PASWptr)["APPLY_OFFSET_AFTER"]))->state = _Data[ID].ApplyOffsetAfter;
+		((checkbox*)((*PASWptr)["COLLAPSE_MIDI"]))->state = _Data[id].collapse_midi;
+		((checkbox*)((*PASWptr)["APPLY_OFFSET_AFTER"]))->state = _Data[id].apply_offset_after;
 
 		((text_box*)((*PASWptr)["CONSTANT_PROPS"]))->safe_string_replace(
-			"File size: " + std::to_string(_Data[ID].filesize) + "b\n" +
-			"Old PPQN: " + std::to_string(_Data[ID].OldPPQN) + "\n" +
-			"Track number (header info): " + std::to_string(_Data[ID].OldTrackNumber) + "\n" +
-			"\"Remnant\" file postfix: " + _Data[ID].FileNamePostfix + "\n" +
-			"Time map status: " + ((_Data[ID].TimeMap.empty()) ? "Empty" : "Present")
+			"File size: " + std::to_string(_Data[id].filesize) + "b\n" +
+			"Old PPQN: " + std::to_string(_Data[id].old_ppqn) + "\n" +
+			"Track number (header info): " + std::to_string(_Data[id].old_track_number) + "\n" +
+			"\"Remnant\" file postfix: " + _Data[id].file_name_postfix + "\n" +
+			"Time map status: " + ((_Data[id].time_map.empty()) ? "Empty" : "Present")
 		);
 
 		wh->enable_window("SMPAS");
@@ -903,7 +903,7 @@ namespace props_and_sets
 
 	void initialize_collecting()
 	{
-		if (currentID < 0 && currentID >= _Data.Files.size()) 
+		if (currentID < 0 && currentID >= _Data.files.size()) 
 		{
 			throw_alert_error("How you have managed to select the midi beyond the list? O.o\n" + std::to_string(currentID));
 			return;
@@ -916,7 +916,7 @@ namespace props_and_sets
 			UIElement->graph = nullptr;
 		}
 
-		SMICptr = new single_midi_info_collector(_Data.Files[currentID].Filename, _Data.Files[currentID].OldPPQN, _Data.Files[currentID].allow_legacy_rsb_meta_interaction);
+		SMICptr = new single_midi_info_collector(_Data.files[currentID].filename, _Data.files[currentID].old_ppqn, _Data.files[currentID].allow_legacy_rsb_meta_interaction);
 
 		std::thread th([]()
 		{
@@ -996,7 +996,7 @@ namespace props_and_sets
 	{
 		void load_time_map()
 		{
-			if (currentID < 0 && currentID >= _Data.Files.size())
+			if (currentID < 0 && currentID >= _Data.files.size())
 			{
 				throw_alert_error("How you have managed to select the midi beyond the lists end? O.o\n" + std::to_string(currentID));
 				return;
@@ -1014,7 +1014,7 @@ namespace props_and_sets
 				return;
 			}
 
-			_Data[currentID].TimeMap = SMICptr->internal_time_map;
+			_Data[currentID].time_map = SMICptr->internal_time_map;
 			open_file_properties(currentID);
 			wh->disable_window("SMIC");
 		}
@@ -1290,9 +1290,9 @@ namespace props_and_sets
 
 	void on_apply_settings()
 	{
-		if (currentID < 0 && currentID >= _Data.Files.size())
+		if (currentID < 0 && currentID >= _Data.files.size())
 		{
-			throw_alert_warning("You cannot apply current settings to file with ID " + std::to_string(currentID));
+			throw_alert_warning("You cannot apply current settings to file with id " + std::to_string(currentID));
 			return;
 		}
 
@@ -1305,32 +1305,32 @@ namespace props_and_sets
 		if (CurStr.size())
 		{
 			T = std::stoi(CurStr);
-			if (T)_Data[currentID].NewPPQN = T;
-			else _Data[currentID].NewPPQN = _Data.GlobalPPQN;
+			if (T)_Data[currentID].new_ppqn = T;
+			else _Data[currentID].new_ppqn = _Data.global_ppqn;
 		}
 
 		CurStr = ((input_field*)(*SMPASptr)["TEMPO"])->get_current_input("0");
 		if (CurStr.size())
 		{
 			float F = stof(CurStr);
-			_Data[currentID].NewTempo = F;
+			_Data[currentID].new_tempo = F;
 		}
 
 		CurStr = ((input_field*)(*SMPASptr)["OFFSET"])->get_current_input("0");
 		if (CurStr.size())
 		{
 			T = stoll(CurStr);
-			_Data[currentID].OffsetTicks = T;
+			_Data[currentID].offset_ticks = T;
 		}
 
 		CurStr = ((input_field*)(*SMPASptr)["GROUPID"])->get_current_input("0");
 		if (CurStr.size())
 		{
 			T = stoi(CurStr);
-			if (T != _Data[currentID].GroupID)
+			if (T != _Data[currentID].group_id)
 			{
-				_Data[currentID].GroupID = T;
-				throw_alert_warning("Manual GroupID editing might cause significant drop of processing perfomance!");
+				_Data[currentID].group_id = T;
+				throw_alert_warning("Manual group_id editing might cause significant drop of processing perfomance!");
 			}
 		}
 
@@ -1338,14 +1338,14 @@ namespace props_and_sets
 		if (CurStr.size())
 		{
 			T = stoll(CurStr);
-			_Data[currentID].SelectionStart = T;
+			_Data[currentID].selection_start = T;
 		}
 
 		CurStr = ((input_field*)(*SMPASptr)["SELECT_LENGTH"])->get_current_input("-1");
 		if (CurStr.size())
 		{
 			T = stoll(CurStr);
-			_Data[currentID].SelectionLength = T;
+			_Data[currentID].selection_length = T;
 		}
 
 		_Data[currentID].allow_legacy_rsb_meta_interaction = (((checkbox*)(*OSptr)["LEGACY_META_RSB_BEHAVIOR"])->state);
@@ -1353,59 +1353,59 @@ namespace props_and_sets
 		if (_Data[currentID].allow_legacy_rsb_meta_interaction)
 			std::cout << "WARNING: Legacy way of treating running status events can also allow major corruptions of midi structure!" << std::endl;
 
-		_Data[currentID].SetBoolSetting(_BoolSettings::remove_empty_tracks, (((checkbox*)(*SMPASptr)["BOOL_REM_TRCKS"])->state));
-		_Data[currentID].SetBoolSetting(_BoolSettings::remove_remnants, (((checkbox*)(*SMPASptr)["BOOL_REM_REM"])->state));
+		_Data[currentID].set_bool_setting(_BoolSettings::remove_empty_tracks, (((checkbox*)(*SMPASptr)["BOOL_REM_TRCKS"])->state));
+		_Data[currentID].set_bool_setting(_BoolSettings::remove_remnants, (((checkbox*)(*SMPASptr)["BOOL_REM_REM"])->state));
 
-		_Data[currentID].SetBoolSetting(_BoolSettings::all_instruments_to_piano, (((checkbox*)(*OSptr)["BOOL_PIANO_ONLY"])->state));
-		_Data[currentID].SetBoolSetting(_BoolSettings::ignore_tempos, (((checkbox*)(*OSptr)["BOOL_IGN_TEMPO"])->state));
-		_Data[currentID].SetBoolSetting(_BoolSettings::ignore_pitches, (((checkbox*)(*OSptr)["BOOL_IGN_PITCH"])->state));
-		_Data[currentID].SetBoolSetting(_BoolSettings::ignore_notes, (((checkbox*)(*OSptr)["BOOL_IGN_NOTES"])->state));
-		_Data[currentID].SetBoolSetting(_BoolSettings::ignore_all_but_tempos_notes_and_pitch, (((checkbox*)(*OSptr)["BOOL_IGN_ALL_EX_TPS"])->state));
+		_Data[currentID].set_bool_setting(_BoolSettings::all_instruments_to_piano, (((checkbox*)(*OSptr)["BOOL_PIANO_ONLY"])->state));
+		_Data[currentID].set_bool_setting(_BoolSettings::ignore_tempos, (((checkbox*)(*OSptr)["BOOL_IGN_TEMPO"])->state));
+		_Data[currentID].set_bool_setting(_BoolSettings::ignore_pitches, (((checkbox*)(*OSptr)["BOOL_IGN_PITCH"])->state));
+		_Data[currentID].set_bool_setting(_BoolSettings::ignore_notes, (((checkbox*)(*OSptr)["BOOL_IGN_NOTES"])->state));
+		_Data[currentID].set_bool_setting(_BoolSettings::ignore_all_but_tempos_notes_and_pitch, (((checkbox*)(*OSptr)["BOOL_IGN_ALL_EX_TPS"])->state));
 
-		_Data[currentID].SetBoolSetting(_BoolSettings::enable_important_filter, (((checkbox*)(*OSptr)["IMP_FLT_ENABLE"])->state));
-		_Data[currentID].SetBoolSetting(_BoolSettings::imp_filter_allow_notes, (((checkbox*)(*OSptr)["IMP_FLT_NOTES"])->state));
-		_Data[currentID].SetBoolSetting(_BoolSettings::imp_filter_allow_tempo, (((checkbox*)(*OSptr)["IMP_FLT_TEMPO"])->state));
-		_Data[currentID].SetBoolSetting(_BoolSettings::imp_filter_allow_pitch, (((checkbox*)(*OSptr)["IMP_FLT_PITCH"])->state));
-		_Data[currentID].SetBoolSetting(_BoolSettings::imp_filter_allow_progc, (((checkbox*)(*OSptr)["IMP_FLT_PROGC"])->state));
-		_Data[currentID].SetBoolSetting(_BoolSettings::imp_filter_allow_other, (((checkbox*)(*OSptr)["IMP_FLT_OTHER"])->state));
+		_Data[currentID].set_bool_setting(_BoolSettings::enable_important_filter, (((checkbox*)(*OSptr)["IMP_FLT_ENABLE"])->state));
+		_Data[currentID].set_bool_setting(_BoolSettings::imp_filter_allow_notes, (((checkbox*)(*OSptr)["IMP_FLT_NOTES"])->state));
+		_Data[currentID].set_bool_setting(_BoolSettings::imp_filter_allow_tempo, (((checkbox*)(*OSptr)["IMP_FLT_TEMPO"])->state));
+		_Data[currentID].set_bool_setting(_BoolSettings::imp_filter_allow_pitch, (((checkbox*)(*OSptr)["IMP_FLT_PITCH"])->state));
+		_Data[currentID].set_bool_setting(_BoolSettings::imp_filter_allow_progc, (((checkbox*)(*OSptr)["IMP_FLT_PROGC"])->state));
+		_Data[currentID].set_bool_setting(_BoolSettings::imp_filter_allow_other, (((checkbox*)(*OSptr)["IMP_FLT_OTHER"])->state));
 
-		_Data[currentID].EnableZeroVelocity = (((checkbox*)(*OSptr)["ENABLE_ZERO_VELOCITY"])->state);
-		_Data[currentID].AllowSysex = (((checkbox*)(*OSptr)["ALLOW_SYSEX"])->state);
+		_Data[currentID].enable_zero_velocity = (((checkbox*)(*OSptr)["ENABLE_ZERO_VELOCITY"])->state);
+		_Data[currentID].allow_sysex = (((checkbox*)(*OSptr)["ALLOW_SYSEX"])->state);
 
-		_Data[currentID].RSBCompression = ((checkbox*)(*SMPASptr)["RSB_COMPRESS"])->state;
-		_Data[currentID].ChannelsSplit = ((checkbox*)(*SMPASptr)["SPLIT_TRACKS"])->state;
-		_Data[currentID].CollapseMIDI = ((checkbox*)(*SMPASptr)["COLLAPSE_MIDI"])->state;
-		_Data[currentID].ApplyOffsetAfter = ((checkbox*)(*SMPASptr)["APPLY_OFFSET_AFTER"])->state; 
+		_Data[currentID].rsb_compression = ((checkbox*)(*SMPASptr)["RSB_COMPRESS"])->state;
+		_Data[currentID].channels_split = ((checkbox*)(*SMPASptr)["SPLIT_TRACKS"])->state;
+		_Data[currentID].collapse_midi = ((checkbox*)(*SMPASptr)["COLLAPSE_MIDI"])->state;
+		_Data[currentID].apply_offset_after = ((checkbox*)(*SMPASptr)["APPLY_OFFSET_AFTER"])->state; 
 		auto& inplaceMergeState = ((checkbox*)(*SMPASptr)["INPLACE_MERGE"])->state;
 
-		inplaceMergeState &= !_Data[currentID].RSBCompression;
-		_Data[currentID].InplaceMergeEnabled = inplaceMergeState;
+		inplaceMergeState &= !_Data[currentID].rsb_compression;
+		_Data[currentID].inplace_merge_enabled = inplaceMergeState;
 	}
 
 	void on_apply_bs2a()
 	{
-		if (currentID < 0 && currentID >= _Data.Files.size())
+		if (currentID < 0 && currentID >= _Data.files.size())
 		{
-			throw_alert_warning("You cannot apply current settings to file with ID " + std::to_string(currentID));
+			throw_alert_warning("You cannot apply current settings to file with id " + std::to_string(currentID));
 			return;
 		}
 
 		on_apply_settings();
 
-		for (auto Y = _Data.Files.begin(); Y != _Data.Files.end(); ++Y)
+		for (auto Y = _Data.files.begin(); Y != _Data.files.end(); ++Y)
 		{
-			DefaultBoolSettings = Y->BoolSettings = _Data[currentID].BoolSettings;
-			_Data.InplaceMergeFlag = Y->InplaceMergeEnabled = _Data[currentID].InplaceMergeEnabled;
+			DefaultBoolSettings = Y->bool_settings = _Data[currentID].bool_settings;
+			_Data.inplace_merge_flag = Y->inplace_merge_enabled = _Data[currentID].inplace_merge_enabled;
 			Y->allow_legacy_rsb_meta_interaction = _Data[currentID].allow_legacy_rsb_meta_interaction;
-			Y->CollapseMIDI = _Data[currentID].CollapseMIDI;
-			Y->ApplyOffsetAfter = _Data[currentID].ApplyOffsetAfter;
-			Y->AllowSysex = _Data[currentID].AllowSysex;
-			Y->ChannelsSplit = _Data[currentID].ChannelsSplit;
-			Y->RSBCompression = _Data[currentID].RSBCompression;
+			Y->collapse_midi = _Data[currentID].collapse_midi;
+			Y->apply_offset_after = _Data[currentID].apply_offset_after;
+			Y->allow_sysex = _Data[currentID].allow_sysex;
+			Y->channels_split = _Data[currentID].channels_split;
+			Y->rsb_compression = _Data[currentID].rsb_compression;
 		}
 	}
 
-	namespace CutAndTranspose
+	namespace cut_and_transpose
 	{
 		std::uint8_t TMax = 0, TMin = 0;
 		std::int16_t TTransp = 0;
@@ -1414,9 +1414,9 @@ namespace props_and_sets
 		{
 			auto Wptr = (*wh)["CAT"];
 			auto CATptr = (cut_and_transpose_piano*)((*Wptr)["CAT_ITSELF"]);
-			if (!_Data[currentID].KeyMap)
-				_Data[currentID].KeyMap = std::make_shared<cut_and_transpose>(0, 127, 0);
-			CATptr->piano_transform = _Data[currentID].KeyMap;
+			if (!_Data[currentID].key_map)
+				_Data[currentID].key_map = std::make_shared<::cut_and_transpose>(0, 127, 0);
+			CATptr->piano_transform = _Data[currentID].key_map;
 			CATptr->update_info();
 			wh->enable_window("CAT");
 		}
@@ -1475,11 +1475,11 @@ namespace props_and_sets
 			auto Wptr = (*wh)["CAT"];
 			((cut_and_transpose_piano*)((*Wptr)["CAT_ITSELF"]))->piano_transform = nullptr;
 			wh->disable_window("CAT");
-			_Data[currentID].KeyMap = nullptr;
+			_Data[currentID].key_map = nullptr;
 		}
 	}
 
-	namespace VolumeMap
+	namespace volume_map
 	{
 		void on_vol_map()
 		{
@@ -1492,9 +1492,9 @@ namespace props_and_sets
 			VM->active_setting = 0;
 			VM->hovered = 0;
 			VM->re_put_mode = 0;
-			if (!_Data[currentID].VolumeMap)
-				_Data[currentID].VolumeMap = std::make_shared<polyline_converter<std::uint8_t, std::uint8_t>>();
-			VM->plc_bb = _Data[currentID].VolumeMap;
+			if (!_Data[currentID].volume_map)
+				_Data[currentID].volume_map = std::make_shared<polyline_converter<std::uint8_t, std::uint8_t>>();
+			VM->plc_bb = _Data[currentID].volume_map;
 			wh->enable_window("VM");
 		}
 
@@ -1569,8 +1569,8 @@ namespace props_and_sets
 
 		void on_delete()
 		{
-			if (_Data[currentID].VolumeMap)
-				_Data[currentID].VolumeMap = nullptr;
+			if (_Data[currentID].volume_map)
+				_Data[currentID].volume_map = nullptr;
 			auto Wptr = (*wh)["VM"];
 			auto VM = ((volume_graph*)(*Wptr)["VM_PLC"]);
 			VM->plc_bb = nullptr;
@@ -1587,12 +1587,12 @@ void on_rem()
 {
 	worker_singleton<struct midi_file_list>::instance().push([](){
 		auto ptr = _WH_t<selectable_properted_list>("MAIN", "List");
-		for (auto ID = ptr->selected_id.rbegin(); ID != ptr->selected_id.rend(); ++ID)
-			_Data.RemoveByID(*ID);
+		for (auto id = ptr->selected_id.rbegin(); id != ptr->selected_id.rend(); ++id)
+			_Data.remove_by_id(*id);
 		ptr->remove_selected();
 		wh->disable_all_windows();
-		_Data.SetGlobalPPQN();
-		_Data.ResolveSubdivisionProblem_GroupIDAssign();
+		_Data.set_global_ppqn();
+		_Data.resolve_subdivision_problem_group_id_assign();
 	});
 }
 
@@ -1601,13 +1601,13 @@ void on_rem_all()
 	worker_singleton<struct midi_file_list>::instance().push([](){
 		auto ptr = _WH_t<selectable_properted_list>("MAIN", "List");
 		wh->disable_all_windows();
-		while (_Data.Files.size())
+		while (_Data.files.size())
 		{
-			_Data.RemoveByID(0);
+			_Data.remove_by_id(0);
 			ptr->safe_remove_string_by_id(0);
 		}
-		//_Data.SetGlobalPPQN();
-		//_Data.ResolveSubdivisionProblem_GroupIDAssign();
+		//_Data.set_global_ppqn();
+		//_Data.resolve_subdivision_problem_group_id_assign();
 	});
 }
 
@@ -1615,8 +1615,8 @@ void on_submit_global_ppqn()
 {
 	auto pptr = (*wh)["PROMPT"];
 	std::string t = ((input_field*)(*pptr)["FLD"])->get_current_input("0");
-	std::uint16_t PPQN = (t.size()) ? stoi(t) : _Data.GlobalPPQN;
-	_Data.SetGlobalPPQN(PPQN, true);
+	std::uint16_t PPQN = (t.size()) ? stoi(t) : _Data.global_ppqn;
+	_Data.set_global_ppqn(PPQN, true);
 	wh->disable_window("PROMPT");
 	//props_and_sets::open_file_properties(props_and_sets::currentID);
 }
@@ -1629,7 +1629,7 @@ void on_global_ppqn()
 		on_submit_global_ppqn,
 		_Align::center,
 		input_field::Type::NaturalNumbers,
-		std::to_string(_Data.GlobalPPQN),
+		std::to_string(_Data.global_ppqn),
 		5);
 }
 
@@ -1637,8 +1637,8 @@ void on_submit_global_offset()
 {
 	auto pptr = (*wh)["PROMPT"];
 	std::string t = ((input_field*)(*pptr)["FLD"])->get_current_input("0");
-	std::uint32_t O = (t.size()) ? std::stoi(t) : _Data.GlobalOffset;
-	_Data.SetGlobalOffset(O);
+	std::uint32_t O = (t.size()) ? std::stoi(t) : _Data.global_offset;
+	_Data.set_global_offset(O);
 	wh->disable_window("PROMPT");
 }
 
@@ -1650,7 +1650,7 @@ void on_global_offset()
 		on_submit_global_offset,
 		_Align::center,
 		input_field::Type::WholeNumbers,
-		std::to_string(_Data.GlobalOffset),
+		std::to_string(_Data.global_offset),
 		10);
 }
 
@@ -1658,40 +1658,40 @@ void on_submit_global_tempo()
 {
 	auto pptr = (*wh)["PROMPT"];
 	std::string t = ((input_field*)(*pptr)["FLD"])->get_current_input("0");
-	float Tempo = (t.size()) ? std::stof(t) : _Data.GlobalNewTempo;
-	_Data.SetGlobalTempo(Tempo);
+	float Tempo = (t.size()) ? std::stof(t) : _Data.global_new_tempo;
+	_Data.set_global_tempo(Tempo);
 	wh->disable_window("PROMPT");
 }
 
 void on_global_tempo()
 {
-	wh->throw_prompt("Sets specific tempo value to every MIDI\n(in settings)", "Global S. Tempo\0", on_submit_global_tempo, _Align::center, input_field::Type::FP_PositiveNumbers, std::to_string(_Data.GlobalNewTempo), 8);
+	wh->throw_prompt("Sets specific tempo value to every MIDI\n(in settings)", "Global S. Tempo\0", on_submit_global_tempo, _Align::center, input_field::Type::FP_PositiveNumbers, std::to_string(_Data.global_new_tempo), 8);
 }
 
 void on_resolve()
 {
-	_Data.ResolveSubdivisionProblem_GroupIDAssign();
+	_Data.resolve_subdivision_problem_group_id_assign();
 }
 
 void on_rem_vol_maps()
 {
 	((volume_graph*)(*((*wh)["VM"]))["VM_PLC"])->plc_bb = NULL;
 	wh->disable_window("VM");
-	for (int i = 0; i < _Data.Files.size(); i++)
-		_Data[i].VolumeMap = nullptr;
+	for (int i = 0; i < _Data.files.size(); i++)
+		_Data[i].volume_map = nullptr;
 }
 void on_rem_cats()
 {
 	wh->disable_window("CAT");
-	for (int i = 0; i < _Data.Files.size(); i++)
-		_Data[i].KeyMap = nullptr;
+	for (int i = 0; i < _Data.files.size(); i++)
+		_Data[i].key_map = nullptr;
 }
 void on_rem_pitch_maps()
 {
 	//wh->disable_window("CAT");
 	throw_alert_warning("Currently pitch maps can not be created and/or deleted :D");
-	for (int i = 0; i < _Data.Files.size(); i++)
-		_Data[i].PitchBendMap = nullptr;
+	for (int i = 0; i < _Data.files.size(); i++)
+		_Data[i].pitch_bend_map = nullptr;
 }
 void on_rem_all_modules()
 {
@@ -1706,12 +1706,12 @@ namespace app_settings
 
 	void on_settings()
 	{
-		wh->enable_window("APP_SETTINGS");//_Data.DetectedThreads
+		wh->enable_window("APP_SETTINGS");//_Data.detected_threads
 		//wh->throw_alert("Please read the docs! Changing some of these app_settings might cause graphics driver failure!","Warning!",special_signs::draw_ex_triangle,1,0x007FFFFF,0x7F7F7FFF);
 		auto pptr = (*wh)["APP_SETTINGS"];
 		((input_field*)(*pptr)["AS_BCKGID"])->update_input_string(std::to_string(ShaderMode));
 		((input_field*)(*pptr)["AS_ROT_ANGLE"])->update_input_string(std::to_string(dumb_rotation_angle));
-		((input_field*)(*pptr)["AS_THREADS_COUNT"])->update_input_string(std::to_string(_Data.DetectedThreads));
+		((input_field*)(*pptr)["AS_THREADS_COUNT"])->update_input_string(std::to_string(_Data.detected_threads));
 
 		((checkbox*)((*pptr)["BOOL_REM_TRCKS"]))->state = DefaultBoolSettings & _BoolSettings::remove_empty_tracks;
 		((checkbox*)((*pptr)["BOOL_REM_REM"]))->state = DefaultBoolSettings & _BoolSettings::remove_remnants;
@@ -1721,12 +1721,12 @@ namespace app_settings
 		((checkbox*)((*pptr)["BOOL_IGN_NOTES"]))->state = DefaultBoolSettings & _BoolSettings::ignore_notes;
 		((checkbox*)((*pptr)["BOOL_IGN_ALL_EX_TPS"]))->state = DefaultBoolSettings & _BoolSettings::ignore_all_but_tempos_notes_and_pitch;
 
-		((checkbox*)((*pptr)["SPLIT_TRACKS"]))->state = _Data.ChannelsSplit;
-		((checkbox*)((*pptr)["RSB_COMPRESS"]))->state = _Data.RSBCompression;
-		((checkbox*)((*pptr)["COLLAPSE_MIDI"]))->state = _Data.CollapseMIDI; 
-		((checkbox*)((*pptr)["APPLY_OFFSET_AFTER"]))->state = _Data.ApplyOffsetAfter;
+		((checkbox*)((*pptr)["SPLIT_TRACKS"]))->state = _Data.channels_split;
+		((checkbox*)((*pptr)["RSB_COMPRESS"]))->state = _Data.rsb_compression;
+		((checkbox*)((*pptr)["COLLAPSE_MIDI"]))->state = _Data.collapse_midi; 
+		((checkbox*)((*pptr)["APPLY_OFFSET_AFTER"]))->state = _Data.apply_offset_after;
 		
-		((checkbox*)((*pptr)["INPLACE_MERGE"]))->state = _Data.InplaceMergeFlag;
+		((checkbox*)((*pptr)["INPLACE_MERGE"]))->state = _Data.inplace_merge_flag;
 		((checkbox*)((*pptr)["AUTOUPDATECHECK"]))->state = check_autoupdates;
 	}
 
@@ -1760,15 +1760,15 @@ namespace app_settings
 			dumb_rotation_angle = stof(T);
 		std::cout << dumb_rotation_angle << std::endl;
 
-		T = ((input_field*)(*pptr)["AS_THREADS_COUNT"])->get_current_input(std::to_string(_Data.DetectedThreads));
+		T = ((input_field*)(*pptr)["AS_THREADS_COUNT"])->get_current_input(std::to_string(_Data.detected_threads));
 		std::cout << "AS_THREADS_COUNT " << T << std::endl;
 		if (T.size())
 		{
-			_Data.DetectedThreads = stoi(T);
-			_Data.ResolveSubdivisionProblem_GroupIDAssign();
-			if (isRegestryOpened)TRY_CATCH(RegestryAccess.SetDwordValue(L"AS_THREADS_COUNT", _Data.DetectedThreads); , "Failed on setting AS_THREADS_COUNT")
+			_Data.detected_threads = stoi(T);
+			_Data.resolve_subdivision_problem_group_id_assign();
+			if (isRegestryOpened)TRY_CATCH(RegestryAccess.SetDwordValue(L"AS_THREADS_COUNT", _Data.detected_threads); , "Failed on setting AS_THREADS_COUNT")
 		}
-		std::cout << _Data.DetectedThreads << std::endl;
+		std::cout << _Data.detected_threads << std::endl;
 
 		DefaultBoolSettings = (DefaultBoolSettings & (~_BoolSettings::remove_empty_tracks)) | (_BoolSettings::remove_empty_tracks * (!!((checkbox*)(*pptr)["BOOL_REM_TRCKS"])->state));
 		DefaultBoolSettings = (DefaultBoolSettings & (~_BoolSettings::remove_remnants)) | (_BoolSettings::remove_remnants * (!!((checkbox*)(*pptr)["BOOL_REM_REM"])->state));
@@ -1780,27 +1780,27 @@ namespace app_settings
 
 		check_autoupdates = ((checkbox*)(*pptr)["AUTOUPDATECHECK"])->state;
 
-		_Data.ChannelsSplit = ((checkbox*)((*pptr)["SPLIT_TRACKS"]))->state;
-		_Data.RSBCompression = ((checkbox*)((*pptr)["RSB_COMPRESS"]))->state;
+		_Data.channels_split = ((checkbox*)((*pptr)["SPLIT_TRACKS"]))->state;
+		_Data.rsb_compression = ((checkbox*)((*pptr)["RSB_COMPRESS"]))->state;
 
-		_Data.CollapseMIDI = ((checkbox*)((*pptr)["COLLAPSE_MIDI"]))->state;
-		_Data.ApplyOffsetAfter = ((checkbox*)((*pptr)["APPLY_OFFSET_AFTER"]))->state;
+		_Data.collapse_midi = ((checkbox*)((*pptr)["COLLAPSE_MIDI"]))->state;
+		_Data.apply_offset_after = ((checkbox*)((*pptr)["APPLY_OFFSET_AFTER"]))->state;
 
 		if (isRegestryOpened)
 		{
 			TRY_CATCH(RegestryAccess.SetDwordValue(L"AUTOUPDATECHECK", check_autoupdates);, "Failed on setting AUTOUPDATECHECK")
-			TRY_CATCH(RegestryAccess.SetDwordValue(L"SPLIT_TRACKS", _Data.ChannelsSplit); , "Failed on setting SPLIT_TRACKS")
-			TRY_CATCH(RegestryAccess.SetDwordValue(L"COLLAPSE_MIDI", _Data.CollapseMIDI);, "Failed on setting COLLAPSE_MIDI")
-			TRY_CATCH(RegestryAccess.SetDwordValue(L"APPLY_OFFSET_AFTER", _Data.CollapseMIDI);, "Failed on setting APPLY_OFFSET_AFTER")
+			TRY_CATCH(RegestryAccess.SetDwordValue(L"SPLIT_TRACKS", _Data.channels_split); , "Failed on setting SPLIT_TRACKS")
+			TRY_CATCH(RegestryAccess.SetDwordValue(L"COLLAPSE_MIDI", _Data.collapse_midi);, "Failed on setting COLLAPSE_MIDI")
+			TRY_CATCH(RegestryAccess.SetDwordValue(L"APPLY_OFFSET_AFTER", _Data.collapse_midi);, "Failed on setting APPLY_OFFSET_AFTER")
 			//TRY_CATCH(RegestryAccess.SetDwordValue(L"RSB_COMPRESS", check_autoupdates);, "Failed on setting RSB_COMPRESS")
 			TRY_CATCH(RegestryAccess.SetDwordValue(L"DEFAULT_BOOL_SETTINGS", DefaultBoolSettings);, "Failed on setting DEFAULT_BOOL_SETTINGS")
 			TRY_CATCH(RegestryAccess.SetDwordValue(L"FONTSIZE_POST1P4", lFontSymbolsInfo::Size); , "Failed on setting FONTSIZE_POST1P4")
 			TRY_CATCH(RegestryAccess.SetDwordValue(L"FLOAT_FONTHTW_POST1P4", *(std::uint32_t*)(&lFONT_HEIGHT_TO_WIDTH)); , "Failed on setting FLOAT_FONTHTW_POST1P4")
 		}
 
-		_Data.InplaceMergeFlag = (((checkbox*)(*pptr)["INPLACE_MERGE"])->state);
+		_Data.inplace_merge_flag = (((checkbox*)(*pptr)["INPLACE_MERGE"])->state);
 		if (isRegestryOpened)
-			TRY_CATCH(RegestryAccess.SetDwordValue(L"AS_INPLACE_FLAG", _Data.InplaceMergeFlag);, "Failed on setting AS_INPLACE_FLAG")
+			TRY_CATCH(RegestryAccess.SetDwordValue(L"AS_INPLACE_FLAG", _Data.inplace_merge_flag);, "Failed on setting AS_INPLACE_FLAG")
 
 		((input_field*)(*pptr)["AS_FONT_NAME"])->put_into_source();
 		std::wstring ws(default_font_name.begin(), default_font_name.end());
@@ -1820,14 +1820,14 @@ namespace app_settings
 	void apply_to_all()
 	{
 		on_set_apply();
-		for (auto Y = _Data.Files.begin(); Y != _Data.Files.end(); ++Y)
+		for (auto Y = _Data.files.begin(); Y != _Data.files.end(); ++Y)
 		{
-			Y->BoolSettings = DefaultBoolSettings;
-			Y->InplaceMergeEnabled = _Data.InplaceMergeFlag && !_Data.ChannelsSplit;
-			Y->ChannelsSplit = _Data.ChannelsSplit;
-			Y->RSBCompression = _Data.RSBCompression;
-			Y->CollapseMIDI = _Data.CollapseMIDI;
-			Y->ApplyOffsetAfter = _Data.ApplyOffsetAfter;
+			Y->bool_settings = DefaultBoolSettings;
+			Y->inplace_merge_enabled = _Data.inplace_merge_flag && !_Data.channels_split;
+			Y->channels_split = _Data.channels_split;
+			Y->rsb_compression = _Data.rsb_compression;
+			Y->collapse_midi = _Data.collapse_midi;
+			Y->apply_offset_after = _Data.apply_offset_after;
 		}
 	}
 
@@ -1857,7 +1857,7 @@ std::pair<float, float> get_position_for_one_of(std::int32_t Position, std::int3
 
 void on_start()
 {
-	if (_Data.Files.empty())
+	if (_Data.files.empty())
 		return;
 
 	worker_singleton<struct merge>::instance().push([]()
@@ -1866,7 +1866,7 @@ void on_start()
 		wh->disable_all_windows();
 		wh->enable_window("SMRP_CONTAINER");
 
-		GlobalMCTM = _Data.MCTM_Constructor();
+		GlobalMCTM = _Data.mctm_constructor();
 
 		auto start_timepoint = std::chrono::high_resolution_clock::now();
 
@@ -1899,31 +1899,31 @@ void on_start()
 			GlobalMCTM->currently_processed_locker.unlock();
 		}
 
-		for (size_t ID = 0; ID < currently_processed_copy.size(); ID++)
+		for (size_t id = 0; id < currently_processed_copy.size(); id++)
 		{
-			auto position = get_position_for_one_of(ID, currently_processed_copy.size(), 140, 0.7);
+			auto position = get_position_for_one_of(id, currently_processed_copy.size(), 140, 0.7);
 			auto visualiser = std::make_unique<midi_processor_visualiser>(position.first, position.second, &system_white);
 			auto& visualiser_ref = *visualiser;
 
 			std::string element_id;
-			merge_preview_container->add_ui_element(element_id = "SMRP_C" + std::to_string(ID), std::move(visualiser));
+			merge_preview_container->add_ui_element(element_id = "SMRP_C" + std::to_string(id), std::move(visualiser));
 
-			std::thread([](std::shared_ptr<midi_collection_threaded_merger> pMCTM, midi_processor_visualiser& pVIS, std::uint32_t ID)
+			std::thread([](std::shared_ptr<midi_collection_threaded_merger> pMCTM, midi_processor_visualiser& pVIS, std::uint32_t id)
 			{
-				std::string SID = "SMRP_C" + std::to_string(ID);
+				std::string SID = "SMRP_C" + std::to_string(id);
 				std::cout << SID << " Processing started" << std::endl;
 				bool finished = false;
 				while (GlobalMCTM->CheckSMRPProcessing())
 				{
 					GlobalMCTM->currently_processed_locker.lock();
-					finished = GlobalMCTM->currently_processed[ID].second->finished;
-					pVIS.set_smrp(GlobalMCTM->currently_processed[ID]);
+					finished = GlobalMCTM->currently_processed[id].second->finished;
+					pVIS.set_smrp(GlobalMCTM->currently_processed[id]);
 					GlobalMCTM->currently_processed_locker.unlock();
 
 					std::this_thread::sleep_for(std::chrono::milliseconds(66));
 				}
 				std::cout << SID << " Processing stopped" << std::endl;
-			}, GlobalMCTM, std::ref(visualiser_ref), ID).detach();
+			}, GlobalMCTM, std::ref(visualiser_ref), id).detach();
 		}
 
 		worker_singleton<struct merge_ri_stage>::instance().push([safc_data_pointer = &_Data, merge_preview_container]()
@@ -2002,10 +2002,10 @@ void on_start()
 void on_save_to()
 {
 	worker_singleton<struct save_file_dialog>::instance().push([](){
-		_Data.SavePath = save_open_file_dialog(L"Save final midi to...");
-		size_t Pos = _Data.SavePath.rfind(L".mid");
-		if (Pos >= _Data.SavePath.size() || Pos <= _Data.SavePath.size() - 4)
-			_Data.SavePath += L".mid";
+		_Data.save_path = save_open_file_dialog(L"Save final midi to...");
+		size_t Pos = _Data.save_path.rfind(L".mid");
+		if (Pos >= _Data.save_path.size() || Pos <= _Data.save_path.size() - 4)
+			_Data.save_path += L".mid";
 	});
 }
 
@@ -2037,22 +2037,22 @@ void restore_reg_settings()
 		catch (...) { std::cout << "Exception thrown while restoring AUTOUPDATECHECK from registry\n"; }
 		try
 		{
-			_Data.ChannelsSplit = app_settings::RegestryAccess.GetDwordValue(L"SPLIT_TRACKS");
+			_Data.channels_split = app_settings::RegestryAccess.GetDwordValue(L"SPLIT_TRACKS");
 		}
 		catch (...) { std::cout << "Exception thrown while restoring SPLIT_TRACKS from registry\n"; }
 		try
 		{
-			_Data.CollapseMIDI = app_settings::RegestryAccess.GetDwordValue(L"COLLAPSE_MIDI");
+			_Data.collapse_midi = app_settings::RegestryAccess.GetDwordValue(L"COLLAPSE_MIDI");
 		}
 		catch (...) { std::cout << "Exception thrown while restoring COLLAPSE_MIDI from registry\n"; }
 		try
 		{
-			_Data.ApplyOffsetAfter = app_settings::RegestryAccess.GetDwordValue(L"APPLY_OFFSET_AFTER");
+			_Data.apply_offset_after = app_settings::RegestryAccess.GetDwordValue(L"APPLY_OFFSET_AFTER");
 		}
 		catch (...) { std::cout << "Exception thrown while restoring APPLY_OFFSET_AFTER from registry\n"; }
 		try
 		{
-			_Data.DetectedThreads = app_settings::RegestryAccess.GetDwordValue(L"AS_THREADS_COUNT");
+			_Data.detected_threads = app_settings::RegestryAccess.GetDwordValue(L"AS_THREADS_COUNT");
 		}
 		catch (...) { std::cout << "Exception thrown while restoring AS_THREADS_COUNT from registry\n"; }
 		try
@@ -2062,7 +2062,7 @@ void restore_reg_settings()
 		catch (...) { std::cout << "Exception thrown while restoring AS_INPLACE_FLAG from registry\n"; }
 		try
 		{
-			_Data.InplaceMergeFlag = app_settings::RegestryAccess.GetDwordValue(L"AS_INPLACE_FLAG");
+			_Data.inplace_merge_flag = app_settings::RegestryAccess.GetDwordValue(L"AS_INPLACE_FLAG");
 		}
 		catch (...) { std::cout << "Exception thrown while restoring INPLACE_MERGE from registry\n"; }
 		try
@@ -2165,7 +2165,7 @@ void on_open_player()
 		worker_singleton<struct player_watcher>::instance().push(player_watch_func);
 
 		player->restore_device_by_name(saved_midi_device_name);
-		player->simple_run(_Data[id].Filename);
+		player->simple_run(_Data[id].filename);
 	});
 }
 
@@ -2289,7 +2289,7 @@ void on_playback_seek_to(float value)
 
 bool simplayer_maximised = false;
 
-struct SimplayerSavedState {
+struct simplayer_saved_state {
 	float window_x, window_y, window_width, window_height;
 	float text_x, text_y;
 	float pause_x, pause_y;
@@ -2454,7 +2454,7 @@ void init()
 {
 	lFontSymbolsInfo::InitialiseFont(default_font_name, true);
 
-	_Data.DetectedThreads =
+	_Data.detected_threads =
 		std::max(
 			std::min((std::uint16_t)(
 				(std::uint16_t)std::max(
@@ -2543,18 +2543,18 @@ void init()
 
 	(*T)["INPLACE_MERGE"] = new checkbox(97.5 - moveable_window::window_header_size, 55 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, 0, &system_white, _Align::right, "Enables/disables inplace merge");
 
-	(*T)["GROUPID"] = new input_field(" ", 92.5 - moveable_window::window_header_size, 75 - moveable_window::window_header_size, 10, 20, system_white, props_and_sets::PPQN, 0x007FFFFF, &system_white, "Group ID...", 2, _Align::center, _Align::right, input_field::Type::NaturalNumbers);
+	(*T)["GROUPID"] = new input_field(" ", 92.5 - moveable_window::window_header_size, 75 - moveable_window::window_header_size, 10, 20, system_white, props_and_sets::PPQN, 0x007FFFFF, &system_white, "Group id...", 2, _Align::center, _Align::right, input_field::Type::NaturalNumbers);
 
 	(*T)["MIDIINFO"] = Butt = new button("Collect info", system_white, props_and_sets::initialize_collecting, 20, 15 - moveable_window::window_header_size, 65, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, &system_white, "Collects additional info about the midi");
 	Butt->tip->safe_move(-20, 0);
 
 	(*T)["APPLY"] = new button("Apply", system_white, props_and_sets::on_apply_settings, 87.5 - moveable_window::window_header_size, 15 - moveable_window::window_header_size, 30, 10, 1, 0x7FAFFF3F, 0xFFFFFFFF, 0xFFAF7FFF, 0xFFAF7F3F, 0xFFAF7FFF, nullptr, " ");
 
-	(*T)["CUT_AND_TRANSPOSE"] = (Butt = new button("Cut & Transpose...", system_white, props_and_sets::CutAndTranspose::on_cat, 45 - moveable_window::window_header_size, 35 - moveable_window::window_header_size, 85, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, &system_white, "Cut and Transpose tool"));
+	(*T)["CUT_AND_TRANSPOSE"] = (Butt = new button("Cut & Transpose...", system_white, props_and_sets::cut_and_transpose::on_cat, 45 - moveable_window::window_header_size, 35 - moveable_window::window_header_size, 85, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, &system_white, "Cut and Transpose tool"));
 	Butt->tip->safe_change_position_argumented(_Align::right, 100 - moveable_window::window_header_size, Butt->tip->cy_pos);
 	(*T)["PITCH_MAP"] = (Butt = new button("Pitch map ...", system_white, props_and_sets::on_pitch_map, -37.5 - moveable_window::window_header_size, 15 - moveable_window::window_header_size, 70, 10, 1, 0x7F7F7F3F, 0x7F7F7FFF, 0xFFFFFFFF, 0xFFFFFF3F, 0xFFFFFFFF, &system_white, "Allows to transform pitches"));
 	Butt->tip->safe_change_position_argumented(_Align::right, 100 - moveable_window::window_header_size, Butt->tip->cy_pos);
-	(*T)["VOLUME_MAP"] = (Butt = new button("Volume map ...", system_white, props_and_sets::VolumeMap::on_vol_map, -37.5 - moveable_window::window_header_size, 35 - moveable_window::window_header_size, 70, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, &system_white, "Allows to transform volumes of notes"));
+	(*T)["VOLUME_MAP"] = (Butt = new button("Volume map ...", system_white, props_and_sets::volume_map::on_vol_map, -37.5 - moveable_window::window_header_size, 35 - moveable_window::window_header_size, 70, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, &system_white, "Allows to transform volumes of notes"));
 	Butt->tip->safe_change_position_argumented(_Align::right, 100 - moveable_window::window_header_size, Butt->tip->cy_pos);
 
 	(*T)["SELECT_START"] = new input_field(" ", -37.5 - moveable_window::window_header_size, -5 - moveable_window::window_header_size, 10, 70, system_white, nullptr, 0x007FFFFF, &system_white, "Selection start", 13, _Align::center, _Align::right, input_field::Type::NaturalNumbers);
@@ -2597,33 +2597,33 @@ void init()
 
 	T = new moveable_fui_window("Cut and Transpose.", system_white, -200, 50, 400, 100, 300, 2.5f, 15, 15, 2.5f, BACKGROUND_OPQ, HEADER, BORDER);
 	(*T)["CAT_ITSELF"] = new cut_and_transpose_piano(0, 20 - moveable_window::window_header_size, 1, 10, nullptr);
-	(*T)["CAT_SET_DEFAULT"] = new button("reset", system_white, props_and_sets::CutAndTranspose::on_reset, -150, -10 - moveable_window::window_header_size, 40, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, nullptr, " ");
-	(*T)["CAT_+128"] = new button("0-127 -> 128-255", system_white, props_and_sets::CutAndTranspose::on_0_127_to_128_255, -85, -10 - moveable_window::window_header_size, 80, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, nullptr, " ");
-	(*T)["CAT_CDT128"] = new button("Cut down to 128", system_white, props_and_sets::CutAndTranspose::on_cdt128, 0, -10 - moveable_window::window_header_size, 80, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, nullptr, " ");
-	(*T)["CAT_COPY"] = new button("Copy", system_white, props_and_sets::CutAndTranspose::on_copy, 65, -10 - moveable_window::window_header_size, 40, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, nullptr, " ");
-	(*T)["CAT_PASTE"] = new button("Paste", system_white, props_and_sets::CutAndTranspose::on_paste, 110, -10 - moveable_window::window_header_size, 40, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, nullptr, " ");
-	(*T)["CAT_DELETE"] = new button("Delete", system_white, props_and_sets::CutAndTranspose::on_delete, 155, -10 - moveable_window::window_header_size, 40, 10, 1, 0xFF00FF3F, 0xFF00FFFF, 0xFFFFFFFF, 0xFF003F3F, 0xFF003FFF, nullptr, " ");
+	(*T)["CAT_SET_DEFAULT"] = new button("reset", system_white, props_and_sets::cut_and_transpose::on_reset, -150, -10 - moveable_window::window_header_size, 40, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, nullptr, " ");
+	(*T)["CAT_+128"] = new button("0-127 -> 128-255", system_white, props_and_sets::cut_and_transpose::on_0_127_to_128_255, -85, -10 - moveable_window::window_header_size, 80, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, nullptr, " ");
+	(*T)["CAT_CDT128"] = new button("Cut down to 128", system_white, props_and_sets::cut_and_transpose::on_cdt128, 0, -10 - moveable_window::window_header_size, 80, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, nullptr, " ");
+	(*T)["CAT_COPY"] = new button("Copy", system_white, props_and_sets::cut_and_transpose::on_copy, 65, -10 - moveable_window::window_header_size, 40, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, nullptr, " ");
+	(*T)["CAT_PASTE"] = new button("Paste", system_white, props_and_sets::cut_and_transpose::on_paste, 110, -10 - moveable_window::window_header_size, 40, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, nullptr, " ");
+	(*T)["CAT_DELETE"] = new button("Delete", system_white, props_and_sets::cut_and_transpose::on_delete, 155, -10 - moveable_window::window_header_size, 40, 10, 1, 0xFF00FF3F, 0xFF00FFFF, 0xFFFFFFFF, 0xFF003F3F, 0xFF003FFF, nullptr, " ");
 
 	(*wh)["CAT"] = T;
 
 	T = new moveable_fui_window("Volume map.", system_white, -150, 150, 300, 350, 200, 2.5f, 100, 100, 2.5f, BACKGROUND_OPQ, HEADER, BORDER);
 	(*T)["VM_PLC"] = new volume_graph(0, 0 - moveable_window::window_header_size, 300 - moveable_window::window_header_size * 2, 300 - moveable_window::window_header_size * 2, std::make_shared<polyline_converter<std::uint8_t, std::uint8_t>>());///todo: interface
-	(*T)["VM_SSBDIIF"] = Butt = new button("Shape alike x^y", system_white, props_and_sets::VolumeMap::on_degree_shape, -110 + moveable_window::window_header_size, -150 - moveable_window::window_header_size, 80, 10, 1, 0xFFFFFF3F, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFAFFF3F, 0xFFAFFFFF, &system_white, "Where y is from frame bellow");///Set shape by degree in input field;
+	(*T)["VM_SSBDIIF"] = Butt = new button("Shape alike x^y", system_white, props_and_sets::volume_map::on_degree_shape, -110 + moveable_window::window_header_size, -150 - moveable_window::window_header_size, 80, 10, 1, 0xFFFFFF3F, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFAFFF3F, 0xFFAFFFFF, &system_white, "Where y is from frame bellow");///Set shape by degree in input field;
 	Butt->tip->safe_change_position_argumented(_Align::left, -150 + moveable_window::window_header_size, -160 - moveable_window::window_header_size);
 	(*T)["VM_DEGREE"] = new input_field("1", -140 + moveable_window::window_header_size, -170 - moveable_window::window_header_size, 10, 20, system_white, nullptr, 0x007FFFFF, nullptr, " ", 4, _Align::center, _Align::center, input_field::Type::FP_PositiveNumbers);
-	(*T)["VM_ERASE"] = Butt = new button("Erase points", system_white, props_and_sets::VolumeMap::on_erase, -35 + moveable_window::window_header_size, -150 - moveable_window::window_header_size, 60, 10, 1, 0xFFFFFF3F, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFAFFF3F, 0xFFAFFFFF, nullptr, "_");
-	(*T)["VM_DELETE"] = new button("Delete map", system_white, props_and_sets::VolumeMap::on_delete, 30 + moveable_window::window_header_size, -150 - moveable_window::window_header_size, 60, 10, 1, 0xFFAFAF3F, 0xFFAFAFFF, 0xFFEFEFFF, 0xFF7F3F7F, 0xFF1F1FFF, nullptr, "_");
-	(*T)["VM_SIMP"] = Butt = new button("Simplify map", system_white, props_and_sets::VolumeMap::on_simplify, -70 - moveable_window::window_header_size, -170 - moveable_window::window_header_size, 60, 10, 1, 0xFFFFFF3F, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFAFFF3F, 0xFFAFFFFF, &system_white, "Reduces amount of \"repeating\" points");
+	(*T)["VM_ERASE"] = Butt = new button("Erase points", system_white, props_and_sets::volume_map::on_erase, -35 + moveable_window::window_header_size, -150 - moveable_window::window_header_size, 60, 10, 1, 0xFFFFFF3F, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFAFFF3F, 0xFFAFFFFF, nullptr, "_");
+	(*T)["VM_DELETE"] = new button("Delete map", system_white, props_and_sets::volume_map::on_delete, 30 + moveable_window::window_header_size, -150 - moveable_window::window_header_size, 60, 10, 1, 0xFFAFAF3F, 0xFFAFAFFF, 0xFFEFEFFF, 0xFF7F3F7F, 0xFF1F1FFF, nullptr, "_");
+	(*T)["VM_SIMP"] = Butt = new button("Simplify map", system_white, props_and_sets::volume_map::on_simplify, -70 - moveable_window::window_header_size, -170 - moveable_window::window_header_size, 60, 10, 1, 0xFFFFFF3F, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFAFFF3F, 0xFFAFFFFF, &system_white, "Reduces amount of \"repeating\" points");
 	Butt->tip->safe_change_position_argumented(_Align::left, -100 - moveable_window::window_header_size, -160 - moveable_window::window_header_size);
-	(*T)["VM_TRACE"] = Butt = new button("Trace map", system_white, props_and_sets::VolumeMap::on_trace, -35 + moveable_window::window_header_size, -170 - moveable_window::window_header_size, 60, 10, 1, 0xFFFFFF3F, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFAFAF3F, 0xFFAFAFFF, &system_white, "Puts every point onto map");
+	(*T)["VM_TRACE"] = Butt = new button("Trace map", system_white, props_and_sets::volume_map::on_trace, -35 + moveable_window::window_header_size, -170 - moveable_window::window_header_size, 60, 10, 1, 0xFFFFFF3F, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFAFAF3F, 0xFFAFAFFF, &system_white, "Puts every point onto map");
 	Butt->tip->safe_change_position_argumented(_Align::left, -65 + moveable_window::window_header_size, -160 - moveable_window::window_header_size);
-	(*T)["VM_SETMODE"] = Butt = new button("Single", system_white, props_and_sets::VolumeMap::on_set_mode_change, 30 + moveable_window::window_header_size, -170 - moveable_window::window_header_size, 40, 10, 1, 0xFFFFFF3F, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFAFAF3F, 0xFFAFAFFF, nullptr, "_");
+	(*T)["VM_SETMODE"] = Butt = new button("Single", system_white, props_and_sets::volume_map::on_set_mode_change, 30 + moveable_window::window_header_size, -170 - moveable_window::window_header_size, 40, 10, 1, 0xFFFFFF3F, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFAFAF3F, 0xFFAFAFFF, nullptr, "_");
 
 	(*wh)["VM"] = T;
 
 	T = new moveable_fui_window("App app_settings", system_white, -100, 110, 200, 230, 125, 2.5f, 50, 50, 2.5f, BACKGROUND_OPQ, HEADER, BORDER);
 
-	(*T)["AS_BCKGID"] = new input_field(std::to_string(app_settings::ShaderMode), -35, 55 - moveable_window::window_header_size, 10, 30, system_white, nullptr, 0x007FFFFF, &system_white, "Background ID", 2, _Align::center, _Align::right, input_field::Type::NaturalNumbers);
+	(*T)["AS_BCKGID"] = new input_field(std::to_string(app_settings::ShaderMode), -35, 55 - moveable_window::window_header_size, 10, 30, system_white, nullptr, 0x007FFFFF, &system_white, "Background id", 2, _Align::center, _Align::right, input_field::Type::NaturalNumbers);
 
 	(*T)["AS_GLOBALSETTINGS"] = new text_box("Global app_settings for new MIDIs", system_white, 0, 85 - moveable_window::window_header_size, 50, 200, 12, 0x007FFF1F, 0x007FFF7F, 1, _Align::center);
 	(*T)["AS_APPLY"] = Butt = new button("Apply", system_white, app_settings::on_set_apply, 85 - moveable_window::window_header_size, -87.5 - moveable_window::window_header_size, 40, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr, "_");
@@ -2656,7 +2656,7 @@ void init()
 	(*T)["COLLAPSE_MIDI"] = new checkbox(72.5 - moveable_window::window_header_size, 75 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF7F00AF, 0x7FFF00AF, 1, 0, &system_white, _Align::right, "Collapse tracks of a MIDI into one");
 	(*T)["APPLY_OFFSET_AFTER"] = new checkbox(57.5 - moveable_window::window_header_size, 75 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF7F00AF, 0x7FFF00AF, 1, 0, &system_white, _Align::right, "Apply offset after PPQ change");
 
-	(*T)["AS_THREADS_COUNT"] = new input_field(std::to_string(_Data.DetectedThreads), 92.5 - moveable_window::window_header_size, 75 - moveable_window::window_header_size, 10, 20, system_white, nullptr, 0x007FFFFF, &system_white, "Threads count", 2, _Align::center, _Align::right, input_field::Type::NaturalNumbers);
+	(*T)["AS_THREADS_COUNT"] = new input_field(std::to_string(_Data.detected_threads), 92.5 - moveable_window::window_header_size, 75 - moveable_window::window_header_size, 10, 20, system_white, nullptr, 0x007FFFFF, &system_white, "Threads count", 2, _Align::center, _Align::right, input_field::Type::NaturalNumbers);
 
 	(*T)["AUTOUPDATECHECK"] = new checkbox(-97.5 + moveable_window::window_header_size, 35 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, check_autoupdates, &system_white, _Align::left, "Check for updates automatically");
 
@@ -2996,13 +2996,13 @@ void gl_exit(int a)
 {
 }
 
-struct SafcRuntime
+struct safc_runtime
 {
 	virtual void operator()(int argc, char** argv) = 0;
 };
 
-struct SafcGuiRuntime :
-	public SafcRuntime
+struct safc_gui_runtime :
+	public safc_runtime
 {
 	virtual void operator()(int argc, char** argv) override
 	{
@@ -3068,8 +3068,8 @@ struct SafcGuiRuntime :
 	}
 };
 
-struct SafcCliRuntime:
-	public SafcRuntime
+struct safc_cli_runtime:
+	public safc_runtime
 {
 	constexpr static auto CLI_inplace_doc = "SAFC CLI (Beta) wiki page: https://github.com/DixelU/SAFC/wiki/SAFC-CLI-(Beta)\n"
 		"To run SAFC in CLI mode you need to pass the path to the JSON config file as an argument:\n\t(example:) SAFC.exe \"X:\\SAFC configs\\my_merge_config.json\"\n\n"
@@ -3111,7 +3111,7 @@ struct SafcCliRuntime:
 	virtual void operator()(int argc, char** argv) override
 	{
 		ShowWindow(GetConsoleWindow(), SW_SHOW);
-		_Data.DetectedThreads =
+		_Data.detected_threads =
 			std::max(
 				std::min((std::uint16_t)(
 					(std::uint16_t)std::max(
@@ -3123,7 +3123,7 @@ struct SafcCliRuntime:
 					(std::uint16_t)(ceil(get_available_memory() / 2048))
 				), (std::uint16_t)1
 			);
-		_Data.IsCLIMode = true;
+		_Data.is_cli_mode = true;
 
 		if (argc < 2)
 		{
@@ -3178,13 +3178,13 @@ struct SafcCliRuntime:
 		}
 
 		if (global_ppq_override != config.end())
-			_Data.SetGlobalPPQN(global_ppq_override->second->AsNumber());
+			_Data.set_global_ppqn(global_ppq_override->second->AsNumber());
 
 		if (global_tempo_override != config.end())
-			_Data.SetGlobalTempo(global_tempo_override->second->AsNumber());
+			_Data.set_global_tempo(global_tempo_override->second->AsNumber());
 
 		if (global_offset != config.end())
-			_Data.SetGlobalOffset(global_offset->second->AsNumber());
+			_Data.set_global_offset(global_offset->second->AsNumber());
 
 		auto& filesArray = files->second->AsArray();
 		std::vector<std::wstring> filenames;
@@ -3205,83 +3205,83 @@ struct SafcCliRuntime:
 			
 			auto ppq_override = object.find(L"ppq_override");
 			if (ppq_override != object.end())
-				_Data.Files[index].NewPPQN = ppq_override->second->AsNumber();
+				_Data.files[index].new_ppqn = ppq_override->second->AsNumber();
 
 			auto tempo_override = object.find(L"tempo_override");
 			if (tempo_override != object.end())
-				_Data.Files[index].NewTempo = tempo_override->second->AsNumber();
+				_Data.files[index].new_tempo = tempo_override->second->AsNumber();
 
 			auto offset = object.find(L"offset");
 			if (offset != object.end())
-				_Data.Files[index].OffsetTicks = offset->second->AsNumber();
+				_Data.files[index].offset_ticks = offset->second->AsNumber();
 
 			auto selection_start = object.find(L"selection_start");
 			if (selection_start != object.end())
-				_Data.Files[index].SelectionStart = selection_start->second->AsNumber();
+				_Data.files[index].selection_start = selection_start->second->AsNumber();
 
 			auto selection_length = object.find(L"selection_length");
 			if (selection_length != object.end())
-				_Data.Files[index].SelectionLength = selection_length->second->AsNumber();
+				_Data.files[index].selection_length = selection_length->second->AsNumber();
 
 			auto ignore_notes = object.find(L"ignore_notes");
 			if (ignore_notes != object.end())
-				_Data.Files[index].SetBoolSetting(_BoolSettings::ignore_notes, ignore_notes->second->AsBool());
+				_Data.files[index].set_bool_setting(_BoolSettings::ignore_notes, ignore_notes->second->AsBool());
 
 			auto ignore_pitches = object.find(L"ignore_pitches");
 			if (ignore_pitches != object.end())
-				_Data.Files[index].SetBoolSetting(_BoolSettings::ignore_pitches, ignore_pitches->second->AsBool());
+				_Data.files[index].set_bool_setting(_BoolSettings::ignore_pitches, ignore_pitches->second->AsBool());
 
 			auto ignore_tempos = object.find(L"ignore_tempos");
 			if (ignore_tempos != object.end())
-				_Data.Files[index].SetBoolSetting(_BoolSettings::ignore_tempos, ignore_tempos->second->AsBool());
+				_Data.files[index].set_bool_setting(_BoolSettings::ignore_tempos, ignore_tempos->second->AsBool());
 
 			auto ignore_other = object.find(L"ignore_other");
 			if (ignore_other != object.end())
-				_Data.Files[index].SetBoolSetting(_BoolSettings::ignore_all_but_tempos_notes_and_pitch, ignore_other->second->AsBool());
+				_Data.files[index].set_bool_setting(_BoolSettings::ignore_all_but_tempos_notes_and_pitch, ignore_other->second->AsBool());
 
 			auto piano_only = object.find(L"piano_only");
 			if (piano_only != object.end())
-				_Data.Files[index].SetBoolSetting(_BoolSettings::all_instruments_to_piano, piano_only->second->AsBool());
+				_Data.files[index].set_bool_setting(_BoolSettings::all_instruments_to_piano, piano_only->second->AsBool());
 
 			auto remove_remnants = object.find(L"remove_remnants");
 			if (remove_remnants != object.end())
-				_Data.Files[index].SetBoolSetting(_BoolSettings::remove_remnants, remove_remnants->second->AsBool());
+				_Data.files[index].set_bool_setting(_BoolSettings::remove_remnants, remove_remnants->second->AsBool());
 
 			auto remove_empty_tracks = object.find(L"remove_empty_tracks");
 			if (remove_empty_tracks != object.end())
-				_Data.Files[index].SetBoolSetting(_BoolSettings::all_instruments_to_piano, remove_empty_tracks->second->AsBool());
+				_Data.files[index].set_bool_setting(_BoolSettings::all_instruments_to_piano, remove_empty_tracks->second->AsBool());
 
 			auto channel_split = object.find(L"channel_split");
 			if (channel_split != object.end())
-				_Data.Files[index].ChannelsSplit = channel_split->second->AsBool();
+				_Data.files[index].channels_split = channel_split->second->AsBool();
 
 			auto collapse_midi = object.find(L"collapse_midi");
 			if (collapse_midi != object.end())
-				_Data.Files[index].CollapseMIDI = collapse_midi->second->AsBool();
+				_Data.files[index].collapse_midi = collapse_midi->second->AsBool();
 
 			auto apply_offset_after = object.find(L"apply_offset_after");
 			if (apply_offset_after != object.end())
-				_Data.Files[index].ApplyOffsetAfter = apply_offset_after->second->AsBool();
+				_Data.files[index].apply_offset_after = apply_offset_after->second->AsBool();
 
 			auto rsb_compression = object.find(L"rsb_compression");
 			if (rsb_compression != object.end())
-				_Data.Files[index].RSBCompression = rsb_compression->second->AsBool();
+				_Data.files[index].rsb_compression = rsb_compression->second->AsBool();
 
 			auto ignore_meta_rsb = object.find(L"ignore_meta_rsb");
 			if (ignore_meta_rsb != object.end())
-				_Data.Files[index].allow_legacy_rsb_meta_interaction = ignore_meta_rsb->second->AsBool();
+				_Data.files[index].allow_legacy_rsb_meta_interaction = ignore_meta_rsb->second->AsBool();
 
 			auto inplace_mergable = object.find(L"inplace_mergable");
 			if (inplace_mergable != object.end())
-				_Data.Files[index].InplaceMergeEnabled = inplace_mergable->second->AsBool();
+				_Data.files[index].inplace_merge_enabled = inplace_mergable->second->AsBool();
 
 			auto allow_sysex = object.find(L"allow_sysex");
 			if (allow_sysex != object.end())
-				_Data.Files[index].AllowSysex = allow_sysex->second->AsBool();
+				_Data.files[index].allow_sysex = allow_sysex->second->AsBool();
 
 			auto enable_zero_vel = object.find(L"enable_zero_velocity");
 			if (enable_zero_vel != object.end())
-				_Data.Files[index].EnableZeroVelocity = enable_zero_vel->second->AsBool();
+				_Data.files[index].enable_zero_velocity = enable_zero_vel->second->AsBool();
 
 			index++;
 		}
@@ -3289,13 +3289,13 @@ struct SafcCliRuntime:
 		auto save_to = config.find(L"save_to");
 		if (save_to != config.end())
 		{
-			_Data.SavePath = (save_to->second->AsString());
-			size_t Pos = _Data.SavePath.rfind(L".mid");
-			if (Pos >= _Data.SavePath.size() || Pos <= _Data.SavePath.size() - 4)
-				_Data.SavePath += L".mid";
+			_Data.save_path = (save_to->second->AsString());
+			size_t Pos = _Data.save_path.rfind(L".mid");
+			if (Pos >= _Data.save_path.size() || Pos <= _Data.save_path.size() - 4)
+				_Data.save_path += L".mid";
 		}
 
-		auto LocalMCTM = _Data.MCTM_Constructor();
+		auto LocalMCTM = _Data.mctm_constructor();
 		LocalMCTM->StartProcessingMIDIs();
 
 		while (LocalMCTM->CheckSMRPProcessingAndStartNextStep())
@@ -3317,14 +3317,14 @@ int main(int argc, char** argv)
 
 	std::ios_base::sync_with_stdio(false); //why not
 
-	std::shared_ptr<SafcRuntime> runtime;
+	std::shared_ptr<safc_runtime> runtime;
 
 	restore_reg_settings();
 
 	if (argc > 1)
-		runtime = std::make_shared<SafcCliRuntime>();
+		runtime = std::make_shared<safc_cli_runtime>();
 	else
-		runtime = std::make_shared<SafcGuiRuntime>();
+		runtime = std::make_shared<safc_gui_runtime>();
 
 	(*runtime)(argc, argv);
 
