@@ -12,11 +12,6 @@ struct volume_graph : handleable_ui_part
 	float cx_pos, cy_pos, horizontal_sides_size, vertical_sides_size;
 	float mouse_x, mouse_y, x_sq_sz, y_sq_sz;
 	bool hovered, active_setting, re_put_mode;
-	// Backward-compat aliases
-	bool& RePutMode = re_put_mode;
-	bool& ActiveSetting = active_setting;
-	bool& Hovered = hovered;
-	std::shared_ptr<polyline_converter<std::uint8_t, std::uint8_t>>& PLC_bb = plc_bb;
 	std::uint8_t xcp, ycp;
 	std::uint8_t fpx, fpy;
 
@@ -35,7 +30,7 @@ struct volume_graph : handleable_ui_part
 		this->re_put_mode = false;
 		this->stl_msg = std::make_unique<single_text_line>(
 			"_", cx_pos, cy_pos,
-			system_white->x_unit_size, system_white->y_unit_size, system_white->space_width,
+			system_white.x_unit_size, system_white.y_unit_size, system_white.space_width,
 			2, 0xFFAFFFCF, std::optional<std::uint32_t>{0xAFFFAFCF}, (7 << 4) | 3);
 		this->mouse_x = this->mouse_y = 0.f;
 		this->hovered_point = std::pair<std::uint8_t, std::uint8_t>(0, 0);
@@ -174,8 +169,6 @@ struct volume_graph : handleable_ui_part
 		}
 	}
 
-	// Legacy alias
-	void _MakeMapMoreSimple() { make_map_more_simple(); }
 
 	void safe_move(float dx, float dy) override
 	{
@@ -230,8 +223,6 @@ struct volume_graph : handleable_ui_part
 		}
 	}
 
-	// Legacy alias
-	void RePutFromAtoB(std::uint8_t a, std::uint8_t b, std::uint8_t va, std::uint8_t vb) { re_put_from_a_to_b(a, b, va, vb); }
 
 	void just_put_new_value(std::uint8_t a, std::uint8_t val_a)
 	{
@@ -240,8 +231,6 @@ struct volume_graph : handleable_ui_part
 			plc_bb->insert(a, val_a);
 	}
 
-	// Legacy alias
-	void JustPutNewValue(std::uint8_t a, std::uint8_t v) { just_put_new_value(a, v); }
 
 	[[nodiscard]] bool mouse_handler(float mx, float my, char button_btn, char state) override
 	{

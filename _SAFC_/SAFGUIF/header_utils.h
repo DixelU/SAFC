@@ -4,7 +4,7 @@
 
 #include <GL/freeglut.h>
 
-#include "consts.h"
+#include "../consts.h"
 
 #include <Windows.h>
 #include <string>
@@ -65,6 +65,8 @@ inline void __glcolor(std::uint32_t uINT)
 	glColor4ub(((uINT & 0xFF000000) >> 24), ((uINT & 0xFF0000) >> 16), ((uINT & 0xFF00) >> 8), (uINT & 0xFF));
 }
 
+template<typename T>
+inline void discard(T) {}
 
 float wind_x = window_base_width, wind_y = window_base_height;
 
@@ -78,16 +80,6 @@ bool animation_is_active = false,
 std::uint32_t timer_v = 0;
 std::int16_t years_old = -1;
 
-// Backward-compat aliases for renamed globals
-auto& WindX = wind_x;
-auto& WindY = wind_y;
-auto& FIRSTBOOT = firstboot;
-auto& DRAG_OVER = drag_over;
-auto& APRIL_FOOL = april_fool;
-auto& MONTH_BEGINING = month_beginning;
-auto& ANIMATION_IS_ACTIVE = animation_is_active;
-auto& TimerV = timer_v;
-auto& YearsOld = years_old;
 
 HWND hWnd;
 HDC hDc;

@@ -53,7 +53,7 @@ struct drag_n_drop_handler : IDropTarget
 	{
 		//MessageBox(hWnd, "dragenter", "Drag", MB_ICONINFORMATION);
 		//cout << "a" << endl;
-		DRAG_OVER = 1;
+		drag_over = 1;
 		*effect = DROPEFFECT_COPY;
 		return NOERROR;
 	}
@@ -68,7 +68,7 @@ struct drag_n_drop_handler : IDropTarget
 	HRESULT STDMETHODCALLTYPE DragLeave() override
 	{
 		//MessageBox(hWnd, "dragleave", "Drag", MB_ICONINFORMATION);
-		DRAG_OVER = 0;
+		drag_over = 0;
 		return NOERROR;
 	}
 
@@ -115,7 +115,7 @@ struct drag_n_drop_handler : IDropTarget
 		else
 			throw_alert_error("drag_and_drop: QueryGetData");
 
-		DRAG_OVER = 0;
+		drag_over = 0;
 		*effect = DROPEFFECT_COPY;
 		return NOERROR;
 	}

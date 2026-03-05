@@ -69,7 +69,7 @@ struct button : handleable_ui_part
 	}
 
 	button(	std::string button_text,
-		single_text_line_settings* button_text_stls,
+		single_text_line_settings& button_text_stls,
 		std::function<void()> on_click,
 		float x_pos,
 		float y_pos,
@@ -84,19 +84,20 @@ struct button : handleable_ui_part
 		single_text_line_settings* tip_stls,
 		std::string tip_text = " ")
 	{
-		button_text_stls->set_new_pos(x_pos, y_pos);
-		this->stl.reset(button_text_stls->create_one(button_text));
+		button_text_stls.set_new_pos(x_pos, y_pos);
+		this->stl.reset(button_text_stls.create_one(button_text));
 		if (tip_stls)
 		{
 			tip_stls->set_new_pos(x_pos, y_pos - height);
 			this->tip.reset(tip_stls->create_one(tip_text));
 		}
+
 		this->border_width = border_width;
 		this->x_pos = x_pos;
 		this->y_pos = y_pos;
 		this->width = width;
 		this->height = height;
-		this->rgba_color = button_text_stls->rgba_color;
+		this->rgba_color = button_text_stls.rgba_color;
 		this->rgba_border = rgba_border;
 		this->rgba_background = rgba_background;
 		this->hovered_rgba_color = hovered_rgba_color;

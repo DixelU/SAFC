@@ -1,0 +1,143 @@
+﻿
+  _SAFC_.cpp
+C:\Users\User\SAFC_v1\_SAFC_\SAFGUIF\moveable_fui_window.h(245,33): warning C4805: '|=': unsafe mix of type 'bool' and type 'unsigned int' in operation [C:\Users\User\SAFC_v1\_SAFC_\_SAFC_.vcxproj]
+  (compiling source file '_SAFC_.cpp')
+  
+C:\Users\User\SAFC_v1\_SAFC_\SAFGUIF\moveable_fui_window.h(245,33): warning C4805: '|': unsafe mix of type 'bool' and type 'unsigned int' in operation [C:\Users\User\SAFC_v1\_SAFC_\_SAFC_.vcxproj]
+  (compiling source file '_SAFC_.cpp')
+  
+C:\Users\User\SAFC_v1\_SAFC_\SAFGUIF\moveable_fui_window.h(257,38): warning C4805: '|=': unsafe mix of type 'bool' and type 'unsigned int' in operation [C:\Users\User\SAFC_v1\_SAFC_\_SAFC_.vcxproj]
+  (compiling source file '_SAFC_.cpp')
+  
+C:\Users\User\SAFC_v1\_SAFC_\SAFGUIF\moveable_fui_window.h(257,38): warning C4805: '|': unsafe mix of type 'bool' and type 'unsigned int' in operation [C:\Users\User\SAFC_v1\_SAFC_\_SAFC_.vcxproj]
+  (compiling source file '_SAFC_.cpp')
+  
+C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\memory(3659,56): warning C4244: 'argument': conversion from '_Ty' to 'float', possible loss of data [C:\Users\User\SAFC_v1\_SAFC_\_SAFC_.vcxproj]
+C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\memory(3659,56): warning C4244:         with [C:\Users\User\SAFC_v1\_SAFC_\_SAFC_.vcxproj]
+C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\memory(3659,56): warning C4244:         [ [C:\Users\User\SAFC_v1\_SAFC_\_SAFC_.vcxproj]
+C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\memory(3659,56): warning C4244:             _Ty=int [C:\Users\User\SAFC_v1\_SAFC_\_SAFC_.vcxproj]
+C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\memory(3659,56): warning C4244:         ] [C:\Users\User\SAFC_v1\_SAFC_\_SAFC_.vcxproj]
+  (compiling source file '_SAFC_.cpp')
+      C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\memory(3659,56):
+      the template instantiation context (the oldest one first) is
+          C:\Users\User\SAFC_v1\_SAFC_\SAFGUIF\windows_handler.h(65,27):
+          see reference to function template instantiation 'std::unique_ptr<moveable_fui_window,std::default_delete<moveable_fui_window>> std::make_unique<moveable_fui_window,const char(&)[13],single_text_line_settings&,int,float,int,const float&,int,float,float,float,float,const unsigned int&,const unsigned int&,const unsigned int&,0>(const char (&)[13],single_text_line_settings &,int &&,float &&,int &&,const float &,int &&,float &&,float &&,float &&,float &&,const unsigned int &,const unsigned int &,const unsigned int &)' being compiled
+  
+C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\memory(3659,56): warning C4244: 'argument': conversion from '_Ty' to 'float', possible loss of data [C:\Users\User\SAFC_v1\_SAFC_\_SAFC_.vcxproj]
+C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\memory(3659,56): warning C4244:         with [C:\Users\User\SAFC_v1\_SAFC_\_SAFC_.vcxproj]
+C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\memory(3659,56): warning C4244:         [ [C:\Users\User\SAFC_v1\_SAFC_\_SAFC_.vcxproj]
+C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\memory(3659,56): warning C4244:             _Ty=double [C:\Users\User\SAFC_v1\_SAFC_\_SAFC_.vcxproj]
+C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\memory(3659,56): warning C4244:         ] [C:\Users\User\SAFC_v1\_SAFC_\_SAFC_.vcxproj]
+  (compiling source file '_SAFC_.cpp')
+      C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\memory(3659,56):
+      the template instantiation context (the oldest one first) is
+          C:\Users\User\SAFC_v1\_SAFC_\_SAFC_.cpp(1942,10):
+          see reference to function template instantiation 'std::unique_ptr<bool_and_number_checker<std::atomic_bool,std::atomic_uint64_t>,std::default_delete<bool_and_number_checker<std::atomic_bool,std::atomic_uint64_t>>> std::make_unique<bool_and_number_checker<std::atomic_bool,std::atomic_uint64_t>,double,double,single_text_line_settings*,std::atomic_bool*,std::atomic_uint64_t*,0>(double &&,double &&,single_text_line_settings *&&,std::atomic_bool *&&,std::atomic_uint64_t *&&)' being compiled
+  
+C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\xutility(4924,18): warning C4244: '=': conversion from 'wchar_t' to 'char', possible loss of data [C:\Users\User\SAFC_v1\_SAFC_\_SAFC_.vcxproj]
+  (compiling source file '_SAFC_.cpp')
+      C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\xutility(4924,18):
+      the template instantiation context (the oldest one first) is
+          C:\Users\User\SAFC_v1\_SAFC_\SAFC_InnerModules\simple_player.h(1958,37):
+          see reference to function template instantiation 'std::basic_string<char,std::char_traits<char>,std::allocator<char>>::basic_string<std::_String_iterator<std::_String_val<std::_Simple_types<_Elem>>>,0>(_Iter,_Iter,const _Alloc &)' being compiled
+          with
+          [
+              _Elem=wchar_t,
+              _Iter=std::_String_iterator<std::_String_val<std::_Simple_types<wchar_t>>>,
+              _Alloc=std::allocator<char>
+          ]
+              C:\Users\User\SAFC_v1\_SAFC_\SAFC_InnerModules\simple_player.h(1958,24):
+              see the first reference to 'std::basic_string<char,std::char_traits<char>,std::allocator<char>>::basic_string' in 'simple_player::init_midi_out'
+          C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\xstring(862,17):
+          see reference to function template instantiation 'void std::basic_string<char,std::char_traits<char>,std::allocator<char>>::_Construct_from_iter<wchar_t*,wchar_t*,_Size_type>(_Iter,const _Sent,_Size)' being compiled
+          with
+          [
+              _Size_type=unsigned __int64,
+              _Iter=wchar_t *,
+              _Sent=wchar_t *,
+              _Size=unsigned __int64
+          ]
+          C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\xstring(1018,18):
+          see reference to function template instantiation '_OutIt *std::_Copy_n_unchecked4<wchar_t*,_Size,char*>(_InIt,_SizeTy,_OutIt)' being compiled
+          with
+          [
+              _OutIt=char *,
+              _Size=unsigned __int64,
+              _InIt=wchar_t *,
+              _SizeTy=unsigned __int64
+          ]
+  
+C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\xutility(4924,18): warning C4244: '=': conversion from 'const wchar_t' to 'char', possible loss of data [C:\Users\User\SAFC_v1\_SAFC_\_SAFC_.vcxproj]
+  (compiling source file '_SAFC_.cpp')
+      C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\xutility(4924,18):
+      the template instantiation context (the oldest one first) is
+          C:\Users\User\SAFC_v1\_SAFC_\_SAFC_.cpp(303,95):
+          see reference to function template instantiation 'std::basic_string<char,std::char_traits<char>,std::allocator<char>>::basic_string<std::_String_const_iterator<std::_String_val<std::_Simple_types<_Elem>>>,0>(_Iter,_Iter,const _Alloc &)' being compiled
+          with
+          [
+              _Elem=wchar_t,
+              _Iter=std::_String_const_iterator<std::_String_val<std::_Simple_types<wchar_t>>>,
+              _Alloc=std::allocator<char>
+          ]
+              C:\Users\User\SAFC_v1\_SAFC_\_SAFC_.cpp(303,25):
+              see the first reference to 'std::basic_string<char,std::char_traits<char>,std::allocator<char>>::basic_string' in 'SAFC_VersionCheck::<lambda_1>::operator ()'
+          C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\xstring(862,17):
+          see reference to function template instantiation 'void std::basic_string<char,std::char_traits<char>,std::allocator<char>>::_Construct_from_iter<const wchar_t*,const wchar_t*,_Size_type>(_Iter,const _Sent,_Size)' being compiled
+          with
+          [
+              _Size_type=unsigned __int64,
+              _Iter=const wchar_t *,
+              _Sent=const wchar_t *,
+              _Size=unsigned __int64
+          ]
+          C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\xstring(1018,18):
+          see reference to function template instantiation '_OutIt *std::_Copy_n_unchecked4<const wchar_t*,_Size,char*>(_InIt,_SizeTy,_OutIt)' being compiled
+          with
+          [
+              _OutIt=char *,
+              _Size=unsigned __int64,
+              _InIt=const wchar_t *,
+              _SizeTy=unsigned __int64
+          ]
+  
+C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\type_traits(1688,98): warning C4244: 'argument': conversion from 'unsigned __int64' to 'unsigned int', possible loss of data [C:\Users\User\SAFC_v1\_SAFC_\_SAFC_.vcxproj]
+  (compiling source file '_SAFC_.cpp')
+      C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\type_traits(1688,98):
+      the template instantiation context (the oldest one first) is
+          C:\Users\User\SAFC_v1\_SAFC_\_SAFC_.cpp(1911,15):
+          see reference to function template instantiation 'std::thread::thread<OnStart::<lambda_1>::()::<lambda_1>,std::shared_ptr<midi_collection_threaded_merger>&,std::reference_wrapper<_Ty>,size_t&,0>(_Fn &&,std::shared_ptr<midi_collection_threaded_merger> &,std::reference_wrapper<_Ty> &&,size_t &)' being compiled
+          with
+          [
+              _Ty=midi_processor_visualiser,
+              _Fn=OnStart::<lambda_1>::()::<lambda_1>
+          ]
+          C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\thread(93,9):
+          see reference to function template instantiation 'void std::thread::_Start<_Ty,std::shared_ptr<midi_collection_threaded_merger>&,std::reference_wrapper<midi_processor_visualiser>,T&>(_Fn &&,std::shared_ptr<midi_collection_threaded_merger> &,std::reference_wrapper<midi_processor_visualiser> &&,T &)' being compiled
+          with
+          [
+              _Ty=OnStart::<lambda_1>::()::<lambda_1>,
+              T=uint64_t,
+              _Fn=OnStart::<lambda_1>::()::<lambda_1>
+          ]
+          C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\thread(76,40):
+          see reference to function template instantiation 'unsigned int (__cdecl *std::thread::_Get_invoke<std::thread::_Start::_Tuple,0,1,2,3>(std::integer_sequence<size_t,0,1,2,3>) noexcept)(void *) noexcept' being compiled
+          C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\thread(67,17):
+          see reference to function template instantiation 'unsigned int std::thread::_Invoke<_Tuple,0,1,2,3>(void *) noexcept' being compiled
+          with
+          [
+              _Tuple=std::thread::_Start::_Tuple
+          ]
+          C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\include\thread(60,14):
+          see reference to function template instantiation 'void std::invoke<OnStart::<lambda_1>::()::<lambda_1>,std::shared_ptr<midi_collection_threaded_merger>,std::reference_wrapper<_Ty>,unsigned __int64>(_Callable &&,_Ty1 &&,std::reference_wrapper<_Ty> &&,unsigned __int64 &&) noexcept(false)' being compiled
+          with
+          [
+              _Ty=midi_processor_visualiser,
+              _Callable=OnStart::<lambda_1>::()::<lambda_1>,
+              _Ty1=std::shared_ptr<midi_collection_threaded_merger>
+          ]
+  
+  Generating code
+  Finished generating code
+  _SAFC_.vcxproj -> C:\Users\User\SAFC_v1\_SAFC_\x64\Release\SAFC.exe
+  "pwsh.exe" ╨╜╨╡ ╤П╨▓╨╗╤П╨╡╤В╤Б╤П ╨▓╨╜╤Г╤В╤А╨╡╨╜╨╜╨╡╨╣ ╨╕╨╗╨╕ ╨▓╨╜╨╡╤И╨╜╨╡╨╣
+  ╨║╨╛╨╝╨░╨╜╨┤╨╛╨╣, ╨╕╤Б╨┐╨╛╨╗╨╜╤П╨╡╨╝╨╛╨╣ ╨┐╤А╨╛╨│╤А╨░╨╝╨╝╨╛╨╣ ╨╕╨╗╨╕ ╨┐╨░╨║╨╡╤В╨╜╤Л╨╝ ╤Д╨░╨╣╨╗╨╛╨╝.

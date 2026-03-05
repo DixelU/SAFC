@@ -87,11 +87,6 @@ struct midi_processor_visualiser : handleable_ui_part
 		SMRP = smrp;
 	}
 
-	// Backward-compat method wrappers
-	void SetSMRP(std::pair<
-		midi_collection_threaded_merger::proc_data_ptr,
-		midi_collection_threaded_merger::message_buffer_ptr>& smrp) { set_smrp(smrp); }
-	void SetInfoString(const std::string& s) { set_info_string(s); }
 
 	void update_info()
 	{

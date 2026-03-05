@@ -185,7 +185,7 @@ struct button_settings
 	[[nodiscard]] std::unique_ptr<button> create_one(const std::string& btn_text, bool keep_text = false)
 	{
 		if (stls && stls_based_settings)
-			return std::make_unique<button>(keep_text ? button_text : btn_text, stls, on_click,
+			return std::make_unique<button>(keep_text ? button_text : btn_text, *stls, on_click,
 				x_pos, y_pos, width, height, border_width,
 				rgba_background, rgba_border,
 				hovered_rgba_color, hovered_rgba_background, hovered_rgba_border, tip, tip_text);

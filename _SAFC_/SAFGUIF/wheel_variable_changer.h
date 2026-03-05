@@ -31,7 +31,7 @@ struct wheel_variable_changer : handleable_ui_part
 		float y_pos,
 		double default_var,
 		double default_fact,
-		single_text_line_settings* stls,
+		single_text_line_settings& stls,
 		std::string var_string = " ",
 		std::string fac_string = " ",
 		Type type = Type::exponential):
@@ -46,8 +46,8 @@ struct wheel_variable_changer : handleable_ui_part
 		this->type = type;
 		this->sen = Sensitivity::on_wheel;
 
-		var_if.reset(new input_field(std::to_string(default_var).substr(0, 8), x_pos - 25.f, y_pos + 15, 10, 40, stls, nullptr, 0x007FFFFF, stls, var_string, 8, _Align::center, _Align::center, input_field::Type::FP_PositiveNumbers));
-		fac_if.reset(new input_field(std::to_string(default_fact).substr(0, 8), x_pos - 25.f, y_pos - 10, 10, 40, stls, nullptr, 0x007FFFFF, stls, fac_string, 8, _Align::center, _Align::center, input_field::Type::FP_PositiveNumbers));
+		var_if.reset(new input_field(std::to_string(default_var).substr(0, 8), x_pos - 25.f, y_pos + 15, 10, 40, stls, nullptr, 0x007FFFFF, &stls, var_string, 8, _Align::center, _Align::center, input_field::Type::FP_PositiveNumbers));
+		fac_if.reset(new input_field(std::to_string(default_fact).substr(0, 8), x_pos - 25.f, y_pos - 10, 10, 40, stls, nullptr, 0x007FFFFF, &stls, fac_string, 8, _Align::center, _Align::center, input_field::Type::FP_PositiveNumbers));
 	}
 
 	void draw() override
@@ -150,8 +150,8 @@ struct wheel_variable_changer : handleable_ui_part
 	{
 		std::lock_guard locker(lock);
 
-		fac_if->mouse_handler(mx, my, button_btn, state);
-		var_if->mouse_handler(mx, my, button_btn, state);
+		discard(fac_if->mouse_handler(mx, my, button_btn, state));
+		discard(var_if->mouse_handler(mx, my, button_btn, state));
 
 		mx -= x_pos;
 		my -= y_pos;

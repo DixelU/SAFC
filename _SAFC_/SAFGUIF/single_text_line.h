@@ -190,7 +190,7 @@ struct single_text_line
 		recalculate_width();
 	}
 
-	inline float default_width_formulae()
+	inline float default_width_formulae() const
 	{
 		return chars.size() * (2.f * x_unit_size) + (chars.size() - 1) * space_width;
 	}

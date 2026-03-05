@@ -18,7 +18,7 @@ struct moveable_fui_window : public moveable_window
 
 	inline static constexpr float budge_slope = 1.f;
 
-	moveable_fui_window(std::string win_name, single_text_line_settings* win_name_settings,
+	moveable_fui_window(std::string win_name, single_text_line_settings& win_name_settings,
 		float x_pos, float y_pos, float width, float height,
 		float headers_hat_width, float headers_hat_height,
 		float top_handles_height, float bottom_handles_height,

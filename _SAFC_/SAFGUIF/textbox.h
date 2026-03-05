@@ -20,7 +20,7 @@ struct text_box : handleable_ui_part
 	float x_pos, y_pos;
 	float width, height;
 	float vertical_offset, calculated_text_height;
-	single_text_line_settings* stls; // non-owning
+	single_text_line_settings& stls;
 
 	std::uint8_t border_width;
 	std::uint32_t rgba_border, rgba_background, symbols_per_line;
@@ -34,7 +34,7 @@ struct text_box : handleable_ui_part
 
 	text_box(
 		std::string txt,
-		single_text_line_settings* stls,
+		single_text_line_settings& stls,
 		float x_pos,
 		float y_pos,
 		float height,
@@ -44,13 +44,13 @@ struct text_box : handleable_ui_part
 		std::uint32_t rgba_border,
 		std::uint8_t border_width,
 		_Align text_align = _Align::left,
-		VerticalOverflow v_overflow = VerticalOverflow::cut)
+		VerticalOverflow v_overflow = VerticalOverflow::cut): 
+			stls(stls)
 	{
 		this->text_align = text_align;
 		this->v_overflow = v_overflow;
 		this->border_width = border_width;
 		this->vertical_offset = vertical_offset;
-		this->stls = stls;
 		this->x_pos = x_pos;
 		this->y_pos = y_pos;
 		this->width = width;
@@ -71,7 +71,7 @@ struct text_box : handleable_ui_part
 		std::vector<std::string> paragraph;
 		std::string line;
 
-		stls->set_new_pos(x_pos, y_pos + 0.5f * height + 0.5f * vertical_offset);
+		stls.set_new_pos(x_pos, y_pos + 0.5f * height + 0.5f * vertical_offset);
 		for (int i = 0; i < (int)text.size(); i++)
 		{
 			if (text[i] == ' ')
@@ -124,16 +124,16 @@ struct text_box : handleable_ui_part
 
 		for (int i = 0; i < (int)paragraph.size(); i++)
 		{
-			stls->move(0, 0 - vertical_offset);
-			if (v_overflow == VerticalOverflow::cut && stls->cy_pos < y_pos - height)
+			stls.move(0, 0 - vertical_offset);
+			if (v_overflow == VerticalOverflow::cut && stls.cy_pos < y_pos - height)
 				break;
 
-			auto& new_line = lines.emplace_back(stls->create_one(paragraph[i]));
+			auto& new_line = lines.emplace_back(stls.create_one(paragraph[i]));
 
 			if (text_align == _Align::right)
-				new_line->safe_change_position_argumented(GLOBAL_RIGHT, ((this->x_pos) + (0.5f * width) - this->stls->x_unit_size), lines.back()->cy_pos);
+				new_line->safe_change_position_argumented(GLOBAL_RIGHT, ((x_pos) + (0.5f * width) - stls.x_unit_size), lines.back()->cy_pos);
 			else if (text_align == _Align::left)
-				new_line->safe_change_position_argumented(GLOBAL_LEFT, ((this->x_pos) - (0.5f * width) + this->stls->x_unit_size), lines.back()->cy_pos);
+				new_line->safe_change_position_argumented(GLOBAL_LEFT, ((x_pos) - (0.5f * width) + stls.x_unit_size), lines.back()->cy_pos);
 		}
 
 		calculated_text_height = (lines.front()->cy_pos - lines.back()->cy_pos) + lines.front()->calculated_height;
@@ -178,7 +178,7 @@ struct text_box : handleable_ui_part
 	void recalculate_available_space_for_text()
 	{
 		std::lock_guard locker(lock);
-		symbols_per_line = std::floor((width + stls->x_unit_size * 2) / (stls->x_unit_size * 2 + stls->space_width));
+		symbols_per_line = std::floor((width + stls.x_unit_size * 2) / (stls.x_unit_size * 2 + stls.space_width));
 	}
 
 	void safe_move(float dx, float dy) override
@@ -188,7 +188,7 @@ struct text_box : handleable_ui_part
 		x_pos += dx;
 		y_pos += dy;
 		
-		stls->move(dx, dy);
+		stls.move(dx, dy);
 
 		for (auto& line_ptr : lines)
 			line_ptr->safe_move(dx, dy);

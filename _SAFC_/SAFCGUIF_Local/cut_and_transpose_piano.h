@@ -16,8 +16,6 @@ struct cut_and_transpose_piano : handleable_ui_part
 	float calculated_height, calculated_width;
 	float base_x_pos, base_y_pos, piano_height, key_width;
 	bool focused;
-	// Backward-compat aliases
-	std::shared_ptr<cut_and_transpose>& PianoTransform = piano_transform;
 
 	~cut_and_transpose_piano() override = default;
 
@@ -31,11 +29,11 @@ struct cut_and_transpose_piano : handleable_ui_part
 		this->calculated_width = key_width * (128 * 3);
 		this->piano_transform = std::move(piano_transform);
 		this->focused = false;
-		system_white->set_new_pos(base_x_pos + key_width * (128 * 1.25f), base_y_pos - 0.75f * piano_height);
-		this->min_cont.reset(system_white->create_one("_"));
-		system_white->set_new_pos(base_x_pos - key_width * (128 * 1.25f), base_y_pos - 0.75f * piano_height);
-		this->max_cont.reset(system_white->create_one("_"));
-		this->transp.reset(system_white->create_one("_"));
+		system_white.set_new_pos(base_x_pos + key_width * (128 * 1.25f), base_y_pos - 0.75f * piano_height);
+		this->min_cont.reset(system_white.create_one("_"));
+		system_white.set_new_pos(base_x_pos - key_width * (128 * 1.25f), base_y_pos - 0.75f * piano_height);
+		this->max_cont.reset(system_white.create_one("_"));
+		this->transp.reset(system_white.create_one("_"));
 		update_info();
 	}
 
@@ -249,8 +247,6 @@ struct cut_and_transpose_piano : handleable_ui_part
 		return false;
 	}
 
-	// Backward-compat method wrapper
-	void UpdateInfo() { update_info(); }
 };
 
 #endif

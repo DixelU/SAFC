@@ -33,7 +33,7 @@ struct Graphing : handleable_ui_part
 		std::uint32_t point_color,
 		std::uint32_t selection_color,
 		ordered_map_type* graph,
-		single_text_line_settings* stls,
+		single_text_line_settings& stls,
 		bool initial_enabled):
 			cx_pos(cx_pos),
 			cy_pos(cy_pos),
@@ -46,19 +46,19 @@ struct Graphing : handleable_ui_part
 			nearest_line_color(nearest_line_color),
 			point_color(point_color),
 			selection_color(selection_color),
-			enabled(initial_enabled),
 			horizontal_scaling(1),
 			central_point(0),
 			is_hovered(false),
 			my_pos(0),
-			mx_pow(0),
+			mx_pos(0),
 			shift(0),
-			assigned_x_selection_by_key(0),
+			assigned_x_selection_by_key(0)
 
 	{
-		stls->rgba_color = text_color;
-		stls->set_new_pos(cx_pos, cy_pos - 0.5f * target_height + 5.f);
-		stl_info.reset(stls->create_one("_"));
+		this->enabled = initial_enabled;
+		stls.rgba_color = text_color;
+		stls.set_new_pos(cx_pos, cy_pos - 0.5f * target_height + 5.f);
+		stl_info.reset(stls.create_one("_"));
 	}
 
 	~Graphing() override = default;

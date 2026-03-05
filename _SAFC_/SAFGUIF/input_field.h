@@ -43,7 +43,7 @@ struct input_field : handleable_ui_part
 		float y_pos,
 		float height,
 		float width,
-		single_text_line_settings* default_string_settings,
+		single_text_line_settings& default_string_settings,
 		std::string* output_source,
 		std::uint32_t border_rgba_color,
 		single_text_line_settings* tip_line_settings = nullptr,
@@ -54,8 +54,8 @@ struct input_field : handleable_ui_part
 		Type input_type = Type::text)
 	{
 		this->default_string = default_str;
-		default_string_settings->set_new_pos(x_pos, y_pos);
-		this->stl.reset(default_string_settings->create_one(default_str));
+		default_string_settings.set_new_pos(x_pos, y_pos);
+		this->stl.reset(default_string_settings.create_one(default_str));
 		if (tip_line_settings)
 		{
 			this->tip.reset(tip_line_settings->create_one(tip_line_text));
@@ -70,7 +70,7 @@ struct input_field : handleable_ui_part
 		this->border_rgba_color = border_rgba_color;
 		this->x_pos = x_pos;
 		this->y_pos = y_pos;
-		this->height = (default_string_settings->y_unit_size * 2 > height) ? default_string_settings->y_unit_size * 2 : height;
+		this->height = (default_string_settings.y_unit_size * 2 > height) ? default_string_settings.y_unit_size * 2 : height;
 		this->width = width;
 		this->current_string.clear();
 		this->first_input = this->focused = false;
@@ -239,7 +239,7 @@ struct input_field : handleable_ui_part
 		}
 	}
 
-	[[nodiscard]] std::string get_current_input(const std::string& replacement)
+	[[nodiscard]] std::string get_current_input(const std::string& replacement) const
 	{
 		if (input_field::check_string_on_type(current_string, input_type))
 			return current_string;

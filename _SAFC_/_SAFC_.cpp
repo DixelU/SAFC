@@ -367,7 +367,7 @@ size_t GetAvailableMemory()
 ////TRUE USAGE STARTS HERE////
 //////////////////////////////
 
-button_settings* BS_List_Black_Small = new button_settings(system_white, 0, 0, 100, 10, 1, 0, 0, 0xFFEFDFFF, 0x00003F7F, 0x7F7F7FFF);
+button_settings* BS_List_Black_Small = new button_settings(&system_white, 0, 0, 100, 10, 1, 0, 0, 0xFFEFDFFF, 0x00003F7F, 0x7F7F7FFF);
 
 std::uint32_t DefaultBoolSettings = _BoolSettings::remove_remnants | _BoolSettings::remove_empty_tracks | _BoolSettings::all_instruments_to_piano;
 
@@ -649,16 +649,16 @@ void throw_alert_error(std::string&& AlertText)
 {
 	std::cerr << AlertText << std::endl;
 
-	if (WH)
-		WH->throw_alert(AlertText, "ERROR!", special_signs::draw_ex_triangle, true, 0xFFAF00FF, 0xFF);
+	if (wh)
+		wh->throw_alert(AlertText, "ERROR!", special_signs::draw_ex_triangle, true, 0xFFAF00FF, 0xFF);
 }
 
 void throw_alert_warning(std::string&& AlertText)
 {
 	std::cout << AlertText << std::endl;
 
-	if (WH)
-		WH->throw_alert(AlertText, "Warning!", special_signs::draw_ex_triangle, true, 0x7F7F7FFF, 0xFFFFFFAF);
+	if (wh)
+		wh->throw_alert(AlertText, "Warning!", special_signs::draw_ex_triangle, true, 0x7F7F7FFF, 0xFFFFFFAF);
 }
 
 std::vector<std::wstring> multiple_open_file_dialog(const wchar_t* Title)
@@ -773,7 +773,7 @@ std::wstring save_open_file_dialog(const wchar_t* Title)
 
 handleable_ui_part* _WH(const char* window, const char* element)
 {
-	return ((*(*WH)[window])[element]);
+	return ((*(*wh)[window])[element]);
 }
 
 template<typename ui_part_type>
@@ -784,8 +784,8 @@ ui_part_type* _WH_t(const char* window, const char* element) requires std::is_ba
 
 void add_files(const std::vector<std::wstring>& Filenames)
 {
-	if(WH)
-		WH->disable_all_windows();
+	if(wh)
+		wh->disable_all_windows();
 	for (int i = 0; i < Filenames.size(); i++)
 	{
 		if (Filenames[i].empty())
@@ -794,7 +794,7 @@ void add_files(const std::vector<std::wstring>& Filenames)
 		auto& lastFile = _Data.Files.back();
 		if (lastFile.is_midi)
 		{
-			if (WH)
+			if (wh)
 				_WH_t<selectable_properted_list>("MAIN", "List")->safe_push_back_new_string(lastFile.AppearanceFilename);
 
 			std::uint32_t Counter = 0;
@@ -849,8 +849,8 @@ namespace PropsAndSets
 		}
 
 		currentID = ID;
-		auto PASWptr = (*WH)["SMPAS"];
-		auto OSptr = (*WH)["OTHER_SETS"];
+		auto PASWptr = (*wh)["SMPAS"];
+		auto OSptr = (*wh)["OTHER_SETS"];
 
 		((text_box*)((*PASWptr)["FileName"]))->safe_string_replace("..." + _Data[ID].AppearanceFilename);
 		((input_field*)((*PASWptr)["PPQN"]))->update_input_string();
@@ -898,7 +898,7 @@ namespace PropsAndSets
 			"Time map status: " + ((_Data[ID].TimeMap.empty()) ? "Empty" : "Present")
 		);
 
-		WH->enable_window("SMPAS");
+		wh->enable_window("SMPAS");
 	}
 
 	void InitializeCollecting()
@@ -909,7 +909,7 @@ namespace PropsAndSets
 			return;
 		}
 
-		auto UIElement = (Graphing<single_midi_info_collector::tempo_graph>*)(*(*WH)["SMIC"])["TEMPO_GRAPH"];
+		auto UIElement = (Graphing<single_midi_info_collector::tempo_graph>*)(*(*wh)["SMIC"])["TEMPO_GRAPH"];
 		if (SMICptr)
 		{
 			{ std::lock_guard<std::recursive_mutex> locker(UIElement->lock); }
@@ -920,25 +920,25 @@ namespace PropsAndSets
 
 		std::thread th([]()
 		{
-			WH->main_window_id = "SMIC";
-			WH->disable_all_windows();
+			wh->main_window_id = "SMIC";
+			wh->disable_all_windows();
 			std::thread ith([]()
 			{
-				auto All_Exp = (*(*WH)["SMIC"])["ALL_EXP"];
-				auto TG_Exp = (*(*WH)["SMIC"])["TG_EXP"];
-				auto ITicks = (*(*WH)["SMIC"])["INTEGRATE_TICKS"];
-				auto ITime = (*(*WH)["SMIC"])["INTEGRATE_TIME"];
-				auto error_line = (text_box*)(*(*WH)["SMIC"])["FEL"];
-				auto InfoLine = (text_box*)(*(*WH)["SMIC"])["FLL"];
-				auto Delim = (input_field*)(*(*WH)["SMIC"])["DELIM"];
-				auto UIMinutes = (input_field*)(*(*WH)["SMIC"])["INT_MIN"];
-				auto UISeconds = (input_field*)(*(*WH)["SMIC"])["INT_SEC"];
-				auto UIT = (input_field*)(*(*WH)["SMIC"])["TG_SWITCH"];
-				auto UIP = (input_field*)(*(*WH)["SMIC"])["PG_SWITCH"];
-				auto UIMilliseconds = (input_field*)(*(*WH)["SMIC"])["INT_MSC"];
-				auto UITicks = (input_field*)(*(*WH)["SMIC"])["INT_TIC"];
-				auto UIElement_TG = (Graphing<single_midi_info_collector::tempo_graph>*)(*(*WH)["SMIC"])["TEMPO_GRAPH"];
-				auto UIElement_PG = (Graphing<single_midi_info_collector::polyphony_graph>*)(*(*WH)["SMIC"])["POLY_GRAPH"];
+				auto All_Exp = (*(*wh)["SMIC"])["ALL_EXP"];
+				auto TG_Exp = (*(*wh)["SMIC"])["TG_EXP"];
+				auto ITicks = (*(*wh)["SMIC"])["INTEGRATE_TICKS"];
+				auto ITime = (*(*wh)["SMIC"])["INTEGRATE_TIME"];
+				auto error_line = (text_box*)(*(*wh)["SMIC"])["FEL"];
+				auto InfoLine = (text_box*)(*(*wh)["SMIC"])["FLL"];
+				auto Delim = (input_field*)(*(*wh)["SMIC"])["DELIM"];
+				auto UIMinutes = (input_field*)(*(*wh)["SMIC"])["INT_MIN"];
+				auto UISeconds = (input_field*)(*(*wh)["SMIC"])["INT_SEC"];
+				auto UIT = (input_field*)(*(*wh)["SMIC"])["TG_SWITCH"];
+				auto UIP = (input_field*)(*(*wh)["SMIC"])["PG_SWITCH"];
+				auto UIMilliseconds = (input_field*)(*(*wh)["SMIC"])["INT_MSC"];
+				auto UITicks = (input_field*)(*(*wh)["SMIC"])["INT_TIC"];
+				auto UIElement_TG = (Graphing<single_midi_info_collector::tempo_graph>*)(*(*wh)["SMIC"])["TEMPO_GRAPH"];
+				auto UIElement_PG = (Graphing<single_midi_info_collector::polyphony_graph>*)(*(*wh)["SMIC"])["POLY_GRAPH"];
 				UIElement_PG->enabled = false;
 				UIElement_PG->reset();
 				UIElement_TG->enabled = false;
@@ -973,23 +973,23 @@ namespace PropsAndSets
 			ith.detach();
 
 			SMICptr->fetch_data();
-			auto UIElement_TG = (Graphing<single_midi_info_collector::tempo_graph>*)(*(*WH)["SMIC"])["TEMPO_GRAPH"];
+			auto UIElement_TG = (Graphing<single_midi_info_collector::tempo_graph>*)(*(*wh)["SMIC"])["TEMPO_GRAPH"];
 			UIElement_TG->graph = &(SMICptr->tempo_map);
-			auto UIElement_PG = (Graphing<single_midi_info_collector::polyphony_graph>*)(*(*WH)["SMIC"])["POLY_GRAPH"];
+			auto UIElement_PG = (Graphing<single_midi_info_collector::polyphony_graph>*)(*(*wh)["SMIC"])["POLY_GRAPH"];
 			UIElement_PG->graph = &(SMICptr->polyphony);
 
-			auto UIElement_TB = (text_box*)(*(*WH)["SMIC"])["TOTAL_INFO"];
+			auto UIElement_TB = (text_box*)(*(*wh)["SMIC"])["TOTAL_INFO"];
 			UIElement_TB->safe_string_replace(
 				"Total (real) tracks: " + std::to_string(SMICptr->tracks.size()) + "; ... "
 			);
 
-			WH->main_window_id = "MAIN";
-			WH->enable_window("MAIN");
-			WH->enable_window("SMIC");
+			wh->main_window_id = "MAIN";
+			wh->enable_window("MAIN");
+			wh->enable_window("SMIC");
 		});
 		th.detach();
 
-		WH->enable_window("SMIC");
+		wh->enable_window("SMIC");
 	}
 
 	namespace SMIC
@@ -1016,13 +1016,13 @@ namespace PropsAndSets
 
 			_Data[currentID].TimeMap = SMICptr->internal_time_map;
 			OpenFileProperties(currentID);
-			WH->disable_window("SMIC");
+			wh->disable_window("SMIC");
 		}
 
 		void EnablePG()
 		{
-			auto UIElement_PG = (Graphing<single_midi_info_collector::polyphony_graph>*)(*(*WH)["SMIC"])["POLY_GRAPH"];
-			auto UIElement_Butt = (button*)(*(*WH)["SMIC"])["PG_SWITCH"];
+			auto UIElement_PG = (Graphing<single_midi_info_collector::polyphony_graph>*)(*(*wh)["SMIC"])["POLY_GRAPH"];
+			auto UIElement_Butt = (button*)(*(*wh)["SMIC"])["PG_SWITCH"];
 			if (UIElement_PG->enabled)
 				UIElement_Butt->safe_string_replace("enable graph B");
 			else
@@ -1032,8 +1032,8 @@ namespace PropsAndSets
 
 		void EnableTG()
 		{
-			auto UIElement_TG = (Graphing<single_midi_info_collector::tempo_graph>*)(*(*WH)["SMIC"])["TEMPO_GRAPH"];
-			auto UIElement_Butt = (button*)(*(*WH)["SMIC"])["TG_SWITCH"];
+			auto UIElement_TG = (Graphing<single_midi_info_collector::tempo_graph>*)(*(*wh)["SMIC"])["TEMPO_GRAPH"];
+			auto UIElement_Butt = (button*)(*(*wh)["SMIC"])["TG_SWITCH"];
 			if (UIElement_TG->enabled)
 				UIElement_Butt->safe_string_replace("enable graph A");
 			else
@@ -1043,19 +1043,19 @@ namespace PropsAndSets
 
 		void ResetTG()
 		{//TEMPO_GRAPH
-			auto UIElement_TG = (Graphing<single_midi_info_collector::tempo_graph>*)(*(*WH)["SMIC"])["TEMPO_GRAPH"];
+			auto UIElement_TG = (Graphing<single_midi_info_collector::tempo_graph>*)(*(*wh)["SMIC"])["TEMPO_GRAPH"];
 			UIElement_TG->reset();
 		}
 
 		void ResetPG()
 		{//TEMPO_GRAPH
-			auto UIElement_PG = (Graphing<single_midi_info_collector::tempo_graph>*)(*(*WH)["SMIC"])["POLY_GRAPH"];
+			auto UIElement_PG = (Graphing<single_midi_info_collector::tempo_graph>*)(*(*wh)["SMIC"])["POLY_GRAPH"];
 			UIElement_PG->reset();
 		}
 
 		void SwitchPersonalUse()
 		{//PERSONALUSE
-			auto UIElement_Butt = (button*)(*(*WH)["SMIC"])["PERSONALUSE"];
+			auto UIElement_Butt = (button*)(*(*wh)["SMIC"])["PERSONALUSE"];
 			ForPersonalUse ^= true;
 			if (ForPersonalUse)
 				UIElement_Butt->safe_string_replace(".csv");
@@ -1067,18 +1067,18 @@ namespace PropsAndSets
 		{
 			worker_singleton<struct info_collection>::instance().push([]()
 			{
-				WH->main_window_id = "SMIC";
-				WH->disable_all_windows();
-				auto InfoLine = (text_box*)(*(*WH)["SMIC"])["FLL"];
+				wh->main_window_id = "SMIC";
+				wh->disable_all_windows();
+				auto InfoLine = (text_box*)(*(*wh)["SMIC"])["FLL"];
 				InfoLine->safe_string_replace("graph A is exporting...");
 				std::ofstream out(SMICptr->filename + L".tg.csv");
 				out << "tick" << CSV_DELIM << "tempo" << '\n';
 				for (auto& cur_pair : SMICptr->tempo_map)
 					out << cur_pair.first << CSV_DELIM << cur_pair.second << '\n';
 				out.close();
-				WH->main_window_id = "MAIN";
-				WH->enable_window("MAIN");
-				WH->enable_window("SMIC");
+				wh->main_window_id = "MAIN";
+				wh->enable_window("MAIN");
+				wh->enable_window("SMIC");
 				InfoLine->safe_string_replace("graph A was successfully exported...");
 			});
 		}
@@ -1087,9 +1087,9 @@ namespace PropsAndSets
 		{
 			worker_singleton<struct info_collection>::instance().push([]()
 			{
-				WH->main_window_id = "SMIC";
-				WH->disable_all_windows();
-				auto InfoLine = (text_box*)(*(*WH)["SMIC"])["FLL"];
+				wh->main_window_id = "SMIC";
+				wh->disable_all_windows();
+				auto InfoLine = (text_box*)(*(*wh)["SMIC"])["FLL"];
 				InfoLine->safe_string_replace("Collecting data for exporting...");
 
 				using line_data = struct
@@ -1178,9 +1178,9 @@ namespace PropsAndSets
 					}
 				}
 				out.close();
-				WH->main_window_id = "MAIN";
-				WH->enable_window("MAIN");
-				WH->enable_window("SMIC");
+				wh->main_window_id = "MAIN";
+				wh->enable_window("MAIN");
+				wh->enable_window("SMIC");
 				InfoLine->safe_string_replace("graph B was successfully exported...");
 			});
 		}
@@ -1189,11 +1189,11 @@ namespace PropsAndSets
 		{
 			worker_singleton<struct info_collection>::instance().push([]()
 			{
-				WH->main_window_id = "SMIC";
-				WH->disable_all_windows();
-				auto InfoLine = (*(*WH)["SMIC"])["FLL"];
-				auto UITicks = (input_field*)(*(*WH)["SMIC"])["INT_TIC"];
-				auto UIOutput = (text_box*)(*(*WH)["SMIC"])["ANSWER"];
+				wh->main_window_id = "SMIC";
+				wh->disable_all_windows();
+				auto InfoLine = (*(*wh)["SMIC"])["FLL"];
+				auto UITicks = (input_field*)(*(*wh)["SMIC"])["INT_TIC"];
+				auto UIOutput = (text_box*)(*(*wh)["SMIC"])["ANSWER"];
 				InfoLine->safe_string_replace("Integration has begun");
 
 				std::int64_t ticks_limit = 0;
@@ -1232,9 +1232,9 @@ namespace PropsAndSets
 					"\nMsec: " + std::to_string((int)(milliseconds_ans))
 				);
 
-				WH->main_window_id = "MAIN";
-				WH->enable_window("MAIN");
-				WH->enable_window("SMIC");
+				wh->main_window_id = "MAIN";
+				wh->enable_window("MAIN");
+				wh->enable_window("SMIC");
 				InfoLine->safe_string_replace("Integration was succsessfully finished");
 			});
 		}
@@ -1243,13 +1243,13 @@ namespace PropsAndSets
 		{
 			worker_singleton<struct info_collection>::instance().push([]()
 			{
-				WH->main_window_id = "SMIC";
-				WH->disable_all_windows();
-				auto InfoLine = (*(*WH)["SMIC"])["FLL"];
-				auto UIMinutes = (input_field*)(*(*WH)["SMIC"])["INT_MIN"];
-				auto UISeconds = (input_field*)(*(*WH)["SMIC"])["INT_SEC"];
-				auto UIMilliseconds = (input_field*)(*(*WH)["SMIC"])["INT_MSC"];
-				auto UIOutput = (text_box*)(*(*WH)["SMIC"])["ANSWER"];
+				wh->main_window_id = "SMIC";
+				wh->disable_all_windows();
+				auto InfoLine = (*(*wh)["SMIC"])["FLL"];
+				auto UIMinutes = (input_field*)(*(*wh)["SMIC"])["INT_MIN"];
+				auto UISeconds = (input_field*)(*(*wh)["SMIC"])["INT_SEC"];
+				auto UIMilliseconds = (input_field*)(*(*wh)["SMIC"])["INT_MSC"];
+				auto UIOutput = (text_box*)(*(*wh)["SMIC"])["ANSWER"];
 				InfoLine->safe_string_replace("Integration has begun");
 
 				double seconds_limit = 0;
@@ -1280,9 +1280,9 @@ namespace PropsAndSets
 
 				UIOutput->safe_string_replace("Tick: " + std::to_string(tick));
 
-				WH->main_window_id = "MAIN";
-				WH->enable_window("MAIN");
-				WH->enable_window("SMIC");
+				wh->main_window_id = "MAIN";
+				wh->enable_window("MAIN");
+				wh->enable_window("SMIC");
 				InfoLine->safe_string_replace("Integration was succsessfully finished");
 			});
 		}
@@ -1298,8 +1298,8 @@ namespace PropsAndSets
 
 		std::int32_t T;
 		std::string CurStr = "";
-		auto SMPASptr = (*WH)["SMPAS"];
-		auto OSptr = (*WH)["OTHER_SETS"];
+		auto SMPASptr = (*wh)["SMPAS"];
+		auto OSptr = (*wh)["OTHER_SETS"];
 
 		CurStr = ((input_field*)(*SMPASptr)["PPQN"])->get_current_input("0");
 		if (CurStr.size())
@@ -1412,69 +1412,69 @@ namespace PropsAndSets
 
 		void OnCaT()
 		{
-			auto Wptr = (*WH)["CAT"];
+			auto Wptr = (*wh)["CAT"];
 			auto CATptr = (cut_and_transpose_piano*)((*Wptr)["CAT_ITSELF"]);
 			if (!_Data[currentID].KeyMap)
 				_Data[currentID].KeyMap = std::make_shared<cut_and_transpose>(0, 127, 0);
-			CATptr->PianoTransform = _Data[currentID].KeyMap;
-			CATptr->UpdateInfo();
-			WH->enable_window("CAT");
+			CATptr->piano_transform = _Data[currentID].KeyMap;
+			CATptr->update_info();
+			wh->enable_window("CAT");
 		}
 
 		void OnReset()
 		{
-			auto Wptr = (*WH)["CAT"];
+			auto Wptr = (*wh)["CAT"];
 			auto CATptr = (cut_and_transpose_piano*)((*Wptr)["CAT_ITSELF"]);
-			CATptr->PianoTransform->max_val = 255;
-			CATptr->PianoTransform->min_val = 0;
-			CATptr->PianoTransform->transpose_val = 0;
-			CATptr->UpdateInfo();
+			CATptr->piano_transform->max_val = 255;
+			CATptr->piano_transform->min_val = 0;
+			CATptr->piano_transform->transpose_val = 0;
+			CATptr->update_info();
 		}
 
 		void OnCDT128()
 		{
-			auto Wptr = (*WH)["CAT"];
+			auto Wptr = (*wh)["CAT"];
 			auto CATptr = (cut_and_transpose_piano*)((*Wptr)["CAT_ITSELF"]);
-			CATptr->PianoTransform->max_val = 127;
-			CATptr->PianoTransform->min_val = 0;
-			CATptr->PianoTransform->transpose_val = 0;
-			CATptr->UpdateInfo();
+			CATptr->piano_transform->max_val = 127;
+			CATptr->piano_transform->min_val = 0;
+			CATptr->piano_transform->transpose_val = 0;
+			CATptr->update_info();
 		}
 
 		void On0_127to128_255()
 		{
-			auto Wptr = (*WH)["CAT"];
+			auto Wptr = (*wh)["CAT"];
 			auto CATptr = (cut_and_transpose_piano*)((*Wptr)["CAT_ITSELF"]);
-			CATptr->PianoTransform->max_val = 127;
-			CATptr->PianoTransform->min_val = 0;
-			CATptr->PianoTransform->transpose_val = 128;
-			CATptr->UpdateInfo();
+			CATptr->piano_transform->max_val = 127;
+			CATptr->piano_transform->min_val = 0;
+			CATptr->piano_transform->transpose_val = 128;
+			CATptr->update_info();
 		}
 
 		void OnCopy()
 		{
-			auto Wptr = (*WH)["CAT"];
+			auto Wptr = (*wh)["CAT"];
 			auto CATptr = (cut_and_transpose_piano*)((*Wptr)["CAT_ITSELF"]);
-			TMax = CATptr->PianoTransform->max_val;
-			TMin = CATptr->PianoTransform->min_val;
-			TTransp = CATptr->PianoTransform->transpose_val;
+			TMax = CATptr->piano_transform->max_val;
+			TMin = CATptr->piano_transform->min_val;
+			TTransp = CATptr->piano_transform->transpose_val;
 		}
 
 		void OnPaste()
 		{
-			auto Wptr = (*WH)["CAT"];
+			auto Wptr = (*wh)["CAT"];
 			auto CATptr = (cut_and_transpose_piano*)((*Wptr)["CAT_ITSELF"]);
-			CATptr->PianoTransform->max_val = TMax;
-			CATptr->PianoTransform->min_val = TMin;
-			CATptr->PianoTransform->transpose_val = TTransp;
-			CATptr->UpdateInfo();
+			CATptr->piano_transform->max_val = TMax;
+			CATptr->piano_transform->min_val = TMin;
+			CATptr->piano_transform->transpose_val = TTransp;
+			CATptr->update_info();
 		}
 
 		void OnDelete()
 		{
-			auto Wptr = (*WH)["CAT"];
-			((cut_and_transpose_piano*)((*Wptr)["CAT_ITSELF"]))->PianoTransform = nullptr;
-			WH->disable_window("CAT");
+			auto Wptr = (*wh)["CAT"];
+			((cut_and_transpose_piano*)((*Wptr)["CAT_ITSELF"]))->piano_transform = nullptr;
+			wh->disable_window("CAT");
 			_Data[currentID].KeyMap = nullptr;
 		}
 	}
@@ -1483,33 +1483,33 @@ namespace PropsAndSets
 	{
 		void OnVolMap()
 		{
-			auto Wptr = (*WH)["VM"];
+			auto Wptr = (*wh)["VM"];
 			auto VM = ((volume_graph*)(*Wptr)["VM_PLC"]);
 			auto IFDeg = ((input_field*)(*Wptr)["VM_DEGREE"]);
 			((button*)(*Wptr)["VM_SETMODE"])->safe_string_replace("Single");
 			IFDeg->update_input_string("1");
 			IFDeg->current_string.clear();
-			VM->ActiveSetting = 0;
-			VM->Hovered = 0;
-			VM->RePutMode = 0;
+			VM->active_setting = 0;
+			VM->hovered = 0;
+			VM->re_put_mode = 0;
 			if (!_Data[currentID].VolumeMap)
 				_Data[currentID].VolumeMap = std::make_shared<polyline_converter<std::uint8_t, std::uint8_t>>();
-			VM->PLC_bb = _Data[currentID].VolumeMap;
-			WH->enable_window("VM");
+			VM->plc_bb = _Data[currentID].VolumeMap;
+			wh->enable_window("VM");
 		}
 
 		void OnDegreeShape()
 		{
-			auto Wptr = (*WH)["VM"];
+			auto Wptr = (*wh)["VM"];
 			auto VM = ((volume_graph*)(*Wptr)["VM_PLC"]);
-			if (VM->PLC_bb)
+			if (VM->plc_bb)
 			{
 				auto IFDeg = ((input_field*)(*Wptr)["VM_DEGREE"]);
 				float Degree = std::stof(IFDeg->get_current_input("0"));
-				VM->PLC_bb->map.clear();
-				VM->PLC_bb->map[127] = 127;
+				VM->plc_bb->map.clear();
+				VM->plc_bb->map[127] = 127;
 				for (int i = 0; i < 128; i++) 
-					VM->PLC_bb->insert(i, std::ceil(std::pow(i / 127., Degree) * 127.));
+					VM->plc_bb->insert(i, std::ceil(std::pow(i / 127., Degree) * 127.));
 			}
 			else
 				throw_alert_error("If you see this message, some error might have happen, since PLC_bb is null");
@@ -1517,11 +1517,11 @@ namespace PropsAndSets
 
 		void OnSimplify()
 		{
-			auto Wptr = (*WH)["VM"];
+			auto Wptr = (*wh)["VM"];
 			auto VM = ((volume_graph*)(*Wptr)["VM_PLC"]);
-			if (VM->PLC_bb)
+			if (VM->plc_bb)
 			{
-				VM->_MakeMapMoreSimple();
+				VM->make_map_more_simple();
 			}
 			else
 				throw_alert_error("If you see this message, some error might have happen, since PLC_bb is null");
@@ -1529,16 +1529,16 @@ namespace PropsAndSets
 
 		void OnTrace()
 		{
-			auto Wptr = (*WH)["VM"];
+			auto Wptr = (*wh)["VM"];
 			auto VM = ((volume_graph*)(*Wptr)["VM_PLC"]);
-			if (VM->PLC_bb)
+			if (VM->plc_bb)
 			{
-				if (VM->PLC_bb->map.empty())return;
+				if (VM->plc_bb->map.empty())return;
 				std::uint8_t C[256]{};
 				for (int i = 0; i < 255; i++)
-					C[i] = VM->PLC_bb->at(i);
+					C[i] = VM->plc_bb->at(i);
 				for (int i = 0; i < 255; i++)
-					VM->PLC_bb->map[i] = C[i];
+					VM->plc_bb->map[i] = C[i];
 			}
 			else
 				throw_alert_error("If you see this message, some error might have happen, since PLC_bb is null");
@@ -1546,12 +1546,12 @@ namespace PropsAndSets
 
 		void OnSetModeChange() 
 		{
-			auto Wptr = (*WH)["VM"];
+			auto Wptr = (*wh)["VM"];
 			auto VM = ((volume_graph*)(*Wptr)["VM_PLC"]);
-			if (VM->PLC_bb)
+			if (VM->plc_bb)
 			{
-				VM->RePutMode = !VM->RePutMode;
-				((button*)(*Wptr)["VM_SETMODE"])->safe_string_replace(((VM->RePutMode) ? "Double" : "Single"));
+				VM->re_put_mode = !VM->re_put_mode;
+				((button*)(*Wptr)["VM_SETMODE"])->safe_string_replace(((VM->re_put_mode) ? "Double" : "Single"));
 			}
 			else
 				throw_alert_error("If you see this message, some error might have happen, since PLC_bb is null");
@@ -1559,10 +1559,10 @@ namespace PropsAndSets
 
 		void OnErase()
 		{
-			auto Wptr = (*WH)["VM"];
+			auto Wptr = (*wh)["VM"];
 			auto VM = ((volume_graph*)(*Wptr)["VM_PLC"]);
-			if (VM->PLC_bb)
-				VM->PLC_bb->map.clear();
+			if (VM->plc_bb)
+				VM->plc_bb->map.clear();
 			else
 				throw_alert_error("If you see this message, some error might have happen, since PLC_bb is null");
 		}
@@ -1571,10 +1571,10 @@ namespace PropsAndSets
 		{
 			if (_Data[currentID].VolumeMap)
 				_Data[currentID].VolumeMap = nullptr;
-			auto Wptr = (*WH)["VM"];
+			auto Wptr = (*wh)["VM"];
 			auto VM = ((volume_graph*)(*Wptr)["VM_PLC"]);
-			VM->PLC_bb = nullptr;
-			WH->disable_window("VM");
+			VM->plc_bb = nullptr;
+			wh->disable_window("VM");
 		}
 	}
 	void OnPitchMap()
@@ -1590,7 +1590,7 @@ void OnRem()
 		for (auto ID = ptr->selected_id.rbegin(); ID != ptr->selected_id.rend(); ++ID)
 			_Data.RemoveByID(*ID);
 		ptr->remove_selected();
-		WH->disable_all_windows();
+		wh->disable_all_windows();
 		_Data.SetGlobalPPQN();
 		_Data.ResolveSubdivisionProblem_GroupIDAssign();
 	});
@@ -1600,7 +1600,7 @@ void OnRemAll()
 {
 	worker_singleton<struct midi_file_list>::instance().push([](){
 		auto ptr = _WH_t<selectable_properted_list>("MAIN", "List");
-		WH->disable_all_windows();
+		wh->disable_all_windows();
 		while (_Data.Files.size())
 		{
 			_Data.RemoveByID(0);
@@ -1613,17 +1613,17 @@ void OnRemAll()
 
 void OnSubmitGlobalPPQN()
 {
-	auto pptr = (*WH)["PROMPT"];
+	auto pptr = (*wh)["PROMPT"];
 	std::string t = ((input_field*)(*pptr)["FLD"])->get_current_input("0");
 	std::uint16_t PPQN = (t.size()) ? stoi(t) : _Data.GlobalPPQN;
 	_Data.SetGlobalPPQN(PPQN, true);
-	WH->disable_window("PROMPT");
+	wh->disable_window("PROMPT");
 	//PropsAndSets::OpenFileProperties(PropsAndSets::currentID);
 }
 
 void OnGlobalPPQN()
 {
-	WH->throw_prompt(
+	wh->throw_prompt(
 		"New value will be assigned to every MIDI\n(in settings)",
 		"Global PPQN",
 		OnSubmitGlobalPPQN,
@@ -1635,16 +1635,16 @@ void OnGlobalPPQN()
 
 void OnSubmitGlobalOffset()
 {
-	auto pptr = (*WH)["PROMPT"];
+	auto pptr = (*wh)["PROMPT"];
 	std::string t = ((input_field*)(*pptr)["FLD"])->get_current_input("0");
 	std::uint32_t O = (t.size()) ? std::stoi(t) : _Data.GlobalOffset;
 	_Data.SetGlobalOffset(O);
-	WH->disable_window("PROMPT");
+	wh->disable_window("PROMPT");
 }
 
 void OnGlobalOffset()
 {
-	WH->throw_prompt(
+	wh->throw_prompt(
 		"Sets new global offset",
 		"Global Offset",
 		OnSubmitGlobalOffset,
@@ -1656,16 +1656,16 @@ void OnGlobalOffset()
 
 void OnSubmitGlobalTempo()
 {
-	auto pptr = (*WH)["PROMPT"];
+	auto pptr = (*wh)["PROMPT"];
 	std::string t = ((input_field*)(*pptr)["FLD"])->get_current_input("0");
 	float Tempo = (t.size()) ? std::stof(t) : _Data.GlobalNewTempo;
 	_Data.SetGlobalTempo(Tempo);
-	WH->disable_window("PROMPT");
+	wh->disable_window("PROMPT");
 }
 
 void OnGlobalTempo()
 {
-	WH->throw_prompt("Sets specific tempo value to every MIDI\n(in settings)", "Global S. Tempo\0", OnSubmitGlobalTempo, _Align::center, input_field::Type::FP_PositiveNumbers, std::to_string(_Data.GlobalNewTempo), 8);
+	wh->throw_prompt("Sets specific tempo value to every MIDI\n(in settings)", "Global S. Tempo\0", OnSubmitGlobalTempo, _Align::center, input_field::Type::FP_PositiveNumbers, std::to_string(_Data.GlobalNewTempo), 8);
 }
 
 void _OnResolve()
@@ -1675,20 +1675,20 @@ void _OnResolve()
 
 void OnRemVolMaps()
 {
-	((volume_graph*)(*((*WH)["VM"]))["VM_PLC"])->PLC_bb = NULL;
-	WH->disable_window("VM");
+	((volume_graph*)(*((*wh)["VM"]))["VM_PLC"])->plc_bb = NULL;
+	wh->disable_window("VM");
 	for (int i = 0; i < _Data.Files.size(); i++)
 		_Data[i].VolumeMap = nullptr;
 }
 void OnRemCATs()
 {
-	WH->disable_window("CAT");
+	wh->disable_window("CAT");
 	for (int i = 0; i < _Data.Files.size(); i++)
 		_Data[i].KeyMap = nullptr;
 }
 void OnRemPitchMaps()
 {
-	//WH->disable_window("CAT");
+	//wh->disable_window("CAT");
 	throw_alert_warning("Currently pitch maps can not be created and/or deleted :D");
 	for (int i = 0; i < _Data.Files.size(); i++)
 		_Data[i].PitchBendMap = nullptr;
@@ -1706,9 +1706,9 @@ namespace Settings
 
 	void OnSettings()
 	{
-		WH->enable_window("APP_SETTINGS");//_Data.DetectedThreads
-		//WH->throw_alert("Please read the docs! Changing some of these settings might cause graphics driver failure!","Warning!",special_signs::draw_ex_triangle,1,0x007FFFFF,0x7F7F7FFF);
-		auto pptr = (*WH)["APP_SETTINGS"];
+		wh->enable_window("APP_SETTINGS");//_Data.DetectedThreads
+		//wh->throw_alert("Please read the docs! Changing some of these settings might cause graphics driver failure!","Warning!",special_signs::draw_ex_triangle,1,0x007FFFFF,0x7F7F7FFF);
+		auto pptr = (*wh)["APP_SETTINGS"];
 		((input_field*)(*pptr)["AS_BCKGID"])->update_input_string(std::to_string(ShaderMode));
 		((input_field*)(*pptr)["AS_ROT_ANGLE"])->update_input_string(std::to_string(dumb_rotation_angle));
 		((input_field*)(*pptr)["AS_THREADS_COUNT"])->update_input_string(std::to_string(_Data.DetectedThreads));
@@ -1742,7 +1742,7 @@ namespace Settings
 		{
 			std::cout << "RK opening failed\n";
 		}
-		auto pptr = (*WH)["APP_SETTINGS"];
+		auto pptr = (*wh)["APP_SETTINGS"];
 		std::string T;
 
 		T = ((input_field*)(*pptr)["AS_BCKGID"])->get_current_input("0");
@@ -1862,9 +1862,9 @@ void OnStart()
 
 	worker_singleton<struct merge>::instance().push([]()
 	{
-		WH->main_window_id = "SMRP_CONTAINER";
-		WH->disable_all_windows();
-		WH->enable_window("SMRP_CONTAINER");
+		wh->main_window_id = "SMRP_CONTAINER";
+		wh->disable_all_windows();
+		wh->enable_window("SMRP_CONTAINER");
 
 		GlobalMCTM = _Data.MCTM_Constructor();
 
@@ -1872,7 +1872,7 @@ void OnStart()
 
 		GlobalMCTM->StartProcessingMIDIs();
 
-		auto merge_preview_container = (*WH)["SMRP_CONTAINER"];
+		auto merge_preview_container = (*wh)["SMRP_CONTAINER"];
 		std::vector<std::string> undesired_window_activities;
 
 		for (auto& single_activity_pair : merge_preview_container->window_activities)
@@ -1902,12 +1902,13 @@ void OnStart()
 		for (size_t ID = 0; ID < currently_processed_copy.size(); ID++)
 		{
 			auto position = GetPositionForOneOf(ID, currently_processed_copy.size(), 140, 0.7);
-			auto visualiser = new midi_processor_visualiser(position.first, position.second, system_white);
+			auto visualiser = std::make_unique<midi_processor_visualiser>(position.first, position.second, &system_white);
+			auto& visualiser_ref = *visualiser;
 
 			std::string element_id;
-			merge_preview_container->add_ui_element(element_id = "SMRP_C" + std::to_string(ID), visualiser);
+			merge_preview_container->add_ui_element(element_id = "SMRP_C" + std::to_string(ID), std::move(visualiser));
 
-			std::thread([](std::shared_ptr<midi_collection_threaded_merger> pMCTM, midi_processor_visualiser* pVIS, std::uint32_t ID)
+			std::thread([](std::shared_ptr<midi_collection_threaded_merger> pMCTM, midi_processor_visualiser& pVIS, std::uint32_t ID)
 			{
 				std::string SID = "SMRP_C" + std::to_string(ID);
 				std::cout << SID << " Processing started" << std::endl;
@@ -1916,13 +1917,13 @@ void OnStart()
 				{
 					GlobalMCTM->currently_processed_locker.lock();
 					finished = GlobalMCTM->currently_processed[ID].second->finished;
-					pVIS->SetSMRP(GlobalMCTM->currently_processed[ID]);
+					pVIS.set_smrp(GlobalMCTM->currently_processed[ID]);
 					GlobalMCTM->currently_processed_locker.unlock();
 
 					std::this_thread::sleep_for(std::chrono::milliseconds(66));
 				}
 				std::cout << SID << " Processing stopped" << std::endl;
-			}, GlobalMCTM, visualiser, ID).detach();
+			}, GlobalMCTM, std::ref(visualiser_ref), ID).detach();
 		}
 
 		worker_singleton<struct merge_ri_stage>::instance().push([safc_data_pointer = &_Data, merge_preview_container]()
@@ -1936,10 +1937,13 @@ void OnStart()
 				merge_preview_container->delete_ui_element_by_name("SMRP_C" + std::to_string(i));
 
 			merge_preview_container->safe_change_position_argumented(0, 0, 0);
-			(*merge_preview_container)["IM"] = new bool_and_number_checker<decltype(GlobalMCTM->IntermediateInplaceFlag), decltype(GlobalMCTM->IITrackCount)>
-				(-100., 0., system_white, &(GlobalMCTM->IntermediateInplaceFlag), &(GlobalMCTM->IITrackCount));
-			(*merge_preview_container)["RM"] = new bool_and_number_checker<decltype(GlobalMCTM->IntermediateInplaceFlag), decltype(GlobalMCTM->IRTrackCount)>
-				(100., 0., system_white, &(GlobalMCTM->IntermediateRegularFlag), &(GlobalMCTM->IRTrackCount));
+
+			(*merge_preview_container)["IM"] = 
+				std::make_unique<bool_and_number_checker<decltype(GlobalMCTM->IntermediateInplaceFlag), decltype(GlobalMCTM->IITrackCount)>>
+					(-100., 0., &system_white, &(GlobalMCTM->IntermediateInplaceFlag), &(GlobalMCTM->IITrackCount));
+			(*merge_preview_container)["RM"] =
+				std::make_unique<bool_and_number_checker<decltype(GlobalMCTM->IntermediateInplaceFlag), decltype(GlobalMCTM->IRTrackCount)>>
+					(100., 0., &system_white, &(GlobalMCTM->IntermediateRegularFlag), &(GlobalMCTM->IRTrackCount));
 			
 			worker_singleton<struct merge_ri_stage_cleanup>::instance().push([safc_data_pointer, merge_preview_container]()
 			{
@@ -1950,8 +1954,10 @@ void OnStart()
 				merge_preview_container->delete_ui_element_by_name("IM");
 				merge_preview_container->delete_ui_element_by_name("RM");
 				merge_preview_container->safe_change_position_argumented(0, 0, 0);
-				(*merge_preview_container)["FM"] = new bool_and_number_checker<decltype(GlobalMCTM->CompleteFlag), int>
-					(0., 0., system_white, &(GlobalMCTM->CompleteFlag), NULL);
+
+				(*merge_preview_container)["FM"] = 
+					std::make_unique<bool_and_number_checker<decltype(GlobalMCTM->CompleteFlag), int>>
+						(0., 0., &system_white, &(GlobalMCTM->CompleteFlag), nullptr);
 			});
 		});
 
@@ -1984,10 +1990,10 @@ void OnStart()
 			std::cout << "F: Out from sleep!!!\n";
 			merge_preview_container->delete_ui_element_by_name("FM");
 
-			WH->disable_window(WH->main_window_id);
-			WH->main_window_id = "MAIN";
-			//WH->disable_all_windows();
-			WH->enable_window("MAIN");
+			wh->disable_window(wh->main_window_id);
+			wh->main_window_id = "MAIN";
+			//wh->disable_all_windows();
+			wh->enable_window("MAIN");
 			//GlobalMCTM->ResetEverything();
 		});
 	});
@@ -2087,15 +2093,15 @@ void RestoreRegSettings()
 
 void OnOtherSettings()
 {
-	WH->enable_window("OTHER_SETS");
+	wh->enable_window("OTHER_SETS");
 }
 
 void UpdateDeviceList();
 
 void PlayerWatchFunc()
 {
-	WH->enable_window("SIMPLAYER");
-	auto window = (*WH)["SIMPLAYER"];
+	wh->enable_window("SIMPLAYER");
+	auto window = (*wh)["SIMPLAYER"];
 	auto textbox = (text_box*)(*window)["TEXT"];
 	auto seek_to_slider = (slider*)(*window)["SEEK_TO"];
 
@@ -2186,7 +2192,7 @@ void UpdateDeviceList()
 	if (current < device_names.size())
 		device_list->selected_id.push_back(static_cast<uint32_t>(current));
 
-	device_list->SafeUpdateLines();
+	device_list->safe_update_lines();
 }
 
 void OnDeviceSelect(int device_id)
@@ -2227,7 +2233,7 @@ void OnPlayerPauseToggle()
 {
 	player->toggle_pause();
 
-	auto window = (*WH)["SIMPLAYER"];
+	auto window = (*wh)["SIMPLAYER"];
 	auto pause = (button*)(*window)["PAUSE"];
 
 	if (player->is_paused())
@@ -2242,7 +2248,7 @@ void OnPlayerStop()
 
 	worker_singleton<struct player_thread>::instance().push([]()
 	{
-		auto window = (*WH)["SIMPLAYER"];
+		auto window = (*wh)["SIMPLAYER"];
 		auto pause = (button*)(*window)["PAUSE"];
 		auto textbox = (text_box*)(*window)["TEXT"];
 
@@ -2257,7 +2263,7 @@ void OnPlayerStop()
 
 void OnViewLengthChange(float value)
 {
-	auto window = (*WH)["SIMPLAYER"];
+	auto window = (*wh)["SIMPLAYER"];
 	auto player_viewer = (PlayerViewer*)(*window)["VIEW"];
 	
 	player_viewer->data->scroll_window_us = std::pow(2, value);
@@ -2265,7 +2271,7 @@ void OnViewLengthChange(float value)
 
 void OnUnbufferedSwitch()
 {
-	auto window = (*WH)["SIMPLAYER"];
+	auto window = (*wh)["SIMPLAYER"];
 	auto player_viewer = (PlayerViewer*)(*window)["VIEW"];
 	auto buffering_switch = (button*)(*window)["BUFFERING_SWITCH"];
 
@@ -2299,12 +2305,12 @@ struct SimplayerSavedState {
 
 void ApplySimplayerMaximisedLayout()
 {
-	float half_w = internal_range * (WindX / window_base_width);
-	float half_h = internal_range * (WindY / window_base_height);
+	float half_w = internal_range * (wind_x / window_base_width);
+	float half_h = internal_range * (wind_y / window_base_height);
 	float full_width = 2.0f * half_w;
 	float full_height = 2.0f * half_h + moveable_window::window_header_size;
 
-	auto window = (*WH)["SIMPLAYER"];
+	auto window = (*wh)["SIMPLAYER"];
 	auto player_viewer = (PlayerViewer*)(*window)["VIEW"];
 	auto text = (text_box*)(*window)["TEXT"];
 	auto pause_btn = (button*)(*window)["PAUSE"];
@@ -2356,7 +2362,7 @@ void ApplySimplayerMaximisedLayout()
 
 void SwitchMaximise()
 {
-	auto window = (*WH)["SIMPLAYER"];
+	auto window = (*wh)["SIMPLAYER"];
 	auto player_viewer = (PlayerViewer*)(*window)["VIEW"];
 	auto text = (text_box*)(*window)["TEXT"];
 	auto pause_btn = (button*)(*window)["PAUSE"];
@@ -2396,14 +2402,14 @@ void SwitchMaximise()
 		state.view_y = player_viewer->ypos;
 		state.view_width = player_viewer->data->width;
 		state.view_height = player_viewer->data->height;
-		state.previous_main_window_id = WH->main_window_id;
+		state.previous_main_window_id = wh->main_window_id;
 
 		// Apply maximized layout
 		ApplySimplayerMaximisedLayout();
 
 		// Make SIMPLAYER the sole window
-		WH->main_window_id = "SIMPLAYER";
-		WH->disable_all_windows();
+		wh->main_window_id = "SIMPLAYER";
+		wh->disable_all_windows();
 
 		simplayer_maximised = true;
 		max_btn->safe_string_replace("Restore");
@@ -2435,9 +2441,9 @@ void SwitchMaximise()
 		player_viewer->RescaleAndReposition(state.view_x, state.view_y, state.view_width, state.view_height);
 
 		// Restore window management
-		WH->main_window_id = state.previous_main_window_id;
-		WH->disable_all_windows();
-		WH->enable_window("SIMPLAYER");
+		wh->main_window_id = state.previous_main_window_id;
+		wh->disable_all_windows();
+		wh->enable_window("SIMPLAYER");
 
 		simplayer_maximised = false;
 		max_btn->safe_string_replace("Maximise");
@@ -2461,7 +2467,7 @@ void Init()
 			), (std::uint16_t)1
 		);
 
-	WH = std::make_shared<windows_handler>();
+	wh = std::make_shared<windows_handler>();
 
 	auto [maj, min, ver, build] = __versionTuple;
 
@@ -2491,7 +2497,7 @@ void Init()
 
 	(*T)["ADD_Butt"] = new button("Add MIDIs", system_white, OnAdd, 150, 167.5, 75, 12, 1, 0x00003FAF, 0xFFFFFFFF, 0x00003FFF, 0xFFFFFFFF, 0xF7F7F7FF, nullptr, " ");
 	(*T)["REM_Butt"] = new button("Remove selected", system_white, OnRem, 150, 155, 75, 12, 1, 0x3F0000AF, 0xFFFFFFFF, 0x3F0000FF, 0xFFFFFFFF, 0xF7F7F7FF, nullptr, " ");
-	(*T)["REM_ALL_Butt"] = new button("Remove all", system_white, OnRemAll, 150, 142.5, 75, 12, 1, 0xAF0000AF, 0xFFFFFFFF, 0xAF0000AF, 0xFFFFFFFF, 0xF7F7F7FF, system_white, "May cause lag");
+	(*T)["REM_ALL_Butt"] = new button("Remove all", system_white, OnRemAll, 150, 142.5, 75, 12, 1, 0xAF0000AF, 0xFFFFFFFF, 0xAF0000AF, 0xFFFFFFFF, 0xF7F7F7FF, &system_white, "May cause lag");
 
 	(*T)["OPEN_SIMPLAYER"] = new button("Open Player", system_black, OnOpenPlayer, 150, 117.5, 75, 12, 1, 0xFFFFFFAF, 0x0F0F0FFF, 0xFFFFFFFF, 0x000000FF, 0xFFFFFFFF, nullptr, " ");
 
@@ -2513,81 +2519,81 @@ void Init()
 	(*T)["START"] = Butt = new button("Start merging", system_white, OnStart, 150, -177.5, 75, 12, 1,
 		0x000000AF, 0xFFFFFFFF, 0x000000AF, 0xFFFFFFFF, 0xF7F7F7FF, nullptr, " ");//177.5
 
-	(*WH)["MAIN"] = T;
+	(*wh)["MAIN"] = T;
 
 	T = new moveable_fui_window("Props. and sets.", system_white, -100, 100, 200, 225, 100, 2.5f, 75, 50, 3, BACKGROUND_OPQ, HEADER, BORDER);
 	(*T)["FileName"] = new text_box("_", system_white, 0, 88.5 - moveable_window::window_header_size, 6, 200 - 1.5 * moveable_window::window_header_size, 7.5, 0, 0, 0, _Align::left, text_box::VerticalOverflow::cut);
-	(*T)["PPQN"] = new input_field(" ", -90 + moveable_window::window_header_size, 75 - moveable_window::window_header_size, 10, 25, system_white, PropsAndSets::PPQN, 0x007FFFFF, system_white, "PPQN is lesser than 65536.", 5, _Align::center, _Align::left, input_field::Type::NaturalNumbers);
-	(*T)["TEMPO"] = new input_field(" ", -50 + moveable_window::window_header_size, 75 - moveable_window::window_header_size, 10, 45, system_white, PropsAndSets::TEMPO, 0x007FFFFF, system_white, "Specific tempo override field", 8, _Align::center, _Align::left, input_field::Type::FP_PositiveNumbers);
-	(*T)["OFFSET"] = new input_field(" ", 20 + moveable_window::window_header_size, 75 - moveable_window::window_header_size, 10, 55, system_white, PropsAndSets::OFFSET, 0x007FFFFF, system_white, "Offset from begining in ticks", 10, _Align::center, _Align::right, input_field::Type::WholeNumbers);
+	(*T)["PPQN"] = new input_field(" ", -90 + moveable_window::window_header_size, 75 - moveable_window::window_header_size, 10, 25, system_white, PropsAndSets::PPQN, 0x007FFFFF, &system_white, "PPQN is lesser than 65536.", 5, _Align::center, _Align::left, input_field::Type::NaturalNumbers);
+	(*T)["TEMPO"] = new input_field(" ", -50 + moveable_window::window_header_size, 75 - moveable_window::window_header_size, 10, 45, system_white, PropsAndSets::TEMPO, 0x007FFFFF, &system_white, "Specific tempo override field", 8, _Align::center, _Align::left, input_field::Type::FP_PositiveNumbers);
+	(*T)["OFFSET"] = new input_field(" ", 20 + moveable_window::window_header_size, 75 - moveable_window::window_header_size, 10, 55, system_white, PropsAndSets::OFFSET, 0x007FFFFF, &system_white, "Offset from begining in ticks", 10, _Align::center, _Align::right, input_field::Type::WholeNumbers);
 
-	(*T)["APPLY_OFFSET_AFTER"] = new checkbox(12.5 - moveable_window::window_header_size, 75 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF7F00AF, 0x7FFF00AF, 1, 0, system_white, _Align::center, "Apply offset after PPQ change");
+	(*T)["APPLY_OFFSET_AFTER"] = new checkbox(12.5 - moveable_window::window_header_size, 75 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF7F00AF, 0x7FFF00AF, 1, 0, &system_white, _Align::center, "Apply offset after PPQ change");
 
-	(*T)["BOOL_REM_TRCKS"] = new checkbox(-97.5 + moveable_window::window_header_size, 55 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, system_white, _Align::left, "Remove empty tracks");
-	(*T)["BOOL_REM_REM"] = new checkbox(-82.5 + moveable_window::window_header_size, 55 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, system_white, _Align::left, "Remove merge \"remnants\"");
-	(*T)["OTHER_CHECKBOXES"] = new button("Other settings", system_white, OnOtherSettings, -37.5 + moveable_window::window_header_size, 55 - moveable_window::window_header_size, 70, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, system_white, "Other MIDI processing settings");
+	(*T)["BOOL_REM_TRCKS"] = new checkbox(-97.5 + moveable_window::window_header_size, 55 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, &system_white, _Align::left, "Remove empty tracks");
+	(*T)["BOOL_REM_REM"] = new checkbox(-82.5 + moveable_window::window_header_size, 55 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, &system_white, _Align::left, "Remove merge \"remnants\"");
+	(*T)["OTHER_CHECKBOXES"] = new button("Other settings", system_white, OnOtherSettings, -37.5 + moveable_window::window_header_size, 55 - moveable_window::window_header_size, 70, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, &system_white, "Other MIDI processing settings");
 
-	(*T)["SPLIT_TRACKS"] = new checkbox(7.5 + moveable_window::window_header_size, 55 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, 0, system_white, _Align::center, "Multichannel split");
-	(*T)["RSB_COMPRESS"] = new checkbox(22.5 + moveable_window::window_header_size, 55 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, 0, system_white, _Align::center, "enable RSB compression");
+	(*T)["SPLIT_TRACKS"] = new checkbox(7.5 + moveable_window::window_header_size, 55 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, 0, &system_white, _Align::center, "Multichannel split");
+	(*T)["RSB_COMPRESS"] = new checkbox(22.5 + moveable_window::window_header_size, 55 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, 0, &system_white, _Align::center, "enable RSB compression");
 
-	(*T)["COLLAPSE_MIDI"] = new checkbox(97.5 - moveable_window::window_header_size, 35 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF7F00AF, 0x7FFF00AF, 1, 0, system_white, _Align::right, "Collapse all tracks of a MIDI into one");
+	(*T)["COLLAPSE_MIDI"] = new checkbox(97.5 - moveable_window::window_header_size, 35 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF7F00AF, 0x7FFF00AF, 1, 0, &system_white, _Align::right, "Collapse all tracks of a MIDI into one");
 
-	(*T)["BOOL_APPLY_TO_ALL_MIDIS"] = Butt = new button("A2A", system_white, PropsAndSets::OnApplyBS2A, 80 - moveable_window::window_header_size, 55 - moveable_window::window_header_size, 15, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, system_white, "Sets \"bool settings\" to all midis");
+	(*T)["BOOL_APPLY_TO_ALL_MIDIS"] = Butt = new button("A2A", system_white, PropsAndSets::OnApplyBS2A, 80 - moveable_window::window_header_size, 55 - moveable_window::window_header_size, 15, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, &system_white, "Sets \"bool settings\" to all midis");
 	Butt->tip->safe_change_position_argumented(_Align::right, 87.5 - moveable_window::window_header_size, Butt->tip->cy_pos);
 
-	(*T)["INPLACE_MERGE"] = new checkbox(97.5 - moveable_window::window_header_size, 55 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, 0, system_white, _Align::right, "Enables/disables inplace merge");
+	(*T)["INPLACE_MERGE"] = new checkbox(97.5 - moveable_window::window_header_size, 55 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, 0, &system_white, _Align::right, "Enables/disables inplace merge");
 
-	(*T)["GROUPID"] = new input_field(" ", 92.5 - moveable_window::window_header_size, 75 - moveable_window::window_header_size, 10, 20, system_white, PropsAndSets::PPQN, 0x007FFFFF, system_white, "Group ID...", 2, _Align::center, _Align::right, input_field::Type::NaturalNumbers);
+	(*T)["GROUPID"] = new input_field(" ", 92.5 - moveable_window::window_header_size, 75 - moveable_window::window_header_size, 10, 20, system_white, PropsAndSets::PPQN, 0x007FFFFF, &system_white, "Group ID...", 2, _Align::center, _Align::right, input_field::Type::NaturalNumbers);
 
-	(*T)["MIDIINFO"] = Butt = new button("Collect info", system_white, PropsAndSets::InitializeCollecting, 20, 15 - moveable_window::window_header_size, 65, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, system_white, "Collects additional info about the midi");
+	(*T)["MIDIINFO"] = Butt = new button("Collect info", system_white, PropsAndSets::InitializeCollecting, 20, 15 - moveable_window::window_header_size, 65, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, &system_white, "Collects additional info about the midi");
 	Butt->tip->safe_move(-20, 0);
 
 	(*T)["APPLY"] = new button("Apply", system_white, PropsAndSets::OnApplySettings, 87.5 - moveable_window::window_header_size, 15 - moveable_window::window_header_size, 30, 10, 1, 0x7FAFFF3F, 0xFFFFFFFF, 0xFFAF7FFF, 0xFFAF7F3F, 0xFFAF7FFF, nullptr, " ");
 
-	(*T)["CUT_AND_TRANSPOSE"] = (Butt = new button("Cut & Transpose...", system_white, PropsAndSets::CutAndTranspose::OnCaT, 45 - moveable_window::window_header_size, 35 - moveable_window::window_header_size, 85, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, system_white, "Cut and Transpose tool"));
+	(*T)["CUT_AND_TRANSPOSE"] = (Butt = new button("Cut & Transpose...", system_white, PropsAndSets::CutAndTranspose::OnCaT, 45 - moveable_window::window_header_size, 35 - moveable_window::window_header_size, 85, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, &system_white, "Cut and Transpose tool"));
 	Butt->tip->safe_change_position_argumented(_Align::right, 100 - moveable_window::window_header_size, Butt->tip->cy_pos);
-	(*T)["PITCH_MAP"] = (Butt = new button("Pitch map ...", system_white, PropsAndSets::OnPitchMap, -37.5 - moveable_window::window_header_size, 15 - moveable_window::window_header_size, 70, 10, 1, 0x7F7F7F3F, 0x7F7F7FFF, 0xFFFFFFFF, 0xFFFFFF3F, 0xFFFFFFFF, system_white, "Allows to transform pitches"));
+	(*T)["PITCH_MAP"] = (Butt = new button("Pitch map ...", system_white, PropsAndSets::OnPitchMap, -37.5 - moveable_window::window_header_size, 15 - moveable_window::window_header_size, 70, 10, 1, 0x7F7F7F3F, 0x7F7F7FFF, 0xFFFFFFFF, 0xFFFFFF3F, 0xFFFFFFFF, &system_white, "Allows to transform pitches"));
 	Butt->tip->safe_change_position_argumented(_Align::right, 100 - moveable_window::window_header_size, Butt->tip->cy_pos);
-	(*T)["VOLUME_MAP"] = (Butt = new button("Volume map ...", system_white, PropsAndSets::VolumeMap::OnVolMap, -37.5 - moveable_window::window_header_size, 35 - moveable_window::window_header_size, 70, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, system_white, "Allows to transform volumes of notes"));
+	(*T)["VOLUME_MAP"] = (Butt = new button("Volume map ...", system_white, PropsAndSets::VolumeMap::OnVolMap, -37.5 - moveable_window::window_header_size, 35 - moveable_window::window_header_size, 70, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, &system_white, "Allows to transform volumes of notes"));
 	Butt->tip->safe_change_position_argumented(_Align::right, 100 - moveable_window::window_header_size, Butt->tip->cy_pos);
 
-	(*T)["SELECT_START"] = new input_field(" ", -37.5 - moveable_window::window_header_size, -5 - moveable_window::window_header_size, 10, 70, system_white, nullptr, 0x007FFFFF, system_white, "Selection start", 13, _Align::center, _Align::right, input_field::Type::NaturalNumbers);
-	(*T)["SELECT_LENGTH"] = new input_field(" ", 37.5 - moveable_window::window_header_size, -5 - moveable_window::window_header_size, 10, 70, system_white, nullptr, 0x007FFFFF, system_white, "Selection length", 14, _Align::center, _Align::right, input_field::Type::WholeNumbers);
+	(*T)["SELECT_START"] = new input_field(" ", -37.5 - moveable_window::window_header_size, -5 - moveable_window::window_header_size, 10, 70, system_white, nullptr, 0x007FFFFF, &system_white, "Selection start", 13, _Align::center, _Align::right, input_field::Type::NaturalNumbers);
+	(*T)["SELECT_LENGTH"] = new input_field(" ", 37.5 - moveable_window::window_header_size, -5 - moveable_window::window_header_size, 10, 70, system_white, nullptr, 0x007FFFFF, &system_white, "Selection length", 14, _Align::center, _Align::right, input_field::Type::WholeNumbers);
 
 	(*T)["CONSTANT_PROPS"] = new text_box("_Props text example_", system_white, 0, -55 - moveable_window::window_header_size, 80 - moveable_window::window_header_size, 200 - 1.5 * moveable_window::window_header_size, 7.5, 0, 0, 1);
 
-	(*WH)["SMPAS"] = T;//Selected midi properties and settings
+	(*wh)["SMPAS"] = T;//Selected midi properties and settings
 
 	T = new moveable_fui_window("Other settings.", system_white, -75, 35, 150, 65 + moveable_window::window_header_size, 100, 2.5f, 17.5f, 17.5f, 3, BACKGROUND_OPQ, HEADER, BORDER);
 
 	checkbox* Chk = nullptr;
 
-	(*T)["BOOL_PIANO_ONLY"] = new checkbox(-65, 25 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, system_white, _Align::left, "All instruments to piano");
-	(*T)["BOOL_IGN_TEMPO"] = new checkbox(-50, 25 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, system_white, _Align::left, "Remove tempo events");
-	(*T)["BOOL_IGN_PITCH"] = new checkbox(-35, 25 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, system_white, _Align::left, "Remove pitch events");
-	(*T)["BOOL_IGN_NOTES"] = new checkbox(-20, 25 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, system_white, _Align::center, "Remove notes");
-	(*T)["BOOL_IGN_ALL_EX_TPS"] = new checkbox(-5, 25 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, system_white, _Align::center, "Ignore other events");
+	(*T)["BOOL_PIANO_ONLY"] = new checkbox(-65, 25 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, &system_white, _Align::left, "All instruments to piano");
+	(*T)["BOOL_IGN_TEMPO"] = new checkbox(-50, 25 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, &system_white, _Align::left, "Remove tempo events");
+	(*T)["BOOL_IGN_PITCH"] = new checkbox(-35, 25 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, &system_white, _Align::left, "Remove pitch events");
+	(*T)["BOOL_IGN_NOTES"] = new checkbox(-20, 25 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, &system_white, _Align::center, "Remove notes");
+	(*T)["BOOL_IGN_ALL_EX_TPS"] = new checkbox(-5, 25 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, &system_white, _Align::center, "Ignore other events");
 
-	(*T)["LEGACY_META_RSB_BEHAVIOR"] = Chk = new checkbox(10, 25 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, false, system_white, _Align::center, "En. legacy RSB/Meta behavior");
+	(*T)["LEGACY_META_RSB_BEHAVIOR"] = Chk = new checkbox(10, 25 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, false, &system_white, _Align::center, "En. legacy RSB/Meta behavior");
 	Chk->tip->safe_change_position_argumented(_Align::left, -70, 15 - moveable_window::window_header_size);
-	(*T)["ALLOW_SYSEX"] = new checkbox(25, 25 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, 0, system_white, _Align::right, "Allow sysex events");
+	(*T)["ALLOW_SYSEX"] = new checkbox(25, 25 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, 0, &system_white, _Align::right, "Allow sysex events");
 
-	(*T)["IMP_FLT_ENABLE"] = new checkbox(65, 25 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF7F1F7F, 0x5FFF007F, 1, 0, system_white, _Align::right, "enable important event filter");
+	(*T)["IMP_FLT_ENABLE"] = new checkbox(65, 25 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF7F1F7F, 0x5FFF007F, 1, 0, &system_white, _Align::right, "enable important event filter");
 
 	(*T)["0VERLAY"] = new text_box("", system_white, -10, 2.5f - moveable_window::window_header_size, 23, 120, 0, 0xFFFFFF1F, 0x007FFF7F, 1);
 
-	(*T)["IMP_FLT_NOTES"] = new checkbox(-60, 5 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, system_white, _Align::left, "Important filter: piano");
-	(*T)["IMP_FLT_TEMPO"] = new checkbox(-45, 5 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, system_white, _Align::left, "Important filter: tempo");
-	(*T)["IMP_FLT_PITCH"] = new checkbox(-30, 5 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, system_white, _Align::left, "Important filter: pitch");
-	(*T)["IMP_FLT_PROGC"] = Chk = new checkbox(-15, 5 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, system_white, _Align::center, "Important filter: program change");
+	(*T)["IMP_FLT_NOTES"] = new checkbox(-60, 5 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, &system_white, _Align::left, "Important filter: piano");
+	(*T)["IMP_FLT_TEMPO"] = new checkbox(-45, 5 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, &system_white, _Align::left, "Important filter: tempo");
+	(*T)["IMP_FLT_PITCH"] = new checkbox(-30, 5 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, &system_white, _Align::left, "Important filter: pitch");
+	(*T)["IMP_FLT_PROGC"] = Chk = new checkbox(-15, 5 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, &system_white, _Align::center, "Important filter: program change");
 	Chk->tip->safe_change_position_argumented(_Align::left, -70, -5 - moveable_window::window_header_size);
-	(*T)["IMP_FLT_OTHER"] = new checkbox(0, 5 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, system_white, _Align::center, "Important filter: other");
+	(*T)["IMP_FLT_OTHER"] = new checkbox(0, 5 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, &system_white, _Align::center, "Important filter: other");
 
-	(*T)["ENABLE_ZERO_VELOCITY"] = new checkbox(60, 5 - moveable_window::window_header_size, 10, 0x007FFFFF, 0x00001F3F, 0x00FF00FF, 1, 0, system_white, _Align::right, "\"enable\" zero velocity notes");
+	(*T)["ENABLE_ZERO_VELOCITY"] = new checkbox(60, 5 - moveable_window::window_header_size, 10, 0x007FFFFF, 0x00001F3F, 0x00FF00FF, 1, 0, &system_white, _Align::right, "\"enable\" zero velocity notes");
 
 	(*T)["APPLY"] = new button("Apply", system_white, PropsAndSets::OnApplySettings, 70 - moveable_window::window_header_size, -20 - moveable_window::window_header_size, 30, 10, 1, 0x3F7FFF3F, 0xFFFFFFEF, 0x7FFF3FFF, 0x7FFF3F1F, 0x7FFF3FFF, nullptr, " ");
 
-	(*WH)["OTHER_SETS"] = T; // Other settings
+	(*wh)["OTHER_SETS"] = T; // Other settings
 
 	T = new moveable_fui_window("Cut and Transpose.", system_white, -200, 50, 400, 100, 300, 2.5f, 15, 15, 2.5f, BACKGROUND_OPQ, HEADER, BORDER);
 	(*T)["CAT_ITSELF"] = new cut_and_transpose_piano(0, 20 - moveable_window::window_header_size, 1, 10, nullptr);
@@ -2598,69 +2604,69 @@ void Init()
 	(*T)["CAT_PASTE"] = new button("Paste", system_white, PropsAndSets::CutAndTranspose::OnPaste, 110, -10 - moveable_window::window_header_size, 40, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, nullptr, " ");
 	(*T)["CAT_DELETE"] = new button("Delete", system_white, PropsAndSets::CutAndTranspose::OnDelete, 155, -10 - moveable_window::window_header_size, 40, 10, 1, 0xFF00FF3F, 0xFF00FFFF, 0xFFFFFFFF, 0xFF003F3F, 0xFF003FFF, nullptr, " ");
 
-	(*WH)["CAT"] = T;
+	(*wh)["CAT"] = T;
 
 	T = new moveable_fui_window("Volume map.", system_white, -150, 150, 300, 350, 200, 2.5f, 100, 100, 2.5f, BACKGROUND_OPQ, HEADER, BORDER);
 	(*T)["VM_PLC"] = new volume_graph(0, 0 - moveable_window::window_header_size, 300 - moveable_window::window_header_size * 2, 300 - moveable_window::window_header_size * 2, std::make_shared<polyline_converter<std::uint8_t, std::uint8_t>>());///todo: interface
-	(*T)["VM_SSBDIIF"] = Butt = new button("Shape alike x^y", system_white, PropsAndSets::VolumeMap::OnDegreeShape, -110 + moveable_window::window_header_size, -150 - moveable_window::window_header_size, 80, 10, 1, 0xFFFFFF3F, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFAFFF3F, 0xFFAFFFFF, system_white, "Where y is from frame bellow");///Set shape by degree in input field;
+	(*T)["VM_SSBDIIF"] = Butt = new button("Shape alike x^y", system_white, PropsAndSets::VolumeMap::OnDegreeShape, -110 + moveable_window::window_header_size, -150 - moveable_window::window_header_size, 80, 10, 1, 0xFFFFFF3F, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFAFFF3F, 0xFFAFFFFF, &system_white, "Where y is from frame bellow");///Set shape by degree in input field;
 	Butt->tip->safe_change_position_argumented(_Align::left, -150 + moveable_window::window_header_size, -160 - moveable_window::window_header_size);
 	(*T)["VM_DEGREE"] = new input_field("1", -140 + moveable_window::window_header_size, -170 - moveable_window::window_header_size, 10, 20, system_white, nullptr, 0x007FFFFF, nullptr, " ", 4, _Align::center, _Align::center, input_field::Type::FP_PositiveNumbers);
 	(*T)["VM_ERASE"] = Butt = new button("Erase points", system_white, PropsAndSets::VolumeMap::OnErase, -35 + moveable_window::window_header_size, -150 - moveable_window::window_header_size, 60, 10, 1, 0xFFFFFF3F, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFAFFF3F, 0xFFAFFFFF, nullptr, "_");
 	(*T)["VM_DELETE"] = new button("Delete map", system_white, PropsAndSets::VolumeMap::OnDelete, 30 + moveable_window::window_header_size, -150 - moveable_window::window_header_size, 60, 10, 1, 0xFFAFAF3F, 0xFFAFAFFF, 0xFFEFEFFF, 0xFF7F3F7F, 0xFF1F1FFF, nullptr, "_");
-	(*T)["VM_SIMP"] = Butt = new button("Simplify map", system_white, PropsAndSets::VolumeMap::OnSimplify, -70 - moveable_window::window_header_size, -170 - moveable_window::window_header_size, 60, 10, 1, 0xFFFFFF3F, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFAFFF3F, 0xFFAFFFFF, system_white, "Reduces amount of \"repeating\" points");
+	(*T)["VM_SIMP"] = Butt = new button("Simplify map", system_white, PropsAndSets::VolumeMap::OnSimplify, -70 - moveable_window::window_header_size, -170 - moveable_window::window_header_size, 60, 10, 1, 0xFFFFFF3F, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFAFFF3F, 0xFFAFFFFF, &system_white, "Reduces amount of \"repeating\" points");
 	Butt->tip->safe_change_position_argumented(_Align::left, -100 - moveable_window::window_header_size, -160 - moveable_window::window_header_size);
-	(*T)["VM_TRACE"] = Butt = new button("Trace map", system_white, PropsAndSets::VolumeMap::OnTrace, -35 + moveable_window::window_header_size, -170 - moveable_window::window_header_size, 60, 10, 1, 0xFFFFFF3F, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFAFAF3F, 0xFFAFAFFF, system_white, "Puts every point onto map");
+	(*T)["VM_TRACE"] = Butt = new button("Trace map", system_white, PropsAndSets::VolumeMap::OnTrace, -35 + moveable_window::window_header_size, -170 - moveable_window::window_header_size, 60, 10, 1, 0xFFFFFF3F, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFAFAF3F, 0xFFAFAFFF, &system_white, "Puts every point onto map");
 	Butt->tip->safe_change_position_argumented(_Align::left, -65 + moveable_window::window_header_size, -160 - moveable_window::window_header_size);
 	(*T)["VM_SETMODE"] = Butt = new button("Single", system_white, PropsAndSets::VolumeMap::OnSetModeChange, 30 + moveable_window::window_header_size, -170 - moveable_window::window_header_size, 40, 10, 1, 0xFFFFFF3F, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFAFAF3F, 0xFFAFAFFF, nullptr, "_");
 
-	(*WH)["VM"] = T;
+	(*wh)["VM"] = T;
 
 	T = new moveable_fui_window("App settings", system_white, -100, 110, 200, 230, 125, 2.5f, 50, 50, 2.5f, BACKGROUND_OPQ, HEADER, BORDER);
 
-	(*T)["AS_BCKGID"] = new input_field(std::to_string(Settings::ShaderMode), -35, 55 - moveable_window::window_header_size, 10, 30, system_white, nullptr, 0x007FFFFF, system_white, "Background ID", 2, _Align::center, _Align::right, input_field::Type::NaturalNumbers);
+	(*T)["AS_BCKGID"] = new input_field(std::to_string(Settings::ShaderMode), -35, 55 - moveable_window::window_header_size, 10, 30, system_white, nullptr, 0x007FFFFF, &system_white, "Background ID", 2, _Align::center, _Align::right, input_field::Type::NaturalNumbers);
 
 	(*T)["AS_GLOBALSETTINGS"] = new text_box("Global settings for new MIDIs", system_white, 0, 85 - moveable_window::window_header_size, 50, 200, 12, 0x007FFF1F, 0x007FFF7F, 1, _Align::center);
 	(*T)["AS_APPLY"] = Butt = new button("Apply", system_white, Settings::OnSetApply, 85 - moveable_window::window_header_size, -87.5 - moveable_window::window_header_size, 40, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr, "_");
-	(*T)["AS_EN_FONT"] = Butt = new button((is_fonted) ? "disable fonts" : "enable fonts", system_white, Settings::ChangeIsFontedVar, 72.5 - moveable_window::window_header_size, -67.5 - moveable_window::window_header_size, 65, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, system_white, " ");
+	(*T)["AS_EN_FONT"] = Butt = new button((is_fonted) ? "disable fonts" : "enable fonts", system_white, Settings::ChangeIsFontedVar, 72.5 - moveable_window::window_header_size, -67.5 - moveable_window::window_header_size, 65, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, &system_white, " ");
 
-	auto AngleInput = new input_field(std::to_string(dumb_rotation_angle), -87.5 + moveable_window::window_header_size, 55 - moveable_window::window_header_size, 10, 30, system_white, nullptr, 0x007FFFFF, system_white, "Rotation angle", 6, _Align::center, _Align::left, input_field::Type::FP_Any);
+	auto AngleInput = new input_field(std::to_string(dumb_rotation_angle), -87.5 + moveable_window::window_header_size, 55 - moveable_window::window_header_size, 10, 30, system_white, nullptr, 0x007FFFFF, &system_white, "Rotation angle", 6, _Align::center, _Align::left, input_field::Type::FP_Any);
 	AngleInput->disable(); // hide // legacy
 	(*T)["AS_ROT_ANGLE"] = AngleInput;
 	(*T)["AS_FONT_SIZE"] = new wheel_variable_changer(Settings::ApplyFSWheel, -37.5, -82.5, lFontSymbolsInfo::Size, 1, system_white, "Font size", "Delta", wheel_variable_changer::Type::addictable);
 	(*T)["AS_FONT_P"] = new wheel_variable_changer(Settings::ApplyRelWheel, -37.5, -22.5, lFONT_HEIGHT_TO_WIDTH, 0.01, system_white, "Font rel.", "Delta", wheel_variable_changer::Type::addictable);
-	(*T)["AS_FONT_NAME"] = new input_field(default_font_name, 52.5 - moveable_window::window_header_size, 55 - moveable_window::window_header_size, 10, 100, legacy_white, &default_font_name, 0x007FFFFF, system_white, "Font name", 32, _Align::center, _Align::left, input_field::Type::text);
+	(*T)["AS_FONT_NAME"] = new input_field(default_font_name, 52.5 - moveable_window::window_header_size, 55 - moveable_window::window_header_size, 10, 100, legacy_white, &default_font_name, 0x007FFFFF, &system_white, "Font name", 32, _Align::center, _Align::left, input_field::Type::text);
 
-	(*T)["BOOL_REM_TRCKS"] = new checkbox(-97.5 + moveable_window::window_header_size, 95 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, system_white, _Align::left, "Remove empty tracks");
-	(*T)["BOOL_REM_REM"] = new checkbox(-82.5 + moveable_window::window_header_size, 95 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, system_white, _Align::left, "Remove merge \"remnants\"");
-	(*T)["BOOL_PIANO_ONLY"] = new checkbox(-67.5 + moveable_window::window_header_size, 95 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, system_white, _Align::left, "All instuments to piano");
-	(*T)["BOOL_IGN_TEMPO"] = new checkbox(-52.5 + moveable_window::window_header_size, 95 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, system_white, _Align::left, "Ignore tempo events");
-	(*T)["BOOL_IGN_PITCH"] = new checkbox(-37.5 + moveable_window::window_header_size, 95 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, system_white, _Align::center, "Ignore pitch bending events");
-	(*T)["BOOL_IGN_NOTES"] = new checkbox(-22.5 + moveable_window::window_header_size, 95 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, system_white, _Align::center, "Ignore note events");
-	(*T)["BOOL_IGN_ALL_EX_TPS"] = new checkbox(-7.5 + moveable_window::window_header_size, 95 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, system_white, _Align::center, "Ignore everything except specified");
-	(*T)["SPLIT_TRACKS"] = new checkbox(7.5 + moveable_window::window_header_size, 95 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, 0, system_white, _Align::center, "Multichannel split");
-	(*T)["RSB_COMPRESS"] = new checkbox(22.5 + moveable_window::window_header_size, 95 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, 0, system_white, _Align::center, "enable RSB compression");	
+	(*T)["BOOL_REM_TRCKS"] = new checkbox(-97.5 + moveable_window::window_header_size, 95 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, &system_white, _Align::left, "Remove empty tracks");
+	(*T)["BOOL_REM_REM"] = new checkbox(-82.5 + moveable_window::window_header_size, 95 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, &system_white, _Align::left, "Remove merge \"remnants\"");
+	(*T)["BOOL_PIANO_ONLY"] = new checkbox(-67.5 + moveable_window::window_header_size, 95 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, &system_white, _Align::left, "All instuments to piano");
+	(*T)["BOOL_IGN_TEMPO"] = new checkbox(-52.5 + moveable_window::window_header_size, 95 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, &system_white, _Align::left, "Ignore tempo events");
+	(*T)["BOOL_IGN_PITCH"] = new checkbox(-37.5 + moveable_window::window_header_size, 95 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, &system_white, _Align::center, "Ignore pitch bending events");
+	(*T)["BOOL_IGN_NOTES"] = new checkbox(-22.5 + moveable_window::window_header_size, 95 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, &system_white, _Align::center, "Ignore note events");
+	(*T)["BOOL_IGN_ALL_EX_TPS"] = new checkbox(-7.5 + moveable_window::window_header_size, 95 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, &system_white, _Align::center, "Ignore everything except specified");
+	(*T)["SPLIT_TRACKS"] = new checkbox(7.5 + moveable_window::window_header_size, 95 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, 0, &system_white, _Align::center, "Multichannel split");
+	(*T)["RSB_COMPRESS"] = new checkbox(22.5 + moveable_window::window_header_size, 95 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, 0, &system_white, _Align::center, "enable RSB compression");
 
-	(*T)["ALLOW_SYSEX"] = new checkbox(-97.5 + moveable_window::window_header_size, 75 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, 0, system_white, _Align::left, "Allow sysex events");
+	(*T)["ALLOW_SYSEX"] = new checkbox(-97.5 + moveable_window::window_header_size, 75 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, 0, &system_white, _Align::left, "Allow sysex events");
 
-	(*T)["BOOL_APPLY_TO_ALL_MIDIS"] = Butt = new button("A2A", system_white, Settings::ApplyToAll, 80 - moveable_window::window_header_size, 95 - moveable_window::window_header_size, 15, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, system_white, "The same as A2A in MIDI's props.");
+	(*T)["BOOL_APPLY_TO_ALL_MIDIS"] = Butt = new button("A2A", system_white, Settings::ApplyToAll, 80 - moveable_window::window_header_size, 95 - moveable_window::window_header_size, 15, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, &system_white, "The same as A2A in MIDI's props.");
 	Butt->tip->safe_change_position_argumented(_Align::right, 87.5 - moveable_window::window_header_size, Butt->tip->cy_pos);
 
-	(*T)["INPLACE_MERGE"] = new checkbox(97.5 - moveable_window::window_header_size, 95 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, 0, system_white, _Align::right, "enable/disable inplace merge");
+	(*T)["INPLACE_MERGE"] = new checkbox(97.5 - moveable_window::window_header_size, 95 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, 0, &system_white, _Align::right, "enable/disable inplace merge");
 
-	(*T)["COLLAPSE_MIDI"] = new checkbox(72.5 - moveable_window::window_header_size, 75 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF7F00AF, 0x7FFF00AF, 1, 0, system_white, _Align::right, "Collapse tracks of a MIDI into one");
-	(*T)["APPLY_OFFSET_AFTER"] = new checkbox(57.5 - moveable_window::window_header_size, 75 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF7F00AF, 0x7FFF00AF, 1, 0, system_white, _Align::right, "Apply offset after PPQ change");
+	(*T)["COLLAPSE_MIDI"] = new checkbox(72.5 - moveable_window::window_header_size, 75 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF7F00AF, 0x7FFF00AF, 1, 0, &system_white, _Align::right, "Collapse tracks of a MIDI into one");
+	(*T)["APPLY_OFFSET_AFTER"] = new checkbox(57.5 - moveable_window::window_header_size, 75 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF7F00AF, 0x7FFF00AF, 1, 0, &system_white, _Align::right, "Apply offset after PPQ change");
 
-	(*T)["AS_THREADS_COUNT"] = new input_field(std::to_string(_Data.DetectedThreads), 92.5 - moveable_window::window_header_size, 75 - moveable_window::window_header_size, 10, 20, system_white, nullptr, 0x007FFFFF, system_white, "Threads count", 2, _Align::center, _Align::right, input_field::Type::NaturalNumbers);
+	(*T)["AS_THREADS_COUNT"] = new input_field(std::to_string(_Data.DetectedThreads), 92.5 - moveable_window::window_header_size, 75 - moveable_window::window_header_size, 10, 20, system_white, nullptr, 0x007FFFFF, &system_white, "Threads count", 2, _Align::center, _Align::right, input_field::Type::NaturalNumbers);
 
-	(*T)["AUTOUPDATECHECK"] = new checkbox(-97.5 + moveable_window::window_header_size, 35 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, check_autoupdates, system_white, _Align::left, "Check for updates automatically"); 
+	(*T)["AUTOUPDATECHECK"] = new checkbox(-97.5 + moveable_window::window_header_size, 35 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, check_autoupdates, &system_white, _Align::left, "Check for updates automatically");
 
-	(*WH)["APP_SETTINGS"] = T;
+	(*wh)["APP_SETTINGS"] = T;
 
 	T = new moveable_window("SMRP Container", system_white, -300, 300, 600, 600, 0x000000CF, 0xFFFFFF7F);
 
-	(*T)["TIMER"] = new input_field("0 s", 0, 195, 10, 50, system_white, nullptr, 0, system_white, "Timer", 12, _Align::center, _Align::center, input_field::Type::text);
+	(*T)["TIMER"] = new input_field("0 s", 0, 195, 10, 50, system_white, nullptr, 0, &system_white, "Timer", 12, _Align::center, _Align::center, input_field::Type::text);
 
-	(*WH)["SMRP_CONTAINER"] = T;
+	(*wh)["SMRP_CONTAINER"] = T;
 
 	T = new moveable_fui_window("MIDI Info Collector", system_white, -150, 200, 300, 400, 200, 1.25f, 100, 100, 5, BACKGROUND_OPQ, HEADER, BORDER);
 	(*T)["FLL"] = new text_box("--File log line--", system_white, 0, -moveable_window::window_header_size + 185, 15, 285, 10, 0, 0, 0, _Align::left);
@@ -2671,26 +2677,26 @@ void Init()
 	(*T)["POLY_GRAPH"] = new Graphing<single_midi_info_collector::polyphony_graph>(
 		0, -moveable_window::window_header_size + 95, 285, 50, (1. / 20000.), true, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F00FF, 0xFFFFFFFF, 0x7F7F7F7F, nullptr, system_white, false
 		);
-	(*T)["PG_SWITCH"] = new button("enable graph B", system_white, PropsAndSets::SMIC::EnablePG, 37.5, 60 - moveable_window::window_header_size, 70, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, system_white, "Polyphony graph");
-	(*T)["TG_SWITCH"] = new button("enable graph A", system_white, PropsAndSets::SMIC::EnableTG, -37.5, 60 - moveable_window::window_header_size, 70, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, system_white, "Tempo graph");
+	(*T)["PG_SWITCH"] = new button("enable graph B", system_white, PropsAndSets::SMIC::EnablePG, 37.5, 60 - moveable_window::window_header_size, 70, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, &system_white, "Polyphony graph");
+	(*T)["TG_SWITCH"] = new button("enable graph A", system_white, PropsAndSets::SMIC::EnableTG, -37.5, 60 - moveable_window::window_header_size, 70, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, &system_white, "Tempo graph");
 	(*T)["ALL_EXP"] = new button("Export all", system_white, PropsAndSets::SMIC::ExportAll, 110, 60 - moveable_window::window_header_size, 65, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr);
 	(*T)["TG_EXP"] = new button("Export Tempo", system_white, PropsAndSets::SMIC::ExportTG, -110, 60 - moveable_window::window_header_size, 65, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr);
 	(*T)["TG_RESET"] = new button("reset graph A", system_white, PropsAndSets::SMIC::ResetTG, 45, 40 - moveable_window::window_header_size, 65, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr);
 	(*T)["PG_RESET"] = new button("reset graph B", system_white, PropsAndSets::SMIC::ResetPG, 45, 20 - moveable_window::window_header_size, 65, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr);
 	(*T)["LD_TIME_MAP"] = new button("Copy time map", system_white, PropsAndSets::SMIC::LoadTimeMap, 45, 0 - moveable_window::window_header_size, 65, 10, 1, 0x7F7F7F3F, 0x7F7F7FFF, 0xFFFFFFFF, 0x000000FF, 0xFFFFFFFF, nullptr);
-	(*T)["PERSONALUSE"] = Butt = new button(".csv", system_white, PropsAndSets::SMIC::SwitchPersonalUse, 105, 40 - moveable_window::window_header_size, 45, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, system_white, "Switches output format for `export all`");
+	(*T)["PERSONALUSE"] = Butt = new button(".csv", system_white, PropsAndSets::SMIC::SwitchPersonalUse, 105, 40 - moveable_window::window_header_size, 45, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, &system_white, "Switches output format for `export all`");
 	Butt->tip->safe_change_position_argumented(_Align::right, Butt->x_pos + Butt->width * 0.5, Butt->tip->cy_pos);
 	(*T)["TOTAL_INFO"] = new text_box("----", system_white, 0, -150, 35, 285, 10, 0, 0, 0, _Align::left);
-	(*T)["INT_MIN"] = new input_field("0", -132.5, 40 - moveable_window::window_header_size, 10, 20, system_white, nullptr, 0x007FFFFF, system_white, "Minutes", 3, _Align::center, _Align::left, input_field::Type::NaturalNumbers);
-	(*T)["INT_SEC"] = new input_field("0", -107.5, 40 - moveable_window::window_header_size, 10, 20, system_white, nullptr, 0x007FFFFF, system_white, "Seconds", 2, _Align::center, _Align::left, input_field::Type::NaturalNumbers);
-	(*T)["INT_MSC"] = new input_field("000", -80, 40 - moveable_window::window_header_size, 10, 25, system_white, nullptr, 0x007FFFFF, system_white, "Milliseconds", 3, _Align::center, _Align::left, input_field::Type::NaturalNumbers);
-	(*T)["INTEGRATE_TICKS"] = new button("Integrate ticks", system_white, PropsAndSets::SMIC::IntegrateTime, -27.5, 40 - moveable_window::window_header_size, 70, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, system_white, "Result is the closest tick to that time.");
-	(*T)["INT_TIC"] = new input_field("0", -105, 20 - moveable_window::window_header_size, 10, 75, system_white, nullptr, 0x007FFFFF, system_white, "Ticks", 17, _Align::center, _Align::left, input_field::Type::NaturalNumbers);
-	(*T)["INTEGRATE_TIME"] = new button("Integrate time", system_white, PropsAndSets::SMIC::DiffirentiateTicks, -27.5, 20 - moveable_window::window_header_size, 70, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, system_white, "Result is the time of that tick.");
-	(*T)["DELIM"] = new input_field(";", 137.5, 40 - moveable_window::window_header_size, 10, 7.5, system_white, &(PropsAndSets::CSV_DELIM), 0x007FFFFF, system_white, "Delimiter", 1, _Align::center, _Align::right, input_field::Type::text);
+	(*T)["INT_MIN"] = new input_field("0", -132.5, 40 - moveable_window::window_header_size, 10, 20, system_white, nullptr, 0x007FFFFF, &system_white, "Minutes", 3, _Align::center, _Align::left, input_field::Type::NaturalNumbers);
+	(*T)["INT_SEC"] = new input_field("0", -107.5, 40 - moveable_window::window_header_size, 10, 20, system_white, nullptr, 0x007FFFFF, &system_white, "Seconds", 2, _Align::center, _Align::left, input_field::Type::NaturalNumbers);
+	(*T)["INT_MSC"] = new input_field("000", -80, 40 - moveable_window::window_header_size, 10, 25, system_white, nullptr, 0x007FFFFF, &system_white, "Milliseconds", 3, _Align::center, _Align::left, input_field::Type::NaturalNumbers);
+	(*T)["INTEGRATE_TICKS"] = new button("Integrate ticks", system_white, PropsAndSets::SMIC::IntegrateTime, -27.5, 40 - moveable_window::window_header_size, 70, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, &system_white, "Result is the closest tick to that time.");
+	(*T)["INT_TIC"] = new input_field("0", -105, 20 - moveable_window::window_header_size, 10, 75, system_white, nullptr, 0x007FFFFF, &system_white, "Ticks", 17, _Align::center, _Align::left, input_field::Type::NaturalNumbers);
+	(*T)["INTEGRATE_TIME"] = new button("Integrate time", system_white, PropsAndSets::SMIC::DiffirentiateTicks, -27.5, 20 - moveable_window::window_header_size, 70, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, &system_white, "Result is the time of that tick.");
+	(*T)["DELIM"] = new input_field(";", 137.5, 40 - moveable_window::window_header_size, 10, 7.5, system_white, &(PropsAndSets::CSV_DELIM), 0x007FFFFF, &system_white, "Delimiter", 1, _Align::center, _Align::right, input_field::Type::text);
 	(*T)["ANSWER"] = new text_box("----", system_white, -66.25, -30, 25, 152.5, 10, 0, 0, 0, _Align::center, text_box::VerticalOverflow::recalibrate);
 
-	(*WH)["SMIC"] = T;
+	(*wh)["SMIC"] = T;
 
 	T = new moveable_fui_window("Simple MIDI player", system_white, /*-200, 197.5, 400, 397.5, 150, 2.5f, 75, 75, 5*/
 		-200, 175 + moveable_window::window_header_size, 400, 375, 150, 2.5, 65, 65, 2.5, BACKGROUND_OPQ, HEADER, BORDER);
@@ -2725,21 +2731,21 @@ void Init()
 		2     // Max visible lines
 	);
 
-	(*WH)["SIMPLAYER"] = T;
+	(*wh)["SIMPLAYER"] = T;
 
-	WH->enable_window("MAIN");
-	//WH->enable_window("SIMPLAYER");
-	//WH->enable_window("V1WT");
-	//WH->enable_window("COMPILEW"); // todo: someday fix the damn editbox...
-	//WH->enable_window("SMIC");
-	//WH->enable_window("OR");
-	//WH->enable_window("SMRP_CONTAINER");
-	//WH->enable_window("APP_SETTINGS");
-	//WH->enable_window("VM");
-	//WH->enable_window("CAT");
-	//WH->enable_window("SMPAS");//Debug line
-	//WH->enable_window("PROMPT");////DEBUUUUG
-	//WH->enable_window("OTHER_SETS");
+	wh->enable_window("MAIN");
+	//wh->enable_window("SIMPLAYER");
+	//wh->enable_window("V1WT");
+	//wh->enable_window("COMPILEW"); // todo: someday fix the damn editbox...
+	//wh->enable_window("SMIC");
+	//wh->enable_window("OR");
+	//wh->enable_window("SMRP_CONTAINER");
+	//wh->enable_window("APP_SETTINGS");
+	//wh->enable_window("VM");
+	//wh->enable_window("CAT");
+	//wh->enable_window("SMPAS");//Debug line
+	//wh->enable_window("PROMPT");////DEBUUUUG
+	//wh->enable_window("OTHER_SETS");
 
 	DragAcceptFiles(hWnd, TRUE);
 	OleInitialize(nullptr);
@@ -2760,102 +2766,102 @@ void mDisplay()
 
 	glClear(GL_COLOR_BUFFER_BIT | GL_ACCUM_BUFFER_BIT);
 	glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-	if (FIRSTBOOT)
+	if (firstboot)
 	{
-		FIRSTBOOT = 0;
+		firstboot = 0;
 
 		Init();
-		if (APRIL_FOOL)
+		if (april_fool)
 		{
-			WH->throw_alert("Today is a special day! ( -w-)\nToday you'll have new background\n(-w- )", "1st of April!", special_signs::draw_wait, 1, 0xFF00FFFF, 20);
-			(*WH)["ALERT"]->rgba_background = 0xF;
+			wh->throw_alert("Today is a special day! ( -w-)\nToday you'll have new background\n(-w- )", "1st of April!", special_signs::draw_wait, 1, 0xFF00FFFF, 20);
+			(*wh)["ALERT"]->rgba_background = 0xF;
 			_WH_t<text_box>("ALERT", "AlertText")->safe_text_color_change(0xFFFFFFFF);
 		}
-		if (YearsOld >= 0)
+		if (years_old >= 0)
 		{
-			WH->throw_alert("Interesting fact: today is exactly " + std::to_string(YearsOld) + " years since first SAFC release.\n(o w o  )", "SAFC birthday", special_signs::draw_wait, 1, 0xFF7F3FFF, 50);
-			(*WH)["ALERT"]->rgba_background = 0xF;
+			wh->throw_alert("Interesting fact: today is exactly " + std::to_string(years_old) + " years since first SAFC release.\n(o w o  )", "SAFC birthday", special_signs::draw_wait, 1, 0xFF7F3FFF, 50);
+			(*wh)["ALERT"]->rgba_background = 0xF;
 			_WH_t<text_box>("ALERT", "AlertText")->safe_text_color_change(0xFFFFFFFF);
 		}
-		ANIMATION_IS_ACTIVE = !ANIMATION_IS_ACTIVE;
+		animation_is_active = !animation_is_active;
 		onTimer(0);
 	}
 
-	if (YearsOld >= 0 || Settings::ShaderMode == 100)
+	if (years_old >= 0 || Settings::ShaderMode == 100)
 	{
 		glBegin(GL_QUADS);
-		glColor4f(1, 1, 1, (DRAG_OVER) ? 0.25f : 1);
-		glVertex2f(0 - internal_range * (WindX / window_base_width), 0 - internal_range * (WindY / window_base_height));
-		glColor4f(1, 1, 1, (DRAG_OVER) ? 0.25f : 1);
-		glVertex2f(0 - internal_range * (WindX / window_base_width), internal_range * (WindY / window_base_height));
-		glColor4f(1, 0.9f, 0.8f, (DRAG_OVER) ? 0.25f : 1);
-		glVertex2f(internal_range * (WindX / window_base_width), internal_range * (WindY / window_base_height));
-		glColor4f(0.8f, 0.9f, 1, (DRAG_OVER) ? 0.25f : 1);
-		glVertex2f(internal_range * (WindX / window_base_width), 0 - internal_range * (WindY / window_base_height));
+		glColor4f(1, 1, 1, (drag_over) ? 0.25f : 1);
+		glVertex2f(0 - internal_range * (wind_x / window_base_width), 0 - internal_range * (wind_y / window_base_height));
+		glColor4f(1, 1, 1, (drag_over) ? 0.25f : 1);
+		glVertex2f(0 - internal_range * (wind_x / window_base_width), internal_range * (wind_y / window_base_height));
+		glColor4f(1, 0.9f, 0.8f, (drag_over) ? 0.25f : 1);
+		glVertex2f(internal_range * (wind_x / window_base_width), internal_range * (wind_y / window_base_height));
+		glColor4f(0.8f, 0.9f, 1, (drag_over) ? 0.25f : 1);
+		glVertex2f(internal_range * (wind_x / window_base_width), 0 - internal_range * (wind_y / window_base_height));
 		glEnd();
 	}
-	else if (APRIL_FOOL || Settings::ShaderMode == 69)
+	else if (april_fool || Settings::ShaderMode == 69)
 	{
 		glBegin(GL_QUADS);
-		glColor4f(1, 0, 1, (DRAG_OVER) ? 0.25f : 1);
-		glVertex2f(0 - internal_range * (WindX / window_base_width), 0 - internal_range * (WindY / window_base_height));
-		glColor4f(0, 1, 0, (DRAG_OVER) ? 0.25f : 1);
-		glVertex2f(0 - internal_range * (WindX / window_base_width), internal_range * (WindY / window_base_height));
-		glColor4f(1, 0.5f, 0, (DRAG_OVER) ? 0.25f : 1);
-		glVertex2f(internal_range * (WindX / window_base_width), internal_range * (WindY / window_base_height));
-		glColor4f(0, 0.5f, 1, (DRAG_OVER) ? 0.25f : 1);
-		glVertex2f(internal_range * (WindX / window_base_width), 0 - internal_range * (WindY / window_base_height));
+		glColor4f(1, 0, 1, (drag_over) ? 0.25f : 1);
+		glVertex2f(0 - internal_range * (wind_x / window_base_width), 0 - internal_range * (wind_y / window_base_height));
+		glColor4f(0, 1, 0, (drag_over) ? 0.25f : 1);
+		glVertex2f(0 - internal_range * (wind_x / window_base_width), internal_range * (wind_y / window_base_height));
+		glColor4f(1, 0.5f, 0, (drag_over) ? 0.25f : 1);
+		glVertex2f(internal_range * (wind_x / window_base_width), internal_range * (wind_y / window_base_height));
+		glColor4f(0, 0.5f, 1, (drag_over) ? 0.25f : 1);
+		glVertex2f(internal_range * (wind_x / window_base_width), 0 - internal_range * (wind_y / window_base_height));
 		glEnd();
 	}
-	else if (MONTH_BEGINING || Settings::ShaderMode == 42)
+	else if (month_beginning || Settings::ShaderMode == 42)
 	{
 		glBegin(GL_QUADS);
-		glColor4f(1, 0.5f, 0, (DRAG_OVER) ? 0.25f : 1);
-		glVertex2f(0 - internal_range * (WindX / window_base_width), 0 - internal_range * (WindY / window_base_height));
-		glVertex2f(0 - internal_range * (WindX / window_base_width), internal_range * (WindY / window_base_height));
-		glColor4f(0, 0.5f, 1, (DRAG_OVER) ? 0.25f : 1);
-		glVertex2f(internal_range * (WindX / window_base_width), internal_range * (WindY / window_base_height));
-		glVertex2f(internal_range * (WindX / window_base_width), 0 - internal_range * (WindY / window_base_height));
+		glColor4f(1, 0.5f, 0, (drag_over) ? 0.25f : 1);
+		glVertex2f(0 - internal_range * (wind_x / window_base_width), 0 - internal_range * (wind_y / window_base_height));
+		glVertex2f(0 - internal_range * (wind_x / window_base_width), internal_range * (wind_y / window_base_height));
+		glColor4f(0, 0.5f, 1, (drag_over) ? 0.25f : 1);
+		glVertex2f(internal_range * (wind_x / window_base_width), internal_range * (wind_y / window_base_height));
+		glVertex2f(internal_range * (wind_x / window_base_width), 0 - internal_range * (wind_y / window_base_height));
 		glEnd();
 	}
 	else if (Settings::ShaderMode < 4)
 	{
 		glBegin(GL_QUADS);
-		glColor4f(0.05f, 0.05f, 0.10f, (DRAG_OVER) ? 0.25f : 1);
-		glVertex2f(0 - internal_range * (WindX / window_base_width), 0 - internal_range * (WindY / window_base_height));
-		glVertex2f(0 - internal_range * (WindX / window_base_width), internal_range * (WindY / window_base_height));
-		glColor4f(0.05f, 0.1f, 0.25f, (DRAG_OVER) ? 0.25f : 1);
-		glVertex2f(internal_range * (WindX / window_base_width), internal_range * (WindY / window_base_height));
-		glVertex2f(internal_range * (WindX / window_base_width), 0 - internal_range * (WindY / window_base_height));
+		glColor4f(0.05f, 0.05f, 0.10f, (drag_over) ? 0.25f : 1);
+		glVertex2f(0 - internal_range * (wind_x / window_base_width), 0 - internal_range * (wind_y / window_base_height));
+		glVertex2f(0 - internal_range * (wind_x / window_base_width), internal_range * (wind_y / window_base_height));
+		glColor4f(0.05f, 0.1f, 0.25f, (drag_over) ? 0.25f : 1);
+		glVertex2f(internal_range * (wind_x / window_base_width), internal_range * (wind_y / window_base_height));
+		glVertex2f(internal_range * (wind_x / window_base_width), 0 - internal_range * (wind_y / window_base_height));
 		glEnd();
 	}
 	else
 	{
 		glBegin(GL_QUADS);
-		glColor4f(0.00f, 0.2f, 0.4f, (DRAG_OVER) ? 0.25f : 1);
-		glVertex2f(0 - internal_range * (WindX / window_base_width), 0 - internal_range * (WindY / window_base_height));
-		glVertex2f(0 - internal_range * (WindX / window_base_width), internal_range * (WindY / window_base_height));
-		glVertex2f(internal_range * (WindX / window_base_width), internal_range * (WindY / window_base_height));
-		glVertex2f(internal_range * (WindX / window_base_width), 0 - internal_range * (WindY / window_base_height));
+		glColor4f(0.00f, 0.2f, 0.4f, (drag_over) ? 0.25f : 1);
+		glVertex2f(0 - internal_range * (wind_x / window_base_width), 0 - internal_range * (wind_y / window_base_height));
+		glVertex2f(0 - internal_range * (wind_x / window_base_width), internal_range * (wind_y / window_base_height));
+		glVertex2f(internal_range * (wind_x / window_base_width), internal_range * (wind_y / window_base_height));
+		glVertex2f(internal_range * (wind_x / window_base_width), 0 - internal_range * (wind_y / window_base_height));
 		glEnd();
 	}
 
 	glRotatef(dumb_rotation_angle, 0, 0, 1);
-	if (WH)
-		WH->draw();
-	if (DRAG_OVER)
+	if (wh)
+		wh->draw();
+	if (drag_over)
 		special_signs::draw_file_sign(0, 0, 50, 0xFFFFFFFF, 0);
 	glRotatef(-dumb_rotation_angle, 0, 0, 1);
 
 	glutSwapBuffers();
-	++TimerV;
+	++timer_v;
 }
 
 void mInit()
 {
 	glMatrixMode(GL_PROJECTION);
 	glLoadIdentity();
-	gluOrtho2D((0 - internal_range) * (WindX / window_base_width), internal_range * (WindX / window_base_width), (0 - internal_range) * (WindY / window_base_height), internal_range * (WindY / window_base_height));
+	gluOrtho2D((0 - internal_range) * (wind_x / window_base_width), internal_range * (wind_x / window_base_width), (0 - internal_range) * (wind_y / window_base_height), internal_range * (wind_y / window_base_height));
 }
 
 void mClose()
@@ -2869,24 +2875,24 @@ void mClose()
 void onTimer(int v)
 {
 	glutTimerFunc(33, onTimer, 0);
-	if (ANIMATION_IS_ACTIVE)
+	if (animation_is_active)
 	{
 		mDisplay();
-		++TimerV;
+		++timer_v;
 	}
 }
 
 void OnResize(int x, int y)
 {
-	WindX = x;
-	WindY = y;
+	wind_x = x;
+	wind_y = y;
 	mInit();
 	glViewport(0, 0, x, y);
-	if (WH)
+	if (wh)
 	{
-		auto SMRP = (*WH)["SMRP_CONTAINER"];
+		auto SMRP = (*wh)["SMRP_CONTAINER"];
 		SMRP->safe_change_position_argumented(0, 0, 0);
-		SMRP->not_safe_resize_centered(internal_range * 3 * (WindY / window_base_height) + 2 * moveable_window::window_header_size, internal_range * 3 * (WindX / window_base_width));
+		SMRP->not_safe_resize_centered(internal_range * 3 * (wind_y / window_base_height) + 2 * moveable_window::window_header_size, internal_range * 3 * (wind_x / window_base_width));
 
 		if (simplayer_maximised)
 			ApplySimplayerMaximisedLayout();
@@ -2901,9 +2907,9 @@ void inline rotate(float& x, float& y)
 
 void inline absolute_to_actual_coords(int ix, int iy, float& x, float& y)
 {
-	float wx = WindX, wy = WindY;
-	x = ((float)(ix - wx * 0.5f)) / (0.5f * (wx / (internal_range * (WindX / window_base_width))));
-	y = ((float)(0 - iy + wy * 0.5f)) / (0.5f * (wy / (internal_range * (WindY / window_base_height))));
+	float wx = wind_x, wy = wind_y;
+	x = ((float)(ix - wx * 0.5f)) / (0.5f * (wx / (internal_range * (wind_x / window_base_width))));
+	y = ((float)(0 - iy + wy * 0.5f)) / (0.5f * (wy / (internal_range * (wind_y / window_base_height))));
 	rotate(x, y);
 }
 
@@ -2913,14 +2919,14 @@ void mMotion(int ix, int iy)
 	absolute_to_actual_coords(ix, iy, fx, fy);
 	mouse_x_position = fx;
 	mouse_y_position = fy;
-	if (WH)
-		WH->mouse_handler(fx, fy, 0, 0);
+	if (wh)
+		wh->mouse_handler(fx, fy, 0, 0);
 }
 
 void mKey(std::uint8_t k, int x, int y)
 {
-	if (WH)
-		WH->keyboard_handler(k);
+	if (wh)
+		wh->keyboard_handler(k);
 
 	if (k == 27)
 	{
@@ -2932,7 +2938,7 @@ void mKey(std::uint8_t k, int x, int y)
 void mClick(int butt, int state, int x, int y)
 {
 	float fx, fy;
-	char button, state = state;
+	char button;
 	absolute_to_actual_coords(x, y, fx, fy);
 	button = butt - 1;
 
@@ -2941,8 +2947,8 @@ void mClick(int butt, int state, int x, int y)
 	else if (state == GLUT_UP)
 		state = 1;
 
-	if (WH)
-		WH->mouse_handler(fx, fy, button, state);
+	if (wh)
+		wh->mouse_handler(fx, fy, button, static_cast<char>(state));
 }
 
 void mDrag(int x, int y)
@@ -2958,29 +2964,29 @@ void mSpecialKey(int Key, int x, int y)
 	{
 		switch (Key)
 		{
-			case GLUT_KEY_DOWN:		if (WH)WH->keyboard_handler(1);
+			case GLUT_KEY_DOWN:		if (wh)wh->keyboard_handler(1);
 				break;
-			case GLUT_KEY_UP:		if (WH)WH->keyboard_handler(2);
+			case GLUT_KEY_UP:		if (wh)wh->keyboard_handler(2);
 				break;
-			case GLUT_KEY_LEFT:		if (WH)WH->keyboard_handler(3);
+			case GLUT_KEY_LEFT:		if (wh)wh->keyboard_handler(3);
 				break;
-			case GLUT_KEY_RIGHT:		if (WH)WH->keyboard_handler(4);
+			case GLUT_KEY_RIGHT:		if (wh)wh->keyboard_handler(4);
 				break;
-			case GLUT_KEY_F5:		if (WH) Init();
+			case GLUT_KEY_F5:		if (wh) Init();
 				break;
 		}
 	}
 	if (modif == GLUT_ACTIVE_ALT && Key == GLUT_KEY_DOWN)
 	{
 		internal_range *= 1.1f;
-		OnResize(WindX, WindY);
+		OnResize(wind_x, wind_y);
 
 		Init();
 	}
 	else if (modif == GLUT_ACTIVE_ALT && Key == GLUT_KEY_UP)
 	{
 		internal_range /= 1.1f;
-		OnResize(WindX, WindY);
+		OnResize(wind_x, wind_y);
 
 		Init();
 	}

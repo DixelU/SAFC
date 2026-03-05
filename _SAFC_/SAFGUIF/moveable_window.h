@@ -4,6 +4,7 @@
 
 #include <map>
 #include <memory>
+#include <ranges>
 
 #include "handleable_ui_part.h"
 #include "single_text_line_settings.h"
@@ -58,19 +59,24 @@ struct moveable_window : handleable_ui_part
 	~moveable_window() override
 	{
 		std::lock_guard locker(lock);
+
 		window_activities.clear();
 	}
 
-	moveable_window(std::string win_name, single_text_line_settings* win_name_settings,
-		float x_pos, float y_pos, float width, float height,
-		std::uint32_t rgba_background, std::uint32_t rgba_theme_color, std::uint32_t rgba_grad_background = 0)
+	moveable_window(
+		std::string win_name,
+		single_text_line_settings& win_name_settings,
+		float x_pos,
+		float y_pos,
+		float width,
+		float height,
+		std::uint32_t rgba_background,
+		std::uint32_t rgba_theme_color,
+		std::uint32_t rgba_grad_background = 0)
 	{
-		if (win_name_settings)
-		{
-			win_name_settings->set_new_pos(x_pos, y_pos);
-			this->window_name.reset(win_name_settings->create_one(win_name));
-			this->window_name->safe_move(this->window_name->calculated_width * 0.5f + window_header_size * 0.5f, 0.f - window_header_size * 0.5f);
-		}
+		win_name_settings.set_new_pos(x_pos, y_pos);
+		this->window_name.reset(win_name_settings.create_one(win_name));
+		this->window_name->safe_move(this->window_name->calculated_width * 0.5f + window_header_size * 0.5f, 0.f - window_header_size * 0.5f);
 
 		this->map_was_changed = false;
 		this->x_window_pos = x_pos;
@@ -85,22 +91,6 @@ struct moveable_window : handleable_ui_part
 		this->drawable = true;
 		this->pc_cur_x = 0.f;
 		this->pc_cur_y = 0.f;
-	}
-
-	void keyboard_handler(char ch) override
-	{
-		std::lock_guard locker(lock);
-		for (auto& elem : window_activities | std::views::values)
-		{
-			if (elem)
-				elem->keyboard_handler(ch);
-
-			if (!map_was_changed)
-				continue;
-			
-			map_was_changed = false;
-			break;
-		}
 	}
 
 	[[nodiscard]] bool mouse_handler(float mx, float my, char button_btn, char state) override
@@ -171,6 +161,23 @@ struct moveable_window : handleable_ui_part
 		}
 		else
 			return flag;
+	}
+
+	void keyboard_handler(char ch) override
+	{
+		std::lock_guard locker(lock);
+
+		for (const auto& elem : window_activities | std::views::values)
+		{
+			if (elem)
+				elem->keyboard_handler(ch);
+
+			if (!map_was_changed)
+				continue;
+
+			map_was_changed = false;
+			break;
+		}
 	}
 
 	void safe_change_position(float new_x, float new_y) override

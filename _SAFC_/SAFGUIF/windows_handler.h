@@ -116,7 +116,7 @@ struct windows_handler
 
 		if (!button_btn && !active_windows.empty())
 		{
-			(*active_windows.begin())->second->mouse_handler(mx, my, 0, 0);
+			discard((*active_windows.begin())->second->mouse_handler(mx, my, 0, 0));
 		}
 		else
 		{
@@ -367,6 +367,6 @@ struct windows_handler
 	}
 };
 
-inline std::shared_ptr<windows_handler> WH;
+inline std::shared_ptr<windows_handler> wh;
 
 #endif // !SAFGUIF_WH

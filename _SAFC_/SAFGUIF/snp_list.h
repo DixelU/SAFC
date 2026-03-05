@@ -21,8 +21,6 @@ struct selectable_properted_list : handleable_ui_part
 	float header_cx_pos, header_y_pos, calculated_height, space_between, width;
 	button_settings* butt_settings; // non-owning
 	// Backward-compat aliases
-	float& header_cx_pos = header_cx_pos;
-	float& header_y_pos = header_y_pos;
 	std::deque<std::string> selectors_text;
 	std::deque<std::unique_ptr<button>> selectors;
 	std::deque<std::uint32_t> selected_id;
@@ -145,7 +143,7 @@ struct selectable_properted_list : handleable_ui_part
 		else
 		{
 			for (int i = 0; i < (int)selectors.size(); i++)
-				selectors[i]->mouse_handler(mx, my, 0, 0);
+				discard(selectors[i]->mouse_handler(mx, my, 0, 0));
 		}
 
 		for (auto id : selected_id)
@@ -154,7 +152,7 @@ struct selectable_properted_list : handleable_ui_part
 				continue;
 
 			if (id >= current_top_line_id && id < current_top_line_id + max_visible_lines)
-				selectors[id - current_top_line_id]->mouse_handler(selectors[id - current_top_line_id]->x_pos, selectors[id - current_top_line_id]->y_pos, 0, 0);
+				discard(selectors[id - current_top_line_id]->mouse_handler(selectors[id - current_top_line_id]->x_pos, selectors[id - current_top_line_id]->y_pos, 0, 0));
 		}
 
 		return false;
