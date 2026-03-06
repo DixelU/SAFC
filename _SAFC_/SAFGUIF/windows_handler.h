@@ -367,6 +367,6 @@ struct windows_handler
 	}
 };
 
-inline std::shared_ptr<windows_handler> wh;
+inline std::shared_ptr<windows_handler> global_window_handler;
 
 #endif // !SAFGUIF_WH

@@ -257,6 +257,29 @@ struct single_text_line
 		if (calculated_width < std::numeric_limits<float>::epsilon())
 			recalculate_width();
 
+		if (is_listed_font)
+		{
+			// Render the whole string in one glCallLists call so that only the
+			// first-character raster position is float→pixel rounded.  Subsequent
+			// glyphs advance by the integer gmCellIncX stored in each display list,
+			// preventing per-glyph pixel-snapping jitter when the window is dragged.
+
+			if (chars.empty())
+				return;
+
+			auto first = static_cast<lfontsymbol*>(chars.front().get());
+			float pixel_size = (internal_range * 2) / window_base_width;
+			if (fabsf(first->x_pos) + font_height_to_width > pixel_size * wind_x / 2 ||
+				fabsf(first->y_pos) + font_height_to_width > pixel_size * wind_y / 2)
+				return;
+
+			glColor4ub(first->R, first->G, first->B, first->A);
+			glRasterPos2f(first->x_pos, first->y_pos - first->y_unit_size() * 0.5f);
+			lfont_symbols_info::call_list_on_string(current_text);
+
+			return;
+		}
+
 		for (auto& ch : chars)
 			ch->draw();
 	}

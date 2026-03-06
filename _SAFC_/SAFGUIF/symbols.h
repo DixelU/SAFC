@@ -5,22 +5,14 @@
 #include "header_utils.h"
 #include "charmap.h"
 
-struct coords
-{
-	float x, y;
-	void set(float newx, float newy)
-	{
-		x = newx; y = newy;
-	}
-};
-
 struct dotted_symbol
 {
 	float x_pos, y_pos;
+	float m_xu, m_yu;
 	std::uint8_t R, G, B, A, line_width;
-	coords points[9];
 	std::string render_way;
-	std::vector<char> point_placement;
+	char point_placement[9];
+	std::uint8_t point_placement_count;
 
 	dotted_symbol(
 		std::string render_way,
@@ -39,15 +31,12 @@ struct dotted_symbol
 
 		this->render_way = std::move(render_way);
 		this->x_pos = x_pos;
-		this->line_width = line_width;
 		this->y_pos = y_pos;
+		this->m_xu = x_unit_size;
+		this->m_yu = y_unit_size;
+		this->line_width = line_width;
 		this->R = red; this->G = green; this->B = blue; this->A = alpha;
-
-		for (int x = -1; x <= 1; x++)
-		{
-			for (int y = -1; y <= 1; y++)
-				points[x + 1 + 3 * (y + 1)].set(x_unit_size * x, y_unit_size * y);
-		}
+		this->point_placement_count = 0;
 
 		update_point_placement_positions();
 	}
@@ -74,56 +63,67 @@ struct dotted_symbol
 		return (c <= '9' && c >= '0');
 	}
 
+	// Offset of grid point [0..8] relative to (x_pos, y_pos).
+	// Grid is a 3x3 numpad layout: index = (col) + 3*(row), col/row in {0,1,2}.
+	inline float point_x(int index) const { return (index % 3 - 1) * m_xu; }
+	inline float point_y(int index) const { return (index / 3 - 1) * m_yu; }
+
+	inline float x_unit_size() const { return m_xu; }
+	inline float y_unit_size() const { return m_yu; }
+
 	void update_point_placement_positions()
 	{
-		point_placement.clear();
+		point_placement_count = 0;
 
 		if (render_way.size() > 1)
 		{
 			if (is_number(render_way[0]) && !is_number(render_way[1]))
-				point_placement.push_back(render_way[0]);
+				point_placement[point_placement_count++] = render_way[0];
 			if (is_number(render_way.back()) && !is_number(render_way[render_way.size() - 2]))
-				point_placement.push_back(render_way.back());
+				point_placement[point_placement_count++] = render_way.back();
 			for (int i = 1; i < (int)render_way.size() - 1; ++i)
 			{
 				if (is_number(render_way[i]) && !is_number(render_way[i - 1]) && !is_number(render_way[i + 1]))
-					point_placement.push_back(render_way[i]);
+					point_placement[point_placement_count++] = render_way[i];
 			}
 		}
 		else if (render_way.size() && is_number(render_way[0]))
 		{
-			point_placement.push_back(render_way[0]);
+			point_placement[point_placement_count++] = render_way[0];
 		}
 	}
 
+protected:
+	struct draw_params { float vs; int rlen; };
+
+	// Returns vertical shift and iteration length, handling '#'/'~' descender suffixes
+	// without mutating render_way.
+	draw_params compute_draw_params() const
+	{
+		if (render_way.size() > 1)
+		{
+			char back = render_way.back();
+			if (back == '#')
+				return { -m_yu, (int)render_way.size() - 1 };
+			if (back == '~')
+				return { -m_yu * 0.5f, (int)render_way.size() - 1 };
+		}
+		return { 0.f, (int)render_way.size() };
+	}
+
+public:
 	virtual void draw()
 	{
 		if (render_way == " ")
 			return;
 
-		float vertical_shift = 0.f;
-		char back = 0;
-
-		if (render_way.back() == '#' || render_way.back() == '~')
-		{
-			back = render_way.back();
-			render_way.back() = ' ';
-			switch (back)
-			{
-				case '#':
-					vertical_shift = points[0].y - points[3].y;
-					break;
-				case '~':
-					vertical_shift = (points[0].y - points[3].y) / 2;
-					break;
-			}
-		}
+		auto [vs, rlen] = compute_draw_params();
 
 		glColor4ub(R, G, B, A);
 		glLineWidth(line_width);
 		glPointSize(line_width);
 		glBegin(GL_LINE_STRIP);
-		for (int i = 0; i < (int)render_way.length(); i++)
+		for (int i = 0; i < rlen; i++)
 		{
 			if (render_way[i] == ' ')
 			{
@@ -132,17 +132,17 @@ struct dotted_symbol
 				continue;
 			}
 			auto index = render_way[i] - '1';
-			glVertex2f(x_pos + points[index].x, y_pos + points[index].y + vertical_shift);
+			glVertex2f(x_pos + point_x(index), y_pos + point_y(index) + vs);
 		}
 		glEnd();
 
 		glBegin(GL_POINTS);
-		for (int i = 0; i < (int)point_placement.size(); ++i)
-			glVertex2f(x_pos + points[point_placement[i] - '1'].x, y_pos + points[point_placement[i] - '1'].y + vertical_shift);
+		for (int i = 0; i < point_placement_count; ++i)
+		{
+			auto index = point_placement[i] - '1';
+			glVertex2f(x_pos + point_x(index), y_pos + point_y(index) + vs);
+		}
 		glEnd();
-
-		if (back)
-			render_way.back() = back;
 	}
 
 	void safe_position_change(float new_x_pos, float new_y_pos)
@@ -153,16 +153,6 @@ struct dotted_symbol
 	void safe_char_move(float dx, float dy)
 	{
 		x_pos += dx; y_pos += dy;
-	}
-
-	inline float x_unit_size() const
-	{
-		return points[1].x - points[0].x;
-	}
-
-	inline float y_unit_size() const
-	{
-		return points[3].y - points[0].y;
 	}
 
 	// Value-by-value refill gradient (replaces raw-pointer version)
@@ -179,95 +169,90 @@ struct dotted_symbol
 	}
 };
 
-float lFONT_HEIGHT_TO_WIDTH = 2.5;
-namespace lFontSymbolsInfo
+float font_height_to_width = 2.5;
+namespace lfont_symbols_info
 {
-	bool IsInitialised = false;
-	GLuint CurrentFont = 0;
-	HFONT SelectedFont = nullptr;
-	std::int32_t Size = 15;
 
-	std::int32_t PrevSize = Size;
-	float Prev_lFONT_HEIGHT_TO_WIDTH = lFONT_HEIGHT_TO_WIDTH;
-	std::string PrevFontName;
+bool is_init = false;
+GLuint current_font = 0;
+HFONT selected_font = nullptr;
+std::int32_t font_size = 15;
 
-	struct lFontSymbInfosListDestructor
+std::int32_t previous_font_size = font_size;
+float previous_font_height_to_width = font_height_to_width;
+std::string previous_font_name;
+
+struct font_symb_infos_list_destructor { ~font_symb_infos_list_destructor() { glDeleteLists(current_font, 256); } };
+font_symb_infos_list_destructor __font_destructor{};
+
+void initialise_font(const std::string& font_name, bool force = false)
+{
+	if (!force && font_name == previous_font_name && previous_font_size == font_size &&
+		(std::abs)(previous_font_height_to_width - font_height_to_width) < std::numeric_limits<float>::epsilon())
+		return;
+
+	previous_font_name = font_name;
+	previous_font_size = font_size;
+	previous_font_height_to_width = font_height_to_width;
+
+	if (!is_init)
 	{
-		~lFontSymbInfosListDestructor()
-		{
-			glDeleteLists(CurrentFont, 256);
-		}
-	};
-
-	lFontSymbInfosListDestructor __wFSILD{};
-
-	void InitialiseFont(const std::string& FontName, bool force = false)
-	{
-		if (!force && FontName == PrevFontName && PrevSize == Size &&
-			(std::abs)(Prev_lFONT_HEIGHT_TO_WIDTH - lFONT_HEIGHT_TO_WIDTH) < std::numeric_limits<float>::epsilon())
-			return;
-
-		PrevFontName = FontName;
-		PrevSize = Size;
-		Prev_lFONT_HEIGHT_TO_WIDTH = lFONT_HEIGHT_TO_WIDTH;
-
-		if (!IsInitialised)
-		{
-			CurrentFont = glGenLists(256);
-			IsInitialised = true;
-		}
-
-		auto height = Size * (base_internal_range / internal_range);
-		auto width = (Size > 0) ? Size * (base_internal_range / internal_range) / lFONT_HEIGHT_TO_WIDTH : 0;
-
-		SelectedFont = CreateFontA(
-			height,
-			width,
-			0, 0,
-			FW_NORMAL,
-			FALSE,
-			FALSE,
-			FALSE,
-			DEFAULT_CHARSET,
-			OUT_TT_PRECIS,
-			CLIP_DEFAULT_PRECIS,
-			NONANTIALIASED_QUALITY,
-			FF_DONTCARE,
-			FontName.c_str()
-		);
-
-		if (SelectedFont)
-		{
-			auto hdiobj = SelectObject(hDc, SelectedFont);
-			auto status = wglUseFontBitmaps(hDc, 0, 255, CurrentFont);
-			SetMapMode(hDc, MM_TEXT);
-		}
+		current_font = glGenLists(256);
+		is_init = true;
 	}
 
-	inline void CallListOnChar(char C)
-	{
-		if (IsInitialised)
-		{
-			const char PsChStr[2] = { C, 0 };
-			glPushAttrib(GL_LIST_BIT);
-			glListBase(CurrentFont);
-			glCallLists(1, GL_UNSIGNED_BYTE, (const char*)(PsChStr));
-			glPopAttrib();
-		}
-	}
+	auto height = font_size * (base_internal_range / internal_range);
+	auto width = (font_size > 0) ? font_size * (base_internal_range / internal_range) / font_height_to_width : 0;
 
-	inline void CallListOnString(const std::string& S)
-	{
-		if (IsInitialised)
-		{
-			glPushAttrib(GL_LIST_BIT);
-			glListBase(CurrentFont);
-			glCallLists(S.size(), GL_UNSIGNED_BYTE, S.c_str());
-			glPopAttrib();
-		}
-	}
+	selected_font = CreateFontA(
+		height,
+		width,
+		0, 0,
+		FW_NORMAL,
+		FALSE,
+		FALSE,
+		FALSE,
+		DEFAULT_CHARSET,
+		OUT_TT_PRECIS,
+		CLIP_DEFAULT_PRECIS,
+		NONANTIALIASED_QUALITY,
+		FF_DONTCARE,
+		font_name.c_str()
+	);
 
-	const _MAT2 MT = { {0, 1}, {0, 0}, {0, 0}, {0, 1} };
+	if (selected_font)
+	{
+		auto hdiobj = SelectObject(hDc, selected_font);
+		auto status = wglUseFontBitmaps(hDc, 0, 255, current_font);
+		SetMapMode(hDc, MM_TEXT);
+	}
+}
+
+inline void call_list_on_char(char C)
+{
+	if (is_init)
+	{
+		const char PsChStr[2] = { C, 0 };
+		glPushAttrib(GL_LIST_BIT);
+		glListBase(current_font);
+		glCallLists(1, GL_UNSIGNED_BYTE, (const char*)(PsChStr));
+		glPopAttrib();
+	}
+}
+
+inline void call_list_on_string(const std::string& S)
+{
+	if (is_init)
+	{
+		glPushAttrib(GL_LIST_BIT);
+		glListBase(current_font);
+		glCallLists(S.size(), GL_UNSIGNED_BYTE, S.c_str());
+		glPopAttrib();
+	}
+}
+
+const _MAT2 MT = { {0, 1}, {0, 0}, {0, 0}, {0, 1} };
+
 }
 
 struct lfontsymbol : dotted_symbol
@@ -293,23 +278,23 @@ struct lfontsymbol : dotted_symbol
 
 	void reinit_glyph_metrics()
 	{
-		auto result = GetGlyphOutline(hDc, symb, GGO_GRAY8_BITMAP, &gm, 0, NULL, &lFontSymbolsInfo::MT);
+		auto result = GetGlyphOutline(hDc, symb, GGO_GRAY8_BITMAP, &gm, 0, NULL, &lfont_symbols_info::MT);
 	}
 
 	void draw() override
 	{
-		if (!lFontSymbolsInfo::SelectedFont || !hDc)
+		if (!lfont_symbols_info::selected_font || !hDc)
 			return;
 
 		float pixel_size = (internal_range * 2) / window_base_width;
 
-		if (fabsf(x_pos) + lFONT_HEIGHT_TO_WIDTH > pixel_size * wind_x / 2 ||
-			fabsf(y_pos) + lFONT_HEIGHT_TO_WIDTH > pixel_size * wind_y / 2)
+		if (fabsf(x_pos) + font_height_to_width > pixel_size * wind_x / 2 ||
+			fabsf(y_pos) + font_height_to_width > pixel_size * wind_y / 2)
 			return;
 
 		glColor4ub(R, G, B, A);
 		glRasterPos2f(x_pos, y_pos - y_unit_size() * 0.5);
-		lFontSymbolsInfo::CallListOnChar(symb);
+		lfont_symbols_info::call_list_on_char(symb);
 	}
 };
 
@@ -427,28 +412,12 @@ struct bi_colored_dotted_symbol : dotted_symbol
 		if (render_way == " ")
 			return;
 
-		float vertical_shift = 0.f;
-		char back = 0;
-
-		if (render_way.back() == '#' || render_way.back() == '~')
-		{
-			back = render_way.back();
-			render_way.back() = ' ';
-			switch (back)
-			{
-			case '#':
-				vertical_shift = points[0].y - points[3].y;
-				break;
-			case '~':
-				vertical_shift = (points[0].y - points[3].y) / 2;
-				break;
-			}
-		}
+		auto [vs, rlen] = compute_draw_params();
 
 		glLineWidth(line_width);
 		glPointSize(line_width);
 		glBegin(GL_LINE_STRIP);
-		for (int i = 0; i < (int)render_way.length(); i++)
+		for (int i = 0; i < rlen; i++)
 		{
 			if (render_way[i] == ' ')
 			{
@@ -456,24 +425,20 @@ struct bi_colored_dotted_symbol : dotted_symbol
 				glBegin(GL_LINE_STRIP);
 				continue;
 			}
-
 			auto index = render_way[i] - '1';
 			glColor4ub(gR[index], gG[index], gB[index], gA[index]);
-			glVertex2f(x_pos + points[index].x, y_pos + points[index].y + vertical_shift);
+			glVertex2f(x_pos + point_x(index), y_pos + point_y(index) + vs);
 		}
 		glEnd();
 
 		glBegin(GL_POINTS);
-		for (int i = 0; i < (int)point_placement.size(); ++i)
+		for (int i = 0; i < point_placement_count; ++i)
 		{
 			auto index = point_placement[i] - '1';
 			glColor4ub(gR[index], gG[index], gB[index], gA[index]);
-			glVertex2f(x_pos + points[index].x, y_pos + points[index].y + vertical_shift);
+			glVertex2f(x_pos + point_x(index), y_pos + point_y(index) + vs);
 		}
 		glEnd();
-
-		if (back)
-			render_way.back() = back;
 	}
 };
 

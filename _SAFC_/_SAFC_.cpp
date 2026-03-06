@@ -161,6 +161,7 @@ static void extract(const void* data, size_t data_size)
 		if (r < ARCHIVE_WARN)
 			throw std::runtime_error("Failed to intilise write of archive data: code " + std::to_string(r) + " - " + archive_error_string(ext));
 	}
+
 	archive_read_close(a);
 	archive_read_free(a);
 	archive_write_close(ext);
@@ -174,18 +175,23 @@ bool safc_update(const std::wstring& latest_release)
 #else
 	constexpr wchar_t* const archive_name = (wchar_t* const)L"SAFC64.7z";
 #endif
-	wchar_t current_file_path[MAX_PATH];
+
 	bool updated_flag = false;
+	std::string error_msg;
+
+	wchar_t current_file_path[MAX_PATH];
 	//GetCurrentDirectoryW(MAX_PATH, current_file_path);
 	GetModuleFileNameW(NULL, current_file_path, MAX_PATH);
+
 	//std::wstring executablepath = current_file_path;
 	std::wstring filename = extract_directory(current_file_path);
 	std::wstring pathway = filename;
+
 	filename += L"update.7z";
 	//wsprintfW(current_file_path, L"%S%S", filename.c_str(), L"update.7z\0");
 	std::wstring link = L"https://github.com/DixelU/SAFC/releases/download/" + latest_release + L"/" + archive_name;
+
 	HRESULT co_res = URLDownloadToFileW(NULL, link.c_str(), filename.c_str(), 0, NULL);
-	std::string error_msg;
 	
 	auto executable_filename = boost::dll::program_location().filename().wstring();
 
@@ -224,6 +230,7 @@ bool safc_update(const std::wstring& latest_release)
 		{
 			error_msg = std::string("Autoudate error (unable to access self): \n") + strerror(errno);
 		}
+
 		_wremove(filename.c_str());
 	}
 	else if (check_autoupdates)
@@ -250,7 +257,7 @@ void safc_version_check()
 	if (!check_autoupdates)
 		return;
 
-	std::thread version_checker([]() 
+	worker_singleton<struct version_check>::instance().push([]() 
 	{
 		bool flag = false;
 		_wremove(L"_s");
@@ -266,16 +273,20 @@ void safc_version_check()
 			if (res == S_OK) 
 			{
 				auto [maj, min, ver, build] = g_version_tuple;
+
+				std::string json_buffer;
 				std::ifstream input(filename);
-				std::string temp_buffer;
-				std::getline(input, temp_buffer);
+				std::getline(input, json_buffer);
 				input.close();
-				auto JSON_Value = JSON::Parse(temp_buffer.c_str());
-				auto& git_latest_version = ((JSON_Value)->AsArray()[0])->AsObject().at(L"name")->AsString();
+
+				auto value = JSON::Parse(json_buffer.c_str());
+				auto& git_latest_version = ((value)->AsArray()[0])->AsObject().at(L"name")->AsString();
+
 				std::uint16_t version_partied[4] = { 0,0,0,0 };
 				std::vector<std::string> ans;
 				std::wstring git_version_numbers_only = git_latest_version.substr(1);//v?.?.?.?
 				boost::algorithm::split(ans, git_version_numbers_only, boost::is_any_of("."));
+
 				int index = 0;
 				for (auto& num_val : ans) 
 				{
@@ -287,12 +298,16 @@ void safc_version_check()
 					{
 						break;
 					}
+
 					if (index == 3)
 						break;
+
 					index++;
 				}
+
 				std::wcout << L"Git latest version: v" << 
 					version_partied[0] << L"." << version_partied[1] << L"." << version_partied[2] << L"." << version_partied[3] << L"\n";
+
 				if (check_autoupdates &&
 					(maj < version_partied[0] ||
 						maj == version_partied[0] && min < version_partied[1] ||
@@ -301,7 +316,9 @@ void safc_version_check()
 						))
 				{
 					throw_alert_warning("Update found! The app might restart soon...\nUpdate: " + std::string(git_latest_version.begin(), git_latest_version.end()));
+
 					flag = safc_update(git_latest_version);
+
 					if (flag)
 						throw_alert_warning("SAFC will restart in 3 seconds...");
 				}
@@ -319,16 +336,18 @@ void safc_version_check()
 			throw_alert_warning("SAFC just almost crashed while checking the update...\nTell developer about that " +
 				std::string() + e.what());
 		}
+
 		_wremove(filename.c_str());
+
 		if (flag)
 		{
 			Sleep(3000);
+
 			ShellExecuteW(NULL, L"open", current_file_path.c_str(), NULL, NULL, SW_SHOWNORMAL);
 			//_wsystem((L"start \"" + executablepath + L"\"").c_str());
 			exit(0);
 		}
 	});
-	version_checker.detach();
 }
 
 size_t get_available_memory() 
@@ -372,63 +391,57 @@ button_settings* bs_list_black_small = new button_settings(&system_white, 0, 0, 
 std::uint32_t default_bool_settings = _BoolSettings::remove_remnants | _BoolSettings::remove_empty_tracks | _BoolSettings::all_instruments_to_piano;
 
 struct file_settings
-{////per file app_settings
+{////per file settings
 	std::wstring filename;
 	std::wstring postprocessed_file_name, w_file_name_postfix;
 	std::string appearance_filename, appearance_path, file_name_postfix;
-	std::uint16_t new_ppqn, old_ppqn, old_track_number, merge_multiplier;
-	std::int16_t group_id;
-	double new_tempo;
-	std::uint64_t filesize;
-	std::int64_t selection_start, selection_length;
+
+	double new_tempo = 0;
+
+	std::uint16_t new_ppqn = 0, old_ppqn = 0, old_track_number = 0, merge_multiplier = 0;
+	std::int16_t group_id = 0;
+
+	std::uint64_t filesize = 0;
+	std::int64_t selection_start = 0, selection_length = -1;
+	std::uint32_t bool_settings = default_bool_settings;
+	std::int64_t offset_ticks = 0;
+
 	bool
-		is_midi,
-		inplace_merge_enabled,
-		allow_legacy_rsb_meta_interaction,
-		rsb_compression,
-		channels_split,
-		collapse_midi,
-		allow_sysex,
-		enable_zero_velocity,
-		apply_offset_after;
+		is_midi = false,
+		inplace_merge_enabled = false,
+		allow_legacy_rsb_meta_interaction = false,
+		rsb_compression = false,
+		channels_split = true,
+		collapse_midi = false,
+		allow_sysex = false,
+		enable_zero_velocity = false,
+		apply_offset_after = true;
+
 	std::shared_ptr<cut_and_transpose> key_map;
 	std::shared_ptr<polyline_converter<std::uint8_t, std::uint8_t>> volume_map;
 	std::shared_ptr<polyline_converter<std::uint16_t, std::uint16_t>> pitch_bend_map;
-	std::uint32_t bool_settings;
-	std::int64_t offset_ticks;
 
 	single_midi_info_collector::time_graph time_map;
 
-	file_settings(const std::wstring& filename) 
+	file_settings(const std::wstring& filename): 
+		filename(filename),
+		file_name_postfix("_.mid"),
+		w_file_name_postfix(L"_.mid")
 	{
-		this->filename = filename;
-		appearance_filename = appearance_path = "";
 		auto pos = filename.rfind('\\');
 		for (; pos < filename.size(); pos++)
 			appearance_filename.push_back(filename[pos] & 0xFF);
 		for (int i = 0; i < filename.size(); i++)
 			appearance_path.push_back((char)(filename[i] & 0xFF));
+
 		//cout << appearance_path << " ::\n";
+
 		fast_midi_checker FMIC(filename);
-		this->is_midi = FMIC.is_acssessible && FMIC.is_midi;
+		is_midi = FMIC.is_acssessible && FMIC.is_midi;
 		old_ppqn = FMIC.PPQN;
 		new_ppqn = FMIC.PPQN;
-		merge_multiplier = 0;
 		old_track_number = FMIC.expected_track_number;
-		offset_ticks = inplace_merge_enabled = 0;
-		allow_sysex = false;
-		enable_zero_velocity = false;
 		filesize = FMIC.filesize;
-		group_id = new_tempo = 0;
-		selection_start = 0;
-		selection_length = -1;
-		bool_settings = default_bool_settings;
-		file_name_postfix = "_.mid"; //_FILENAMEWITHEXTENSIONSTRING_.mid
-		w_file_name_postfix = L"_.mid";
-		rsb_compression = channels_split = false;
-		collapse_midi = true;
-		allow_legacy_rsb_meta_interaction = false;
-		apply_offset_after = true;
 	}
 
 	inline void switch_bool_setting(std::uint32_t smp_bool_setting) 
@@ -506,6 +519,7 @@ struct file_settings
 		return smrp_data;
 	}
 };
+
 struct sfd_rsp 
 {
 	std::int32_t id;
@@ -521,13 +535,14 @@ struct sfd_rsp
 	}
 };
 
-struct safc_data 
+struct safc_data
 {
-	////overall app_settings and storing perfile settings....
+	////overall settings and storing perfile settings....
 	std::vector<file_settings> files;
 	std::wstring save_path;
 	std::uint16_t global_ppqn;
 	std::int32_t global_offset;
+
 	float global_new_tempo;
 	bool incremental_ppqn;
 	bool inplace_merge_flag;
@@ -536,6 +551,7 @@ struct safc_data
 	bool collapse_midi;
 	bool apply_offset_after;
 	bool is_cli_mode;
+
 	std::uint16_t detected_threads;
 
 	safc_data()
@@ -649,16 +665,16 @@ void throw_alert_error(std::string&& AlertText)
 {
 	std::cerr << AlertText << std::endl;
 
-	if (wh)
-		wh->throw_alert(AlertText, "ERROR!", special_signs::draw_ex_triangle, true, 0xFFAF00FF, 0xFF);
+	if (global_window_handler)
+		global_window_handler->throw_alert(AlertText, "ERROR!", special_signs::draw_ex_triangle, true, 0xFFAF00FF, 0xFF);
 }
 
 void throw_alert_warning(std::string&& AlertText)
 {
 	std::cout << AlertText << std::endl;
 
-	if (wh)
-		wh->throw_alert(AlertText, "Warning!", special_signs::draw_ex_triangle, true, 0x7F7F7FFF, 0xFFFFFFAF);
+	if (global_window_handler)
+		global_window_handler->throw_alert(AlertText, "Warning!", special_signs::draw_ex_triangle, true, 0x7F7F7FFF, 0xFFFFFFAF);
 }
 
 std::vector<std::wstring> multiple_open_file_dialog(const wchar_t* Title)
@@ -773,7 +789,7 @@ std::wstring save_open_file_dialog(const wchar_t* Title)
 
 handleable_ui_part* _WH(const char* window, const char* element)
 {
-	return ((*(*wh)[window])[element]);
+	return ((*(*global_window_handler)[window])[element]);
 }
 
 template<typename ui_part_type>
@@ -784,8 +800,8 @@ ui_part_type* _WH_t(const char* window, const char* element) requires std::is_ba
 
 void add_files(const std::vector<std::wstring>& Filenames)
 {
-	if(wh)
-		wh->disable_all_windows();
+	if(global_window_handler)
+		global_window_handler->disable_all_windows();
 	for (int i = 0; i < Filenames.size(); i++)
 	{
 		if (Filenames[i].empty())
@@ -794,7 +810,7 @@ void add_files(const std::vector<std::wstring>& Filenames)
 		auto& lastFile = g_data.files.back();
 		if (lastFile.is_midi)
 		{
-			if (wh)
+			if (global_window_handler)
 				_WH_t<selectable_properted_list>("MAIN", "List")->safe_push_back_new_string(lastFile.appearance_filename);
 
 			std::uint32_t Counter = 0;
@@ -849,8 +865,8 @@ namespace props_and_sets
 		}
 
 		current_id = id;
-		auto PASWptr = (*wh)["SMPAS"];
-		auto OSptr = (*wh)["OTHER_SETS"];
+		auto PASWptr = (*global_window_handler)["SMPAS"];
+		auto OSptr = (*global_window_handler)["OTHER_SETS"];
 
 		((text_box*)((*PASWptr)["FileName"]))->safe_string_replace("..." + g_data[id].appearance_filename);
 		((input_field*)((*PASWptr)["PPQN"]))->update_input_string();
@@ -898,7 +914,7 @@ namespace props_and_sets
 			"Time map status: " + ((g_data[id].time_map.empty()) ? "Empty" : "Present")
 		);
 
-		wh->enable_window("SMPAS");
+		global_window_handler->enable_window("SMPAS");
 	}
 
 	void initialize_collecting()
@@ -909,7 +925,7 @@ namespace props_and_sets
 			return;
 		}
 
-		auto UIElement = (Graphing<single_midi_info_collector::tempo_graph>*)(*(*wh)["SMIC"])["TEMPO_GRAPH"];
+		auto UIElement = (Graphing<single_midi_info_collector::tempo_graph>*)(*(*global_window_handler)["SMIC"])["TEMPO_GRAPH"];
 		if (smic_ptr)
 		{
 			{ std::lock_guard<std::recursive_mutex> locker(UIElement->lock); }
@@ -920,33 +936,33 @@ namespace props_and_sets
 
 		std::thread th([]()
 		{
-			wh->main_window_id = "SMIC";
-			wh->disable_all_windows();
+			global_window_handler->main_window_id = "SMIC";
+			global_window_handler->disable_all_windows();
 			std::thread ith([]()
 			{
-				auto All_Exp = (*(*wh)["SMIC"])["ALL_EXP"];
-				auto TG_Exp = (*(*wh)["SMIC"])["TG_EXP"];
-				auto ITicks = (*(*wh)["SMIC"])["INTEGRATE_TICKS"];
-				auto ITime = (*(*wh)["SMIC"])["INTEGRATE_TIME"];
-				auto error_line = (text_box*)(*(*wh)["SMIC"])["FEL"];
-				auto InfoLine = (text_box*)(*(*wh)["SMIC"])["FLL"];
-				auto Delim = (input_field*)(*(*wh)["SMIC"])["DELIM"];
-				auto UIMinutes = (input_field*)(*(*wh)["SMIC"])["INT_MIN"];
-				auto UISeconds = (input_field*)(*(*wh)["SMIC"])["INT_SEC"];
-				auto UIT = (input_field*)(*(*wh)["SMIC"])["TG_SWITCH"];
-				auto UIP = (input_field*)(*(*wh)["SMIC"])["PG_SWITCH"];
-				auto UIMilliseconds = (input_field*)(*(*wh)["SMIC"])["INT_MSC"];
-				auto UITicks = (input_field*)(*(*wh)["SMIC"])["INT_TIC"];
-				auto UIElement_TG = (Graphing<single_midi_info_collector::tempo_graph>*)(*(*wh)["SMIC"])["TEMPO_GRAPH"];
-				auto UIElement_PG = (Graphing<single_midi_info_collector::polyphony_graph>*)(*(*wh)["SMIC"])["POLY_GRAPH"];
+				auto All_Exp = (*(*global_window_handler)["SMIC"])["ALL_EXP"];
+				auto TG_Exp = (*(*global_window_handler)["SMIC"])["TG_EXP"];
+				auto ITicks = (*(*global_window_handler)["SMIC"])["INTEGRATE_TICKS"];
+				auto ITime = (*(*global_window_handler)["SMIC"])["INTEGRATE_TIME"];
+				auto error_line = (text_box*)(*(*global_window_handler)["SMIC"])["FEL"];
+				auto InfoLine = (text_box*)(*(*global_window_handler)["SMIC"])["FLL"];
+				auto Delim = (input_field*)(*(*global_window_handler)["SMIC"])["DELIM"];
+				auto UIMinutes = (input_field*)(*(*global_window_handler)["SMIC"])["INT_MIN"];
+				auto UISeconds = (input_field*)(*(*global_window_handler)["SMIC"])["INT_SEC"];
+				auto UIT = (input_field*)(*(*global_window_handler)["SMIC"])["TG_SWITCH"];
+				auto UIP = (input_field*)(*(*global_window_handler)["SMIC"])["PG_SWITCH"];
+				auto UIMilliseconds = (input_field*)(*(*global_window_handler)["SMIC"])["INT_MSC"];
+				auto UITicks = (input_field*)(*(*global_window_handler)["SMIC"])["INT_TIC"];
+				auto UIElement_TG = (Graphing<single_midi_info_collector::tempo_graph>*)(*(*global_window_handler)["SMIC"])["TEMPO_GRAPH"];
+				auto UIElement_PG = (Graphing<single_midi_info_collector::polyphony_graph>*)(*(*global_window_handler)["SMIC"])["POLY_GRAPH"];
 				UIElement_PG->enabled = false;
 				UIElement_PG->reset();
 				UIElement_TG->enabled = false;
 				UIElement_TG->reset();
 				Delim->safe_string_replace(csv_delim);
 				Delim->current_string = csv_delim;
-				UIP->safe_string_replace("enable graph B");
-				UIT->safe_string_replace("enable graph A");
+				UIP->safe_string_replace("Enable graph B");
+				UIT->safe_string_replace("Enable graph A");
 				InfoLine->safe_string_replace("Please wait...");
 				UIMinutes->safe_string_replace("0");
 				UISeconds->safe_string_replace("0");
@@ -973,23 +989,23 @@ namespace props_and_sets
 			ith.detach();
 
 			smic_ptr->fetch_data();
-			auto UIElement_TG = (Graphing<single_midi_info_collector::tempo_graph>*)(*(*wh)["SMIC"])["TEMPO_GRAPH"];
+			auto UIElement_TG = (Graphing<single_midi_info_collector::tempo_graph>*)(*(*global_window_handler)["SMIC"])["TEMPO_GRAPH"];
 			UIElement_TG->graph = &(smic_ptr->tempo_map);
-			auto UIElement_PG = (Graphing<single_midi_info_collector::polyphony_graph>*)(*(*wh)["SMIC"])["POLY_GRAPH"];
+			auto UIElement_PG = (Graphing<single_midi_info_collector::polyphony_graph>*)(*(*global_window_handler)["SMIC"])["POLY_GRAPH"];
 			UIElement_PG->graph = &(smic_ptr->polyphony);
 
-			auto UIElement_TB = (text_box*)(*(*wh)["SMIC"])["TOTAL_INFO"];
+			auto UIElement_TB = (text_box*)(*(*global_window_handler)["SMIC"])["TOTAL_INFO"];
 			UIElement_TB->safe_string_replace(
 				"Total (real) tracks: " + std::to_string(smic_ptr->tracks.size()) + "; ... "
 			);
 
-			wh->main_window_id = "MAIN";
-			wh->enable_window("MAIN");
-			wh->enable_window("SMIC");
+			global_window_handler->main_window_id = "MAIN";
+			global_window_handler->enable_window("MAIN");
+			global_window_handler->enable_window("SMIC");
 		});
 		th.detach();
 
-		wh->enable_window("SMIC");
+		global_window_handler->enable_window("SMIC");
 	}
 
 	namespace SMIC
@@ -1016,46 +1032,46 @@ namespace props_and_sets
 
 			g_data[current_id].time_map = smic_ptr->internal_time_map;
 			open_file_properties(current_id);
-			wh->disable_window("SMIC");
+			global_window_handler->disable_window("SMIC");
 		}
 
 		void enable_pg()
 		{
-			auto UIElement_PG = (Graphing<single_midi_info_collector::polyphony_graph>*)(*(*wh)["SMIC"])["POLY_GRAPH"];
-			auto UIElement_Butt = (button*)(*(*wh)["SMIC"])["PG_SWITCH"];
+			auto UIElement_PG = (Graphing<single_midi_info_collector::polyphony_graph>*)(*(*global_window_handler)["SMIC"])["POLY_GRAPH"];
+			auto UIElement_Butt = (button*)(*(*global_window_handler)["SMIC"])["PG_SWITCH"];
 			if (UIElement_PG->enabled)
-				UIElement_Butt->safe_string_replace("enable graph B");
+				UIElement_Butt->safe_string_replace("Enable graph B");
 			else
-				UIElement_Butt->safe_string_replace("disable graph B");
+				UIElement_Butt->safe_string_replace("Disable graph B");
 			UIElement_PG->enabled ^= true;
 		}
 
 		void enable_tg()
 		{
-			auto UIElement_TG = (Graphing<single_midi_info_collector::tempo_graph>*)(*(*wh)["SMIC"])["TEMPO_GRAPH"];
-			auto UIElement_Butt = (button*)(*(*wh)["SMIC"])["TG_SWITCH"];
+			auto UIElement_TG = (Graphing<single_midi_info_collector::tempo_graph>*)(*(*global_window_handler)["SMIC"])["TEMPO_GRAPH"];
+			auto UIElement_Butt = (button*)(*(*global_window_handler)["SMIC"])["TG_SWITCH"];
 			if (UIElement_TG->enabled)
-				UIElement_Butt->safe_string_replace("enable graph A");
+				UIElement_Butt->safe_string_replace("Enable graph A");
 			else
-				UIElement_Butt->safe_string_replace("disable graph A");
+				UIElement_Butt->safe_string_replace("Disable graph A");
 			UIElement_TG->enabled ^= true;
 		}
 
 		void reset_tg()
 		{//TEMPO_GRAPH
-			auto UIElement_TG = (Graphing<single_midi_info_collector::tempo_graph>*)(*(*wh)["SMIC"])["TEMPO_GRAPH"];
+			auto UIElement_TG = (Graphing<single_midi_info_collector::tempo_graph>*)(*(*global_window_handler)["SMIC"])["TEMPO_GRAPH"];
 			UIElement_TG->reset();
 		}
 
 		void reset_pg()
 		{//TEMPO_GRAPH
-			auto UIElement_PG = (Graphing<single_midi_info_collector::tempo_graph>*)(*(*wh)["SMIC"])["POLY_GRAPH"];
+			auto UIElement_PG = (Graphing<single_midi_info_collector::tempo_graph>*)(*(*global_window_handler)["SMIC"])["POLY_GRAPH"];
 			UIElement_PG->reset();
 		}
 
 		void switch_personal_use()
 		{//PERSONALUSE
-			auto UIElement_Butt = (button*)(*(*wh)["SMIC"])["PERSONALUSE"];
+			auto UIElement_Butt = (button*)(*(*global_window_handler)["SMIC"])["PERSONALUSE"];
 			for_personal_use ^= true;
 			if (for_personal_use)
 				UIElement_Butt->safe_string_replace(".csv");
@@ -1067,18 +1083,18 @@ namespace props_and_sets
 		{
 			worker_singleton<struct info_collection>::instance().push([]()
 			{
-				wh->main_window_id = "SMIC";
-				wh->disable_all_windows();
-				auto InfoLine = (text_box*)(*(*wh)["SMIC"])["FLL"];
+				global_window_handler->main_window_id = "SMIC";
+				global_window_handler->disable_all_windows();
+				auto InfoLine = (text_box*)(*(*global_window_handler)["SMIC"])["FLL"];
 				InfoLine->safe_string_replace("graph A is exporting...");
 				std::ofstream out(smic_ptr->filename + L".tg.csv");
 				out << "tick" << csv_delim << "tempo" << '\n';
 				for (auto& cur_pair : smic_ptr->tempo_map)
 					out << cur_pair.first << csv_delim << cur_pair.second << '\n';
 				out.close();
-				wh->main_window_id = "MAIN";
-				wh->enable_window("MAIN");
-				wh->enable_window("SMIC");
+				global_window_handler->main_window_id = "MAIN";
+				global_window_handler->enable_window("MAIN");
+				global_window_handler->enable_window("SMIC");
 				InfoLine->safe_string_replace("graph A was successfully exported...");
 			});
 		}
@@ -1087,9 +1103,9 @@ namespace props_and_sets
 		{
 			worker_singleton<struct info_collection>::instance().push([]()
 			{
-				wh->main_window_id = "SMIC";
-				wh->disable_all_windows();
-				auto InfoLine = (text_box*)(*(*wh)["SMIC"])["FLL"];
+				global_window_handler->main_window_id = "SMIC";
+				global_window_handler->disable_all_windows();
+				auto InfoLine = (text_box*)(*(*global_window_handler)["SMIC"])["FLL"];
 				InfoLine->safe_string_replace("Collecting data for exporting...");
 
 				using line_data = struct
@@ -1178,9 +1194,9 @@ namespace props_and_sets
 					}
 				}
 				out.close();
-				wh->main_window_id = "MAIN";
-				wh->enable_window("MAIN");
-				wh->enable_window("SMIC");
+				global_window_handler->main_window_id = "MAIN";
+				global_window_handler->enable_window("MAIN");
+				global_window_handler->enable_window("SMIC");
 				InfoLine->safe_string_replace("graph B was successfully exported...");
 			});
 		}
@@ -1189,11 +1205,11 @@ namespace props_and_sets
 		{
 			worker_singleton<struct info_collection>::instance().push([]()
 			{
-				wh->main_window_id = "SMIC";
-				wh->disable_all_windows();
-				auto InfoLine = (*(*wh)["SMIC"])["FLL"];
-				auto UITicks = (input_field*)(*(*wh)["SMIC"])["INT_TIC"];
-				auto UIOutput = (text_box*)(*(*wh)["SMIC"])["ANSWER"];
+				global_window_handler->main_window_id = "SMIC";
+				global_window_handler->disable_all_windows();
+				auto InfoLine = (*(*global_window_handler)["SMIC"])["FLL"];
+				auto UITicks = (input_field*)(*(*global_window_handler)["SMIC"])["INT_TIC"];
+				auto UIOutput = (text_box*)(*(*global_window_handler)["SMIC"])["ANSWER"];
 				InfoLine->safe_string_replace("Integration has begun");
 
 				std::int64_t ticks_limit = 0;
@@ -1232,9 +1248,9 @@ namespace props_and_sets
 					"\nMsec: " + std::to_string((int)(milliseconds_ans))
 				);
 
-				wh->main_window_id = "MAIN";
-				wh->enable_window("MAIN");
-				wh->enable_window("SMIC");
+				global_window_handler->main_window_id = "MAIN";
+				global_window_handler->enable_window("MAIN");
+				global_window_handler->enable_window("SMIC");
 				InfoLine->safe_string_replace("Integration was succsessfully finished");
 			});
 		}
@@ -1243,13 +1259,13 @@ namespace props_and_sets
 		{
 			worker_singleton<struct info_collection>::instance().push([]()
 			{
-				wh->main_window_id = "SMIC";
-				wh->disable_all_windows();
-				auto InfoLine = (*(*wh)["SMIC"])["FLL"];
-				auto UIMinutes = (input_field*)(*(*wh)["SMIC"])["INT_MIN"];
-				auto UISeconds = (input_field*)(*(*wh)["SMIC"])["INT_SEC"];
-				auto UIMilliseconds = (input_field*)(*(*wh)["SMIC"])["INT_MSC"];
-				auto UIOutput = (text_box*)(*(*wh)["SMIC"])["ANSWER"];
+				global_window_handler->main_window_id = "SMIC";
+				global_window_handler->disable_all_windows();
+				auto InfoLine = (*(*global_window_handler)["SMIC"])["FLL"];
+				auto UIMinutes = (input_field*)(*(*global_window_handler)["SMIC"])["INT_MIN"];
+				auto UISeconds = (input_field*)(*(*global_window_handler)["SMIC"])["INT_SEC"];
+				auto UIMilliseconds = (input_field*)(*(*global_window_handler)["SMIC"])["INT_MSC"];
+				auto UIOutput = (text_box*)(*(*global_window_handler)["SMIC"])["ANSWER"];
 				InfoLine->safe_string_replace("Integration has begun");
 
 				double seconds_limit = 0;
@@ -1280,9 +1296,9 @@ namespace props_and_sets
 
 				UIOutput->safe_string_replace("Tick: " + std::to_string(tick));
 
-				wh->main_window_id = "MAIN";
-				wh->enable_window("MAIN");
-				wh->enable_window("SMIC");
+				global_window_handler->main_window_id = "MAIN";
+				global_window_handler->enable_window("MAIN");
+				global_window_handler->enable_window("SMIC");
 				InfoLine->safe_string_replace("Integration was succsessfully finished");
 			});
 		}
@@ -1298,8 +1314,8 @@ namespace props_and_sets
 
 		std::int32_t T;
 		std::string CurStr = "";
-		auto SMPASptr = (*wh)["SMPAS"];
-		auto OSptr = (*wh)["OTHER_SETS"];
+		auto SMPASptr = (*global_window_handler)["SMPAS"];
+		auto OSptr = (*global_window_handler)["OTHER_SETS"];
 
 		CurStr = ((input_field*)(*SMPASptr)["PPQN"])->get_current_input("0");
 		if (CurStr.size())
@@ -1412,18 +1428,18 @@ namespace props_and_sets
 
 		void on_cat()
 		{
-			auto Wptr = (*wh)["CAT"];
+			auto Wptr = (*global_window_handler)["CAT"];
 			auto CATptr = (cut_and_transpose_piano*)((*Wptr)["CAT_ITSELF"]);
 			if (!g_data[current_id].key_map)
 				g_data[current_id].key_map = std::make_shared<::cut_and_transpose>(0, 127, 0);
 			CATptr->piano_transform = g_data[current_id].key_map;
 			CATptr->update_info();
-			wh->enable_window("CAT");
+			global_window_handler->enable_window("CAT");
 		}
 
 		void on_reset()
 		{
-			auto Wptr = (*wh)["CAT"];
+			auto Wptr = (*global_window_handler)["CAT"];
 			auto CATptr = (cut_and_transpose_piano*)((*Wptr)["CAT_ITSELF"]);
 			CATptr->piano_transform->max_val = 255;
 			CATptr->piano_transform->min_val = 0;
@@ -1433,7 +1449,7 @@ namespace props_and_sets
 
 		void on_cdt128()
 		{
-			auto Wptr = (*wh)["CAT"];
+			auto Wptr = (*global_window_handler)["CAT"];
 			auto CATptr = (cut_and_transpose_piano*)((*Wptr)["CAT_ITSELF"]);
 			CATptr->piano_transform->max_val = 127;
 			CATptr->piano_transform->min_val = 0;
@@ -1443,7 +1459,7 @@ namespace props_and_sets
 
 		void on_0_127_to_128_255()
 		{
-			auto Wptr = (*wh)["CAT"];
+			auto Wptr = (*global_window_handler)["CAT"];
 			auto CATptr = (cut_and_transpose_piano*)((*Wptr)["CAT_ITSELF"]);
 			CATptr->piano_transform->max_val = 127;
 			CATptr->piano_transform->min_val = 0;
@@ -1453,7 +1469,7 @@ namespace props_and_sets
 
 		void on_copy()
 		{
-			auto Wptr = (*wh)["CAT"];
+			auto Wptr = (*global_window_handler)["CAT"];
 			auto CATptr = (cut_and_transpose_piano*)((*Wptr)["CAT_ITSELF"]);
 			TMax = CATptr->piano_transform->max_val;
 			TMin = CATptr->piano_transform->min_val;
@@ -1462,7 +1478,7 @@ namespace props_and_sets
 
 		void on_paste()
 		{
-			auto Wptr = (*wh)["CAT"];
+			auto Wptr = (*global_window_handler)["CAT"];
 			auto CATptr = (cut_and_transpose_piano*)((*Wptr)["CAT_ITSELF"]);
 			CATptr->piano_transform->max_val = TMax;
 			CATptr->piano_transform->min_val = TMin;
@@ -1472,9 +1488,9 @@ namespace props_and_sets
 
 		void on_delete()
 		{
-			auto Wptr = (*wh)["CAT"];
+			auto Wptr = (*global_window_handler)["CAT"];
 			((cut_and_transpose_piano*)((*Wptr)["CAT_ITSELF"]))->piano_transform = nullptr;
-			wh->disable_window("CAT");
+			global_window_handler->disable_window("CAT");
 			g_data[current_id].key_map = nullptr;
 		}
 	}
@@ -1483,7 +1499,7 @@ namespace props_and_sets
 	{
 		void on_vol_map()
 		{
-			auto Wptr = (*wh)["VM"];
+			auto Wptr = (*global_window_handler)["VM"];
 			auto VM = ((volume_graph*)(*Wptr)["VM_PLC"]);
 			auto IFDeg = ((input_field*)(*Wptr)["VM_DEGREE"]);
 			((button*)(*Wptr)["VM_SETMODE"])->safe_string_replace("Single");
@@ -1495,12 +1511,12 @@ namespace props_and_sets
 			if (!g_data[current_id].volume_map)
 				g_data[current_id].volume_map = std::make_shared<polyline_converter<std::uint8_t, std::uint8_t>>();
 			VM->plc_bb = g_data[current_id].volume_map;
-			wh->enable_window("VM");
+			global_window_handler->enable_window("VM");
 		}
 
 		void on_degree_shape()
 		{
-			auto Wptr = (*wh)["VM"];
+			auto Wptr = (*global_window_handler)["VM"];
 			auto VM = ((volume_graph*)(*Wptr)["VM_PLC"]);
 			if (VM->plc_bb)
 			{
@@ -1517,7 +1533,7 @@ namespace props_and_sets
 
 		void on_simplify()
 		{
-			auto Wptr = (*wh)["VM"];
+			auto Wptr = (*global_window_handler)["VM"];
 			auto VM = ((volume_graph*)(*Wptr)["VM_PLC"]);
 			if (VM->plc_bb)
 			{
@@ -1529,7 +1545,7 @@ namespace props_and_sets
 
 		void on_trace()
 		{
-			auto Wptr = (*wh)["VM"];
+			auto Wptr = (*global_window_handler)["VM"];
 			auto VM = ((volume_graph*)(*Wptr)["VM_PLC"]);
 			if (VM->plc_bb)
 			{
@@ -1546,7 +1562,7 @@ namespace props_and_sets
 
 		void on_set_mode_change() 
 		{
-			auto Wptr = (*wh)["VM"];
+			auto Wptr = (*global_window_handler)["VM"];
 			auto VM = ((volume_graph*)(*Wptr)["VM_PLC"]);
 			if (VM->plc_bb)
 			{
@@ -1559,7 +1575,7 @@ namespace props_and_sets
 
 		void on_erase()
 		{
-			auto Wptr = (*wh)["VM"];
+			auto Wptr = (*global_window_handler)["VM"];
 			auto VM = ((volume_graph*)(*Wptr)["VM_PLC"]);
 			if (VM->plc_bb)
 				VM->plc_bb->map.clear();
@@ -1571,10 +1587,10 @@ namespace props_and_sets
 		{
 			if (g_data[current_id].volume_map)
 				g_data[current_id].volume_map = nullptr;
-			auto Wptr = (*wh)["VM"];
+			auto Wptr = (*global_window_handler)["VM"];
 			auto VM = ((volume_graph*)(*Wptr)["VM_PLC"]);
 			VM->plc_bb = nullptr;
-			wh->disable_window("VM");
+			global_window_handler->disable_window("VM");
 		}
 	}
 	void on_pitch_map()
@@ -1590,7 +1606,7 @@ void on_rem()
 		for (auto id = ptr->selected_id.rbegin(); id != ptr->selected_id.rend(); ++id)
 			g_data.remove_by_id(*id);
 		ptr->remove_selected();
-		wh->disable_all_windows();
+		global_window_handler->disable_all_windows();
 		g_data.set_global_ppqn();
 		g_data.resolve_subdivision_problem_group_id_assign();
 	});
@@ -1600,7 +1616,7 @@ void on_rem_all()
 {
 	worker_singleton<struct midi_file_list>::instance().push([](){
 		auto ptr = _WH_t<selectable_properted_list>("MAIN", "List");
-		wh->disable_all_windows();
+		global_window_handler->disable_all_windows();
 		while (g_data.files.size())
 		{
 			g_data.remove_by_id(0);
@@ -1613,17 +1629,17 @@ void on_rem_all()
 
 void on_submit_global_ppqn()
 {
-	auto pptr = (*wh)["PROMPT"];
+	auto pptr = (*global_window_handler)["PROMPT"];
 	std::string t = ((input_field*)(*pptr)["FLD"])->get_current_input("0");
 	std::uint16_t PPQN = (t.size()) ? stoi(t) : g_data.global_ppqn;
 	g_data.set_global_ppqn(PPQN, true);
-	wh->disable_window("PROMPT");
+	global_window_handler->disable_window("PROMPT");
 	//props_and_sets::open_file_properties(props_and_sets::current_id);
 }
 
 void on_global_ppqn()
 {
-	wh->throw_prompt(
+	global_window_handler->throw_prompt(
 		"New value will be assigned to every MIDI\n(in settings)",
 		"Global PPQN",
 		on_submit_global_ppqn,
@@ -1635,16 +1651,16 @@ void on_global_ppqn()
 
 void on_submit_global_offset()
 {
-	auto pptr = (*wh)["PROMPT"];
+	auto pptr = (*global_window_handler)["PROMPT"];
 	std::string t = ((input_field*)(*pptr)["FLD"])->get_current_input("0");
 	std::uint32_t O = (t.size()) ? std::stoi(t) : g_data.global_offset;
 	g_data.set_global_offset(O);
-	wh->disable_window("PROMPT");
+	global_window_handler->disable_window("PROMPT");
 }
 
 void on_global_offset()
 {
-	wh->throw_prompt(
+	global_window_handler->throw_prompt(
 		"Sets new global offset",
 		"Global Offset",
 		on_submit_global_offset,
@@ -1656,16 +1672,16 @@ void on_global_offset()
 
 void on_submit_global_tempo()
 {
-	auto pptr = (*wh)["PROMPT"];
+	auto pptr = (*global_window_handler)["PROMPT"];
 	std::string t = ((input_field*)(*pptr)["FLD"])->get_current_input("0");
 	float Tempo = (t.size()) ? std::stof(t) : g_data.global_new_tempo;
 	g_data.set_global_tempo(Tempo);
-	wh->disable_window("PROMPT");
+	global_window_handler->disable_window("PROMPT");
 }
 
 void on_global_tempo()
 {
-	wh->throw_prompt("Sets specific tempo value to every MIDI\n(in settings)", "Global S. Tempo\0", on_submit_global_tempo, _Align::center, input_field::Type::FP_PositiveNumbers, std::to_string(g_data.global_new_tempo), 8);
+	global_window_handler->throw_prompt("Sets specific tempo value to every MIDI\n(in settings)", "Global S. Tempo\0", on_submit_global_tempo, _Align::center, input_field::Type::FP_PositiveNumbers, std::to_string(g_data.global_new_tempo), 8);
 }
 
 void on_resolve()
@@ -1675,20 +1691,20 @@ void on_resolve()
 
 void on_rem_vol_maps()
 {
-	((volume_graph*)(*((*wh)["VM"]))["VM_PLC"])->plc_bb = NULL;
-	wh->disable_window("VM");
+	((volume_graph*)(*((*global_window_handler)["VM"]))["VM_PLC"])->plc_bb = NULL;
+	global_window_handler->disable_window("VM");
 	for (int i = 0; i < g_data.files.size(); i++)
 		g_data[i].volume_map = nullptr;
 }
 void on_rem_cats()
 {
-	wh->disable_window("CAT");
+	global_window_handler->disable_window("CAT");
 	for (int i = 0; i < g_data.files.size(); i++)
 		g_data[i].key_map = nullptr;
 }
 void on_rem_pitch_maps()
 {
-	//wh->disable_window("CAT");
+	//global_window_handler->disable_window("CAT");
 	throw_alert_warning("Currently pitch maps can not be created and/or deleted :D");
 	for (int i = 0; i < g_data.files.size(); i++)
 		g_data[i].pitch_bend_map = nullptr;
@@ -1699,16 +1715,16 @@ void on_rem_all_modules()
 	on_rem_cats();
 }
 
-namespace app_settings
+namespace settings
 {
 	INT shader_mode = 0;
 	WinReg::RegKey regestry_access;
 
 	void on_settings()
 	{
-		wh->enable_window("APP_SETTINGS");//g_data.detected_threads
-		//wh->throw_alert("Please read the docs! Changing some of these app_settings might cause graphics driver failure!","Warning!",special_signs::draw_ex_triangle,1,0x007FFFFF,0x7F7F7FFF);
-		auto pptr = (*wh)["APP_SETTINGS"];
+		global_window_handler->enable_window("APP_SETTINGS");//g_data.detected_threads
+		//global_window_handler->throw_alert("Please read the docs! Changing some of these settings might cause graphics driver failure!","Warning!",special_signs::draw_ex_triangle,1,0x007FFFFF,0x7F7F7FFF);
+		auto pptr = (*global_window_handler)["APP_SETTINGS"];
 		((input_field*)(*pptr)["AS_BCKGID"])->update_input_string(std::to_string(shader_mode));
 		((input_field*)(*pptr)["AS_ROT_ANGLE"])->update_input_string(std::to_string(dumb_rotation_angle));
 		((input_field*)(*pptr)["AS_THREADS_COUNT"])->update_input_string(std::to_string(g_data.detected_threads));
@@ -1732,17 +1748,17 @@ namespace app_settings
 
 	void on_set_apply()
 	{
-		bool isRegestryOpened = false;
+		bool registry_opened = false;
 		try
 		{
-			app_settings::regestry_access.Open(HKEY_CURRENT_USER, default_reg_path);
-			isRegestryOpened = true;
+			settings::regestry_access.Open(HKEY_CURRENT_USER, default_reg_path);
+			registry_opened = true;
 		}
 		catch (...)
 		{
 			std::cout << "RK opening failed\n";
 		}
-		auto pptr = (*wh)["APP_SETTINGS"];
+		auto pptr = (*global_window_handler)["APP_SETTINGS"];
 		std::string T;
 
 		T = ((input_field*)(*pptr)["AS_BCKGID"])->get_current_input("0");
@@ -1750,7 +1766,7 @@ namespace app_settings
 		if (T.size())
 		{
 			shader_mode = std::stoi(T);
-			if (isRegestryOpened)TRY_CATCH(regestry_access.SetDwordValue(L"AS_BCKGID", shader_mode); , "Failed on setting AS_BCKGID")
+			if (registry_opened) TRY_CATCH(regestry_access.SetDwordValue(L"AS_BCKGID", shader_mode); , "Failed on setting AS_BCKGID")
 		}
 		std::cout << shader_mode << std::endl;
 
@@ -1766,7 +1782,7 @@ namespace app_settings
 		{
 			g_data.detected_threads = stoi(T);
 			g_data.resolve_subdivision_problem_group_id_assign();
-			if (isRegestryOpened)TRY_CATCH(regestry_access.SetDwordValue(L"AS_THREADS_COUNT", g_data.detected_threads); , "Failed on setting AS_THREADS_COUNT")
+			if (registry_opened) TRY_CATCH(regestry_access.SetDwordValue(L"AS_THREADS_COUNT", g_data.detected_threads); , "Failed on setting AS_THREADS_COUNT")
 		}
 		std::cout << g_data.detected_threads << std::endl;
 
@@ -1786,7 +1802,7 @@ namespace app_settings
 		g_data.collapse_midi = ((checkbox*)((*pptr)["COLLAPSE_MIDI"]))->state;
 		g_data.apply_offset_after = ((checkbox*)((*pptr)["APPLY_OFFSET_AFTER"]))->state;
 
-		if (isRegestryOpened)
+		if (registry_opened)
 		{
 			TRY_CATCH(regestry_access.SetDwordValue(L"AUTOUPDATECHECK", check_autoupdates);, "Failed on setting AUTOUPDATECHECK")
 			TRY_CATCH(regestry_access.SetDwordValue(L"SPLIT_TRACKS", g_data.channels_split); , "Failed on setting SPLIT_TRACKS")
@@ -1794,20 +1810,20 @@ namespace app_settings
 			TRY_CATCH(regestry_access.SetDwordValue(L"APPLY_OFFSET_AFTER", g_data.collapse_midi);, "Failed on setting APPLY_OFFSET_AFTER")
 			//TRY_CATCH(regestry_access.SetDwordValue(L"RSB_COMPRESS", check_autoupdates);, "Failed on setting RSB_COMPRESS")
 			TRY_CATCH(regestry_access.SetDwordValue(L"DEFAULT_BOOL_SETTINGS", default_bool_settings);, "Failed on setting DEFAULT_BOOL_SETTINGS")
-			TRY_CATCH(regestry_access.SetDwordValue(L"FONTSIZE_POST1P4", lFontSymbolsInfo::Size); , "Failed on setting FONTSIZE_POST1P4")
-			TRY_CATCH(regestry_access.SetDwordValue(L"FLOAT_FONTHTW_POST1P4", *(std::uint32_t*)(&lFONT_HEIGHT_TO_WIDTH)); , "Failed on setting FLOAT_FONTHTW_POST1P4")
+			TRY_CATCH(regestry_access.SetDwordValue(L"FONTSIZE_POST1P4", lfont_symbols_info::font_size); , "Failed on setting FONTSIZE_POST1P4")
+			TRY_CATCH(regestry_access.SetDwordValue(L"FLOAT_FONTHTW_POST1P4", *(std::uint32_t*)(&font_height_to_width)); , "Failed on setting FLOAT_FONTHTW_POST1P4")
 		}
 
 		g_data.inplace_merge_flag = (((checkbox*)(*pptr)["INPLACE_MERGE"])->state);
-		if (isRegestryOpened)
+		if (registry_opened)
 			TRY_CATCH(regestry_access.SetDwordValue(L"AS_INPLACE_FLAG", g_data.inplace_merge_flag);, "Failed on setting AS_INPLACE_FLAG")
 
 		((input_field*)(*pptr)["AS_FONT_NAME"])->put_into_source();
 		std::wstring ws(default_font_name.begin(), default_font_name.end());
-		if (isRegestryOpened)
+		if (registry_opened)
 			TRY_CATCH(regestry_access.SetStringValue(L"COLLAPSEDFONTNAME_POST1P4", ws); , "Failed on setting COLLAPSEDFONTNAME_POST1P4")
 
-		app_settings::regestry_access.Close();
+		settings::regestry_access.Close();
 	}
 
 	void change_is_fonted_var()
@@ -1833,14 +1849,14 @@ namespace app_settings
 
 	void apply_fs_wheel(double new_val)
 	{
-		lFontSymbolsInfo::Size = new_val;
-		lFontSymbolsInfo::InitialiseFont(default_font_name);
+		lfont_symbols_info::font_size = new_val;
+		lfont_symbols_info::initialise_font(default_font_name);
 	}
 
 	void apply_rel_wheel(double new_val)
 	{
-		lFONT_HEIGHT_TO_WIDTH = new_val;
-		lFontSymbolsInfo::InitialiseFont(default_font_name);
+		font_height_to_width = new_val;
+		lfont_symbols_info::initialise_font(default_font_name);
 	}
 }
 
@@ -1862,9 +1878,9 @@ void on_start()
 
 	worker_singleton<struct merge>::instance().push([]()
 	{
-		wh->main_window_id = "SMRP_CONTAINER";
-		wh->disable_all_windows();
-		wh->enable_window("SMRP_CONTAINER");
+		global_window_handler->main_window_id = "SMRP_CONTAINER";
+		global_window_handler->disable_all_windows();
+		global_window_handler->enable_window("SMRP_CONTAINER");
 
 		global_mctm = g_data.mctm_constructor();
 
@@ -1872,7 +1888,7 @@ void on_start()
 
 		global_mctm->StartProcessingMIDIs();
 
-		auto merge_preview_container = (*wh)["SMRP_CONTAINER"];
+		auto merge_preview_container = (*global_window_handler)["SMRP_CONTAINER"];
 		std::vector<std::string> undesired_window_activities;
 
 		for (auto& single_activity_pair : merge_preview_container->window_activities)
@@ -1990,10 +2006,10 @@ void on_start()
 			std::cout << "F: Out from sleep!!!\n";
 			merge_preview_container->delete_ui_element_by_name("FM");
 
-			wh->disable_window(wh->main_window_id);
-			wh->main_window_id = "MAIN";
-			//wh->disable_all_windows();
-			wh->enable_window("MAIN");
+			global_window_handler->disable_window(global_window_handler->main_window_id);
+			global_window_handler->main_window_id = "MAIN";
+			//global_window_handler->disable_all_windows();
+			global_window_handler->enable_window("MAIN");
 			//global_mctm->ResetEverything();
 		});
 	});
@@ -2014,12 +2030,12 @@ void restore_reg_settings()
 	bool Opened = false;
 	try
 	{
-		app_settings::regestry_access.Create(HKEY_CURRENT_USER, default_reg_path);
+		settings::regestry_access.Create(HKEY_CURRENT_USER, default_reg_path);
 	}
 	catch (...) { std::cout << "Exception thrown while creating registry key\n"; }
 	try
 	{
-		app_settings::regestry_access.Open(HKEY_CURRENT_USER, default_reg_path);
+		settings::regestry_access.Open(HKEY_CURRENT_USER, default_reg_path);
 		Opened = true;
 	}
 	catch (...) { std::cout << "Exception thrown while opening RK\n"; }
@@ -2027,81 +2043,81 @@ void restore_reg_settings()
 	{
 		try
 		{
-			app_settings::shader_mode = app_settings::regestry_access.GetDwordValue(L"AS_BCKGID");
+			settings::shader_mode = settings::regestry_access.GetDwordValue(L"AS_BCKGID");
 		}
 		catch (...) { std::cout << "Exception thrown while restoring AS_BCKGID from registry\n"; }
 		try
 		{
-			check_autoupdates = app_settings::regestry_access.GetDwordValue(L"AUTOUPDATECHECK");
+			check_autoupdates = settings::regestry_access.GetDwordValue(L"AUTOUPDATECHECK");
 		}
 		catch (...) { std::cout << "Exception thrown while restoring AUTOUPDATECHECK from registry\n"; }
 		try
 		{
-			g_data.channels_split = app_settings::regestry_access.GetDwordValue(L"SPLIT_TRACKS");
+			g_data.channels_split = settings::regestry_access.GetDwordValue(L"SPLIT_TRACKS");
 		}
 		catch (...) { std::cout << "Exception thrown while restoring SPLIT_TRACKS from registry\n"; }
 		try
 		{
-			g_data.collapse_midi = app_settings::regestry_access.GetDwordValue(L"COLLAPSE_MIDI");
+			g_data.collapse_midi = settings::regestry_access.GetDwordValue(L"COLLAPSE_MIDI");
 		}
 		catch (...) { std::cout << "Exception thrown while restoring COLLAPSE_MIDI from registry\n"; }
 		try
 		{
-			g_data.apply_offset_after = app_settings::regestry_access.GetDwordValue(L"APPLY_OFFSET_AFTER");
+			g_data.apply_offset_after = settings::regestry_access.GetDwordValue(L"APPLY_OFFSET_AFTER");
 		}
 		catch (...) { std::cout << "Exception thrown while restoring APPLY_OFFSET_AFTER from registry\n"; }
 		try
 		{
-			g_data.detected_threads = app_settings::regestry_access.GetDwordValue(L"AS_THREADS_COUNT");
+			g_data.detected_threads = settings::regestry_access.GetDwordValue(L"AS_THREADS_COUNT");
 		}
 		catch (...) { std::cout << "Exception thrown while restoring AS_THREADS_COUNT from registry\n"; }
 		try
 		{
-			default_bool_settings = app_settings::regestry_access.GetDwordValue(L"DEFAULT_BOOL_SETTINGS");
+			default_bool_settings = settings::regestry_access.GetDwordValue(L"DEFAULT_BOOL_SETTINGS");
 		}
 		catch (...) { std::cout << "Exception thrown while restoring AS_INPLACE_FLAG from registry\n"; }
 		try
 		{
-			g_data.inplace_merge_flag = app_settings::regestry_access.GetDwordValue(L"AS_INPLACE_FLAG");
+			g_data.inplace_merge_flag = settings::regestry_access.GetDwordValue(L"AS_INPLACE_FLAG");
 		}
 		catch (...) { std::cout << "Exception thrown while restoring INPLACE_MERGE from registry\n"; }
 		try
 		{
-			std::wstring ws = app_settings::regestry_access.GetStringValue(L"COLLAPSEDFONTNAME_POST1P4");//COLLAPSEDFONTNAME
+			std::wstring ws = settings::regestry_access.GetStringValue(L"COLLAPSEDFONTNAME_POST1P4");//COLLAPSEDFONTNAME
 			default_font_name = std::string(ws.begin(), ws.end());
 		}
 		catch (...) { std::cout << "Exception thrown while restoring COLLAPSEDFONTNAME_POST1P4 from registry\n"; }
 		try
 		{
-			lFontSymbolsInfo::Size = app_settings::regestry_access.GetDwordValue(L"FONTSIZE_POST1P4");
+			lfont_symbols_info::font_size = settings::regestry_access.GetDwordValue(L"FONTSIZE_POST1P4");
 		}
 		catch (...) { std::cout << "Exception thrown while restoring FONTSIZE from registry\n"; }
 		try
 		{
-			std::uint32_t B = app_settings::regestry_access.GetDwordValue(L"FLOAT_FONTHTW_POST1P4");
-			lFONT_HEIGHT_TO_WIDTH = *(float*)&B;
+			std::uint32_t B = settings::regestry_access.GetDwordValue(L"FLOAT_FONTHTW_POST1P4");
+			font_height_to_width = *(float*)&B;
 		}
 		catch (...) { std::cout << "Exception thrown while restoring FLOAT_FONTHTW from registry\n"; }
 		try
 		{
-			saved_midi_device_name = app_settings::regestry_access.GetStringValue(L"MIDI_DEVICE_NAME");
+			saved_midi_device_name = settings::regestry_access.GetStringValue(L"MIDI_DEVICE_NAME");
 		}
 		catch (...) { std::cout << "Exception thrown while restoring MIDI_DEVICE_NAME from registry\n"; }
-		app_settings::regestry_access.Close();
+		settings::regestry_access.Close();
 	}
 }
 
 void on_other_settings()
 {
-	wh->enable_window("OTHER_SETS");
+	global_window_handler->enable_window("OTHER_SETS");
 }
 
 void update_device_list();
 
 void player_watch_func()
 {
-	wh->enable_window("SIMPLAYER");
-	auto window = (*wh)["SIMPLAYER"];
+	global_window_handler->enable_window("SIMPLAYER");
+	auto window = (*global_window_handler)["SIMPLAYER"];
 	auto textbox = (text_box*)(*window)["TEXT"];
 	auto seek_to_slider = (slider*)(*window)["SEEK_TO"];
 
@@ -2197,7 +2213,7 @@ void update_device_list()
 
 void on_device_select(int device_id)
 {
-	worker_singleton<struct midi_out_select>::instance().push([device_id]()
+	worker_singleton<struct midi_out_selct>::instance().push([device_id]()
 	{
 		player->set_device(device_id);
 
@@ -2217,9 +2233,9 @@ void on_device_select(int device_id)
 
 			try
 			{
-				app_settings::regestry_access.Open(HKEY_CURRENT_USER, default_reg_path);
-				app_settings::regestry_access.SetStringValue(L"MIDI_DEVICE_NAME", wdevice_name);
-				app_settings::regestry_access.Close();
+				settings::regestry_access.Open(HKEY_CURRENT_USER, default_reg_path);
+				settings::regestry_access.SetStringValue(L"MIDI_DEVICE_NAME", wdevice_name);
+				settings::regestry_access.Close();
 			}
 			catch (...)
 			{
@@ -2233,7 +2249,7 @@ void on_player_pause_toggle()
 {
 	player->toggle_pause();
 
-	auto window = (*wh)["SIMPLAYER"];
+	auto window = (*global_window_handler)["SIMPLAYER"];
 	auto pause = (button*)(*window)["PAUSE"];
 
 	if (player->is_paused())
@@ -2248,7 +2264,7 @@ void on_player_stop()
 
 	worker_singleton<struct player_thread>::instance().push([]()
 	{
-		auto window = (*wh)["SIMPLAYER"];
+		auto window = (*global_window_handler)["SIMPLAYER"];
 		auto pause = (button*)(*window)["PAUSE"];
 		auto textbox = (text_box*)(*window)["TEXT"];
 
@@ -2263,7 +2279,7 @@ void on_player_stop()
 
 void on_view_length_change(float value)
 {
-	auto window = (*wh)["SIMPLAYER"];
+	auto window = (*global_window_handler)["SIMPLAYER"];
 	auto player_viewer = (PlayerViewer*)(*window)["VIEW"];
 	
 	player_viewer->data->scroll_window_us = std::pow(2, value);
@@ -2271,7 +2287,7 @@ void on_view_length_change(float value)
 
 void on_unbuffered_switch()
 {
-	auto window = (*wh)["SIMPLAYER"];
+	auto window = (*global_window_handler)["SIMPLAYER"];
 	auto player_viewer = (PlayerViewer*)(*window)["VIEW"];
 	auto buffering_switch = (button*)(*window)["BUFFERING_SWITCH"];
 
@@ -2310,7 +2326,7 @@ void apply_simplayer_maximised_layout()
 	float full_width = 2.0f * half_w;
 	float full_height = 2.0f * half_h + moveable_window::window_header_size;
 
-	auto window = (*wh)["SIMPLAYER"];
+	auto window = (*global_window_handler)["SIMPLAYER"];
 	auto player_viewer = (PlayerViewer*)(*window)["VIEW"];
 	auto text = (text_box*)(*window)["TEXT"];
 	auto pause_btn = (button*)(*window)["PAUSE"];
@@ -2362,7 +2378,7 @@ void apply_simplayer_maximised_layout()
 
 void switch_maximise()
 {
-	auto window = (*wh)["SIMPLAYER"];
+	auto window = (*global_window_handler)["SIMPLAYER"];
 	auto player_viewer = (PlayerViewer*)(*window)["VIEW"];
 	auto text = (text_box*)(*window)["TEXT"];
 	auto pause_btn = (button*)(*window)["PAUSE"];
@@ -2402,14 +2418,14 @@ void switch_maximise()
 		state.view_y = player_viewer->ypos;
 		state.view_width = player_viewer->data->width;
 		state.view_height = player_viewer->data->height;
-		state.previous_main_window_id = wh->main_window_id;
+		state.previous_main_window_id = global_window_handler->main_window_id;
 
 		// Apply maximized layout
 		apply_simplayer_maximised_layout();
 
 		// Make SIMPLAYER the sole window
-		wh->main_window_id = "SIMPLAYER";
-		wh->disable_all_windows();
+		global_window_handler->main_window_id = "SIMPLAYER";
+		global_window_handler->disable_all_windows();
 
 		simplayer_maximised = true;
 		max_btn->safe_string_replace("Restore");
@@ -2441,9 +2457,9 @@ void switch_maximise()
 		player_viewer->RescaleAndReposition(state.view_x, state.view_y, state.view_width, state.view_height);
 
 		// Restore window management
-		wh->main_window_id = state.previous_main_window_id;
-		wh->disable_all_windows();
-		wh->enable_window("SIMPLAYER");
+		global_window_handler->main_window_id = state.previous_main_window_id;
+		global_window_handler->disable_all_windows();
+		global_window_handler->enable_window("SIMPLAYER");
 
 		simplayer_maximised = false;
 		max_btn->safe_string_replace("Maximise");
@@ -2452,7 +2468,7 @@ void switch_maximise()
 
 void init()
 {
-	lFontSymbolsInfo::InitialiseFont(default_font_name, true);
+	lfont_symbols_info::initialise_font(default_font_name, true);
 
 	g_data.detected_threads =
 		std::max(
@@ -2467,7 +2483,7 @@ void init()
 			), (std::uint16_t)1
 		);
 
-	wh = std::make_shared<windows_handler>();
+	global_window_handler = std::make_shared<windows_handler>();
 
 	auto [maj, min, ver, build] = g_version_tuple;
 
@@ -2487,9 +2503,9 @@ void init()
 	((MoveableResizeableWindow*)T)->assign_min_dimensions(300, 300);
 	((MoveableResizeableWindow*)T)->assign_pinned_activities({
 		"ADD_Butt", "REM_Butt", "REM_ALL_Butt", "GLOBAL_PPQN_Butt", "GLOBAL_OFFSET_Butt", "GLOBAL_TEMPO_Butt", "DELETE_ALL_VM", "DELETE_ALL_CAT", "DELETE_ALL_PITCHES",
-		"DELETE_ALL_MODULES", "app_settings", "SAVE_AS", "START"
+		"DELETE_ALL_MODULES", "settings", "SAVE_AS", "START"
 		}, MoveableResizeableWindow::PinSide::right);
-	((MoveableResizeableWindow*)T)->assign_pinned_activities({ "app_settings", "SAVE_AS", "START" }, MoveableResizeableWindow::PinSide::bottom);*/
+	((MoveableResizeableWindow*)T)->assign_pinned_activities({ "settings", "SAVE_AS", "START" }, MoveableResizeableWindow::PinSide::bottom);*/
 	moveable_window* T = new moveable_fui_window(std::format("SAFC v{}.{}.{}.{}", maj, min, ver, build), system_white, -200, 197.5f, 400, 397.5f, 300, 2.5f, 100, 100, 5, BACKGROUND, HEADER, BORDER);
 
 	button* Butt;
@@ -2512,14 +2528,14 @@ void init()
 	(*T)["DELETE_ALL_MODULES"] = new button("Remove modules", system_white, on_rem_all_modules, 150, 17.5, 75, 12, 1,
 		0x7F7F7FAF, 0xFFFFFFFF, 0x7F7F7FAF, 0xFFFFFFFF, 0xF7F7F7FF, nullptr, " ");
 
-	(*T)["app_settings"] = new button("settings...", system_white, app_settings::on_settings, 150, -140, 75, 12, 1,
+	(*T)["APP_SETTINGS"] = new button("Settings...", system_white, settings::on_settings, 150, -140, 75, 12, 1,
 		0x5F5F5FAF, 0xFFFFFFFF, 0x5F5F5FAF, 0xFFFFFFFF, 0xF7F7F7FF, nullptr, " ");
 	(*T)["SAVE_AS"] = new button("Save as...", system_white, on_save_to, 150, -152.5, 75, 12, 1,
 		0x3FAF00AF, 0xFFFFFFFF, 0x3FAF00AF, 0xFFFFFFFF, 0xF7F7F7FF, nullptr, " ");
 	(*T)["START"] = Butt = new button("Start merging", system_white, on_start, 150, -177.5, 75, 12, 1,
 		0x000000AF, 0xFFFFFFFF, 0x000000AF, 0xFFFFFFFF, 0xF7F7F7FF, nullptr, " ");//177.5
 
-	(*wh)["MAIN"] = T;
+	(*global_window_handler)["MAIN"] = T;
 
 	T = new moveable_fui_window("Props. and sets.", system_white, -100, 100, 200, 225, 100, 2.5f, 75, 50, 3, BACKGROUND_OPQ, HEADER, BORDER);
 	(*T)["FileName"] = new text_box("_", system_white, 0, 88.5 - moveable_window::window_header_size, 6, 200 - 1.5 * moveable_window::window_header_size, 7.5, 0, 0, 0, _Align::left, text_box::VerticalOverflow::cut);
@@ -2531,17 +2547,17 @@ void init()
 
 	(*T)["BOOL_REM_TRCKS"] = new checkbox(-97.5 + moveable_window::window_header_size, 55 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, &system_white, _Align::left, "Remove empty tracks");
 	(*T)["BOOL_REM_REM"] = new checkbox(-82.5 + moveable_window::window_header_size, 55 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, &system_white, _Align::left, "Remove merge \"remnants\"");
-	(*T)["OTHER_CHECKBOXES"] = new button("Other app_settings", system_white, on_other_settings, -37.5 + moveable_window::window_header_size, 55 - moveable_window::window_header_size, 70, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, &system_white, "Other MIDI processing app_settings");
+	(*T)["OTHER_CHECKBOXES"] = new button("Other settings", system_white, on_other_settings, -37.5 + moveable_window::window_header_size, 55 - moveable_window::window_header_size, 70, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, &system_white, "Other MIDI processing settings");
 
 	(*T)["SPLIT_TRACKS"] = new checkbox(7.5 + moveable_window::window_header_size, 55 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, 0, &system_white, _Align::center, "Multichannel split");
-	(*T)["RSB_COMPRESS"] = new checkbox(22.5 + moveable_window::window_header_size, 55 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, 0, &system_white, _Align::center, "enable RSB compression");
+	(*T)["RSB_COMPRESS"] = new checkbox(22.5 + moveable_window::window_header_size, 55 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, 0, &system_white, _Align::center, "Enable RSB compression");
 
 	(*T)["COLLAPSE_MIDI"] = new checkbox(97.5 - moveable_window::window_header_size, 35 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF7F00AF, 0x7FFF00AF, 1, 0, &system_white, _Align::right, "Collapse all tracks of a MIDI into one");
 
-	(*T)["BOOL_APPLY_TO_ALL_MIDIS"] = Butt = new button("A2A", system_white, props_and_sets::on_apply_bs2a, 80 - moveable_window::window_header_size, 55 - moveable_window::window_header_size, 15, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, &system_white, "Sets \"bool app_settings\" to all midis");
+	(*T)["BOOL_APPLY_TO_ALL_MIDIS"] = Butt = new button("A2A", system_white, props_and_sets::on_apply_bs2a, 80 - moveable_window::window_header_size, 55 - moveable_window::window_header_size, 15, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, &system_white, "Sets \"bool settings\" to all midis");
 	Butt->tip->safe_change_position_argumented(_Align::right, 87.5 - moveable_window::window_header_size, Butt->tip->cy_pos);
 
-	(*T)["INPLACE_MERGE"] = new checkbox(97.5 - moveable_window::window_header_size, 55 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, 0, &system_white, _Align::right, "Enables/disables inplace merge");
+	(*T)["INPLACE_MERGE"] = new checkbox(97.5 - moveable_window::window_header_size, 55 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, 0, &system_white, _Align::right, "Enables/Disables inplace merge");
 
 	(*T)["GROUPID"] = new input_field(" ", 92.5 - moveable_window::window_header_size, 75 - moveable_window::window_header_size, 10, 20, system_white, props_and_sets::PPQN, 0x007FFFFF, &system_white, "Group id...", 2, _Align::center, _Align::right, input_field::Type::NaturalNumbers);
 
@@ -2562,7 +2578,7 @@ void init()
 
 	(*T)["CONSTANT_PROPS"] = new text_box("_Props text example_", system_white, 0, -55 - moveable_window::window_header_size, 80 - moveable_window::window_header_size, 200 - 1.5 * moveable_window::window_header_size, 7.5, 0, 0, 1);
 
-	(*wh)["SMPAS"] = T;//Selected midi properties and app_settings
+	(*global_window_handler)["SMPAS"] = T;//Selected midi properties and settings
 
 	T = new moveable_fui_window("Other settings.", system_white, -75, 35, 150, 65 + moveable_window::window_header_size, 100, 2.5f, 17.5f, 17.5f, 3, BACKGROUND_OPQ, HEADER, BORDER);
 
@@ -2578,7 +2594,7 @@ void init()
 	Chk->tip->safe_change_position_argumented(_Align::left, -70, 15 - moveable_window::window_header_size);
 	(*T)["ALLOW_SYSEX"] = new checkbox(25, 25 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, 0, &system_white, _Align::right, "Allow sysex events");
 
-	(*T)["IMP_FLT_ENABLE"] = new checkbox(65, 25 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF7F1F7F, 0x5FFF007F, 1, 0, &system_white, _Align::right, "enable important event filter");
+	(*T)["IMP_FLT_ENABLE"] = new checkbox(65, 25 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF7F1F7F, 0x5FFF007F, 1, 0, &system_white, _Align::right, "Enable important event filter");
 
 	(*T)["0VERLAY"] = new text_box("", system_white, -10, 2.5f - moveable_window::window_header_size, 23, 120, 0, 0xFFFFFF1F, 0x007FFF7F, 1);
 
@@ -2589,11 +2605,11 @@ void init()
 	Chk->tip->safe_change_position_argumented(_Align::left, -70, -5 - moveable_window::window_header_size);
 	(*T)["IMP_FLT_OTHER"] = new checkbox(0, 5 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, &system_white, _Align::center, "Important filter: other");
 
-	(*T)["ENABLE_ZERO_VELOCITY"] = new checkbox(60, 5 - moveable_window::window_header_size, 10, 0x007FFFFF, 0x00001F3F, 0x00FF00FF, 1, 0, &system_white, _Align::right, "\"enable\" zero velocity notes");
+	(*T)["ENABLE_ZERO_VELOCITY"] = new checkbox(60, 5 - moveable_window::window_header_size, 10, 0x007FFFFF, 0x00001F3F, 0x00FF00FF, 1, 0, &system_white, _Align::right, "\"Enable\" zero velocity notes");
 
 	(*T)["APPLY"] = new button("Apply", system_white, props_and_sets::on_apply_settings, 70 - moveable_window::window_header_size, -20 - moveable_window::window_header_size, 30, 10, 1, 0x3F7FFF3F, 0xFFFFFFEF, 0x7FFF3FFF, 0x7FFF3F1F, 0x7FFF3FFF, nullptr, " ");
 
-	(*wh)["OTHER_SETS"] = T; // Other app_settings
+	(*global_window_handler)["OTHER_SETS"] = T; // Other settings
 
 	T = new moveable_fui_window("Cut and Transpose.", system_white, -200, 50, 400, 100, 300, 2.5f, 15, 15, 2.5f, BACKGROUND_OPQ, HEADER, BORDER);
 	(*T)["CAT_ITSELF"] = new cut_and_transpose_piano(0, 20 - moveable_window::window_header_size, 1, 10, nullptr);
@@ -2604,7 +2620,7 @@ void init()
 	(*T)["CAT_PASTE"] = new button("Paste", system_white, props_and_sets::cut_and_transpose::on_paste, 110, -10 - moveable_window::window_header_size, 40, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, nullptr, " ");
 	(*T)["CAT_DELETE"] = new button("Delete", system_white, props_and_sets::cut_and_transpose::on_delete, 155, -10 - moveable_window::window_header_size, 40, 10, 1, 0xFF00FF3F, 0xFF00FFFF, 0xFFFFFFFF, 0xFF003F3F, 0xFF003FFF, nullptr, " ");
 
-	(*wh)["CAT"] = T;
+	(*global_window_handler)["CAT"] = T;
 
 	T = new moveable_fui_window("Volume map.", system_white, -150, 150, 300, 350, 200, 2.5f, 100, 100, 2.5f, BACKGROUND_OPQ, HEADER, BORDER);
 	(*T)["VM_PLC"] = new volume_graph(0, 0 - moveable_window::window_header_size, 300 - moveable_window::window_header_size * 2, 300 - moveable_window::window_header_size * 2, std::make_shared<polyline_converter<std::uint8_t, std::uint8_t>>());///todo: interface
@@ -2619,21 +2635,21 @@ void init()
 	Butt->tip->safe_change_position_argumented(_Align::left, -65 + moveable_window::window_header_size, -160 - moveable_window::window_header_size);
 	(*T)["VM_SETMODE"] = Butt = new button("Single", system_white, props_and_sets::volume_map::on_set_mode_change, 30 + moveable_window::window_header_size, -170 - moveable_window::window_header_size, 40, 10, 1, 0xFFFFFF3F, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFAFAF3F, 0xFFAFAFFF, nullptr, "_");
 
-	(*wh)["VM"] = T;
+	(*global_window_handler)["VM"] = T;
 
-	T = new moveable_fui_window("App app_settings", system_white, -100, 110, 200, 230, 125, 2.5f, 50, 50, 2.5f, BACKGROUND_OPQ, HEADER, BORDER);
+	T = new moveable_fui_window("App settings", system_white, -100, 110, 200, 230, 125, 2.5f, 50, 50, 2.5f, BACKGROUND_OPQ, HEADER, BORDER);
 
-	(*T)["AS_BCKGID"] = new input_field(std::to_string(app_settings::shader_mode), -35, 55 - moveable_window::window_header_size, 10, 30, system_white, nullptr, 0x007FFFFF, &system_white, "Background id", 2, _Align::center, _Align::right, input_field::Type::NaturalNumbers);
+	(*T)["AS_BCKGID"] = new input_field(std::to_string(settings::shader_mode), -35, 55 - moveable_window::window_header_size, 10, 30, system_white, nullptr, 0x007FFFFF, &system_white, "Background id", 2, _Align::center, _Align::right, input_field::Type::NaturalNumbers);
 
-	(*T)["AS_GLOBALSETTINGS"] = new text_box("Global app_settings for new MIDIs", system_white, 0, 85 - moveable_window::window_header_size, 50, 200, 12, 0x007FFF1F, 0x007FFF7F, 1, _Align::center);
-	(*T)["AS_APPLY"] = Butt = new button("Apply", system_white, app_settings::on_set_apply, 85 - moveable_window::window_header_size, -87.5 - moveable_window::window_header_size, 40, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr, "_");
-	(*T)["AS_EN_FONT"] = Butt = new button((is_fonted) ? "disable fonts" : "enable fonts", system_white, app_settings::change_is_fonted_var, 72.5 - moveable_window::window_header_size, -67.5 - moveable_window::window_header_size, 65, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, &system_white, " ");
+	(*T)["AS_GLOBALSETTINGS"] = new text_box("Global settings for new MIDIs", system_white, 0, 85 - moveable_window::window_header_size, 50, 200, 12, 0x007FFF1F, 0x007FFF7F, 1, _Align::center);
+	(*T)["AS_APPLY"] = Butt = new button("Apply", system_white, settings::on_set_apply, 85 - moveable_window::window_header_size, -87.5 - moveable_window::window_header_size, 40, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr, "_");
+	(*T)["AS_EN_FONT"] = Butt = new button((is_fonted) ? "Disable fonts" : "Enable fonts", system_white, settings::change_is_fonted_var, 72.5 - moveable_window::window_header_size, -67.5 - moveable_window::window_header_size, 65, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, &system_white, " ");
 
 	auto AngleInput = new input_field(std::to_string(dumb_rotation_angle), -87.5 + moveable_window::window_header_size, 55 - moveable_window::window_header_size, 10, 30, system_white, nullptr, 0x007FFFFF, &system_white, "Rotation angle", 6, _Align::center, _Align::left, input_field::Type::FP_Any);
 	AngleInput->disable(); // hide // legacy
 	(*T)["AS_ROT_ANGLE"] = AngleInput;
-	(*T)["AS_FONT_SIZE"] = new wheel_variable_changer(app_settings::apply_fs_wheel, -37.5, -82.5, lFontSymbolsInfo::Size, 1, system_white, "Font size", "Delta", wheel_variable_changer::Type::addictable);
-	(*T)["AS_FONT_P"] = new wheel_variable_changer(app_settings::apply_rel_wheel, -37.5, -22.5, lFONT_HEIGHT_TO_WIDTH, 0.01, system_white, "Font rel.", "Delta", wheel_variable_changer::Type::addictable);
+	(*T)["AS_FONT_SIZE"] = new wheel_variable_changer(settings::apply_fs_wheel, -37.5, -82.5, lfont_symbols_info::font_size, 1, system_white, "Font size", "Delta", wheel_variable_changer::Type::addictable);
+	(*T)["AS_FONT_P"] = new wheel_variable_changer(settings::apply_rel_wheel, -37.5, -22.5, font_height_to_width, 0.01, system_white, "Font rel.", "Delta", wheel_variable_changer::Type::addictable);
 	(*T)["AS_FONT_NAME"] = new input_field(default_font_name, 52.5 - moveable_window::window_header_size, 55 - moveable_window::window_header_size, 10, 100, legacy_white, &default_font_name, 0x007FFFFF, &system_white, "Font name", 32, _Align::center, _Align::left, input_field::Type::text);
 
 	(*T)["BOOL_REM_TRCKS"] = new checkbox(-97.5 + moveable_window::window_header_size, 95 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, &system_white, _Align::left, "Remove empty tracks");
@@ -2644,14 +2660,14 @@ void init()
 	(*T)["BOOL_IGN_NOTES"] = new checkbox(-22.5 + moveable_window::window_header_size, 95 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, &system_white, _Align::center, "Ignore note events");
 	(*T)["BOOL_IGN_ALL_EX_TPS"] = new checkbox(-7.5 + moveable_window::window_header_size, 95 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 0, &system_white, _Align::center, "Ignore everything except specified");
 	(*T)["SPLIT_TRACKS"] = new checkbox(7.5 + moveable_window::window_header_size, 95 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, 0, &system_white, _Align::center, "Multichannel split");
-	(*T)["RSB_COMPRESS"] = new checkbox(22.5 + moveable_window::window_header_size, 95 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, 0, &system_white, _Align::center, "enable RSB compression");
+	(*T)["RSB_COMPRESS"] = new checkbox(22.5 + moveable_window::window_header_size, 95 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, 0, &system_white, _Align::center, "Enable RSB compression");
 
 	(*T)["ALLOW_SYSEX"] = new checkbox(-97.5 + moveable_window::window_header_size, 75 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, 0, &system_white, _Align::left, "Allow sysex events");
 
-	(*T)["BOOL_APPLY_TO_ALL_MIDIS"] = Butt = new button("A2A", system_white, app_settings::apply_to_all, 80 - moveable_window::window_header_size, 95 - moveable_window::window_header_size, 15, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, &system_white, "The same as A2A in MIDI's props.");
+	(*T)["BOOL_APPLY_TO_ALL_MIDIS"] = Butt = new button("A2A", system_white, settings::apply_to_all, 80 - moveable_window::window_header_size, 95 - moveable_window::window_header_size, 15, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, &system_white, "The same as A2A in MIDI's props.");
 	Butt->tip->safe_change_position_argumented(_Align::right, 87.5 - moveable_window::window_header_size, Butt->tip->cy_pos);
 
-	(*T)["INPLACE_MERGE"] = new checkbox(97.5 - moveable_window::window_header_size, 95 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, 0, &system_white, _Align::right, "enable/disable inplace merge");
+	(*T)["INPLACE_MERGE"] = new checkbox(97.5 - moveable_window::window_header_size, 95 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, 0, &system_white, _Align::right, "Enable/disable inplace merge");
 
 	(*T)["COLLAPSE_MIDI"] = new checkbox(72.5 - moveable_window::window_header_size, 75 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF7F00AF, 0x7FFF00AF, 1, 0, &system_white, _Align::right, "Collapse tracks of a MIDI into one");
 	(*T)["APPLY_OFFSET_AFTER"] = new checkbox(57.5 - moveable_window::window_header_size, 75 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF7F00AF, 0x7FFF00AF, 1, 0, &system_white, _Align::right, "Apply offset after PPQ change");
@@ -2660,13 +2676,13 @@ void init()
 
 	(*T)["AUTOUPDATECHECK"] = new checkbox(-97.5 + moveable_window::window_header_size, 35 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, check_autoupdates, &system_white, _Align::left, "Check for updates automatically");
 
-	(*wh)["APP_SETTINGS"] = T;
+	(*global_window_handler)["APP_SETTINGS"] = T;
 
 	T = new moveable_window("SMRP Container", system_white, -300, 300, 600, 600, 0x000000CF, 0xFFFFFF7F);
 
 	(*T)["TIMER"] = new input_field("0 s", 0, 195, 10, 50, system_white, nullptr, 0, &system_white, "Timer", 12, _Align::center, _Align::center, input_field::Type::text);
 
-	(*wh)["SMRP_CONTAINER"] = T;
+	(*global_window_handler)["SMRP_CONTAINER"] = T;
 
 	T = new moveable_fui_window("MIDI Info Collector", system_white, -150, 200, 300, 400, 200, 1.25f, 100, 100, 5, BACKGROUND_OPQ, HEADER, BORDER);
 	(*T)["FLL"] = new text_box("--File log line--", system_white, 0, -moveable_window::window_header_size + 185, 15, 285, 10, 0, 0, 0, _Align::left);
@@ -2675,10 +2691,9 @@ void init()
 		0, -moveable_window::window_header_size + 145, 285, 50, (1. / 20000.), true, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F00FF, 0xFFFFFFFF, 0x7F7F7F7F, nullptr, system_white, false
 		);
 	(*T)["POLY_GRAPH"] = new Graphing<single_midi_info_collector::polyphony_graph>(
-		0, -moveable_window::window_header_size + 95, 285, 50, (1. / 20000.), true, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F00FF, 0xFFFFFFFF, 0x7F7F7F7F, nullptr, system_white, false
-		);
-	(*T)["PG_SWITCH"] = new button("enable graph B", system_white, props_and_sets::SMIC::enable_pg, 37.5, 60 - moveable_window::window_header_size, 70, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, &system_white, "Polyphony graph");
-	(*T)["TG_SWITCH"] = new button("enable graph A", system_white, props_and_sets::SMIC::enable_tg, -37.5, 60 - moveable_window::window_header_size, 70, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, &system_white, "Tempo graph");
+		0, -moveable_window::window_header_size + 95, 285, 50, (1. / 20000.), true, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F00FF, 0xFFFFFFFF, 0x7F7F7F7F, nullptr, system_white, false);
+	(*T)["PG_SWITCH"] = new button("Enable graph B", system_white, props_and_sets::SMIC::enable_pg, 37.5, 60 - moveable_window::window_header_size, 70, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, &system_white, "Polyphony graph");
+	(*T)["TG_SWITCH"] = new button("Enable graph A", system_white, props_and_sets::SMIC::enable_tg, -37.5, 60 - moveable_window::window_header_size, 70, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, &system_white, "Tempo graph");
 	(*T)["ALL_EXP"] = new button("Export all", system_white, props_and_sets::SMIC::export_all, 110, 60 - moveable_window::window_header_size, 65, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr);
 	(*T)["TG_EXP"] = new button("Export Tempo", system_white, props_and_sets::SMIC::export_tg, -110, 60 - moveable_window::window_header_size, 65, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr);
 	(*T)["TG_RESET"] = new button("reset graph A", system_white, props_and_sets::SMIC::reset_tg, 45, 40 - moveable_window::window_header_size, 65, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr);
@@ -2696,7 +2711,7 @@ void init()
 	(*T)["DELIM"] = new input_field(";", 137.5, 40 - moveable_window::window_header_size, 10, 7.5, system_white, &(props_and_sets::csv_delim), 0x007FFFFF, &system_white, "Delimiter", 1, _Align::center, _Align::right, input_field::Type::text);
 	(*T)["ANSWER"] = new text_box("----", system_white, -66.25, -30, 25, 152.5, 10, 0, 0, 0, _Align::center, text_box::VerticalOverflow::recalibrate);
 
-	(*wh)["SMIC"] = T;
+	(*global_window_handler)["SMIC"] = T;
 
 	T = new moveable_fui_window("Simple MIDI player", system_white, /*-200, 197.5, 400, 397.5, 150, 2.5f, 75, 75, 5*/
 		-200, 175 + moveable_window::window_header_size, 400, 375, 150, 2.5, 65, 65, 2.5, BACKGROUND_OPQ, HEADER, BORDER);
@@ -2731,23 +2746,23 @@ void init()
 		2     // Max visible lines
 	);
 
-	(*wh)["SIMPLAYER"] = T;
+	(*global_window_handler)["SIMPLAYER"] = T;
 
-	wh->enable_window("MAIN");
-	//wh->enable_window("SIMPLAYER");
-	//wh->enable_window("V1WT");
-	//wh->enable_window("COMPILEW"); // todo: someday fix the damn editbox...
-	//wh->enable_window("SMIC");
-	//wh->enable_window("OR");
-	//wh->enable_window("SMRP_CONTAINER");
-	//wh->enable_window("APP_SETTINGS");
-	//wh->enable_window("VM");
-	//wh->enable_window("CAT");
-	//wh->enable_window("SMPAS");//Debug line
-	//wh->enable_window("PROMPT");////DEBUUUUG
-	//wh->enable_window("OTHER_SETS");
+	global_window_handler->enable_window("MAIN");
+	//global_window_handler->enable_window("SIMPLAYER");
+	//global_window_handler->enable_window("V1WT");
+	//global_window_handler->enable_window("COMPILEW"); // todo: someday fix the damn editbox...
+	//global_window_handler->enable_window("SMIC");
+	//global_window_handler->enable_window("OR");
+	//global_window_handler->enable_window("SMRP_CONTAINER");
+	//global_window_handler->enable_window("APP_SETTINGS");
+	//global_window_handler->enable_window("VM");
+	//global_window_handler->enable_window("CAT");
+	//global_window_handler->enable_window("SMPAS");//Debug line
+	//global_window_handler->enable_window("PROMPT");////DEBUUUUG
+	//global_window_handler->enable_window("OTHER_SETS");
 
-	DragAcceptFiles(hWnd, TRUE);
+	DragAcceptFiles(hWnd, true);
 	OleInitialize(nullptr);
 
 	std::cout << "Registering Drag&Drop: " << (RegisterDragDrop(hWnd, &global_drag_and_drop_handler)) << std::endl;
@@ -2762,7 +2777,7 @@ void init()
 void on_timer(int v);
 void gl_display()
 {
-	lFontSymbolsInfo::InitialiseFont(default_font_name);
+	lfont_symbols_info::initialise_font(default_font_name);
 
 	glClear(GL_COLOR_BUFFER_BIT | GL_ACCUM_BUFFER_BIT);
 	glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
@@ -2773,21 +2788,21 @@ void gl_display()
 		init();
 		if (april_fool)
 		{
-			wh->throw_alert("Today is a special day! ( -w-)\nToday you'll have new background\n(-w- )", "1st of April!", special_signs::draw_wait, 1, 0xFF00FFFF, 20);
-			(*wh)["ALERT"]->rgba_background = 0xF;
+			global_window_handler->throw_alert("Today is a special day! ( -w-)\nToday you'll have new background\n(-w- )", "1st of April!", special_signs::draw_wait, 1, 0xFF00FFFF, 20);
+			(*global_window_handler)["ALERT"]->rgba_background = 0xF;
 			_WH_t<text_box>("ALERT", "AlertText")->safe_text_color_change(0xFFFFFFFF);
 		}
 		if (years_old >= 0)
 		{
-			wh->throw_alert("Interesting fact: today is exactly " + std::to_string(years_old) + " years since first SAFC release.\n(o w o  )", "SAFC birthday", special_signs::draw_wait, 1, 0xFF7F3FFF, 50);
-			(*wh)["ALERT"]->rgba_background = 0xF;
+			global_window_handler->throw_alert("Interesting fact: today is exactly " + std::to_string(years_old) + " years since first SAFC release.\n(o w o  )", "SAFC birthday", special_signs::draw_wait, 1, 0xFF7F3FFF, 50);
+			(*global_window_handler)["ALERT"]->rgba_background = 0xF;
 			_WH_t<text_box>("ALERT", "AlertText")->safe_text_color_change(0xFFFFFFFF);
 		}
 		animation_is_active = !animation_is_active;
 		on_timer(0);
 	}
 
-	if (years_old >= 0 || app_settings::shader_mode == 100)
+	if (years_old >= 0 || settings::shader_mode == 100)
 	{
 		glBegin(GL_QUADS);
 		glColor4f(1, 1, 1, (drag_over) ? 0.25f : 1);
@@ -2800,7 +2815,7 @@ void gl_display()
 		glVertex2f(internal_range * (wind_x / window_base_width), 0 - internal_range * (wind_y / window_base_height));
 		glEnd();
 	}
-	else if (april_fool || app_settings::shader_mode == 69)
+	else if (april_fool || settings::shader_mode == 69)
 	{
 		glBegin(GL_QUADS);
 		glColor4f(1, 0, 1, (drag_over) ? 0.25f : 1);
@@ -2813,7 +2828,7 @@ void gl_display()
 		glVertex2f(internal_range * (wind_x / window_base_width), 0 - internal_range * (wind_y / window_base_height));
 		glEnd();
 	}
-	else if (month_beginning || app_settings::shader_mode == 42)
+	else if (month_beginning || settings::shader_mode == 42)
 	{
 		glBegin(GL_QUADS);
 		glColor4f(1, 0.5f, 0, (drag_over) ? 0.25f : 1);
@@ -2824,7 +2839,7 @@ void gl_display()
 		glVertex2f(internal_range * (wind_x / window_base_width), 0 - internal_range * (wind_y / window_base_height));
 		glEnd();
 	}
-	else if (app_settings::shader_mode < 4)
+	else if (settings::shader_mode < 4)
 	{
 		glBegin(GL_QUADS);
 		glColor4f(0.05f, 0.05f, 0.10f, (drag_over) ? 0.25f : 1);
@@ -2847,8 +2862,8 @@ void gl_display()
 	}
 
 	glRotatef(dumb_rotation_angle, 0, 0, 1);
-	if (wh)
-		wh->draw();
+	if (global_window_handler)
+		global_window_handler->draw();
 	if (drag_over)
 		special_signs::draw_file_sign(0, 0, 50, 0xFFFFFFFF, 0);
 	glRotatef(-dumb_rotation_angle, 0, 0, 1);
@@ -2866,7 +2881,7 @@ void gl_init()
 
 void gl_close()
 {
-	app_settings::regestry_access.Close();
+	settings::regestry_access.Close();
 
 	if (player)
 		player->stop();
@@ -2888,9 +2903,9 @@ void on_resize(int x, int y)
 	wind_y = y;
 	gl_init();
 	glViewport(0, 0, x, y);
-	if (wh)
+	if (global_window_handler)
 	{
-		auto SMRP = (*wh)["SMRP_CONTAINER"];
+		auto SMRP = (*global_window_handler)["SMRP_CONTAINER"];
 		SMRP->safe_change_position_argumented(0, 0, 0);
 		SMRP->not_safe_resize_centered(internal_range * 3 * (wind_y / window_base_height) + 2 * moveable_window::window_header_size, internal_range * 3 * (wind_x / window_base_width));
 
@@ -2919,14 +2934,14 @@ void gl_motion(int ix, int iy)
 	absolute_to_actual_coords(ix, iy, fx, fy);
 	mouse_x_position = fx;
 	mouse_y_position = fy;
-	if (wh)
-		wh->mouse_handler(fx, fy, 0, 0);
+	if (global_window_handler)
+		global_window_handler->mouse_handler(fx, fy, 0, 0);
 }
 
 void gl_key(std::uint8_t k, int x, int y)
 {
-	if (wh)
-		wh->keyboard_handler(k);
+	if (global_window_handler)
+		global_window_handler->keyboard_handler(k);
 
 	if (k == 27)
 	{
@@ -2947,8 +2962,8 @@ void gl_click(int butt, int state, int x, int y)
 	else if (state == GLUT_UP)
 		state = 1;
 
-	if (wh)
-		wh->mouse_handler(fx, fy, button, static_cast<char>(state));
+	if (global_window_handler)
+		global_window_handler->mouse_handler(fx, fy, button, static_cast<char>(state));
 }
 
 void gl_drag(int x, int y)
@@ -2964,15 +2979,15 @@ void gl_special_key(int Key, int x, int y)
 	{
 		switch (Key)
 		{
-			case GLUT_KEY_DOWN:		if (wh)wh->keyboard_handler(1);
+			case GLUT_KEY_DOWN:		if (global_window_handler) global_window_handler->keyboard_handler(1);
 				break;
-			case GLUT_KEY_UP:		if (wh)wh->keyboard_handler(2);
+			case GLUT_KEY_UP:		if (global_window_handler) global_window_handler->keyboard_handler(2);
 				break;
-			case GLUT_KEY_LEFT:		if (wh)wh->keyboard_handler(3);
+			case GLUT_KEY_LEFT:		if (global_window_handler) global_window_handler->keyboard_handler(3);
 				break;
-			case GLUT_KEY_RIGHT:		if (wh)wh->keyboard_handler(4);
+			case GLUT_KEY_RIGHT:		if (global_window_handler) global_window_handler->keyboard_handler(4);
 				break;
-			case GLUT_KEY_F5:		if (wh) init();
+			case GLUT_KEY_F5:		if (global_window_handler) init();
 				break;
 		}
 	}
