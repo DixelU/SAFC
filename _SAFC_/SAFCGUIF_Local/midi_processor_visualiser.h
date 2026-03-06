@@ -96,15 +96,15 @@ struct midi_processor_visualiser : handleable_ui_part
 		std::lock_guard locker(lock);
 		auto& logger_ptr = SMRP.second;
 
-		auto last_logger_line = logger_ptr->log->getLast();
+		auto last_logger_line = logger_ptr->log->get_last();
 		if (last_logger_line != stl_log->current_text)
 			stl_log->safe_string_replace(last_logger_line);
 
-		auto last_warning_line = logger_ptr->warning->getLast();
+		auto last_warning_line = logger_ptr->warning->get_last();
 		if (last_warning_line != stl_warn->current_text)
 			stl_warn->safe_string_replace(last_warning_line);
 
-		auto last_error_line = logger_ptr->error->getLast();
+		auto last_error_line = logger_ptr->error->get_last();
 		if (last_error_line != stl_err->current_text)
 			stl_err->safe_string_replace(last_error_line);
 

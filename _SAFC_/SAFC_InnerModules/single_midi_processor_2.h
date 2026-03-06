@@ -30,7 +30,7 @@ struct logger_base
 {
 	virtual ~logger_base() = default;
 	virtual void operator<<(std::string&& message) {};
-	virtual std::string getLast() const { return ""; };
+	virtual std::string get_last() const { return ""; };
 
 	virtual void report(std::vector<std::ptrdiff_t> data, std::string&& message)
 	{
@@ -61,12 +61,12 @@ public:
 		std::lock_guard locker(mtx);
 		messages.push_back(std::move(message));
 	}
-	std::string getLast() const override
+	std::string get_last() const override
 	{
 		std::lock_guard locker(mtx);
 		return (messages.size()) ? messages.back() : "";
 	}
-	std::vector<std::string> getAll() const
+	std::vector<std::string> get_all() const
 	{
 		std::lock_guard locker(mtx);
 		return messages;
@@ -86,7 +86,7 @@ public:
 		std::lock_guard locker(mtx);
 		this->message = std::move(message);
 	}
-	std::string getLast() const override
+	std::string get_last() const override
 	{
 		std::lock_guard locker(mtx);
 		return message;
