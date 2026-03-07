@@ -13,12 +13,11 @@
 
 struct selectable_properted_list : handleable_ui_part
 {
-	inline static constexpr int arrow_stick_height = 10;
-
 	_Align text_in_buttons_align;
 	std::function<void(int)> on_select;
 	std::function<void(int)> on_get_properties;
 	float header_cx_pos, header_y_pos, calculated_height, space_between, width;
+	float arrow_stick_height = 10;
 	button_settings* butt_settings; // non-owning
 	// Backward-compat aliases
 	std::deque<std::string> selectors_text;

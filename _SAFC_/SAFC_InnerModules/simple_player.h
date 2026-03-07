@@ -2016,12 +2016,12 @@ private:
 	constexpr static std::uint32_t MThd_header = 1297377380;
 };
 
-struct PlayerViewer : public handleable_ui_part
+struct player_viewer : public handleable_ui_part
 {
 	float xpos, ypos;
 	std::unique_ptr<simple_player::draw_data> data;
 
-	PlayerViewer(float xpos, float ypos):
+	player_viewer(float xpos, float ypos):
 		xpos(xpos),
 		ypos(ypos),
 		data(std::make_unique<simple_player::draw_data>())
@@ -2068,7 +2068,7 @@ struct PlayerViewer : public handleable_ui_part
 				) * data->height;
 		safe_change_position(NewX + CW, NewY + CH);
 	}
-	void RescaleAndReposition(float new_xpos, float new_ypos, float new_width, float new_height)
+	void rescale_and_reposition(float new_xpos, float new_ypos, float new_width, float new_height)
 	{
 		std::lock_guard<std::recursive_mutex> locker(lock);
 
