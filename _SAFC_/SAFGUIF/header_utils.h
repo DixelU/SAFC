@@ -89,7 +89,9 @@ auto hand_cursor = ::LoadCursor(NULL, IDC_HAND), all_direct_cursor = ::LoadCurso
 bool check_autoupdates = true;
 
 struct simple_player;
+struct midi_editor;
 std::shared_ptr<simple_player> player;
+std::shared_ptr<midi_editor> editor;
 
 void absolute_to_actual_coords(int ix, int iy, float& x, float& y);
 void inline rotate_view(float& x, float& y);

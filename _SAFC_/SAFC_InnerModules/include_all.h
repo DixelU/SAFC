@@ -9,5 +9,7 @@
 #include "midi_collection_threaded_merger.h"
 #include "fast_midi_checker.h"
 #include "simple_player.h"
+#include "midi_editor.h"
+#include "midi_editor_integration.h"
 
 #endif

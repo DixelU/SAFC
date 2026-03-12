@@ -38,6 +38,7 @@
 #include "SAFGUIF/SAFGUIF.h"
 #include "SAFC_InnerModules/include_all.h"
 #include "SAFCGUIF_Local/SAFGUIF_L.h"
+#include "SAFCGUIF_Local/midi_editor_viewer.h"
 
 #include "SAFC_InnerModules/single_midi_processor_2.h"
 #include "SAFC_InnerModules/bool_settings.h"
@@ -2304,6 +2305,175 @@ void on_playback_seek_to(float value)
 	player->seek_to(value);
 }
 
+// ============================================================================
+// MIDI Editor Functions
+// ============================================================================
+
+void on_editor_load_file()
+{
+	worker_singleton<struct editor_load>::instance().push([]()
+	{
+		auto filenames = multiple_open_file_dialog(L"Select MIDI file to edit");
+		if (!filenames.empty() && !filenames[0].empty())
+		{
+			if (editor->load_file(filenames[0]))
+			{
+				auto textbox = _WH_t<text_box>("MIDI_EDITOR", "TEXT");
+				if (textbox)
+				{
+					textbox->safe_string_replace(
+						"Loaded: " + std::string(filenames[0].begin(), filenames[0].end()) +
+						"\nNotes: " + std::to_string(editor->get_note_count()) +
+						"\nPPQN: " + std::to_string(editor->get_ppqn()) +
+						"\nDuration: " + std::to_string(editor->get_total_seconds()) + "s"
+					);
+				}
+				
+				// Update editor viewer
+				auto editor_window = (*global_window_handler)["MIDI_EDITOR"];
+				if (editor_window)
+				{
+					auto editor_view = (midi_editor_viewer*)(*editor_window)["VIEW"];
+					if (editor_view)
+					{
+						editor_view->set_editor(editor.get());
+						editor->set_view_range(0, editor->get_ticks_per_beat() * 4);
+						editor->set_view_keys(24, 108);
+					}
+				}
+			}
+			else
+			{
+				throw_alert_error("Failed to load MIDI file");
+			}
+		}
+	});
+}
+
+void on_editor_save_file()
+{
+	if (!editor || !editor->is_file_loaded())
+	{
+		throw_alert_warning("No MIDI file loaded for editing");
+		return;
+	}
+
+	worker_singleton<struct editor_save>::instance().push([]()
+	{
+		auto save_path = save_open_file_dialog(L"Save edited MIDI as...");
+		if (!save_path.empty())
+		{
+			if (editor->save_file(save_path))
+			{
+				auto textbox = _WH_t<text_box>("MIDI_EDITOR", "TEXT");
+				if (textbox)
+					textbox->safe_string_replace("File saved successfully!");
+			}
+			else
+			{
+				throw_alert_error("Failed to save MIDI file");
+			}
+		}
+	});
+}
+
+void on_editor_delete()
+{
+	if (!editor || !editor->is_file_loaded())
+		return;
+	
+	editor->delete_selected_notes();
+}
+
+void on_editor_undo()
+{
+	if (!editor || !editor->is_file_loaded())
+		return;
+	
+	editor->undo();
+}
+
+void on_editor_redo()
+{
+	if (!editor || !editor->is_file_loaded())
+		return;
+	
+	editor->redo();
+}
+
+void on_editor_zoom_in()
+{
+	if (!editor || !editor->is_file_loaded())
+		return;
+	
+	editor->zoom_in(1.5f);
+}
+
+void on_editor_zoom_out()
+{
+	if (!editor || !editor->is_file_loaded())
+		return;
+	
+	editor->zoom_out(1.5f);
+}
+
+void on_editor_play()
+{
+	if (!editor || !editor->is_file_loaded())
+		return;
+	
+	// Integrate with simple_player for playback
+	if (player)
+	{
+		player->restore_device_by_name(saved_midi_device_name);
+		player->simple_run(editor->get_filename());
+	}
+}
+
+void on_editor_load_current()
+{
+	// Load currently selected file from main list
+	worker_singleton<struct editor_load_current>::instance().push([]()
+	{
+		auto ptr = _WH_t<selectable_properted_list>("MAIN", "List");
+		if (ptr->selected_id.empty())
+		{
+			throw_alert_warning("No MIDI file selected in main list");
+			return;
+		}
+
+		auto& id = ptr->selected_id.front();
+		if (id < g_data.files.size())
+		{
+			if (editor->load_file(g_data[id].filename))
+			{
+				auto textbox = _WH_t<text_box>("MIDI_EDITOR", "TEXT");
+				if (textbox)
+				{
+					textbox->safe_string_replace(
+						"Loaded: " + std::string(g_data[id].filename.begin(), g_data[id].filename.end()) +
+						"\nNotes: " + std::to_string(editor->get_note_count()) +
+						"\nPPQN: " + std::to_string(editor->get_ppqn())
+					);
+				}
+				
+				// Update editor viewer
+				auto editor_window = (*global_window_handler)["MIDI_EDITOR"];
+				if (editor_window)
+				{
+					auto editor_view = (midi_editor_viewer*)(*editor_window)["VIEW"];
+					if (editor_view)
+					{
+						editor_view->set_editor(editor.get());
+						editor->set_view_range(0, editor->get_ticks_per_beat() * 4);
+						editor->set_view_keys(24, 108);
+					}
+				}
+			}
+		}
+	});
+}
+
 bool simplayer_maximised = false;
 
 struct simplayer_saved_state {
@@ -2517,6 +2687,11 @@ void init()
 	(*window)["REM_ALL_Butt"] = new button("Remove all", system_white, on_rem_all, 150, 142.5, 75, 12, 1, 0xAF0000AF, 0xFFFFFFFF, 0xAF0000AF, 0xFFFFFFFF, 0xF7F7F7FF, &system_white, "May cause lag");
 
 	(*window)["OPEN_SIMPLAYER"] = new button("Open Player", system_black, on_open_player, 150, 117.5, 75, 12, 1, 0xFFFFFFAF, 0x0F0F0FFF, 0xFFFFFFFF, 0x000000FF, 0xFFFFFFFF, nullptr, " ");
+	(*window)["OPEN_MIDI_EDITOR"] = new button("MIDI Editor", system_black, []() { 
+		global_window_handler->main_window_id = "MIDI_EDITOR";
+		global_window_handler->disable_all_windows();
+		global_window_handler->enable_window("MIDI_EDITOR");
+	}, 150, 105, 75, 12, 1, 0xFFFFFFAF, 0x0F0F0FFF, 0xFFFFFFFF, 0x000000FF, 0xFFFFFFFF, nullptr, "Open MIDI Piano Roll Editor");
 
 	(*window)["GLOBAL_PPQN_Butt"] = new button("Global PPQN", system_white, on_global_ppqn, 150, 92.5, 75, 12, 1, 0xFF3F00AF, 0xFFFFFFFF, 0xFF3F00AF, 0xFFFFFFFF, 0xF7F7F7FF, nullptr, " ");
 	(*window)["GLOBAL_OFFSET_Butt"] = new button("Global offset", system_white, on_global_offset, 150, 80, 75, 12, 1, 0xFF7F00AF, 0xFFFFFFFF, 0xFF7F00FF, 0xFFFFFFFF, 0xF7F7F7FF, nullptr, " ");
@@ -2751,6 +2926,37 @@ void init()
 	(*window)["DEVICE_LIST"] = device_list_selector;
 
 	(*global_window_handler)["SIMPLAYER"] = window;
+
+	// ========================================================================
+	// MIDI Editor Window
+	// ========================================================================
+	window = new moveable_fui_window("MIDI Piano Roll Editor", system_white,
+		200, 175 + moveable_window::window_header_size, 450, 400, 150, 2.5, 65, 65, 2.5, BACKGROUND_OPQ, HEADER, BORDER);
+
+	(*window)["TEXT"] = new text_box("Load a MIDI file to begin editing", legacy_white, 0, 140 + moveable_window::window_header_size, 60, 200, 10, 0xFFFFFF1A, 0, 0, _Align(center | top), text_box::VerticalOverflow::cut);
+	
+	// Editor viewer (piano roll visualization)
+	auto editor_view = new midi_editor_viewer(0, -20, editor.get());
+	(*window)["VIEW"] = editor_view;
+
+	// File operation buttons
+	(*window)["LOAD_FILE"] = new button("Load MIDI", system_black, on_editor_load_file, 160, 110 + moveable_window::window_header_size, 80, 12, 1, 0xFFFFFFAF, 0x0F0F0FFF, 0xFFFFFFFF, 0x000000FF, 0xFFFFFFFF, nullptr, "Load MIDI file for editing");
+	(*window)["SAVE_FILE"] = new button("Save MIDI", system_black, on_editor_save_file, 160, 95 + moveable_window::window_header_size, 80, 12, 1, 0xFFFFFFAF, 0x0F0F0FFF, 0xFFFFFFFF, 0x000000FF, 0xFFFFFFFF, nullptr, "Save edited MIDI file");
+	(*window)["LOAD_CURRENT"] = new button("Load Selected", system_black, on_editor_load_current, 160, 80 + moveable_window::window_header_size, 80, 12, 1, 0xFFFFFFAF, 0x0F0F0FFF, 0xFFFFFFFF, 0x000000FF, 0xFFFFFFFF, nullptr, "Load currently selected file from main list");
+
+	// Edit operation buttons
+	(*window)["UNDO"] = new button("Undo (Z)", legacy_white, on_editor_undo, -215, 180 - moveable_window::window_header_size, 10, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr, "Undo last edit");
+	(*window)["REDO"] = new button("Redo (Y)", legacy_white, on_editor_redo, -200, 180 - moveable_window::window_header_size, 10, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr, "Redo undone edit");
+	(*window)["DELETE"] = new button("Delete (Del)", legacy_white, on_editor_delete, -185, 180 - moveable_window::window_header_size, 10, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr, "Delete selected notes");
+
+	// View control buttons
+	(*window)["ZOOM_IN"] = new button("Zoom +", system_black, on_editor_zoom_in, 160, 65 + moveable_window::window_header_size, 80, 12, 1, 0xFFFFFFAF, 0x0F0F0FFF, 0xFFFFFFFF, 0x000000FF, 0xFFFFFFFF, nullptr, "Zoom in piano roll");
+	(*window)["ZOOM_OUT"] = new button("Zoom -", system_black, on_editor_zoom_out, 160, 50 + moveable_window::window_header_size, 80, 12, 1, 0xFFFFFFAF, 0x0F0F0FFF, 0xFFFFFFFF, 0x000000FF, 0xFFFFFFFF, nullptr, "Zoom out piano roll");
+	
+	// Playback button
+	(*window)["PLAY"] = new button("Play", system_black, on_editor_play, 160, 35 + moveable_window::window_header_size, 80, 12, 1, 0xFFFFFFAF, 0x0F0F0FFF, 0xFFFFFFFF, 0x000000FF, 0xFFFFFFFF, nullptr, "Play current MIDI");
+
+	(*global_window_handler)["MIDI_EDITOR"] = window;
 
 	global_window_handler->enable_window("MAIN");
 	//global_window_handler->enable_window("SIMPLAYER");
@@ -3331,6 +3537,8 @@ int main(int argc, char** argv)
 {
 	player = std::make_shared<simple_player>();
 	player->init();
+
+	editor = std::make_shared<midi_editor>();
 
 	g_version_tuple = ___GetVersion();
 
