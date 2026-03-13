@@ -2490,6 +2490,105 @@ struct simplayer_saved_state {
 	std::string previous_main_window_id;
 } saved_simplayer_state;
 
+bool midieditor_maximised = false;
+
+struct midieditor_saved_state {
+	float window_x, window_y, window_width, window_height;
+	float text_x, text_y;
+	float load_file_x, load_file_y;
+	float save_file_x, save_file_y;
+	float load_current_x, load_current_y;
+	float zoom_in_x, zoom_in_y;
+	float zoom_out_x, zoom_out_y;
+	float play_x, play_y;
+	float undo_x, undo_y;
+	float redo_x, redo_y;
+	float delete_x, delete_y;
+	float back_x, back_y;
+	float view_x, view_y, view_width, view_height;
+	std::string previous_main_window_id;
+} saved_midieditor_state;
+
+void apply_midieditor_maximised_layout()
+{
+	float half_w = internal_range * (wind_x / window_base_width);
+	float half_h = internal_range * (wind_y / window_base_height);
+	float full_width = 2.0f * half_w;
+	float full_height = 2.0f * half_h + moveable_window::window_header_size;
+
+	auto window = (*global_window_handler)["MIDI_EDITOR"];
+	auto editor_view = (midi_editor_viewer*)(*window)["VIEW"];
+	auto text = (text_box*)(*window)["TEXT"];
+	auto load_file_btn = (button*)(*window)["LOAD_FILE"];
+	auto save_file_btn = (button*)(*window)["SAVE_FILE"];
+	auto load_current_btn = (button*)(*window)["LOAD_CURRENT"];
+	auto zoom_in_btn = (button*)(*window)["ZOOM_IN"];
+	auto zoom_out_btn = (button*)(*window)["ZOOM_OUT"];
+	auto play_btn = (button*)(*window)["PLAY"];
+	auto undo_btn = (button*)(*window)["UNDO"];
+	auto redo_btn = (button*)(*window)["REDO"];
+	auto delete_btn = (button*)(*window)["DELETE"];
+	auto back_btn = (button*)(*window)["BACK_TO_MAIN"];
+
+	// move window so top-left aligns with viewport top-left
+	float dx = (-half_w) - window->x_window_pos;
+	float dy = (half_h) - window->y_window_pos + moveable_window::window_header_size;
+	window->safe_move(dx, dy);
+
+	// Resize window frame
+	window->not_safe_resize(full_height, full_width);
+	auto fui = (moveable_fui_window*)window;
+	fui->safe_window_rename(window->window_name->current_text, false);
+
+	// Position file operation buttons (right side)
+	float row1_y = half_h - 10;
+	float row2_y = row1_y - 25;
+	float row3_y = row2_y - 25;
+
+	load_file_btn->safe_change_position(half_w - 85, row1_y);
+	save_file_btn->safe_change_position(half_w - 85, row2_y);
+	load_current_btn->safe_change_position(half_w - 85, row3_y);
+
+	// Position view control buttons
+	float row4_y = row3_y - 25;
+	float row5_y = row4_y - 25;
+
+	zoom_in_btn->safe_change_position(half_w - 85, row4_y);
+	zoom_out_btn->safe_change_position(half_w - 85, row5_y);
+
+	// Position play button
+	float row6_y = row5_y - 25;
+	play_btn->safe_change_position(half_w - 85, row6_y);
+
+	// Position edit operation buttons (bottom area)
+	float row7_y = -half_h + 50;
+	float row8_y = row7_y - 25;
+	float row9_y = row8_y - 25;
+
+	undo_btn->safe_change_position(half_w - 85, row7_y);
+	redo_btn->safe_change_position(half_w - 85, row8_y);
+	delete_btn->safe_change_position(half_w - 85, row9_y);
+
+	// Position back button
+	float row10_y = -half_h + 20;
+	back_btn->safe_change_position(half_w - 85, row10_y);
+
+	// Position status text (centered)
+	text->safe_change_position(0, 0);
+
+	// Resize editor viewer to fill the window area (minus button space)
+	float view_margin = 100.f; // Space for buttons on the right
+	float view_width = full_width - view_margin;
+	float view_height = full_height - 40; // Margins top and bottom
+	float view_center_x = -view_margin / 2.f;
+	float view_center_y = 0;
+
+	editor_view->data.width = view_width;
+	editor_view->data.height = view_height;
+	editor_view->xpos = view_center_x;
+	editor_view->ypos = view_center_y;
+}
+
 void apply_simplayer_maximised_layout()
 {
 	float half_w = internal_range * (wind_x / window_base_width);
@@ -2931,30 +3030,38 @@ void init()
 	// MIDI Editor Window
 	// ========================================================================
 	window = new moveable_fui_window("MIDI Piano Roll Editor", system_white,
-		200, 175 + moveable_window::window_header_size, 450, 400, 150, 2.5, 65, 65, 2.5, BACKGROUND_OPQ, HEADER, BORDER);
+		200, 197.5f, 400, 397.5f, 300, 2.5f, 100, 100, 5, BACKGROUND_OPQ, HEADER, BORDER);
 
-	(*window)["TEXT"] = new text_box("Load a MIDI file to begin editing", legacy_white, 0, 140 + moveable_window::window_header_size, 60, 200, 10, 0xFFFFFF1A, 0, 0, _Align(center | top), text_box::VerticalOverflow::cut);
-	
-	// Editor viewer (piano roll visualization)
-	auto editor_view = new midi_editor_viewer(0, -20, editor.get());
+	// Editor viewer (piano roll visualization) - occupies main area
+	auto editor_view = new midi_editor_viewer(0, 20, editor.get());
 	(*window)["VIEW"] = editor_view;
 
-	// File operation buttons
-	(*window)["LOAD_FILE"] = new button("Load MIDI", system_black, on_editor_load_file, 160, 110 + moveable_window::window_header_size, 80, 12, 1, 0xFFFFFFAF, 0x0F0F0FFF, 0xFFFFFFFF, 0x000000FF, 0xFFFFFFFF, nullptr, "Load MIDI file for editing");
-	(*window)["SAVE_FILE"] = new button("Save MIDI", system_black, on_editor_save_file, 160, 95 + moveable_window::window_header_size, 80, 12, 1, 0xFFFFFFAF, 0x0F0F0FFF, 0xFFFFFFFF, 0x000000FF, 0xFFFFFFFF, nullptr, "Save edited MIDI file");
-	(*window)["LOAD_CURRENT"] = new button("Load Selected", system_black, on_editor_load_current, 160, 80 + moveable_window::window_header_size, 80, 12, 1, 0xFFFFFFAF, 0x0F0F0FFF, 0xFFFFFFFF, 0x000000FF, 0xFFFFFFFF, nullptr, "Load currently selected file from main list");
+	// Status text (centered in viewer area)
+	(*window)["TEXT"] = new text_box("Load a MIDI file to begin editing", legacy_white, 0, 140, 60, 200, 10, 0xFFFFFF1A, 0, 0, _Align(center | top), text_box::VerticalOverflow::cut);
 
-	// Edit operation buttons
-	(*window)["UNDO"] = new button("Undo (Z)", legacy_white, on_editor_undo, -215, 180 - moveable_window::window_header_size, 10, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr, "Undo last edit");
-	(*window)["REDO"] = new button("Redo (Y)", legacy_white, on_editor_redo, -200, 180 - moveable_window::window_header_size, 10, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr, "Redo undone edit");
-	(*window)["DELETE"] = new button("Delete (Del)", legacy_white, on_editor_delete, -185, 180 - moveable_window::window_header_size, 10, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr, "Delete selected notes");
+	// File operation buttons (right side, aligned with MAIN window pattern)
+	(*window)["LOAD_FILE"] = new button("Load MIDI", system_black, on_editor_load_file, 150, 167.5, 75, 12, 1, 0xFFFFFFAF, 0x0F0F0FFF, 0xFFFFFFFF, 0x000000FF, 0xFFFFFFFF, nullptr, "Load MIDI file for editing");
+	(*window)["SAVE_FILE"] = new button("Save MIDI", system_black, on_editor_save_file, 150, 155, 75, 12, 1, 0xFFFFFFAF, 0x0F0F0FFF, 0xFFFFFFFF, 0x000000FF, 0xFFFFFFFF, nullptr, "Save edited MIDI file");
+	(*window)["LOAD_CURRENT"] = new button("Load Selected", system_black, on_editor_load_current, 150, 142.5, 75, 12, 1, 0xFFFFFFAF, 0x0F0F0FFF, 0xFFFFFFFF, 0x000000FF, 0xFFFFFFFF, nullptr, "Load currently selected file from main list");
 
 	// View control buttons
-	(*window)["ZOOM_IN"] = new button("Zoom +", system_black, on_editor_zoom_in, 160, 65 + moveable_window::window_header_size, 80, 12, 1, 0xFFFFFFAF, 0x0F0F0FFF, 0xFFFFFFFF, 0x000000FF, 0xFFFFFFFF, nullptr, "Zoom in piano roll");
-	(*window)["ZOOM_OUT"] = new button("Zoom -", system_black, on_editor_zoom_out, 160, 50 + moveable_window::window_header_size, 80, 12, 1, 0xFFFFFFAF, 0x0F0F0FFF, 0xFFFFFFFF, 0x000000FF, 0xFFFFFFFF, nullptr, "Zoom out piano roll");
-	
+	(*window)["ZOOM_IN"] = new button("Zoom +", system_black, on_editor_zoom_in, 150, 117.5, 75, 12, 1, 0xFFFFFFAF, 0x0F0F0FFF, 0xFFFFFFFF, 0x000000FF, 0xFFFFFFFF, nullptr, "Zoom in piano roll");
+	(*window)["ZOOM_OUT"] = new button("Zoom -", system_black, on_editor_zoom_out, 150, 105, 75, 12, 1, 0xFFFFFFAF, 0x0F0F0FFF, 0xFFFFFFFF, 0x000000FF, 0xFFFFFFFF, nullptr, "Zoom out piano roll");
+
 	// Playback button
-	(*window)["PLAY"] = new button("Play", system_black, on_editor_play, 160, 35 + moveable_window::window_header_size, 80, 12, 1, 0xFFFFFFAF, 0x0F0F0FFF, 0xFFFFFFFF, 0x000000FF, 0xFFFFFFFF, nullptr, "Play current MIDI");
+	(*window)["PLAY"] = new button("Play", system_black, on_editor_play, 150, 92.5, 75, 12, 1, 0xFFFFFFAF, 0x0F0F0FFF, 0xFFFFFFFF, 0x000000FF, 0xFFFFFFFF, nullptr, "Play current MIDI");
+
+	// Edit operation buttons (bottom area)
+	(*window)["UNDO"] = new button("Undo (Z)", legacy_white, on_editor_undo, 150, -140, 75, 12, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr, "Undo last edit");
+	(*window)["REDO"] = new button("Redo (Y)", legacy_white, on_editor_redo, 150, -152.5, 75, 12, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr, "Redo undone edit");
+	(*window)["DELETE"] = new button("Delete (Del)", legacy_white, on_editor_delete, 150, -165, 75, 12, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr, "Delete selected notes");
+
+	// Back to main window button
+	(*window)["BACK_TO_MAIN"] = new button("Back", system_white, []() {
+		global_window_handler->main_window_id = "MAIN";
+		global_window_handler->disable_all_windows();
+		global_window_handler->enable_window("MAIN");
+	}, 150, -177.5, 75, 12, 1, 0x5F5F5FAF, 0xFFFFFFFF, 0x5F5F5FAF, 0xFFFFFFFF, 0xF7F7F7FF, nullptr, "Return to main window");
 
 	(*global_window_handler)["MIDI_EDITOR"] = window;
 
