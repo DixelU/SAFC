@@ -345,10 +345,10 @@ public:
 		if (cursor_position.first == words.end())
 			return;
 
-		auto y = cursor_position.first;
+		auto tracked_symbol = cursor_position.first;
 
-		auto cur_y_coord = (*y)->cy_pos;
-		auto cur_x_coord = (*y)->chars[cursor_position.second]->x_pos;
+		auto cur_y_coord = (*tracked_symbol)->cy_pos;
+		auto cur_x_coord = (*tracked_symbol)->chars[cursor_position.second]->x_pos;
 
 		switch (move)
 		{

@@ -364,7 +364,7 @@ size_t get_available_memory()
 	GMSEx = (BOOL(__stdcall*)(LPMEMORYSTATUSEX))GetProcAddress(hIL, "GlobalMemoryStatusEx");
 	if (GMSEx) 
 	{
-		MEMORYSTATUSEX m;
+		MEMORYSTATUSEX m{};
 		m.dwLength = sizeof(m);
 		if (GMSEx(&m))
 		{
@@ -373,7 +373,7 @@ size_t get_available_memory()
 	}
 	else 
 	{
-		MEMORYSTATUS m;
+		MEMORYSTATUS m{};
 		m.dwLength = sizeof(m);
 		GlobalMemoryStatus(&m);
 		ret = (int)(m.dwAvailPhys >> 20);
@@ -2492,7 +2492,7 @@ void init()
 
 	global_window_handler = std::make_shared<windows_handler>();
 
-	auto [maj, min, ver, build] = g_version_tuple;
+	const auto& [maj, min, ver, build] = g_version_tuple;
 
 	constexpr unsigned BACKGROUND = 0x070E16AF;
 	constexpr unsigned BACKGROUND_OPQ = 0x070E16DF;
