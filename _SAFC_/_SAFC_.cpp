@@ -2893,7 +2893,7 @@ void gl_close()
 
 void on_timer(int v)
 {
-	glutTimerFunc(33, on_timer, 0);
+	glutTimerFunc(15, on_timer, 0);
 	if (animation_is_active)
 	{
 		gl_display();
