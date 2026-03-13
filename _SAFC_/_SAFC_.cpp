@@ -1758,6 +1758,7 @@ namespace settings
 		{
 			std::cout << "RK opening failed\n";
 		}
+
 		auto pptr = (*global_window_handler)["APP_SETTINGS"];
 		std::string T;
 
@@ -1857,6 +1858,11 @@ namespace settings
 	{
 		font_height_to_width = new_val;
 		lfont_symbols_info::initialise_font(default_font_name);
+	}
+
+	void feedback_open()
+	{
+		global_window_handler->enable_window("SUPPORT");
 	}
 }
 
@@ -2676,6 +2682,7 @@ void init()
 	(*window)["AS_THREADS_COUNT"] = new input_field(std::to_string(g_data.detected_threads), 92.5 - moveable_window::window_header_size, 75 - moveable_window::window_header_size, 10, 20, system_white, nullptr, 0x007FFFFF, &system_white, "Threads count", 2, _Align::center, _Align::right, input_field::Type::NaturalNumbers);
 
 	(*window)["AUTOUPDATECHECK"] = new checkbox(-97.5 + moveable_window::window_header_size, 35 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, check_autoupdates, &system_white, _Align::left, "Check for updates automatically");
+	/*(*window)["FEEDBACK"] = button_buff = new button("F/B", system_white, settings::feedback_open, 50 - moveable_window::window_header_size, -87.5 - moveable_window::window_header_size, 20, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr, "_");*/
 
 	(*global_window_handler)["APP_SETTINGS"] = window;
 
@@ -2751,6 +2758,11 @@ void init()
 	(*window)["DEVICE_LIST"] = device_list_selector;
 
 	(*global_window_handler)["SIMPLAYER"] = window;
+
+	window = new moveable_fui_window("Feedback/Support? O.o", system_white, -100, 100 + moveable_window::window_header_size, 200, 200 + moveable_window::window_header_size, 100, 1.25f, 50, 50, 5, BACKGROUND_OPQ, HEADER, BORDER);
+	(*window)["EDITBOX"] = new edit_box(" ", &system_white, 0, 0, 150, 150, 10, 0, ~0U ^ 0b11100000, 1);
+
+	(*global_window_handler)["SUPPORT"] = window;
 
 	global_window_handler->enable_window("MAIN");
 	//global_window_handler->enable_window("SIMPLAYER");
@@ -2991,6 +3003,11 @@ void gl_special_key(int Key, int x, int y)
 				break;
 			case GLUT_KEY_RIGHT:		if (global_window_handler) global_window_handler->keyboard_handler(4);
 				break;
+			case GLUT_KEY_HOME:		if (global_window_handler) global_window_handler->keyboard_handler(5);
+				break;
+			case GLUT_KEY_END:		if (global_window_handler) global_window_handler->keyboard_handler(6);
+				break;
+
 			case GLUT_KEY_F5:		if (global_window_handler) init();
 				break;
 		}

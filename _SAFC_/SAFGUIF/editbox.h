@@ -8,9 +8,10 @@
 #include <vector>
 #include <utility>
 #include <algorithm>
+#include <limits>
 #include <memory>
 
-constexpr int eb_cursor_flash_fraction = 30;
+constexpr int eb_cursor_flash_fraction = 90;
 constexpr int eb_cursor_flash_subcycle = eb_cursor_flash_fraction / 2;
 
 // doesn't work with fonted mode anymore!
@@ -20,6 +21,82 @@ private:
 	using char_pos = std::pair<std::deque<std::unique_ptr<single_text_line>>::iterator, size_t>;
 public:
 private:
+	float available_line_width() const
+	{
+		float char_width = stls->x_unit_size * 2;
+		return std::max(width - 2 * char_width, 0.f);
+	}
+
+	float measure_string_width(const std::string& candidate) const
+	{
+		if (candidate.empty())
+			return 0.f;
+		std::unique_ptr<single_text_line> probe(stls->create_one(candidate));
+		return probe->calculated_width;
+	}
+
+	size_t max_chars_that_fit(const std::string& source, float max_width) const
+	{
+		if (source.empty() || max_width <= std::numeric_limits<float>::epsilon())
+			return 1;
+
+		size_t low = 1;
+		size_t high = source.size();
+		size_t best = 0;
+
+		while (low <= high)
+		{
+			size_t mid = (low + high) / 2;
+			float width = measure_string_width(source.substr(0, mid));
+
+			if (width <= max_width)
+			{
+				best = mid;
+				low = mid + 1;
+			}
+			else
+			{
+				if (mid == 0)
+					break;
+				high = mid - 1;
+			}
+		}
+
+		return best ? best : 1;
+	}
+
+	void split_word_if_needed(char_pos& cursor, float max_width)
+	{
+		if (cursor.first == words.end())
+			return;
+
+		auto it = cursor.first;
+		while (it != words.end())
+		{
+			auto& word_line = *it;
+			const std::string current_text = word_line->current_text;
+			if (current_text == "\n" || current_text.empty())
+				break;
+
+			float width = measure_string_width(current_text);
+			if (width <= max_width)
+				break;
+
+			size_t fit_len = max_chars_that_fit(current_text, max_width);
+			std::string remainder = current_text.substr(fit_len);
+			word_line->safe_string_replace(current_text.substr(0, fit_len));
+			auto inserted = words.insert(it + 1, std::unique_ptr<single_text_line>(stls->create_one(remainder)));
+
+			if (cursor.first == it && cursor.second >= fit_len)
+			{
+				cursor.first = inserted;
+				cursor.second = cursor.second - fit_len;
+			}
+
+			it = inserted;
+		}
+	}
+
 	std::string buffered_cur_text;
 	std::uint8_t visibility_countdown;
 public:
@@ -67,10 +144,7 @@ public:
 
 		std::string cur_word = (cursor_position.first != words.end()) ? (*cursor_position.first)->current_text : "";
 
-		float char_width = stls->x_unit_size * 2;
-		float fixed_width = (width - 2 * char_width);
-
-		size_t maximal_whole_word_size = (size_t)(fixed_width / (char_width + stls->space_width));
+		float fixed_width = available_line_width();
 
 		if (cursor_position.second)
 		{
@@ -86,17 +160,6 @@ public:
 			else if (ch < 32 || ch == 127)
 			{
 				return;
-			}
-			else if (cur_word.size() >= maximal_whole_word_size)
-			{
-				cur_word.insert(cur_word.begin() + cursor_position.second, ch);
-				(*cursor_position.first)->safe_string_replace(cur_word.substr(0, maximal_whole_word_size - 1));
-				cursor_position.first = words.insert(cursor_position.first + 1, std::unique_ptr<single_text_line>(stls->create_one(cur_word.substr(maximal_whole_word_size - 1, 0x7FFFFFFF))));
-				cursor_position.second++;
-				if (cursor_position.second < maximal_whole_word_size)
-					--cursor_position.first;
-				else
-					cursor_position.second -= maximal_whole_word_size - 1;
 			}
 			else
 			{
@@ -117,14 +180,6 @@ public:
 			}
 			else if (ch < 32 || ch == 127)
 				return;
-			else if (cur_word.size() >= maximal_whole_word_size)
-			{
-				cur_word.insert(cur_word.begin() + 1, ch);
-				(*cursor_position.first)->safe_string_replace(cur_word.substr(0, maximal_whole_word_size - 1));
-				cursor_position.first = words.insert(cursor_position.first + 1, std::unique_ptr<single_text_line>(stls->create_one(cur_word.substr(maximal_whole_word_size - 1, 0x7FFFFFFF))));
-				cursor_position.second++;
-				--cursor_position.first;
-			}
 			else
 			{
 				cur_word.insert(cur_word.begin(), ch);
@@ -133,6 +188,7 @@ public:
 			}
 		}
 
+		split_word_if_needed(cursor_position, fixed_width);
 		visibility_countdown = eb_cursor_flash_subcycle;
 		if (rearrange)
 			rearrange_positions();
@@ -196,37 +252,45 @@ public:
 		float char_width = stls->x_unit_size * 2;
 		float char_height = vertical_offset;
 		float fixed_height = height - vertical_offset;
-		float space_width = stls->space_width;
-		float fixed_width = (width - char_width);
 		float top_line = y_pos + fixed_height * 0.5f;
-		float left_line = x_pos - fixed_width * 0.5f;
-		size_t line_no = 0, col_no = 1;
+		float inner_width = std::max(width - char_width, 0.f);
+		float left_line = x_pos - inner_width * 0.5f;
+		float available_width = inner_width;
+		float cursor = 0.f;
+		size_t line_no = 0;
 
 		for (auto& word : words)
 		{
-			if (word->current_text == "\n")
+			const auto& text = word->current_text;
+			if (text == "\n")
 			{
-				col_no++;
-				word->safe_change_position_argumented(
-					_Align::right | _Align::center,
-					left_line + col_no * char_width + (col_no - 1) * space_width,
-					top_line - char_height * line_no);
+				float newline_center = left_line + cursor + stls->x_unit_size;
+				float newline_y = top_line - char_height * line_no;
+				word->safe_change_position_argumented(_Align::center, newline_center, newline_y);
 
 				line_no++;
-				col_no = 1;
+				cursor = 0.f;
 				continue;
 			}
-			else if (word->calculated_width + col_no * char_width + (col_no - 1) * space_width > fixed_width)
+
+			float word_width = word->calculated_width;
+			if (word_width <= 0.f)
+				continue;
+
+			if (cursor + word_width > available_width && word_width < available_width)
 			{
 				line_no++;
-				col_no = word->chars.size();
-			}
-			else
-			{
-				col_no += word->chars.size();
+				cursor = 0.f;
 			}
 
-			word->safe_change_position_argumented(_Align::right | _Align::center, left_line + col_no * char_width + (col_no - 1) * space_width, top_line - char_height * line_no);
+			float center_x = left_line + cursor + word_width * 0.5f;
+			float center_y = top_line - char_height * line_no;
+			word->safe_change_position_argumented(_Align::center, center_x, center_y);
+
+			cursor += word_width;
+			bool only_whitespace = std::all_of(text.begin(), text.end(), [](char c) { return c == ' ' || c == '\t'; });
+			if (!only_whitespace)
+				cursor += stls->space_width;
 		}
 	}
 
@@ -282,6 +346,7 @@ public:
 			return;
 
 		auto y = cursor_position.first;
+
 		auto cur_y_coord = (*y)->cy_pos;
 		auto cur_x_coord = (*y)->chars[cursor_position.second]->x_pos;
 
@@ -311,22 +376,57 @@ public:
 			}
 			case _Align::top:
 			{
+				float start_y = (*cursor_position.first)->cy_pos;
 				do { move_cursor_by1(_Align::left); }
-				while (
-					!(cursor_position.first == words.begin() && cursor_position.second == 0) && (
-						cur_x_coord + stls->x_unit_size * 0.5f < (*cursor_position.first)->chars[cursor_position.second]->x_pos ||
-						cur_y_coord == (*cursor_position.first)->cy_pos
-						));
+				while (cursor_position.first != words.begin() &&
+					((*cursor_position.first)->current_text == "\n" || (*cursor_position.first)->cy_pos == start_y));
 				break;
 			}
 			case _Align::bottom:
 			{
+				float start_y = (*cursor_position.first)->cy_pos;
 				do { move_cursor_by1(_Align::right); }
-				while (
-					!(cursor_position.first == words.end() - 1 && cursor_position.second == words.back()->current_text.size() - 1) && (
-						cur_x_coord - stls->x_unit_size * 0.5f > (*cursor_position.first)->chars[cursor_position.second]->x_pos ||
-						cur_y_coord == (*cursor_position.first)->cy_pos
-						));
+				while (cursor_position.first != words.end() - 1 &&
+					((*cursor_position.first)->current_text == "\n" || (*cursor_position.first)->cy_pos == start_y));
+				break;
+			}
+			case _Align::top | _Align::left: // HOME
+			{
+				if (cursor_position.second > 0)
+				{
+					cursor_position.second = 0;
+					break;
+				}
+
+				auto it = cursor_position.first;
+				while (it != words.begin())
+				{
+					--it;
+					if ((*it)->current_text == "\n")
+					{
+						++it;
+						cursor_position.first = it;
+						cursor_position.second = 0;
+						break;
+					}
+					cursor_position.first = it;
+					cursor_position.second = 0;
+				}
+				break;
+			}
+			case _Align::top | _Align::right: // END
+			{
+				auto it = cursor_position.first;
+				cursor_position.second = std::min(cursor_position.second, (*it)->current_text.size());
+				while (it + 1 != words.end())
+				{
+					auto next = it + 1;
+					if ((*next)->current_text == "\n")
+						break;
+					++it;
+					cursor_position.first = it;
+					cursor_position.second = (*it)->current_text.size();
+				}
 				break;
 			}
 			case _Align::center:
@@ -366,6 +466,14 @@ public:
 				return;
 			case 4:
 				move_cursor_by1(_Align::right);
+				visibility_countdown = eb_cursor_flash_subcycle;
+				return;
+			case 5:
+				move_cursor_by1(static_cast<_Align>(_Align::top | _Align::left));
+				visibility_countdown = eb_cursor_flash_subcycle;
+				return;
+			case 6:
+				move_cursor_by1(static_cast<_Align>(_Align::top | _Align::right));
 				visibility_countdown = eb_cursor_flash_subcycle;
 				return;
 		}
@@ -435,11 +543,13 @@ public:
 			if (cursor_position.first != words.end())
 			{
 				const float fonted_fix = (is_fonted ? 0.75f : 1.5f);
-				auto& t = (*cursor_position.first)->chars[cursor_position.second];
+				const auto& traced_symbol = (*cursor_position.first)->chars[cursor_position.second];
+
+				glLineWidth(1);
 				__glcolor(stls->rgba_color);
 				glBegin(GL_LINES);
-				glVertex2f(t->x_pos - stls->x_unit_size - stls->space_width * 0.5f, t->y_pos + stls->y_unit_size * fonted_fix);
-				glVertex2f(t->x_pos - stls->x_unit_size - stls->space_width * 0.5f, t->y_pos - stls->y_unit_size * fonted_fix);
+				glVertex2f(traced_symbol->x_pos + stls->x_unit_size - stls->space_width * 0.5f, traced_symbol->y_pos + stls->y_unit_size * fonted_fix);
+				glVertex2f(traced_symbol->x_pos + stls->x_unit_size - stls->space_width * 0.5f, traced_symbol->y_pos - stls->y_unit_size * fonted_fix);
 				glEnd();
 			}
 		}
