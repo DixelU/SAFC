@@ -3325,12 +3325,12 @@ struct safc_cli_runtime:
 		if (global_offset != config.end())
 			g_data.set_global_offset(global_offset->second->AsNumber());
 
-		auto& filesArray = files->second->AsArray();
+		auto& files_array = files->second->AsArray();
 		std::vector<std::wstring> filenames;
 
-		for (auto& singleEntry : filesArray)
+		for (auto& single_entry : files_array)
 		{
-			auto& object = singleEntry->AsObject();
+			auto& object = single_entry->AsObject();
 			auto& filename = object.at(L"filename")->AsString();
 			filenames.push_back(filename);
 		}
@@ -3338,9 +3338,9 @@ struct safc_cli_runtime:
 		add_files(filenames);
 
 		size_t index = 0;
-		for (auto& singleEntry : filesArray)
+		for (auto& single_entry : files_array)
 		{
-			auto& object = singleEntry->AsObject();
+			auto& object = single_entry->AsObject();
 			
 			auto ppq_override = object.find(L"ppq_override");
 			if (ppq_override != object.end())
@@ -3434,15 +3434,15 @@ struct safc_cli_runtime:
 				g_data.save_path += L".mid";
 		}
 
-		auto LocalMCTM = g_data.mctm_constructor();
-		LocalMCTM->StartProcessingMIDIs();
+		auto local_mctm = g_data.mctm_constructor();
+		local_mctm->StartProcessingMIDIs();
 
-		while (LocalMCTM->CheckSMRPProcessingAndStartNextStep())
+		while (local_mctm->CheckSMRPProcessingAndStartNextStep())
 			//that's some really dumb synchronization... TODO: MAKE BETTER
 			std::this_thread::sleep_for(std::chrono::milliseconds(5));
-		while (!LocalMCTM->CheckRIMerge())
+		while (!local_mctm->CheckRIMerge())
 			std::this_thread::sleep_for(std::chrono::milliseconds(5));
-		while (!LocalMCTM->CompleteFlag)
+		while (!local_mctm->CompleteFlag)
 			std::this_thread::sleep_for(std::chrono::milliseconds(5));
 	}
 };
