@@ -169,6 +169,12 @@ struct single_midi_info_collector
 		tempo_map[0] = tempo_event(0x7, 0xA1, 0x20);
 		poly_differences[-1] = note_on_off_counter();
 
+		for (int i = 0; i < 12 && file_input.good(); i++)
+			static_cast<void>(file_input.get());
+
+		ppq = ((std::uint16_t)file_input.get()) << 8;
+		ppq |= ((std::uint16_t)file_input.get());
+
 		while (file_input.good())
 		{
 			std::array<std::uint64_t, 4096> polyphony;
