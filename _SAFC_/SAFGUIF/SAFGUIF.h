@@ -22,5 +22,6 @@
 #include "stls_presets.h"
 #include "windows_handler.h"
 #include "editbox.h"
+#include "ui_builders.h"
 
 #endif // !SAFGUIF_INCLUDE
