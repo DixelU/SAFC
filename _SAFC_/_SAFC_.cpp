@@ -2019,12 +2019,15 @@ void on_start()
 		{
 			auto position = get_position_for_one_of(id, currently_processed_copy.size(), 140, 0.7);
 			auto visualiser = std::make_unique<midi_processor_visualiser>(position.first, position.second, &system_white);
-			auto& visualiser_ref = *visualiser;
+			auto visualiser_ref = std::ref(*visualiser);
 
 			std::string element_id;
 			merge_preview_container->add_ui_element(element_id = "SMRP_C" + std::to_string(id), std::move(visualiser));
 
-			std::thread([](std::shared_ptr<midi_collection_threaded_merger> pMCTM, midi_processor_visualiser& pVIS, std::uint32_t id)
+			std::thread([](
+				std::shared_ptr<midi_collection_threaded_merger> merger_ptr,
+				midi_processor_visualiser& vis_ref,
+				std::uint32_t id)
 			{
 				std::string SID = "SMRP_C" + std::to_string(id);
 				std::cout << SID << " Processing started" << std::endl;
@@ -2032,12 +2035,12 @@ void on_start()
 				{
 					global_mctm->with_currently_processed_item(id, [&](const auto& item)
 					{
-						pVIS.set_smrp(item);
+						vis_ref.set_smrp(item);
 					});
 					std::this_thread::sleep_for(std::chrono::milliseconds(66));
 				}
 				std::cout << SID << " Processing stopped" << std::endl;
-			}, global_mctm, std::ref(visualiser_ref), id).detach();
+			}, global_mctm, visualiser_ref, id).detach();
 		}
 
 		worker_singleton<struct merge_ri_stage>::instance().push([safc_data_pointer = &g_data, merge_preview_container]()
@@ -2080,7 +2083,7 @@ void on_start()
 		{
 			auto timer_ptr = (input_field*)(*merge_preview_container)["TIMER"];
 
-			while (\!global_mctm->complete)
+			while (!global_mctm->complete)
 			{
 				auto now = std::chrono::high_resolution_clock::now();
 				auto difference = std::chrono::duration_cast<std::chrono::duration<double>>(now - start_timepoint);
@@ -2897,9 +2900,9 @@ void gl_display()
 		firstboot = 0;
 
 		init();
-		if (april_fool)
+		if (true || april_fool)
 		{
-			global_window_handler->throw_alert("Today is a special day! ( -w-)\nToday you'll have new background\n(-w- )", "1st of April!", special_signs::draw_wait, 1, 0xFF00FFFF, 20);
+			global_window_handler->throw_alert("Today is a special day! ( -w-)\nToday you'll have new background\n(-w- )", "1st of April!", special_signs::draw_wait, true, 0xFF00FFFF, 20);
 			(*global_window_handler)["ALERT"]->rgba_background = 0xF;
 			_WH_t<text_box>("ALERT", "AlertText")->safe_text_color_change(0xFFFFFFFF);
 		}
