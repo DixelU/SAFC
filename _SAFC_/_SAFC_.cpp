@@ -2900,7 +2900,7 @@ void gl_display()
 		firstboot = 0;
 
 		init();
-		if (true || april_fool)
+		if (april_fool)
 		{
 			global_window_handler->throw_alert("Today is a special day! ( -w-)\nToday you'll have new background\n(-w- )", "1st of April!", special_signs::draw_wait, true, 0xFF00FFFF, 20);
 			(*global_window_handler)["ALERT"]->rgba_background = 0xF;
