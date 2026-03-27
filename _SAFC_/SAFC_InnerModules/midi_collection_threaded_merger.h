@@ -42,14 +42,15 @@ struct midi_track_iterator
 			processing = false;
 			return;
 		}
-		std::uint32_t vlv = 0, io = 0;
+
+		std::uint32_t delta_time = 0, last_byte = 0;
 		do
 		{
-			io = track_data[cur_position++];
-			vlv = (vlv << 7) | (io & 0x7F);
-		} while (io & 0x80);
-		cur_tick += vlv;
+			last_byte = track_data[cur_position++];
+			delta_time = (delta_time << 7) | (last_byte & 0x7F);
+		} while (last_byte & 0x80);
 
+		cur_tick += delta_time;
 		if (track_data[cur_position] == 0xFF)
 		{
 			cur_position++;
@@ -60,14 +61,16 @@ struct midi_track_iterator
 			}
 			else
 			{
-				io = 0;
+				std::uint32_t size = 0, last_byte = 0;
 				cur_position++;
+
 				do
 				{
-					io = track_data[cur_position++];
-					vlv = (vlv << 7) | (io & 0x7F);
-				} while (io & 0x80);
-				for (std::uint32_t j = 0; j < io; j++)
+					last_byte = track_data[cur_position++];
+					size = (size << 7) | (last_byte & 0x7F);
+				} while (last_byte & 0x80);
+
+				for (std::uint32_t index = 0; index < last_byte; index++)
 					cur_position++;
 			}
 		}
@@ -75,8 +78,10 @@ struct midi_track_iterator
 		{
 			std::uint16_t ftd = track_data[cur_position++];
 			std::uint16_t key = track_data[cur_position++];
+
 			cur_position++; // velocity
 			std::uint16_t index = (key << 4) | (ftd & 0xF);
+
 			if (ftd & 0x10)
 				held[index]++;
 			else if (held[index] > 0)
@@ -103,6 +108,7 @@ struct midi_track_iterator
 	{
 		constexpr std::uint32_t delta_trunk_edge = 0xF000000;
 		std::uint64_t local_tick = cur_tick;
+
 		while (output_noteon_wall && local_tick > delta_trunk_edge)
 		{
 			single_midi_processor_2::push_vlv_s(delta_trunk_edge, out);
@@ -111,10 +117,12 @@ struct midi_track_iterator
 			out.push_back(0x00);
 			local_tick -= delta_trunk_edge;
 		}
+
 		if (output_noteon_wall)
 			single_midi_processor_2::push_vlv_s(local_tick, out);
 		else
 			out.push_back(0);
+
 		for (int i = 0; i < 4096; i++)
 		{
 			std::int64_t key = held[i];
@@ -127,6 +135,7 @@ struct midi_track_iterator
 				key--;
 			}
 		}
+
 		if (!out.empty())
 			out.pop_back();
 	}
@@ -329,33 +338,36 @@ private:
 
 		std::ofstream out(save_to + L".I.mid", std::ios::binary | std::ios::out);
 		out << "MThd" << '\0' << '\0' << '\0' << (char)6 << '\0' << (char)1;
-		out.put(0); out.put(0); // track count placeholder, updated at end
+		out.put(0); out.put(0); // track count placeholder, updated at the end
 		out.put((char)(ppqn >> 8));
 		out.put((char)ppqn);
 
 		std::vector<std::uint8_t> track, front_edge, back_edge;
 		track.reserve(1'000'000);
-		std::vector<std::int64_t> ddts(streams.size(), -1);
+		std::vector<std::int64_t> delta_times(streams.size(), -1);
 
 		bool active_stream = true;
 		while (active_stream)
 		{
 			for (std::size_t i = 0; i < streams.size(); i++)
 			{
-				auto& s = *streams[i];
+				auto& reader = *streams[i];
+
 				std::uint32_t header = 0;
-				while (s.good() && header != single_midi_processor_2::MTrk_header)
-					header = (header << 8) | s.get();
+				while (reader.good() && header != single_midi_processor_2::MTrk_header)
+					header = (header << 8) | reader.get();
+
 				for (int w = 0; w < 4; w++)
-					s.get(); // skip track size
-				if (s.good())
+					reader.get(); // skip track size
+
+				if (reader.good())
 				{
-					ddts[i] = (std::int64_t)read_vlv(s);
-					if (s.eof())
-						ddts[i] = -1;
+					delta_times[i] = (std::int64_t)read_vlv(reader);
+					if (reader.eof())
+						delta_times[i] = -1;
 				}
 				else
-					ddts[i] = -1;
+					delta_times[i] = -1;
 			}
 
 			bool active_track = true;
@@ -368,29 +380,29 @@ private:
 
 				for (std::size_t i = 0; i < streams.size(); i++)
 				{
-					auto& s = *streams[i];
-					auto& ddt = ddts[i];
+					auto& reader = *streams[i];
+					auto& delta_time = delta_times[i];
 
-					if (ddt < 0)
+					if (delta_time < 0)
 					{
-						if (s.good())
+						if (reader.good())
 							active_stream = true;
 						continue;
 					}
 
-					while (ddt == 0)
+					while (delta_time == 0)
 					{
-						std::uint8_t event_type = s.get();
+						std::uint8_t event_type = reader.get();
 						auto delta_len = single_midi_processor_2::push_vlv(in_track_delta, track);
 						in_track_delta = 0;
 
 						bool track_ended = false;
 						if (event_type == 0xFF)
 						{
-							std::uint8_t meta_type = s.get();
+							std::uint8_t meta_type = reader.get();
 							if (meta_type == 0x2F)
 							{
-								s.get(); // skip 0x00 length byte
+								reader.get(); // skip 0x00 length byte
 								for (int l = 0; l < (int)delta_len; l++)
 									track.pop_back();
 								track_ended = true;
@@ -400,48 +412,51 @@ private:
 								track.push_back(event_type);
 								track.push_back(meta_type);
 								std::uint32_t meta_len = 0;
-								std::uint8_t b;
+								std::uint8_t last_byte;
 								do
 								{
-									b = s.get();
-									track.push_back(b);
-									meta_len = (meta_len << 7) | (b & 0x7F);
-								} while (b & 0x80);
+									last_byte = reader.get();
+									track.push_back(last_byte);
+									meta_len = (meta_len << 7) | (last_byte & 0x7F);
+								} while (last_byte & 0x80);
+
 								for (std::uint32_t j = 0; j < meta_len; j++)
-									track.push_back(s.get());
+									track.push_back(reader.get());
 							}
 						}
 						else if (event_type == 0xF0 || event_type == 0xF7)
 						{
 							track.push_back(event_type);
 							std::uint32_t sysex_len = 0;
-							std::uint8_t b;
+							std::uint8_t last_byte;
+
 							do
 							{
-								b = s.get();
-								track.push_back(b);
-								sysex_len = (sysex_len << 7) | (b & 0x7F);
-							} while (b & 0x80);
+								last_byte = reader.get();
+								track.push_back(last_byte);
+								sysex_len = (sysex_len << 7) | (last_byte & 0x7F);
+							} while (last_byte & 0x80);
+
 							for (std::uint32_t j = 0; j < sysex_len; j++)
-								track.push_back(s.get());
+								track.push_back(reader.get());
 						}
 						else if ((event_type >= 0x80 && event_type <= 0xBF) ||
 						         (event_type >= 0xE0 && event_type <= 0xEF))
 						{
 							track.push_back(event_type);
-							track.push_back(s.get());
-							track.push_back(s.get());
+							track.push_back(reader.get());
+							track.push_back(reader.get());
 						}
 						else if (event_type >= 0xC0 && event_type <= 0xDF)
 						{
 							track.push_back(event_type);
-							track.push_back(s.get());
+							track.push_back(reader.get());
 						}
 						else
 						{
-							auto pos = s.tellg();
+							auto pos = reader.tellg();
 							throw_alert_error("DTI Failure at " + std::to_string(pos) + ". Type: " +
-								std::to_string(event_type) + ". Tell developer about it and give him source midis.\n");
+								std::to_string(event_type) + ". Tell developer about it and give him source midi.\n");
 							track.push_back(0xCA);
 							track.push_back(0);
 							track_ended = true;
@@ -449,34 +464,34 @@ private:
 
 						if (track_ended)
 						{
-							ddt = -1;
-							if (s.good())
+							delta_time = -1;
+							if (reader.good())
 								active_stream = true;
 							break;
 						}
 
-						auto next_delta = read_vlv(s);
-						if (s.eof())
+						auto next_delta = read_vlv(reader);
+						if (reader.eof())
 						{
-							ddt = -1;
-							if (s.good())
+							delta_time = -1;
+							if (reader.good())
 								active_stream = true;
 							break;
 						}
-						ddt = (std::int64_t)next_delta;
-						if (ddt > 0)
+						delta_time = (std::int64_t)next_delta;
+						if (delta_time > 0)
 						{
-							ddt--;
+							delta_time--;
 							active_track = true;
 							break;
 						}
-						// ddt == 0: loop and process next event immediately
+						// delta_time == 0: loop and process next event immediately
 					}
 
-					if (ddt > 0)
+					if (delta_time > 0)
 					{
 						active_track = true;
-						ddt--;
+						delta_time--;
 					}
 				}
 
