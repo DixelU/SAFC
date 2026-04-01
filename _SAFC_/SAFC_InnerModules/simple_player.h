@@ -475,7 +475,7 @@ struct simple_player
 					auto& front = queue.front();
 					// Only cull if note has ended and end is before cutoff
 					// Atomic load for end_time_us
-					uint64_t end_time = front.end_time_us.load(std::memory_order_acquire);
+					uint64_t end_time = front.end_time_us.load(std::memory_order_relaxed);
 					if (end_time != ~0ULL && static_cast<int64_t>(end_time) < cutoff_time_us)
 						queue.pop();
 					else
@@ -1435,6 +1435,16 @@ struct simple_player
 		}
 	};
 
+	template <float SCALE>
+	static uint8_t scale(uint8_t value)
+	{
+		// 16-bit fractional part is more than enough for uint8_t → uint8_t scaling
+		constexpr uint32_t MAGIC = static_cast<uint32_t>(SCALE * (1u << 16) + 0.5f);
+
+		uint32_t temp = static_cast<uint32_t>(value) * MAGIC;
+		return static_cast<uint8_t>(temp >> 16);
+	}
+
 	SIMPLE_PLAYER_FORCE_NO_INLINE void draw(const draw_data& data)
 	{
 		constexpr int total_white = draw_data::white_keys_count();
@@ -1502,15 +1512,14 @@ struct simple_player
 						continue;
 
 					auto color_value = rotate(0xFF7F008F, note.track_id);
+					const draw_data::color color_split{
+						.r = uint8_t(color_value >> 24),
+						.g = uint8_t(color_value >> 16),
+						.b = uint8_t(color_value >> 8),
+					};
 
 					if (begin_y <= 0 && end_y >= 0)
-					{
-						keyboard_colors[index] = draw_data::color{
-							.r = uint8_t(color_value >> 24),
-							.g = uint8_t(color_value >> 16),
-							.b = uint8_t(color_value >> 8),
-						};
-					}
+						keyboard_colors[index] = color_split;
 
 					begin_y = std::clamp(begin_y, 0.f, 1.f);
 					end_y = std::clamp(end_y, 0.f, 1.f);
@@ -1521,16 +1530,17 @@ struct simple_player
 					//begin_y = (data.keyboard->tr.y + draw_data::HEIGHT) * (1 - begin_y) + (begin_y)*data.keyboard->tr.y;
 					//end_y = (data.keyboard->tr.y + draw_data::HEIGHT) * (1 - end_y) + (end_y)*data.keyboard->tr.y;
 
-					__glcolor(color_value | 0xFF);
-
+					glColor3ub(color_split.r, color_split.g, color_split.b);
 					glBegin(GL_QUADS);
 					glVertex2f(data.keyboard[index].tl.x, begin_y);
 					glVertex2f(data.keyboard[index].tl.x, end_y);
+
+					glColor3ub(scale<0.5f>(color_split.r), scale<0.5f>(color_split.g), scale<0.5f>(color_split.b));
 					glVertex2f(data.keyboard[index].tr.x, end_y);
 					glVertex2f(data.keyboard[index].tr.x, begin_y);
 					glEnd();
 
-					__glcolor(mul255_div_by_factor(color_value, 2) | 0xFF);
+					glColor3ub(scale<0.25f>(color_split.r), scale<0.25f>(color_split.g), scale<0.25f>(color_split.b));
 					glBegin(GL_LINE_LOOP);
 					glVertex2f(data.keyboard[index].tl.x, begin_y);
 					glVertex2f(data.keyboard[index].tl.x, end_y);
@@ -1546,19 +1556,32 @@ struct simple_player
 		{
 			const auto& key = data.keyboard[i];
 			auto color = keyboard_colors[i];
+			uint8_t glare = 0;
 			
 			if (color.r == 0 && color.g == 0 && color.b == 0)
 			{
 				if (i < total_white)
+				{
 					color = {1, 1, 1};
+					glare = 0xAF;
+				}
 				else
+				{
 					color = {0, 0, 0};
+					glare = 48;
+				}
 			}
 
-			glColor3ub(color.r, color.g, color.b);
+			glColor3ub(scale<0.9f>(color.r) + glare, scale<0.9f>(color.g) + glare, scale<0.9f>(color.b) + glare);
 			glVertex2f(key.tl.x, key.tl.y);
+
+			glColor3ub(color.r, color.g, color.b);
 			glVertex2f(key.tr.x, key.tr.y);
+
+			glColor3ub(scale<0.9f>(color.r) + glare, scale<0.9f>(color.g) + glare, scale<0.9f>(color.b) + glare);
 			glVertex2f(key.br.x, key.br.y);
+
+			glColor3ub(color.r, color.g, color.b);
 			glVertex2f(key.bl.x, key.bl.y);
 		}
 		glEnd();
@@ -1609,29 +1632,6 @@ struct simple_player
 	}
 
 private:
-
-	static uint32_t mul255_div_by_factor(uint32_t rgba, uint32_t divisor)
-	{
-		// Works well when divisor is small constant: 2,3,4,5,6,8,10,...
-		// divisor must be > 0
-
-		constexpr uint32_t MAGIC_R = (1u << 24) / 255u + 1;  // ~ 0x01010101 when using 1<<24
-
-		// 1. unpack
-		uint32_t rb = rgba & 0x00FF00FFu;          // R and B in low 8 bits each
-		uint32_t ga = (rgba >> 8) & 0x00FF00FFu;   // G and A
-
-		// 2. multiply + add rounding bias
-		rb = ((rb * MAGIC_R) >> 24) / divisor;
-		ga = ((ga * MAGIC_R) >> 24) / divisor;
-
-		// 3. saturate (optional but strongly recommended)
-		rb += ((rb >> 8) & 1) * 0x00FF00FFu;   // cheap saturate to 255
-		ga += ((ga >> 8) & 1) * 0x00FF00FFu;
-
-		// 4. repack
-		return (ga << 8) | rb;
-	}
 
 	static uint32_t rotate(uint32_t color, uint32_t shift)
 	{
