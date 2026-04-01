@@ -201,7 +201,7 @@ namespace safgui
 				m_width, m_height,
 				m_char_height,
 				m_style.color,
-				m_style.color_hovered,
+				m_style.color,  // g_rgba_color (gradient end = same color, gradient disabled)
 				15,  // base_point (no gradient by default)
 				15,  // grad_point
 				m_style.border_width,
@@ -456,7 +456,7 @@ namespace safgui
 	inline window_builder make_window() { return window_builder(); }
 
 	// Quick creation helpers
-	inline std::unique_ptr<button> button(
+	inline std::unique_ptr<::button> make_button_quick(
 		const std::string& text,
 		std::function<void()> on_click,
 		float x, float y,
@@ -472,7 +472,7 @@ namespace safgui
 			.build();
 	}
 
-	inline std::unique_ptr<checkbox> checkbox(
+	inline std::unique_ptr<::checkbox> make_checkbox_quick(
 		float x, float y,
 		bool checked = false,
 		float size = 10.f,
