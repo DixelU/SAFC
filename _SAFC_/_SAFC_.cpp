@@ -2351,6 +2351,21 @@ void on_device_select(int device_id)
 
 void on_player_pause_toggle()
 {
+	if (!player->is_playing())
+	{
+		auto filename = player->get_filename();
+		if (filename.empty())
+			return;
+
+		worker_singleton<struct player_watcher>::instance().push(player_watch_func);
+		worker_singleton<struct player_thread>::instance().push([filename]()
+		{
+			player->restore_device_by_name(saved_midi_device_name);
+			player->simple_run(filename);
+		});
+		return;
+	}
+
 	player->toggle_pause();
 
 	auto window = (*global_window_handler)["SIMPLAYER"];

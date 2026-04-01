@@ -871,8 +871,11 @@ struct simple_player
 		return state.playing.load(std::memory_order_acquire);
 	}
 
+	const std::wstring& get_filename() const { return current_filename; }
+
 	bool open(std::wstring filename)
 	{
+		current_filename = filename;
 		// prerequisite: this is a midi file with valid header;
 		mmap = std::make_unique<bbb_mmap>(filename.c_str());
 		info = midi_info{};
@@ -1318,7 +1321,10 @@ struct simple_player
 				pause_after_seek = state.seek_resume_paused.load(std::memory_order_relaxed);
 
 				state.seek_requested.store(false, std::memory_order_relaxed);
-				state.paused.store(false, std::memory_order_relaxed);
+				if (pause_after_seek)
+					state.pause_position_us.store(skip_to_us, std::memory_order_release);
+
+				state.paused.store(pause_after_seek, std::memory_order_relaxed);
 
 				all_notes_off();
 				continue;
@@ -1999,6 +2005,7 @@ private:
 
 	std::shared_ptr<logger_base> warnings;
 
+	std::wstring current_filename;
 	std::unique_ptr<bbb_mmap> mmap;
 
 	midi_info info;
