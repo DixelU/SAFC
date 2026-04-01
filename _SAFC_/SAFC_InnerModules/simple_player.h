@@ -393,6 +393,7 @@ struct simple_player
 				auto it = stacks.find(track_id);
 				if (it == stacks.end() || it->second.empty())
 					return nullptr;
+
 				buffered_note* result = it->second.back();
 				it->second.pop_back();
 				return result;
@@ -475,7 +476,7 @@ struct simple_player
 					auto& front = queue.front();
 					// Only cull if note has ended and end is before cutoff
 					// Atomic load for end_time_us
-					uint64_t end_time = front.end_time_us.load(std::memory_order_acquire);
+					uint64_t end_time = front.end_time_us.load(std::memory_order_relaxed);
 					if (end_time != ~0ULL && static_cast<int64_t>(end_time) < cutoff_time_us)
 						queue.pop();
 					else
@@ -1345,6 +1346,14 @@ struct simple_player
 		std::vector<color> colors;
 		//std::unordered_map<uint32_t, uint32_t> track_colors;
 
+		// Scratch buffers for batched note rendering (reused each frame)
+		struct note_vert  { float x, y; };
+		struct note_color { uint8_t r, g, b, a; };
+		std::vector<note_vert>  note_verts;
+		std::vector<note_color> note_colors;
+		std::vector<note_vert>  outline_verts;
+		std::vector<note_color> outline_colors;
+
 		bool enable_simulated_lag = true;
 
 		static constexpr float DEFAULT_WIDTH = 400, DEFAULT_HEIGHT = 250;
@@ -1435,7 +1444,7 @@ struct simple_player
 		}
 	};
 
-	SIMPLE_PLAYER_FORCE_NO_INLINE void draw(const draw_data& data)
+	SIMPLE_PLAYER_FORCE_NO_INLINE void draw(draw_data& data)
 	{
 		constexpr int total_white = draw_data::white_keys_count();
 
@@ -1471,13 +1480,16 @@ struct simple_player
 		memset(keyboard_colors, 0xFF, sizeof(draw_data::color) * total_white);
 		memset(keyboard_colors + total_white, 0x00, sizeof(draw_data::color) * (128 - total_white));
 
+		GLsizei white_fill_verts = 0;
+		GLsizei white_outline_verts = 0;
+
 		{
 			// lock against visuals.reset() which may be called by playback_thread on seek/restart.
 			std::lock_guard<std::mutex> visuals_lock(visuals.access_mutex);
 
 			visuals.cull_expired(int64_t(current_us) - data.scroll_window_us);
 
-			for (uint8_t index = 0; index < 128; ++index)
+			auto batch_notes_for_index = [&](int index)
 			{
 				uint8_t key = data.key_n[index];
 
@@ -1521,26 +1533,89 @@ struct simple_player
 					//begin_y = (data.keyboard->tr.y + draw_data::HEIGHT) * (1 - begin_y) + (begin_y)*data.keyboard->tr.y;
 					//end_y = (data.keyboard->tr.y + draw_data::HEIGHT) * (1 - end_y) + (end_y)*data.keyboard->tr.y;
 
-					__glcolor(color_value | 0xFF);
+					const float lx = data.keyboard[index].tl.x;
+					const float rx = data.keyboard[index].tr.x;
+					const draw_data::note_color col{
+						uint8_t(color_value >> 24),
+						uint8_t(color_value >> 16),
+						uint8_t(color_value >> 8),
+						0xFF
+					};
 
-					glBegin(GL_QUADS);
-					glVertex2f(data.keyboard[index].tl.x, begin_y);
-					glVertex2f(data.keyboard[index].tl.x, end_y);
-					glVertex2f(data.keyboard[index].tr.x, end_y);
-					glVertex2f(data.keyboard[index].tr.x, begin_y);
-					glEnd();
+					data.note_verts.push_back({lx, begin_y});
+					data.note_verts.push_back({lx, end_y});
+					data.note_verts.push_back({rx, end_y});
+					data.note_verts.push_back({rx, begin_y});
 
-					__glcolor(mul255_div_by_factor(color_value, 2) | 0xFF);
-					glBegin(GL_LINE_LOOP);
-					glVertex2f(data.keyboard[index].tl.x, begin_y);
-					glVertex2f(data.keyboard[index].tl.x, end_y);
-					glVertex2f(data.keyboard[index].tr.x, end_y);
-					glVertex2f(data.keyboard[index].tr.x, begin_y);
-					glEnd();
+					data.note_colors.push_back(col);
+					data.note_colors.push_back(col);
+					data.note_colors.push_back(col);
+					data.note_colors.push_back(col);
+
+					const uint32_t ocv = mul255_div_by_factor(color_value, 2);
+					const draw_data::note_color ocol{
+						uint8_t(ocv >> 24),
+						uint8_t(ocv >> 16),
+						uint8_t(ocv >> 8),
+						0xFF
+					};
+
+					// 4 edges as GL_LINES pairs (replaces GL_LINE_LOOP)
+					data.outline_verts.push_back({lx, begin_y}); data.outline_verts.push_back({lx, end_y});
+					data.outline_verts.push_back({lx, end_y});   data.outline_verts.push_back({rx, end_y});
+					data.outline_verts.push_back({rx, end_y});   data.outline_verts.push_back({rx, begin_y});
+					data.outline_verts.push_back({rx, begin_y}); data.outline_verts.push_back({lx, begin_y});
+
+					for (int e = 0; e < 8; ++e)
+						data.outline_colors.push_back(ocol);
 				}
-			}
+			};
+
+			// White key notes first (drawn behind), record split point, then black key notes on top
+			for (int index = 0; index < total_white; ++index)
+				batch_notes_for_index(index);
+
+			white_fill_verts    = static_cast<GLsizei>(data.note_verts.size());
+			white_outline_verts = static_cast<GLsizei>(data.outline_verts.size());
+			for (int index = total_white; index < 128; ++index)
+				batch_notes_for_index(index);
 		}
-		
+
+		// Draw order: white fills, white outlines, black fills, black outlines.
+		// Matches original per-note ordering so black notes fully overdraw white note outlines.
+		glEnableClientState(GL_VERTEX_ARRAY);
+		glEnableClientState(GL_COLOR_ARRAY);
+
+		if (!data.note_verts.empty())
+		{
+			const GLsizei total_fill    = static_cast<GLsizei>(data.note_verts.size());
+			const GLsizei total_outline = static_cast<GLsizei>(data.outline_verts.size());
+
+			glVertexPointer(2, GL_FLOAT, 0, data.note_verts.data());
+			glColorPointer(4, GL_UNSIGNED_BYTE, 0, data.note_colors.data());
+			glDrawArrays(GL_QUADS, 0, white_fill_verts);                           // white fills
+
+			glVertexPointer(2, GL_FLOAT, 0, data.outline_verts.data());
+			glColorPointer(4, GL_UNSIGNED_BYTE, 0, data.outline_colors.data());
+			glDrawArrays(GL_LINES, 0, white_outline_verts);                        // white outlines
+
+			glVertexPointer(2, GL_FLOAT, 0, data.note_verts.data());
+			glColorPointer(4, GL_UNSIGNED_BYTE, 0, data.note_colors.data());
+			glDrawArrays(GL_QUADS, white_fill_verts, total_fill - white_fill_verts);    // black fills
+
+			glVertexPointer(2, GL_FLOAT, 0, data.outline_verts.data());
+			glColorPointer(4, GL_UNSIGNED_BYTE, 0, data.outline_colors.data());
+			glDrawArrays(GL_LINES, white_outline_verts, total_outline - white_outline_verts); // black outlines
+
+			data.note_verts.clear();
+			data.note_colors.clear();
+			data.outline_verts.clear();
+			data.outline_colors.clear();
+		}
+
+		glDisableClientState(GL_COLOR_ARRAY);
+		glDisableClientState(GL_VERTEX_ARRAY);
+
 		glBegin(GL_QUADS);
 		for (uint8_t i = 0; i < 128; ++i)
 		{
