@@ -107,7 +107,8 @@ struct special_signs
 
 	static void draw_wait(float x, float y, float sz_param, std::uint32_t rgba_color, std::uint32_t total_stages)
 	{
-		float start = ((float)((timer_v % total_stages) * 360)) / (float)(total_stages), t;
+		auto timer_decimated = timer_v / 3;
+		float start = ((float)((timer_decimated % total_stages) * 360)) / (float)(total_stages), t;
 		std::uint8_t R = (rgba_color >> 24), G = (rgba_color >> 16) & 0xFF, B = (rgba_color >> 8) & 0xFF, A = (rgba_color) & 0xFF;
 		glLineWidth(ceil(sz_param / 1.5f));
 		glBegin(GL_LINES);

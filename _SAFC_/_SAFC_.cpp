@@ -1,4 +1,4 @@
-﻿#define NOMINMAX
+#define NOMINMAX
 
 #include <algorithm>
 #include <cstdlib>
@@ -1992,7 +1992,7 @@ void on_start()
 
 		auto start_timepoint = std::chrono::high_resolution_clock::now();
 
-		global_mctm->StartProcessingMIDIs();
+		global_mctm->start_processing();
 
 		auto merge_preview_container = (*global_window_handler)["SMRP_CONTAINER"];
 		std::vector<std::string> undesired_window_activities;
@@ -2013,64 +2013,60 @@ void on_start()
 
 		std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
-		decltype(global_mctm->currently_processed) currently_processed_copy;
-
-		{
-			global_mctm->currently_processed_locker.lock();
-			currently_processed_copy = global_mctm->currently_processed;
-			global_mctm->currently_processed_locker.unlock();
-		}
+		auto currently_processed_copy = global_mctm->snapshot_currently_processed();
 
 		for (size_t id = 0; id < currently_processed_copy.size(); id++)
 		{
 			auto position = get_position_for_one_of(id, currently_processed_copy.size(), 140, 0.7);
 			auto visualiser = std::make_unique<midi_processor_visualiser>(position.first, position.second, &system_white);
-			auto& visualiser_ref = *visualiser;
+			auto visualiser_ref = std::ref(*visualiser);
 
 			std::string element_id;
 			merge_preview_container->add_ui_element(element_id = "SMRP_C" + std::to_string(id), std::move(visualiser));
 
-			std::thread([](std::shared_ptr<midi_collection_threaded_merger> pMCTM, midi_processor_visualiser& pVIS, std::uint32_t id)
+			std::thread([](
+				std::shared_ptr<midi_collection_threaded_merger> merger_ptr,
+				midi_processor_visualiser& vis_ref,
+				std::uint32_t id)
 			{
 				std::string SID = "SMRP_C" + std::to_string(id);
 				std::cout << SID << " Processing started" << std::endl;
-				bool finished = false;
-				while (global_mctm->CheckSMRPProcessing())
+				while (!global_mctm->is_smrp_complete())
 				{
-					global_mctm->currently_processed_locker.lock();
-					finished = global_mctm->currently_processed[id].second->finished;
-					pVIS.set_smrp(global_mctm->currently_processed[id]);
-					global_mctm->currently_processed_locker.unlock();
-
+					global_mctm->with_currently_processed_item(id, [&](const auto& item)
+					{
+						vis_ref.set_smrp(item);
+					});
 					std::this_thread::sleep_for(std::chrono::milliseconds(66));
 				}
 				std::cout << SID << " Processing stopped" << std::endl;
-			}, global_mctm, std::ref(visualiser_ref), id).detach();
+			}, global_mctm, visualiser_ref, id).detach();
 		}
 
 		worker_singleton<struct merge_ri_stage>::instance().push([safc_data_pointer = &g_data, merge_preview_container]()
 		{
-			//that's some really dumb synchronization... TODO: MAKE BETTER
-			while (global_mctm->CheckSMRPProcessingAndStartNextStep())
+			while (!global_mctm->is_smrp_complete())
 				std::this_thread::sleep_for(std::chrono::milliseconds(100));
+			global_mctm->start_ri_merge();
 
 			std::cout << "SMRP: Out from sleep\n" << std::flush;
-			for (int i = 0; i <= global_mctm->currently_processed.size(); i++)
+			for (int i = 0; i <= (int)global_mctm->currently_processed_count(); i++)
 				merge_preview_container->delete_ui_element_by_name("SMRP_C" + std::to_string(i));
 
 			merge_preview_container->safe_change_position_argumented(0, 0, 0);
 
-			(*merge_preview_container)["IM"] = 
-				std::make_unique<bool_and_number_checker<decltype(global_mctm->IntermediateInplaceFlag), decltype(global_mctm->IITrackCount)>>
-					(-100., 0., &system_white, &(global_mctm->IntermediateInplaceFlag), &(global_mctm->IITrackCount));
+			(*merge_preview_container)["IM"] =
+				std::make_unique<bool_and_number_checker<decltype(global_mctm->inplace_merge_complete), decltype(global_mctm->inplace_track_count)>>
+					(-100., 0., &system_white, &(global_mctm->inplace_merge_complete), &(global_mctm->inplace_track_count));
 			(*merge_preview_container)["RM"] =
-				std::make_unique<bool_and_number_checker<decltype(global_mctm->IntermediateInplaceFlag), decltype(global_mctm->IRTrackCount)>>
-					(100., 0., &system_white, &(global_mctm->IntermediateRegularFlag), &(global_mctm->IRTrackCount));
+				std::make_unique<bool_and_number_checker<decltype(global_mctm->regular_merge_complete), decltype(global_mctm->regular_track_count)>>
+					(100., 0., &system_white, &(global_mctm->regular_merge_complete), &(global_mctm->regular_track_count));
 			
 			worker_singleton<struct merge_ri_stage_cleanup>::instance().push([safc_data_pointer, merge_preview_container]()
 			{
-				while (!global_mctm->CheckRIMerge())
+				while (!global_mctm->is_ri_merge_complete())
 					std::this_thread::sleep_for(std::chrono::milliseconds(33));
+				global_mctm->start_final_merge();
 
 				std::cout << "RI: Out from sleep!\n";
 				merge_preview_container->delete_ui_element_by_name("IM");
@@ -2078,8 +2074,8 @@ void on_start()
 				merge_preview_container->safe_change_position_argumented(0, 0, 0);
 
 				(*merge_preview_container)["FM"] = 
-					std::make_unique<bool_and_number_checker<decltype(global_mctm->CompleteFlag), int>>
-						(0., 0., &system_white, &(global_mctm->CompleteFlag), nullptr);
+					std::make_unique<bool_and_number_checker<decltype(global_mctm->complete), int>>
+						(0., 0., &system_white, &(global_mctm->complete), nullptr);
 			});
 		});
 
@@ -2087,7 +2083,7 @@ void on_start()
 		{
 			auto timer_ptr = (input_field*)(*merge_preview_container)["TIMER"];
 
-			while (!global_mctm->CompleteFlag)
+			while (!global_mctm->complete)
 			{
 				auto now = std::chrono::high_resolution_clock::now();
 				auto difference = std::chrono::duration_cast<std::chrono::duration<double>>(now - start_timepoint);
@@ -2906,7 +2902,7 @@ void gl_display()
 		init();
 		if (april_fool)
 		{
-			global_window_handler->throw_alert("Today is a special day! ( -w-)\nToday you'll have new background\n(-w- )", "1st of April!", special_signs::draw_wait, 1, 0xFF00FFFF, 20);
+			global_window_handler->throw_alert("Today is a special day! ( -w-)\nToday you'll have new background\n(-w- )", "1st of April!", special_signs::draw_wait, true, 0xFF00FFFF, 20);
 			(*global_window_handler)["ALERT"]->rgba_background = 0xF;
 			_WH_t<text_box>("ALERT", "AlertText")->safe_text_color_change(0xFFFFFFFF);
 		}
@@ -3435,14 +3431,15 @@ struct safc_cli_runtime:
 		}
 
 		auto local_mctm = g_data.mctm_constructor();
-		local_mctm->StartProcessingMIDIs();
+		local_mctm->start_processing();
 
-		while (local_mctm->CheckSMRPProcessingAndStartNextStep())
-			//that's some really dumb synchronization... TODO: MAKE BETTER
+		while (!local_mctm->is_smrp_complete())
 			std::this_thread::sleep_for(std::chrono::milliseconds(5));
-		while (!local_mctm->CheckRIMerge())
+		local_mctm->start_ri_merge();
+		while (!local_mctm->is_ri_merge_complete())
 			std::this_thread::sleep_for(std::chrono::milliseconds(5));
-		while (!local_mctm->CompleteFlag)
+		local_mctm->start_final_merge();
+		while (!local_mctm->complete)
 			std::this_thread::sleep_for(std::chrono::milliseconds(5));
 	}
 };
