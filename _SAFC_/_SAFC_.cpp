@@ -415,7 +415,8 @@ struct file_settings
 		collapse_midi = false,
 		allow_sysex = false,
 		enable_zero_velocity = false,
-		apply_offset_after = true;
+		apply_offset_after = true,
+		ppqn_manually_set = false;
 
 	std::shared_ptr<cut_and_transpose> key_map;
 	std::shared_ptr<polyline_converter<std::uint8_t, std::uint8_t>> volume_map;
@@ -623,7 +624,15 @@ struct safc_data
 		}
 
 		for (int i = 0; i < files.size(); i++)
+		{
+			if (!force_global_ppqn_override && files[i].ppqn_manually_set)
+				continue;
 			files[i].new_ppqn = new_ppqn;
+		}
+
+		if (force_global_ppqn_override)
+			for (int i = 0; i < files.size(); i++)
+				files[i].ppqn_manually_set = false;
 
 		global_ppqn = new_ppqn;
 	}
@@ -1364,7 +1373,7 @@ namespace props_and_sets
 			return;
 		}
 
-		std::int32_t T;
+		std::int32_t string_value;
 		std::string current_string = "";
 		auto settings_window = (*global_window_handler)["SMPAS"];
 		auto other_settings_window = (*global_window_handler)["OTHER_SETS"];
@@ -1372,9 +1381,17 @@ namespace props_and_sets
 		current_string = ((input_field*)(*settings_window)["PPQN"])->get_current_input("0");
 		if (current_string.size())
 		{
-			T = std::stoi(current_string);
-			if (T)g_data[current_id].new_ppqn = T;
-			else g_data[current_id].new_ppqn = g_data.global_ppqn;
+			string_value = std::stoi(current_string);
+			if (string_value) 
+			{
+				g_data[current_id].new_ppqn = string_value;
+				g_data[current_id].ppqn_manually_set = true;
+			}
+			else
+			{
+				g_data[current_id].new_ppqn = g_data.global_ppqn;
+				g_data[current_id].ppqn_manually_set = false;
+			}
 		}
 
 		current_string = ((input_field*)(*settings_window)["TEMPO"])->get_current_input("0");
@@ -1387,17 +1404,17 @@ namespace props_and_sets
 		current_string = ((input_field*)(*settings_window)["OFFSET"])->get_current_input("0");
 		if (current_string.size())
 		{
-			T = stoll(current_string);
-			g_data[current_id].offset_ticks = T;
+			string_value = stoll(current_string);
+			g_data[current_id].offset_ticks = string_value;
 		}
 
 		current_string = ((input_field*)(*settings_window)["GROUPID"])->get_current_input("0");
 		if (current_string.size())
 		{
-			T = stoi(current_string);
-			if (T != g_data[current_id].group_id)
+			string_value = stoi(current_string);
+			if (string_value != g_data[current_id].group_id)
 			{
-				g_data[current_id].group_id = T;
+				g_data[current_id].group_id = string_value;
 				throw_alert_warning("Manual group_id editing might cause significant drop of processing perfomance!");
 			}
 		}
@@ -1405,15 +1422,15 @@ namespace props_and_sets
 		current_string = ((input_field*)(*settings_window)["SELECT_START"])->get_current_input("0");
 		if (current_string.size())
 		{
-			T = stoll(current_string);
-			g_data[current_id].selection_start = T;
+			string_value = stoll(current_string);
+			g_data[current_id].selection_start = string_value;
 		}
 
 		current_string = ((input_field*)(*settings_window)["SELECT_LENGTH"])->get_current_input("-1");
 		if (current_string.size())
 		{
-			T = stoll(current_string);
-			g_data[current_id].selection_length = T;
+			string_value = stoll(current_string);
+			g_data[current_id].selection_length = string_value;
 		}
 
 		g_data[current_id].allow_legacy_rsb_meta_interaction = (((checkbox*)(*other_settings_window)["LEGACY_META_RSB_BEHAVIOR"])->state);
@@ -2254,6 +2271,12 @@ void player_watch_func()
 	bool was_playing = false;
 	while (was_playing <= state.playing)
 	{
+		if (!window->drawable)
+		{
+			player->stop();
+			break;
+		}
+
 		auto seconds = state.current_time_us / 1000000;
 		auto parts_of_second = state.current_time_us % 1000000;
 
