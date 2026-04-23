@@ -481,7 +481,6 @@ private:
 						delta_time = (std::int64_t)next_delta;
 						if (delta_time > 0)
 						{
-							delta_time--;
 							active_track = true;
 							break;
 						}
