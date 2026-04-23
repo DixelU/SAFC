@@ -15,6 +15,7 @@
 #include <ranges>
 #include <mutex>
 #include <unordered_map>
+#include <new>
 
 #include "../bbb_ffio.h"
 
@@ -626,6 +627,7 @@ struct simple_player
 		std::atomic<bool> parser_done{false};       // parser finished all events
 		std::atomic<uint64_t> parsed_up_to_us{0};   // how far ahead the parser has reached (in us)
 		std::atomic<uint64_t> sender_position_us{0}; // current sender playback position (in us)
+		std::atomic<bool> memory_failure{false};
 
 		// Lookahead limits: parser throttles when too far ahead
 		static constexpr uint64_t max_lookahead_us = 7500000;  // 5 seconds max lookahead
@@ -648,6 +650,7 @@ struct simple_player
 			parser_done = false;
 			parsed_up_to_us = 0;
 			sender_position_us = 0;
+			memory_failure = false;
 			track_states.clear();
 			send_buffer.clear();
 			visuals.reset();
@@ -762,16 +765,26 @@ struct simple_player
 
 	void simple_run(std::wstring filename)
 	{
-		auto res = open(filename);
-		info.open_complete = true;
+		memory_failure_reported.store(false, std::memory_order_release);
 
-		if (!res)
+		try
 		{
-			throw_alert_error("Playback failed");
-			return;
-		}
+			auto res = open(filename);
+			info.open_complete = true;
 
-		playback_thread();
+			if (!res)
+			{
+				throw_alert_error("Playback failed");
+				return;
+			}
+
+			playback_thread();
+		}
+		catch (const std::bad_alloc&)
+		{
+			info.open_complete = true;
+			handle_memory_failure(true);
+		}
 	}
 
 	const playback_state& get_state() const
@@ -1284,56 +1297,95 @@ struct simple_player
 
 	void playback_thread()
 	{
-		state.reset();
-		state.start_time = std::chrono::steady_clock::now();
-		state.playing.store(true, std::memory_order_release);
-
-		// Start paused by default so user can select synth first
-		state.paused.store(true, std::memory_order_release);
-		state.pause_position_us.store(0, std::memory_order_release);
-
-		uint64_t skip_to_us = 0;
-		bool pause_after_seek = false;
-
-		for (;;)
+		try
 		{
-			// reset per-iteration state
-			state.stop_requested.store(false, std::memory_order_relaxed);
-			state.seeking_ff.store(false, std::memory_order_relaxed);
-			state.parser_done.store(false, std::memory_order_relaxed);
-			state.parsed_up_to_us.store(0, std::memory_order_relaxed);
-			state.sender_position_us.store(0, std::memory_order_relaxed);
-			state.send_buffer.clear();
-			state.visuals.reset();
-			state.track_states.clear();
+			state.reset();
+			state.start_time = std::chrono::steady_clock::now();
+			state.playing.store(true, std::memory_order_release);
 
-			// Launch parser and sender threads
-			std::thread parser_thread([this, skip_to_us, pause_after_seek]() {
-				parser_thread_func(skip_to_us, pause_after_seek);
-			});
-			std::thread sender_thread([this]() { sender_thread_func(); });
+			// Start paused by default so user can select synth first
+			state.paused.store(true, std::memory_order_release);
+			state.pause_position_us.store(0, std::memory_order_release);
 
-			parser_thread.join();
-			sender_thread.join();
+			uint64_t skip_to_us = 0;
+			bool pause_after_seek = false;
 
-			// Check if this was a seek (threads stopped due to seek_requested)
-			if (state.seek_requested.load(std::memory_order_acquire))
+			for (;;)
 			{
-				skip_to_us = state.seek_target_us.load(std::memory_order_relaxed);
-				pause_after_seek = state.seek_resume_paused.load(std::memory_order_relaxed);
+				// reset per-iteration state
+				state.stop_requested.store(false, std::memory_order_relaxed);
+				state.seeking_ff.store(false, std::memory_order_relaxed);
+				state.parser_done.store(false, std::memory_order_relaxed);
+				state.parsed_up_to_us.store(0, std::memory_order_relaxed);
+				state.sender_position_us.store(0, std::memory_order_relaxed);
+				state.memory_failure.store(false, std::memory_order_relaxed);
+				state.send_buffer.clear();
+				state.visuals.reset();
+				state.track_states.clear();
 
-				state.seek_requested.store(false, std::memory_order_relaxed);
-				if (pause_after_seek)
-					state.pause_position_us.store(skip_to_us, std::memory_order_release);
+				// Launch parser and sender threads
+				std::thread parser_thread;
+				std::thread sender_thread;
 
-				state.paused.store(pause_after_seek, std::memory_order_relaxed);
+				try
+				{
+					parser_thread = std::thread([this, skip_to_us, pause_after_seek]() {
+						try
+						{
+							parser_thread_func(skip_to_us, pause_after_seek);
+						}
+						catch (const std::bad_alloc&)
+						{
+							handle_memory_failure();
+						}
+					});
+					sender_thread = std::thread([this]() { sender_thread_func(); });
+				}
+				catch (...)
+				{
+					state.stop_requested.store(true, std::memory_order_release);
+					state.parser_done.store(true, std::memory_order_release);
 
-				all_notes_off();
-				continue;
+					if (parser_thread.joinable())
+						parser_thread.join();
+					if (sender_thread.joinable())
+						sender_thread.join();
+
+					throw;
+				}
+
+				parser_thread.join();
+				sender_thread.join();
+
+				if (state.memory_failure.load(std::memory_order_acquire))
+				{
+					report_memory_failure_once();
+					break;
+				}
+
+				// Check if this was a seek (threads stopped due to seek_requested)
+				if (state.seek_requested.load(std::memory_order_acquire))
+				{
+					skip_to_us = state.seek_target_us.load(std::memory_order_relaxed);
+					pause_after_seek = state.seek_resume_paused.load(std::memory_order_relaxed);
+
+					state.seek_requested.store(false, std::memory_order_relaxed);
+					if (pause_after_seek)
+						state.pause_position_us.store(skip_to_us, std::memory_order_release);
+
+					state.paused.store(pause_after_seek, std::memory_order_relaxed);
+
+					all_notes_off();
+					continue;
+				}
+
+				// Normal exit
+				break;
 			}
-
-			// Normal exit
-			break;
+		}
+		catch (const std::bad_alloc&)
+		{
+			handle_memory_failure(true);
 		}
 
 		all_notes_off();
@@ -1640,6 +1692,27 @@ struct simple_player
 	}
 
 private:
+	void handle_memory_failure(bool report_now = false)
+	{
+		state.memory_failure.store(true, std::memory_order_release);
+		state.stop_requested.store(true, std::memory_order_release);
+		state.seek_requested.store(false, std::memory_order_release);
+		state.seeking_ff.store(false, std::memory_order_release);
+		state.parser_done.store(true, std::memory_order_release);
+		state.paused.store(false, std::memory_order_release);
+		info.open_complete = true;
+
+		if (report_now)
+			report_memory_failure_once();
+	}
+
+	void report_memory_failure_once()
+	{
+		if (memory_failure_reported.exchange(true, std::memory_order_acq_rel))
+			return;
+
+		throw_alert_error("Not enough memory to play this MIDI. Playback was stopped.");
+	}
 
 	static uint32_t rotate(uint32_t color, uint32_t shift)
 	{
@@ -2018,6 +2091,7 @@ private:
 	size_t current_device = ~0ULL;
 	std::vector<MIDIOUTCAPSW> devices;
 	inline static std::atomic<HMIDIOUT> hout;
+	std::atomic<bool> memory_failure_reported{false};
 
 	void(WINAPI* short_msg)(uint32_t msg) = nullptr;
 	bool(WINAPI* kdmapi_status)() = nullptr;
