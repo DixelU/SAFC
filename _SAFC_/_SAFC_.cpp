@@ -50,7 +50,7 @@
 #include <archive_entry.h>
 
 std::tuple<std::uint16_t, std::uint16_t, std::uint16_t, std::uint16_t> g_version_tuple;
-std::tuple<std::uint16_t, std::uint16_t, std::uint16_t, std::uint16_t> ___GetVersion() 
+std::tuple<std::uint16_t, std::uint16_t, std::uint16_t, std::uint16_t> __get_executable_version() 
 {
 	// get the filename of the executable containing the version resource
 	TCHAR szFilename[MAX_PATH + 1] = { 0 };
@@ -251,7 +251,7 @@ bool safc_update(const std::wstring& latest_release)
 
 void safc_version_check()
 {
-	auto [maj, min, ver, build] = g_version_tuple;
+	const auto& [maj, min, ver, build] = g_version_tuple;
 	std::wcout << L"Current vesion: v" << maj << L"." << min << L"." << ver << L"." << build << L"\n";
 
 	if (!check_autoupdates)
@@ -272,7 +272,7 @@ void safc_version_check()
 		{
 			if (res == S_OK) 
 			{
-				auto [maj, min, ver, build] = g_version_tuple;
+				const auto& [maj, min, ver, build] = g_version_tuple;
 
 				std::string json_buffer;
 				std::ifstream input(filename);
@@ -283,9 +283,9 @@ void safc_version_check()
 				auto& git_latest_version = ((value)->AsArray()[0])->AsObject().at(L"name")->AsString();
 
 				std::uint16_t version_partied[4] = { 0,0,0,0 };
-				std::vector<std::string> ans;
+				std::vector<std::wstring> ans;
 				std::wstring git_version_numbers_only = git_latest_version.substr(1);//v?.?.?.?
-				boost::algorithm::split(ans, git_version_numbers_only, boost::is_any_of("."));
+				boost::algorithm::split(ans, git_version_numbers_only, boost::is_any_of(L"."));
 
 				int index = 0;
 				for (auto& num_val : ans) 
@@ -315,7 +315,9 @@ void safc_version_check()
 						maj == version_partied[0] && min == version_partied[1] && ver == version_partied[2] && build < version_partied[3]
 						))
 				{
-					throw_alert_warning("Update found! The app might restart soon...\nUpdate: " + std::string(git_latest_version.begin(), git_latest_version.end()));
+					std::string git_version_str(git_latest_version.size(), '\0');
+					std::transform(git_latest_version.begin(), git_latest_version.end(), git_version_str.begin(), [](wchar_t c) { return static_cast<char>(c); });
+					throw_alert_warning("Update found! The app might restart soon...\nUpdate: " + git_version_str);
 
 					flag = safc_update(git_latest_version);
 
@@ -1988,8 +1990,8 @@ std::pair<float, float> get_position_for_one_of(std::int32_t Position, std::int3
 	std::pair<float, float> coords{ 0.f, 0.f };
 	std::int32_t side_count = ceil(sqrt(Amount));
 
-	coords.first = (0 - (Position % side_count) + ((side_count - 1) / 2.f)) * UnitSize;
-	coords.second = (0 - (Position / side_count) + ((side_count - 1) / 2.f)) * UnitSize * HeightRel;
+	coords.first = (0.f - static_cast<float>(Position % side_count) + ((side_count - 1) / 2.f)) * UnitSize;
+	coords.second = (0.f - static_cast<float>(Position / side_count) + ((side_count - 1) / 2.f)) * UnitSize * HeightRel;
 
 	return coords;
 }
@@ -2044,7 +2046,7 @@ void on_start()
 			std::thread([](
 				std::shared_ptr<midi_collection_threaded_merger> merger_ptr,
 				midi_processor_visualiser& vis_ref,
-				std::uint32_t id)
+				size_t id)
 			{
 				std::string SID = "SMRP_C" + std::to_string(id);
 				std::cout << SID << " Processing started" << std::endl;
@@ -2074,10 +2076,10 @@ void on_start()
 
 			(*merge_preview_container)["IM"] =
 				std::make_unique<bool_and_number_checker<decltype(global_mctm->inplace_merge_complete), decltype(global_mctm->inplace_track_count)>>
-					(-100., 0., &system_white, &(global_mctm->inplace_merge_complete), &(global_mctm->inplace_track_count));
+					(-100.f, 0.f, &system_white, &(global_mctm->inplace_merge_complete), &(global_mctm->inplace_track_count));
 			(*merge_preview_container)["RM"] =
 				std::make_unique<bool_and_number_checker<decltype(global_mctm->regular_merge_complete), decltype(global_mctm->regular_track_count)>>
-					(100., 0., &system_white, &(global_mctm->regular_merge_complete), &(global_mctm->regular_track_count));
+					(100.f, 0.f, &system_white, &(global_mctm->regular_merge_complete), &(global_mctm->regular_track_count));
 			
 			worker_singleton<struct merge_ri_stage_cleanup>::instance().push([safc_data_pointer, merge_preview_container]()
 			{
@@ -2092,7 +2094,7 @@ void on_start()
 
 				(*merge_preview_container)["FM"] = 
 					std::make_unique<bool_and_number_checker<decltype(global_mctm->complete), int>>
-						(0., 0., &system_white, &(global_mctm->complete), nullptr);
+						(0.f, 0.f, &system_white, &(global_mctm->complete), nullptr);
 			});
 		});
 
@@ -2205,7 +2207,8 @@ void restore_reg_settings()
 	try
 	{
 		std::wstring ws = settings::regestry_access.GetStringValue(L"COLLAPSEDFONTNAME_POST1P4");//COLLAPSEDFONTNAME
-		default_font_name = std::string(ws.begin(), ws.end());
+		default_font_name.resize(ws.size());
+		std::transform(ws.begin(), ws.end(), default_font_name.begin(), [](wchar_t c) { return static_cast<char>(c); });
 	}
 	catch (...) { std::cout << "Exception thrown while restoring COLLAPSEDFONTNAME_POST1P4 from registry\n"; }
 	try
@@ -2376,7 +2379,7 @@ void on_player_pause_toggle()
 {
 	if (!player->is_playing())
 	{
-		auto filename = player->get_filename();
+		std::wstring filename = player->get_filename();
 		if (filename.empty())
 			return;
 
@@ -3487,7 +3490,7 @@ int main(int argc, char** argv)
 	player = std::make_shared<simple_player>();
 	player->init();
 
-	g_version_tuple = ___GetVersion();
+	g_version_tuple = __get_executable_version();
 
 	std::ios_base::sync_with_stdio(false); //why not
 

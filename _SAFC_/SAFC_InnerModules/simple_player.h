@@ -706,7 +706,9 @@ struct simple_player
 		for (const auto& device : devices)
 		{
 			std::wstring wname = device.szPname;
-			names.emplace_back(wname.begin(), wname.end());
+			std::string name(wname.size(), '\0');
+			std::transform(wname.begin(), wname.end(), name.begin(), [](wchar_t c) { return static_cast<char>(c); });
+			names.push_back(std::move(name));
 		}
 
 		return names;
@@ -1961,7 +1963,8 @@ private:
 			if (midiOutOpen(&hout_copy, device, 0, 0, 0) != MMSYSERR_NOERROR)
 			{
 				std::wstring name = devices[device].szPname;
-				auto readable_name = std::string(name.begin(), name.end());
+				std::string readable_name(name.size(), '\0');
+				std::transform(name.begin(), name.end(), readable_name.begin(), [](wchar_t c) { return static_cast<char>(c); });
 				throw_alert_error("Unable to open MIDI out '" + readable_name + "'!");
 				hout = nullptr;
 			}
