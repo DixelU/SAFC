@@ -8,6 +8,8 @@
 #include <vector>
 #include <Windows.h>
 
+#include "../consts.h"
+
 constexpr int base_internal_range = 200;
 
 float internal_range = base_internal_range, mouse_x_position = 0.f, mouse_y_position = 0.f;

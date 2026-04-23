@@ -2130,6 +2130,7 @@ struct player_viewer : public handleable_ui_part
 
 		data->move(dx, dy);
 	}
+
 	void safe_change_position(float NewX, float NewY) override
 	{
 		std::lock_guard<std::recursive_mutex> locker(lock);
@@ -2139,6 +2140,7 @@ struct player_viewer : public handleable_ui_part
 
 		safe_move(NewX, NewY);
 	}
+
 	void safe_change_position_argumented(std::uint8_t Arg, float NewX, float NewY) override
 	{
 		std::lock_guard<std::recursive_mutex> locker(lock);
@@ -2152,6 +2154,7 @@ struct player_viewer : public handleable_ui_part
 				) * data->height;
 		safe_change_position(NewX + CW, NewY + CH);
 	}
+
 	void rescale_and_reposition(float new_xpos, float new_ypos, float new_width, float new_height)
 	{
 		std::lock_guard<std::recursive_mutex> locker(lock);
@@ -2164,14 +2167,17 @@ struct player_viewer : public handleable_ui_part
 		data->reinit(new_width, new_height, data->last_keyboard_height * width_factor_change, data->last_keyboard_height * width_factor_change * black_relative_height, 0.f);
 		data->move(new_xpos - 0.5f * data->width, new_ypos);
 	}
+
 	void keyboard_handler(char) override
 	{
 		return;
 	}
+
 	void safe_string_replace(std::string) override
 	{
 		return;
 	}
+
 	[[nodiscard]] bool mouse_handler(float, float, char, char) override
 	{
 		return false;
