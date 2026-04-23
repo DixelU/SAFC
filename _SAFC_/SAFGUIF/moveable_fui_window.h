@@ -248,6 +248,8 @@ struct moveable_fui_window : public moveable_window
 			{
 				drawable = false;
 				cursor_follow_mode = false;
+				if (on_close)
+					on_close();
 				return true;
 			}
 			else if (!button_btn)

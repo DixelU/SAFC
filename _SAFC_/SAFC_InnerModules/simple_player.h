@@ -766,11 +766,15 @@ struct simple_player
 	void simple_run(std::wstring filename)
 	{
 		memory_failure_reported.store(false, std::memory_order_release);
+		cancel_requested.store(false, std::memory_order_release);
 
 		try
 		{
 			auto res = open(filename);
 			info.open_complete = true;
+
+			if (cancel_requested.load(std::memory_order_acquire))
+				return;
 
 			if (!res)
 			{
@@ -869,6 +873,7 @@ struct simple_player
 	// Stop playback completely
 	void stop()
 	{
+		cancel_requested.store(true, std::memory_order_release);
 		state.stop_requested.store(true, std::memory_order_release);
 
 		// If paused, unpause so threads can exit
@@ -919,6 +924,9 @@ struct simple_player
 
 		while (ptr < end)
 		{
+			if (cancel_requested.load(std::memory_order_acquire))
+				return false;
+
 			if(!read_through_one_track(ptr, end))
 				return false;
 
@@ -2092,6 +2100,7 @@ private:
 	std::vector<MIDIOUTCAPSW> devices;
 	inline static std::atomic<HMIDIOUT> hout;
 	std::atomic<bool> memory_failure_reported{false};
+	std::atomic<bool> cancel_requested{false};
 
 	void(WINAPI* short_msg)(uint32_t msg) = nullptr;
 	bool(WINAPI* kdmapi_status)() = nullptr;

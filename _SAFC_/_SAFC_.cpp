@@ -2257,6 +2257,12 @@ void player_watch_func()
 	auto& info = player->get_info();
 	while (true)
 	{
+		if (!window->drawable)
+		{
+			player->stop();
+			return;
+		}
+
 		uint64_t scanned = info.scanned;
 		uint64_t size = info.size;
 
@@ -2862,6 +2868,14 @@ void init()
 
 	window = new moveable_fui_window("Simple MIDI player", system_white, /*-200, 197.5, 400, 397.5, 150, 2.5f, 75, 75, 5*/
 		-200, 175 + moveable_window::window_header_size, 400, 375, 150, 2.5, 65, 65, 2.5, BACKGROUND_OPQ, HEADER, BORDER);
+	window->on_close = []()
+	{
+		if (simplayer_maximised)
+			global_window_handler->main_window_id = saved_simplayer_state.previous_main_window_id;
+
+		if (player)
+			player->stop();
+	};
 
 	(*window)["TEXT"] = new text_box("TIME", legacy_white, 0, 130 + moveable_window::window_header_size, 50, 175, 10, 0xFFFFFF1A, 0, 0, _Align(center | top), text_box::VerticalOverflow::cut);
 	(*window)["PAUSE"] = new button("\202", legacy_white, on_player_pause_toggle, -190, 180 - moveable_window::window_header_size, 10, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr);
