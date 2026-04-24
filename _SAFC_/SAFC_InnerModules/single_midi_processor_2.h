@@ -1,7 +1,7 @@
 #pragma once
 
-#ifndef SAF_SMRP2
-#define SAF_SMRP2
+#ifndef SAF_SMPR2
+#define SAF_SMPR2
 
 #include <string>
 #include <vector>
@@ -880,6 +880,9 @@ struct single_midi_processor_2
 
 	FORCEDINLINE static tick_type convert_ppq(tick_type value, ppq_type from, ppq_type to)
 	{
+		if (from == to)
+			return value;
+
 		constexpr auto radix = 1ull << 32;
 		auto hi = value >> 32;
 		auto lo = value & (~0u);
@@ -1984,4 +1987,4 @@ struct single_midi_processor_2
 	}
 };
 
-#endif // SAF_SMRP2
+#endif // SAF_SMPR2

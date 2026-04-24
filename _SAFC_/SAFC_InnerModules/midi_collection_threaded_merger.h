@@ -200,7 +200,9 @@ struct midi_collection_threaded_merger
 						currently_processed_[idx] = el;
 					}
 
-					if (el.first->settings.proc_details.channel_split)
+					if (single_midi_processor_lean::can_handle(el.first->settings))
+						single_midi_processor_lean::sync_processing(*el.first, *el.second);
+					else if (el.first->settings.proc_details.channel_split)
 						single_midi_processor_2::sync_processing<true>(*el.first, *el.second);
 					else
 						single_midi_processor_2::sync_processing<false>(*el.first, *el.second);
