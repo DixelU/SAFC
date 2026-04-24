@@ -159,6 +159,9 @@
     <ClInclude Include="SAFGUIF\slider.h">
       <Filter>Файлы заголовков\SAFGUIF</Filter>
     </ClInclude>
+    <ClInclude Include="SAFC_InnerModules\single_midi_processor_lean.h">
+      <Filter>Файлы заголовков\MIDI Processing</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="_SAFC_.cpp">
