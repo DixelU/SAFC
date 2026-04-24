@@ -5,6 +5,8 @@
 #include <io.h>
 #include <tuple>
 #include <mutex>
+#include <atomic>
+#include <condition_variable>
 #include <iostream>
 #include <vector>
 #include <filesystem>
@@ -17,6 +19,7 @@
 #include <boost/algorithm/string.hpp>
 
 #include <WinSock2.h>
+#include <urlmon.h>
 
 #pragma comment (lib, "Version.lib")//Urlmon.lib
 #pragma comment (lib, "Urlmon.lib")//Urlmon.lib
@@ -168,6 +171,132 @@ static void extract(const void* data, size_t data_size)
 	archive_write_free(ext);
 }
 
+class timeout_bind_status_callback : public IBindStatusCallback
+{
+public:
+	timeout_bind_status_callback(DWORD total_timeout_ms, DWORD stall_timeout_ms)
+		: m_ref(1)
+		, m_total_timeout_ms(total_timeout_ms)
+		, m_stall_timeout_ms(stall_timeout_ms)
+		, m_start_tick(GetTickCount64())
+		, m_last_progress_tick(GetTickCount64())
+		, m_binding(nullptr)
+		, m_stop(false)
+	{
+		m_watchdog = std::thread([this]()
+		{
+			std::unique_lock<std::mutex> lk(m_mtx);
+			while (!m_stop)
+			{
+				if (m_cv.wait_for(lk, std::chrono::milliseconds(250), [this]() { return m_stop.load(); }))
+					return;
+
+				auto now = GetTickCount64();
+				bool total_expired = (now - m_start_tick) > m_total_timeout_ms;
+				bool stall_expired = (now - m_last_progress_tick.load()) > m_stall_timeout_ms;
+				if (!total_expired && !stall_expired)
+					continue;
+
+				IBinding* b = m_binding;
+				if (b) b->AddRef();
+				lk.unlock();
+				if (b) { b->Abort(); b->Release(); }
+				return;
+			}
+		});
+	}
+
+	~timeout_bind_status_callback()
+	{
+		{
+			std::lock_guard<std::mutex> lk(m_mtx);
+			m_stop = true;
+		}
+		m_cv.notify_all();
+		if (m_watchdog.joinable()) m_watchdog.join();
+		if (m_binding) { m_binding->Release(); m_binding = nullptr; }
+	}
+
+	STDMETHODIMP QueryInterface(REFIID riid, void** ppv) override
+	{
+		if (!ppv) return E_POINTER;
+		if (riid == IID_IUnknown || riid == IID_IBindStatusCallback)
+		{
+			*ppv = static_cast<IBindStatusCallback*>(this);
+			AddRef();
+			return S_OK;
+		}
+		*ppv = nullptr;
+		return E_NOINTERFACE;
+	}
+	STDMETHODIMP_(ULONG) AddRef() override { return ++m_ref; }
+	STDMETHODIMP_(ULONG) Release() override
+	{
+		ULONG r = --m_ref;
+		if (r == 0) delete this;
+		return r;
+	}
+
+	STDMETHODIMP OnStartBinding(DWORD, IBinding* binding) override
+	{
+		std::lock_guard<std::mutex> lk(m_mtx);
+		if (binding) { binding->AddRef(); m_binding = binding; }
+		return S_OK;
+	}
+	STDMETHODIMP GetPriority(LONG*) override { return E_NOTIMPL; }
+	STDMETHODIMP OnLowResource(DWORD) override { return S_OK; }
+	STDMETHODIMP OnProgress(ULONG, ULONG, ULONG, LPCWSTR) override
+	{
+		auto now = GetTickCount64();
+		m_last_progress_tick = now;
+		if ((now - m_start_tick) > m_total_timeout_ms)
+			return E_ABORT;
+		return S_OK;
+	}
+	STDMETHODIMP OnStopBinding(HRESULT, LPCWSTR) override
+	{
+		{
+			std::lock_guard<std::mutex> lk(m_mtx);
+			m_stop = true;
+		}
+		m_cv.notify_all();
+		return S_OK;
+	}
+	STDMETHODIMP GetBindInfo(DWORD* grfBINDF, BINDINFO* pbindinfo) override
+	{
+		if (!grfBINDF || !pbindinfo) return E_POINTER;
+		*grfBINDF = BINDF_ASYNCHRONOUS | BINDF_ASYNCSTORAGE | BINDF_PULLDATA;
+		ULONG cb = pbindinfo->cbSize;
+		ZeroMemory(pbindinfo, cb);
+		pbindinfo->cbSize = cb;
+		pbindinfo->dwBindVerb = BINDVERB_GET;
+		return S_OK;
+	}
+	STDMETHODIMP OnDataAvailable(DWORD, DWORD, FORMATETC*, STGMEDIUM*) override { return S_OK; }
+	STDMETHODIMP OnObjectAvailable(REFIID, IUnknown*) override { return S_OK; }
+
+private:
+	std::atomic<ULONG> m_ref;
+	DWORD m_total_timeout_ms;
+	DWORD m_stall_timeout_ms;
+	ULONGLONG m_start_tick;
+	std::atomic<ULONGLONG> m_last_progress_tick;
+	IBinding* m_binding;
+	std::atomic<bool> m_stop;
+	std::thread m_watchdog;
+	std::mutex m_mtx;
+	std::condition_variable m_cv;
+};
+
+static HRESULT url_download_to_file_with_timeout(
+	LPCWSTR url, LPCWSTR filename, DWORD total_timeout_ms, DWORD stall_timeout_ms)
+{
+	auto* cb = new timeout_bind_status_callback(total_timeout_ms, stall_timeout_ms);
+	HRESULT hr = URLDownloadToFileW(NULL, url, filename, 0, cb);
+	cb->Release();
+	return hr;
+}
+
 bool safc_update(const std::wstring& latest_release)
 {
 #ifndef __X64
@@ -191,7 +320,7 @@ bool safc_update(const std::wstring& latest_release)
 	//wsprintfW(current_file_path, L"%S%S", filename.c_str(), L"update.7z\0");
 	std::wstring link = L"https://github.com/DixelU/SAFC/releases/download/" + latest_release + L"/" + archive_name;
 
-	HRESULT co_res = URLDownloadToFileW(NULL, link.c_str(), filename.c_str(), 0, NULL);
+	HRESULT co_res = url_download_to_file_with_timeout(link.c_str(), filename.c_str(), 120000, 30000);
 	
 	auto executable_filename = boost::dll::program_location().filename().wstring();
 
@@ -267,7 +396,7 @@ void safc_version_check()
 		std::wstring pathway = filename;
 		filename += L"tags.json";
 		// if you have error here -> https://github.com/Microsoft/WSL/issues/22#issuecomment-207788173
-		HRESULT res = URLDownloadToFileW(NULL, SAFC_tags_link, filename.c_str(), 0, NULL);
+		HRESULT res = url_download_to_file_with_timeout(SAFC_tags_link, filename.c_str(), 10000, 5000);
 		try 
 		{
 			if (res == S_OK) 
