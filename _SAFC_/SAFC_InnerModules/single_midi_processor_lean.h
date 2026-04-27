@@ -34,7 +34,93 @@ struct single_midi_processor_lean
 	using processing_data  = single_midi_processor_2::processing_data;
 	using message_buffers  = single_midi_processor_2::message_buffers;
 
-	FORCEDINLINE static std::uint8_t push_vlv(std::uint64_t value, std::vector<base_type>& vec)
+	// Streaming track writer. Bytes accumulate in a fixed-size buffer; when it
+	// fills, the MTrk header is committed (with a placeholder length on the
+	// first overflow) and the buffer is drained to the file. finish() either
+	// patches the length field via seekp on a previously-committed track, or
+	// emits the header + buffer in one shot for tracks that never overflowed.
+	struct track_writer
+	{
+		static constexpr std::size_t capacity = 1u << 20; // 1 MiB
+
+		std::vector<base_type>& buffer;
+		std::ofstream& out;
+		std::size_t pos = 0;
+		std::uint64_t flushed = 0;
+		std::ofstream::pos_type mtrk_start;
+		bool header_written = false;
+
+		track_writer(std::vector<base_type>& buf, std::ofstream& os)
+			: buffer(buf), out(os), mtrk_start(os.tellp()) {}
+
+		FORCEDINLINE void push(base_type b)
+		{
+			if (pos == capacity) [[unlikely]]
+				commit_buffer();
+			buffer[pos++] = b;
+		}
+
+		void commit_buffer()
+		{
+			if (!header_written)
+			{
+				base_type hdr[8] = { 'M','T','r','k', 0, 0, 0, 0 };
+				out.write((const char*)hdr, 8);
+				header_written = true;
+			}
+			if (pos)
+			{
+				out.write((const char*)buffer.data(), pos);
+				flushed += pos;
+				pos = 0;
+			}
+		}
+
+		// Returns true if the track was emitted to the output file.
+		bool finish(bool skip)
+		{
+			if (skip)
+			{
+				// any_event=false implies only the 4-byte synthesized EOT was
+				// pushed, which can't have overflowed a 1 MiB buffer, so the
+				// header has not been written yet — just discard.
+				pos = 0;
+				return false;
+			}
+
+			if (!header_written)
+			{
+				std::uint32_t size = std::uint32_t(pos);
+				base_type hdr[8] = {
+					'M','T','r','k',
+					base_type((size >> 24) & 0xFF),
+					base_type((size >> 16) & 0xFF),
+					base_type((size >>  8) & 0xFF),
+					base_type((size      ) & 0xFF)
+				};
+				out.write((const char*)hdr, 8);
+				out.write((const char*)buffer.data(), pos);
+				pos = 0;
+				return true;
+			}
+
+			commit_buffer();
+			std::uint64_t size = flushed;
+			auto end_pos = out.tellp();
+			out.seekp(mtrk_start + std::ofstream::off_type(4));
+			base_type sz[4] = {
+				base_type((size >> 24) & 0xFF),
+				base_type((size >> 16) & 0xFF),
+				base_type((size >>  8) & 0xFF),
+				base_type((size      ) & 0xFF)
+			};
+			out.write((const char*)sz, 4);
+			out.seekp(end_pos);
+			return true;
+		}
+	};
+
+	FORCEDINLINE static std::uint8_t push_vlv(std::uint64_t value, track_writer& w)
 	{
 		base_type stack[11];
 		std::uint8_t size = 0;
@@ -48,7 +134,7 @@ struct single_midi_processor_lean
 			stack[i] |= 0x80;
 
 		for (std::uint8_t i = size; i-- > 0; )
-			vec.push_back(stack[i]);
+			w.push(stack[i]);
 
 		return size;
 	}
@@ -93,11 +179,11 @@ struct single_midi_processor_lean
 		return convert_ppq(tick_type(t), s.old_ppqn, s.new_ppqn);
 	}
 
-	// Writes delta-time VLV into `track`, splitting across dummy meta events when
+	// Writes delta-time VLV through `w`, splitting across dummy meta events when
 	// it overflows the 4-byte VLV ceiling. Each split emits FF 7F 01 00 with
 	// limit-delta. rsb_out is cleared because meta events reset running status.
 	FORCEDINLINE static void emit_delta(
-		std::vector<base_type>& track,
+		track_writer& w,
 		tick_type delta,
 		base_type& rsb_out,
 		bool force_overflow_correction)
@@ -106,29 +192,29 @@ struct single_midi_processor_lean
 		{
 			while (delta > deltatime_limit) [[unlikely]]
 			{
-				push_vlv(deltatime_limit, track);
-				track.push_back(0xFF);
-				track.push_back(0x7F);
-				track.push_back(0x01);
-				track.push_back(0x00);
+				push_vlv(deltatime_limit, w);
+				w.push(0xFF);
+				w.push(0x7F);
+				w.push(0x01);
+				w.push(0x00);
 				rsb_out = 0;
 				delta -= deltatime_limit;
 			}
 		}
-		push_vlv(delta, track);
+		push_vlv(delta, w);
 	}
 
 	// Channel-voice status byte emission. When compression is on and the status
 	// matches the running one, the status is elided; otherwise it is written.
 	// 0xFn events never participate in running status.
 	FORCEDINLINE static void emit_channel_status(
-		std::vector<base_type>& track,
+		track_writer& w,
 		base_type status,
 		base_type& rsb_out,
 		bool compression)
 	{
 		if (!compression || status != rsb_out)
-			track.push_back(status);
+			w.push(status);
 		rsb_out = status;
 	}
 
@@ -156,7 +242,7 @@ struct single_midi_processor_lean
 	static bool process_track(
 		bbb_ffr& in,
 		std::ofstream& out,
-		std::vector<base_type>& track,
+		std::vector<base_type>& track_buffer,
 		const settings_obj& s,
 		message_buffers& msg,
 		bool& reached_eof,
@@ -181,7 +267,7 @@ struct single_midi_processor_lean
 			return false;
 		}
 
-		track.clear();
+		track_writer w(track_buffer, out);
 
 		tick_type old_abs = 0;
 		tick_type prev_new_abs = 0;
@@ -191,7 +277,6 @@ struct single_midi_processor_lean
 
 		bool track_ended = false;
 		bool any_event   = false;
-		std::size_t noteoff_misses = 0;
 
 		const bool compression = s.legacy.rsb_compression;
 		const bool overflow_fix = s.proc_details.force_delta_overflow_correction;
@@ -255,10 +340,10 @@ struct single_midi_processor_lean
 						vel = 0;
 					}
 
-					emit_delta(track, new_delta, rsb_out, overflow_fix);
-					emit_channel_status(track, cmd, rsb_out, compression);
-					track.push_back(key);
-					track.push_back(vel);
+					emit_delta(w, new_delta, rsb_out, overflow_fix);
+					emit_channel_status(w, cmd, rsb_out, compression);
+					w.push(key);
+					w.push(vel);
 
 					prev_new_abs = new_abs;
 					any_event = true;
@@ -270,10 +355,10 @@ struct single_midi_processor_lean
 					base_type a = p1_consumed ? p1 : in.get();
 					base_type b = in.get();
 
-					emit_delta(track, new_delta, rsb_out, overflow_fix);
-					emit_channel_status(track, cmd, rsb_out, compression);
-					track.push_back(a);
-					track.push_back(b);
+					emit_delta(w, new_delta, rsb_out, overflow_fix);
+					emit_channel_status(w, cmd, rsb_out, compression);
+					w.push(a);
+					w.push(b);
 
 					prev_new_abs = new_abs;
 					any_event = true;
@@ -284,9 +369,9 @@ struct single_midi_processor_lean
 					rsb_in = cmd;
 					base_type a = p1_consumed ? p1 : in.get();
 
-					emit_delta(track, new_delta, rsb_out, overflow_fix);
-					emit_channel_status(track, cmd, rsb_out, compression);
-					track.push_back(a);
+					emit_delta(w, new_delta, rsb_out, overflow_fix);
+					emit_channel_status(w, cmd, rsb_out, compression);
+					w.push(a);
 
 					prev_new_abs = new_abs;
 					any_event = true;
@@ -328,13 +413,13 @@ struct single_midi_processor_lean
 							if (!new_tempo)
 								continue;
 
-							emit_delta(track, new_delta, rsb_out, overflow_fix);
-							track.push_back(0xFF);
-							track.push_back(0x51);
-							track.push_back(0x03);
-							track.push_back(base_type((new_tempo >> 16) & 0xFF));
-							track.push_back(base_type((new_tempo >>  8) & 0xFF));
-							track.push_back(base_type((new_tempo      ) & 0xFF));
+							emit_delta(w, new_delta, rsb_out, overflow_fix);
+							w.push(0xFF);
+							w.push(0x51);
+							w.push(0x03);
+							w.push(base_type((new_tempo >> 16) & 0xFF));
+							w.push(base_type((new_tempo >>  8) & 0xFF));
+							w.push(base_type((new_tempo      ) & 0xFF));
 							rsb_out = 0;
 
 							prev_new_abs = new_abs;
@@ -342,12 +427,12 @@ struct single_midi_processor_lean
 							break;
 						}
 
-						emit_delta(track, new_delta, rsb_out, overflow_fix);
-						track.push_back(0xFF);
-						track.push_back(meta_type);
-						push_vlv(len, track);
+						emit_delta(w, new_delta, rsb_out, overflow_fix);
+						w.push(0xFF);
+						w.push(meta_type);
+						push_vlv(len, w);
 						for (std::uint64_t i = 0; i < len && in.good(); ++i)
-							track.push_back(in.get());
+							w.push(in.get());
 						rsb_out = 0;
 
 						prev_new_abs = new_abs;
@@ -365,11 +450,11 @@ struct single_midi_processor_lean
 						}
 
 						std::uint64_t len = get_vlv(in);
-						emit_delta(track, new_delta, rsb_out, overflow_fix);
-						track.push_back(cmd);
-						push_vlv(len, track);
+						emit_delta(w, new_delta, rsb_out, overflow_fix);
+						w.push(cmd);
+						push_vlv(len, w);
 						for (std::uint64_t i = 0; i < len && in.good(); ++i)
-							track.push_back(in.get());
+							w.push(in.get());
 						rsb_out = 0;
 
 						prev_new_abs = new_abs;
@@ -391,36 +476,16 @@ struct single_midi_processor_lean
 			}
 		}
 
+		w.push(0x00);
+		w.push(0xFF);
+		w.push(0x2F);
+		w.push(0x00);
 		if (!track_ended)
-		{
-			track.push_back(0x00);
-			track.push_back(0xFF);
-			track.push_back(0x2F);
-			track.push_back(0x00);
 			(*msg.warning) << "Track ended without explicit EOT — synthesized";
-		}
-		else
-		{
-			track.push_back(0x00);
-			track.push_back(0xFF);
-			track.push_back(0x2F);
-			track.push_back(0x00);
-		}
 
 		const bool skip = s.proc_details.remove_empty_tracks && !any_event;
-		if (!skip)
-		{
-			base_type header[8] = {
-				'M','T','r','k',
-				base_type((track.size() >> 24) & 0xFF),
-				base_type((track.size() >> 16) & 0xFF),
-				base_type((track.size() >>  8) & 0xFF),
-				base_type((track.size()      ) & 0xFF)
-			};
-			out.write((const char*)header, 8);
-			out.write((const char*)track.data(), track.size());
+		if (w.finish(skip))
 			++tracks_written;
-		}
 
 		return true;
 	}
@@ -429,8 +494,7 @@ struct single_midi_processor_lean
 	{
 		loggers.processing = true;
 
-		std::vector<base_type> track;
-		track.reserve(1ull << 22); // 4 MiB, grows as needed
+		std::vector<base_type> track(track_writer::capacity); // 1 MiB fixed buffer
 
 		bbb_ffr file_input(data.filename.c_str());
 		std::ofstream file_output(data.filename + data.postfix,
