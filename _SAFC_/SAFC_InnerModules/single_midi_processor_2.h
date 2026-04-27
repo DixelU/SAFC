@@ -541,8 +541,8 @@ struct single_midi_processor_2
 			case 3: { copy_back_traits::copy_back(vec, get_value<uint16_t>(begin, 0), get_value<uint8_t>(begin, 2)); break; }
 			case 4: { copy_back_traits::copy_back(vec, get_value<uint32_t>(begin, 0)); break; }
 			case 5: { copy_back_traits::copy_back(vec, get_value<uint32_t>(begin, 0), get_value<uint8_t>(begin, 4)); break; }
-			case 6: { copy_back_traits::copy_back(vec, get_value<uint32_t>(begin, 0), get_value<uint16_t>(begin, 2)); break; }
-			case 7: { copy_back_traits::copy_back(vec, get_value<uint32_t>(begin, 0), get_value<uint16_t>(begin, 2), get_value<uint8_t>(begin, 6)); break; }
+			case 6: { copy_back_traits::copy_back(vec, get_value<uint32_t>(begin, 0), get_value<uint16_t>(begin, 4)); break; }
+			case 7: { copy_back_traits::copy_back(vec, get_value<uint32_t>(begin, 0), get_value<uint16_t>(begin, 4), get_value<uint8_t>(begin, 6)); break; }
 			case 8: { copy_back_traits::copy_back(vec, get_value<uint64_t>(begin, 0)); break; }
 
 			//case 9: { copy_back_traits::copy_back(vec, get_value<uint64_t>(begin, 0), get_value<uint8_t>(begin, 0 + 8)); break; }
@@ -550,8 +550,8 @@ struct single_midi_processor_2
 			//case 11: { copy_back_traits::copy_back(vec, get_value<uint64_t>(begin, 0), get_value<uint16_t>(begin, 0 + 8), get_value<uint8_t>(begin, 2 + 8)); break; }
 			//case 12: { copy_back_traits::copy_back(vec, get_value<uint64_t>(begin, 0), get_value<uint32_t>(begin, 0 + 8)); break; }
 			//case 13: { copy_back_traits::copy_back(vec, get_value<uint64_t>(begin, 0), get_value<uint32_t>(begin, 0 + 8), get_value<uint8_t>(begin, 4 + 8)); break; }
-			//case 14: { copy_back_traits::copy_back(vec, get_value<uint64_t>(begin, 0), get_value<uint32_t>(begin, 0 + 8), get_value<uint16_t>(begin, 2 + 8)); break; }
-			//case 15: { copy_back_traits::copy_back(vec, get_value<uint64_t>(begin, 0), get_value<uint32_t>(begin, 0 + 8), get_value<uint16_t>(begin, 2 + 8), get_value<uint8_t>(begin, 6 + 8)); break; }
+			//case 14: { copy_back_traits::copy_back(vec, get_value<uint64_t>(begin, 0), get_value<uint32_t>(begin, 0 + 8), get_value<uint16_t>(begin, 4 + 8)); break; }
+			//case 15: { copy_back_traits::copy_back(vec, get_value<uint64_t>(begin, 0), get_value<uint32_t>(begin, 0 + 8), get_value<uint16_t>(begin, 4 + 8), get_value<uint8_t>(begin, 6 + 8)); break; }
 			//case 16: { copy_back_traits::copy_back(vec, get_value<uint64_t>(begin, 0), get_value<uint64_t>(begin, 0 + 8)); break; }
 			default:
 			{
@@ -1176,7 +1176,7 @@ struct single_midi_processor_2
 							if (size != 0x8 && size != 0xB) [[unlikely]]
 								break;
 
-							const auto& signature = get_value<base_type>(cur, base_position + 0);
+							const auto& signature = get_value<base_type>(cur, base_position + 1);
 							if (signature) [[unlikely]]
 								break;
 
@@ -1184,7 +1184,7 @@ struct single_midi_processor_2
 							std_ref.selection_data.frontal_color_event.size = size;
 							std_ref.selection_data.frontal_color_event.data[0] = signature;
 							for(size_t i = 1; i < size; ++i)
-								std_ref.selection_data.frontal_color_event.data[i] = get_value<base_type>(cur, event_param3 + i);
+								std_ref.selection_data.frontal_color_event.data[i] = get_value<base_type>(cur, base_position + i);
 							break;
 						}
 						default:
@@ -1198,8 +1198,9 @@ struct single_midi_processor_2
 				tick = disable_tick;
 			}
 
-			return false;
 			}
+
+			return false;
 		};
 
 		const event_transforming_filter program_transform = [filtering = settings.filter]
@@ -1343,8 +1344,11 @@ struct single_midi_processor_2
 			{
 				case 0xF0:
 				case 0xF7:
+				{
 					if (!filtering.pass_sysex)
 						tick = disable_tick;
+					break;
+				}
 				case 0xFF:
 				default: 
 					if (!filtering.pass_other)
