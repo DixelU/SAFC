@@ -493,9 +493,7 @@ struct single_midi_processor_2
 		template<typename _head, typename... _tail>
 		static size_t __total_size(const _head& head, const _tail&... tail)
 		{
-			return
-				size_of_contained_data(head) +
-				__total_size(tail...);
+			return size_of_contained_data(head) + __total_size(tail...);
 		}
 
 		template<typename _head, typename... _tail>
