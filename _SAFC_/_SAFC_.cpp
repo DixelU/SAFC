@@ -751,7 +751,8 @@ struct safc_data
 		if (!force_global_ppqn_override && (!new_ppqn || incremental_ppqn))
 		{
 			for (int i = 0; i < files.size(); i++)
-				if (new_ppqn < files[i].old_ppqn)new_ppqn = files[i].old_ppqn;
+				if (new_ppqn < files[i].old_ppqn)
+					new_ppqn = files[i].old_ppqn;
 		}
 
 		for (int i = 0; i < files.size(); i++)
@@ -947,23 +948,26 @@ ui_part_type* _WH_t(const char* window, const char* element) requires std::is_ba
 	return dynamic_cast<ui_part_type*>(_WH(window, element));
 }
 
-void add_files(const std::vector<std::wstring>& Filenames)
+void add_files(const std::vector<std::wstring>& filenames)
 {
 	if(global_window_handler)
 		global_window_handler->disable_all_windows();
 
-	for (int i = 0; i < Filenames.size(); i++)
+	for (int i = 0; i < filenames.size(); i++)
 	{
-		if (Filenames[i].empty())
+		if (filenames[i].empty())
 			continue;
-		g_data.files.push_back(file_settings(Filenames[i]));
+
+		g_data.files.push_back(file_settings(filenames[i]));
+
 		auto& lastFile = g_data.files.back();
 		if (lastFile.is_midi)
 		{
 			if (global_window_handler)
 				_WH_t<selectable_properted_list>("MAIN", "List")->safe_push_back_new_string(lastFile.appearance_filename);
 
-			std::uint32_t Counter = 0;
+			std::uint32_t counter = 0;
+
 			lastFile.new_tempo = g_data.global_new_tempo;
 			lastFile.offset_ticks = g_data.global_offset;
 			lastFile.inplace_merge_enabled = g_data.inplace_merge_flag;
@@ -976,9 +980,9 @@ void add_files(const std::vector<std::wstring>& Filenames)
 			{
 				if (g_data[q].filename == lastFile.filename)
 				{
-					g_data[q].file_name_postfix = std::to_string(Counter) + "_.mid";
-					g_data[q].w_file_name_postfix = std::to_wstring(Counter) + L"_.mid";
-					Counter++;
+					g_data[q].file_name_postfix = std::to_string(counter) + "_.mid";
+					g_data[q].w_file_name_postfix = std::to_wstring(counter) + L"_.mid";
+					counter++;
 				}
 			}
 		}
