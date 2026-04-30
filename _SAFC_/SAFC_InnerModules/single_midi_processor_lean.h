@@ -231,7 +231,6 @@ struct single_midi_processor_lean
 		if (s.proc_details.channel_split)       return false;
 		if (s.proc_details.whole_midi_collapse) return false;
 		if (s.enable_imp_events_filter)         return false;
-		if (s.filter.piano_only)                return false;
 		if (!s.filter.pass_tempo)               return false;
 		if (!s.filter.pass_pitch)               return false;
 		if (!s.filter.pass_notes)               return false;
@@ -267,10 +266,10 @@ struct single_midi_processor_lean
 			return false;
 		}
 
-		track_writer w(track_buffer, out);
+		track_writer writer(track_buffer, out);
 
-		tick_type old_abs = 0;
-		tick_type prev_new_abs = 0;
+		tick_type current_tick = 0;
+		tick_type previous_tick = 0;
 
 		base_type rsb_in  = 0; // input running status
 		base_type rsb_out = 0; // output running status (for compression)
@@ -287,11 +286,11 @@ struct single_midi_processor_lean
 			if (in.eof())
 				break;
 
-			old_abs += delta;
-			tick_type new_abs = compute_new_abs_tick(old_abs, s);
-			if (new_abs < prev_new_abs)
-				new_abs = prev_new_abs;
-			tick_type new_delta = new_abs - prev_new_abs;
+			current_tick += delta;
+			tick_type new_abs = compute_new_abs_tick(current_tick, s);
+			if (new_abs < previous_tick)
+				new_abs = previous_tick;
+			tick_type new_delta = new_abs - previous_tick;
 
 			base_type cmd = in.get();
 			base_type p1 = 0;
@@ -340,12 +339,12 @@ struct single_midi_processor_lean
 						vel = 0;
 					}
 
-					emit_delta(w, new_delta, rsb_out, overflow_fix);
-					emit_channel_status(w, cmd, rsb_out, compression);
-					w.push(key);
-					w.push(vel);
+					emit_delta(writer, new_delta, rsb_out, overflow_fix);
+					emit_channel_status(writer, cmd, rsb_out, compression);
+					writer.push(key);
+					writer.push(vel);
 
-					prev_new_abs = new_abs;
+					previous_tick = new_abs;
 					any_event = true;
 					break;
 				}
@@ -355,25 +354,36 @@ struct single_midi_processor_lean
 					base_type a = p1_consumed ? p1 : in.get();
 					base_type b = in.get();
 
-					emit_delta(w, new_delta, rsb_out, overflow_fix);
-					emit_channel_status(w, cmd, rsb_out, compression);
-					w.push(a);
-					w.push(b);
+					emit_delta(writer, new_delta, rsb_out, overflow_fix);
+					emit_channel_status(writer, cmd, rsb_out, compression);
+					writer.push(a);
+					writer.push(b);
 
-					prev_new_abs = new_abs;
+					previous_tick = new_abs;
 					any_event = true;
 					break;
 				}
-				case 0xC: case 0xD:
+				case 0xC:
+				{
+					if (s.filter.piano_only)
+					{
+						rsb_in = cmd;
+						base_type read_param = p1_consumed ? p1 : in.get();
+						break;
+					}
+
+					[[fallthrough]];
+				}
+				case 0xD:
 				{
 					rsb_in = cmd;
-					base_type a = p1_consumed ? p1 : in.get();
+					base_type read_param1 = p1_consumed ? p1 : in.get();
 
-					emit_delta(w, new_delta, rsb_out, overflow_fix);
-					emit_channel_status(w, cmd, rsb_out, compression);
-					w.push(a);
+					emit_delta(writer, new_delta, rsb_out, overflow_fix);
+					emit_channel_status(writer, cmd, rsb_out, compression);
+					writer.push(read_param1);
 
-					prev_new_abs = new_abs;
+					previous_tick = new_abs;
 					any_event = true;
 					break;
 				}
@@ -413,29 +423,29 @@ struct single_midi_processor_lean
 							if (!new_tempo)
 								continue;
 
-							emit_delta(w, new_delta, rsb_out, overflow_fix);
-							w.push(0xFF);
-							w.push(0x51);
-							w.push(0x03);
-							w.push(base_type((new_tempo >> 16) & 0xFF));
-							w.push(base_type((new_tempo >>  8) & 0xFF));
-							w.push(base_type((new_tempo      ) & 0xFF));
+							emit_delta(writer, new_delta, rsb_out, overflow_fix);
+							writer.push(0xFF);
+							writer.push(0x51);
+							writer.push(0x03);
+							writer.push(base_type((new_tempo >> 16) & 0xFF));
+							writer.push(base_type((new_tempo >>  8) & 0xFF));
+							writer.push(base_type((new_tempo      ) & 0xFF));
 							rsb_out = 0;
 
-							prev_new_abs = new_abs;
+							previous_tick = new_abs;
 							any_event = true;
 							break;
 						}
 
-						emit_delta(w, new_delta, rsb_out, overflow_fix);
-						w.push(0xFF);
-						w.push(meta_type);
-						push_vlv(len, w);
+						emit_delta(writer, new_delta, rsb_out, overflow_fix);
+						writer.push(0xFF);
+						writer.push(meta_type);
+						push_vlv(len, writer);
 						for (std::uint64_t i = 0; i < len && in.good(); ++i)
-							w.push(in.get());
+							writer.push(in.get());
 						rsb_out = 0;
 
-						prev_new_abs = new_abs;
+						previous_tick = new_abs;
 						any_event = true;
 						break;
 					}
@@ -450,14 +460,16 @@ struct single_midi_processor_lean
 						}
 
 						std::uint64_t len = get_vlv(in);
-						emit_delta(w, new_delta, rsb_out, overflow_fix);
-						w.push(cmd);
-						push_vlv(len, w);
+
+						emit_delta(writer, new_delta, rsb_out, overflow_fix);
+						writer.push(cmd);
+						push_vlv(len, writer);
+
 						for (std::uint64_t i = 0; i < len && in.good(); ++i)
-							w.push(in.get());
+							writer.push(in.get());
 						rsb_out = 0;
 
-						prev_new_abs = new_abs;
+						previous_tick = new_abs;
 						any_event = true;
 						break;
 					}
@@ -476,15 +488,15 @@ struct single_midi_processor_lean
 			}
 		}
 
-		w.push(0x00);
-		w.push(0xFF);
-		w.push(0x2F);
-		w.push(0x00);
+		writer.push(0x00);
+		writer.push(0xFF);
+		writer.push(0x2F);
+		writer.push(0x00);
 		if (!track_ended)
 			(*msg.warning) << "Track ended without explicit EOT — synthesized";
 
 		const bool skip = s.proc_details.remove_empty_tracks && !any_event;
-		if (w.finish(skip))
+		if (writer.finish(skip))
 			++tracks_written;
 
 		return true;

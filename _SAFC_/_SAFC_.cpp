@@ -3051,7 +3051,6 @@ void init()
 	//global_window_handler->enable_window("OR");
 	//global_window_handler->enable_window("SMRP_CONTAINER");
 	//global_window_handler->enable_window("APP_SETTINGS");
-	//global_window_handler->enable_window("tool_ptr");
 	//global_window_handler->enable_window("CAT");
 	//global_window_handler->enable_window("SMPAS");//Debug line
 	//global_window_handler->enable_window("PROMPT");////DEBUUUUG
