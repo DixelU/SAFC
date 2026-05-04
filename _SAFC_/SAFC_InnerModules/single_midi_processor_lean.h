@@ -242,8 +242,8 @@ struct single_midi_processor_lean
 		bbb_ffr& in,
 		std::ofstream& out,
 		std::vector<base_type>& track_buffer,
-		const settings_obj& s,
-		message_buffers& msg,
+		const settings_obj& settings,
+		message_buffers& buffers,
 		bool& reached_eof,
 		std::uint64_t& tracks_written)
 	{
@@ -277,8 +277,8 @@ struct single_midi_processor_lean
 		bool track_ended = false;
 		bool any_event   = false;
 
-		const bool compression = s.legacy.rsb_compression;
-		const bool overflow_fix = s.proc_details.force_delta_overflow_correction;
+		const bool compression = settings.legacy.rsb_compression;
+		const bool overflow_fix = settings.proc_details.force_delta_overflow_correction;
 
 		while (in.good() && !track_ended)
 		{
@@ -287,7 +287,7 @@ struct single_midi_processor_lean
 				break;
 
 			current_tick += delta;
-			tick_type new_abs = compute_new_abs_tick(current_tick, s);
+			tick_type new_abs = compute_new_abs_tick(current_tick, settings);
 			if (new_abs < previous_tick)
 				new_abs = previous_tick;
 			tick_type new_delta = new_abs - previous_tick;
@@ -300,7 +300,7 @@ struct single_midi_processor_lean
 			{
 				if (rsb_in < 0x80) [[unlikely]]
 				{
-					(*msg.error) << (std::to_string(in.tellg()) +
+					(*buffers.error) << (std::to_string(in.tellg()) +
 						": Unexpected data byte with no running status");
 					return false;
 				}
@@ -321,7 +321,7 @@ struct single_midi_processor_lean
 					// 0x9x vel=0 normalisation: collapse to 0x8x vel=0 unless the
 					// legacy flag wants to keep 0x9x (in which case vel=0 is bumped
 					// to 1 to keep it as a note-on).
-					if (!s.legacy.enable_zero_velocity) [[likely]]
+					if (!settings.legacy.enable_zero_velocity) [[likely]]
 					{
 						if ((cmd & 0x10) && !vel)
 							cmd &= ~0x10;
@@ -365,7 +365,7 @@ struct single_midi_processor_lean
 				}
 				case 0xC:
 				{
-					if (s.filter.piano_only)
+					if (settings.filter.piano_only)
 					{
 						rsb_in = cmd;
 						base_type read_param = p1_consumed ? p1 : in.get();
@@ -389,7 +389,7 @@ struct single_midi_processor_lean
 				}
 				case 0xF:
 				{
-					if (!s.legacy.ignore_meta_rsb)
+					if (!settings.legacy.ignore_meta_rsb)
 						rsb_in = 0;
 
 					if (cmd == 0xFF)
@@ -419,7 +419,7 @@ struct single_midi_processor_lean
 								(std::uint32_t(tb2) << 8)  |
 								 std::uint32_t(tb3);
 
-							std::uint32_t new_tempo = s.tempo.process(tempo);
+							std::uint32_t new_tempo = settings.tempo.process(tempo);
 							if (!new_tempo)
 								continue;
 
@@ -451,7 +451,7 @@ struct single_midi_processor_lean
 					}
 					else if (cmd == 0xF0 || cmd == 0xF7)
 					{
-						if (!s.filter.pass_sysex)
+						if (!settings.filter.pass_sysex)
 						{
 							std::uint64_t len = get_vlv(in);
 							for (std::uint64_t i = 0; i < len && in.good(); ++i)
@@ -475,13 +475,13 @@ struct single_midi_processor_lean
 					}
 					else
 					{
-						(*msg.error) << (std::to_string(in.tellg()) +
+						(*buffers.error) << (std::to_string(in.tellg()) +
 							": Unsupported 0xFx status " + std::to_string(cmd));
 						return false;
 					}
 				}
 				default: {
-					(*msg.error) << (std::to_string(in.tellg()) +
+					(*buffers.error) << (std::to_string(in.tellg()) +
 						": Unknown event type " + std::to_string(cmd));
 					return false;
 				}
@@ -493,9 +493,9 @@ struct single_midi_processor_lean
 		writer.push(0x2F);
 		writer.push(0x00);
 		if (!track_ended)
-			(*msg.warning) << "Track ended without explicit EOT — synthesized";
+			(*buffers.warning) << "Track ended without explicit EOT — synthesized";
 
-		const bool skip = s.proc_details.remove_empty_tracks && !any_event;
+		const bool skip = settings.proc_details.remove_empty_tracks && !any_event;
 		if (writer.finish(skip))
 			++tracks_written;
 
