@@ -1612,10 +1612,24 @@ struct simple_player
 
 					const float lx = data.keyboard[index].tl.x;
 					const float rx = data.keyboard[index].tr.x;
-					const draw_data::note_color col{
+					const draw_data::note_color note_color{
 						uint8_t(color_value >> 24),
 						uint8_t(color_value >> 16),
 						uint8_t(color_value >> 8),
+						0xFF
+					};
+
+					const draw_data::note_color note_color_shady{
+						scale<0.5f>(note_color.r),
+						scale<0.5f>(note_color.g),
+						scale<0.5f>(note_color.b),
+						0xFF
+					};
+
+					const draw_data::note_color note_border_col{
+						scale<0.25f>(note_color.r),
+						scale<0.25f>(note_color.g),
+						scale<0.25f>(note_color.b),
 						0xFF
 					};
 
@@ -1624,18 +1638,10 @@ struct simple_player
 					data.note_verts.push_back({rx, end_y});
 					data.note_verts.push_back({rx, begin_y});
 
-					data.note_colors.push_back(col);
-					data.note_colors.push_back(col);
-					data.note_colors.push_back(col);
-					data.note_colors.push_back(col);
-
-					const uint32_t ocv = mul255_div_by_factor(color_value, 2);
-					const draw_data::note_color ocol{
-						uint8_t(ocv >> 24),
-						uint8_t(ocv >> 16),
-						uint8_t(ocv >> 8),
-						0xFF
-					};
+					data.note_colors.push_back(note_color);
+					data.note_colors.push_back(note_color);
+					data.note_colors.push_back(note_color_shady);
+					data.note_colors.push_back(note_color_shady);
 
 					// 4 edges as GL_LINES pairs (replaces GL_LINE_LOOP)
 					data.outline_verts.push_back({lx, begin_y}); data.outline_verts.push_back({lx, end_y});
@@ -1644,7 +1650,7 @@ struct simple_player
 					data.outline_verts.push_back({rx, begin_y}); data.outline_verts.push_back({lx, begin_y});
 
 					for (int e = 0; e < 8; ++e)
-						data.outline_colors.push_back(ocol);
+						data.outline_colors.push_back(note_border_col);
 				}
 			};
 
