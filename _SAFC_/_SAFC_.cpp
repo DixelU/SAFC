@@ -2418,7 +2418,7 @@ void player_watch_func()
 		auto seconds = state.current_time_us / 1000000;
 		auto parts_of_second = state.current_time_us % 1000000;
 
-		auto position = float(state.current_tick) / player->get_info().ticks_length;
+		auto position = float(state.current_time_us) / player->get_info().total_duration_us;
 		
 		auto str = std::format("{:0>2}:{:0>2}:{:0>2}", seconds / 60, seconds % 60, parts_of_second / 10000);
 		textbox->safe_string_replace(str);
