@@ -5,6 +5,8 @@
 #include <io.h>
 #include <tuple>
 #include <mutex>
+#include <atomic>
+#include <condition_variable>
 #include <iostream>
 #include <vector>
 #include <filesystem>
@@ -17,6 +19,7 @@
 #include <boost/algorithm/string.hpp>
 
 #include <WinSock2.h>
+#include <urlmon.h>
 
 #pragma comment (lib, "Version.lib")//Urlmon.lib
 #pragma comment (lib, "Urlmon.lib")//Urlmon.lib
@@ -50,7 +53,7 @@
 #include <archive_entry.h>
 
 std::tuple<std::uint16_t, std::uint16_t, std::uint16_t, std::uint16_t> g_version_tuple;
-std::tuple<std::uint16_t, std::uint16_t, std::uint16_t, std::uint16_t> ___GetVersion() 
+std::tuple<std::uint16_t, std::uint16_t, std::uint16_t, std::uint16_t> __get_executable_version() 
 {
 	// get the filename of the executable containing the version resource
 	TCHAR szFilename[MAX_PATH + 1] = { 0 };
@@ -168,6 +171,132 @@ static void extract(const void* data, size_t data_size)
 	archive_write_free(ext);
 }
 
+class timeout_bind_status_callback : public IBindStatusCallback
+{
+public:
+	timeout_bind_status_callback(DWORD total_timeout_ms, DWORD stall_timeout_ms)
+		: m_ref(1)
+		, m_total_timeout_ms(total_timeout_ms)
+		, m_stall_timeout_ms(stall_timeout_ms)
+		, m_start_tick(GetTickCount64())
+		, m_last_progress_tick(GetTickCount64())
+		, m_binding(nullptr)
+		, m_stop(false)
+	{
+		m_watchdog = std::thread([this]()
+		{
+			std::unique_lock<std::mutex> lk(m_mtx);
+			while (!m_stop)
+			{
+				if (m_cv.wait_for(lk, std::chrono::milliseconds(250), [this]() { return m_stop.load(); }))
+					return;
+
+				auto now = GetTickCount64();
+				bool total_expired = (now - m_start_tick) > m_total_timeout_ms;
+				bool stall_expired = (now - m_last_progress_tick.load()) > m_stall_timeout_ms;
+				if (!total_expired && !stall_expired)
+					continue;
+
+				IBinding* b = m_binding;
+				if (b) b->AddRef();
+				lk.unlock();
+				if (b) { b->Abort(); b->Release(); }
+				return;
+			}
+		});
+	}
+
+	~timeout_bind_status_callback()
+	{
+		{
+			std::lock_guard<std::mutex> lk(m_mtx);
+			m_stop = true;
+		}
+		m_cv.notify_all();
+		if (m_watchdog.joinable()) m_watchdog.join();
+		if (m_binding) { m_binding->Release(); m_binding = nullptr; }
+	}
+
+	STDMETHODIMP QueryInterface(REFIID riid, void** ppv) override
+	{
+		if (!ppv) return E_POINTER;
+		if (riid == IID_IUnknown || riid == IID_IBindStatusCallback)
+		{
+			*ppv = static_cast<IBindStatusCallback*>(this);
+			AddRef();
+			return S_OK;
+		}
+		*ppv = nullptr;
+		return E_NOINTERFACE;
+	}
+	STDMETHODIMP_(ULONG) AddRef() override { return ++m_ref; }
+	STDMETHODIMP_(ULONG) Release() override
+	{
+		ULONG r = --m_ref;
+		if (r == 0) delete this;
+		return r;
+	}
+
+	STDMETHODIMP OnStartBinding(DWORD, IBinding* binding) override
+	{
+		std::lock_guard<std::mutex> lk(m_mtx);
+		if (binding) { binding->AddRef(); m_binding = binding; }
+		return S_OK;
+	}
+	STDMETHODIMP GetPriority(LONG*) override { return E_NOTIMPL; }
+	STDMETHODIMP OnLowResource(DWORD) override { return S_OK; }
+	STDMETHODIMP OnProgress(ULONG, ULONG, ULONG, LPCWSTR) override
+	{
+		auto now = GetTickCount64();
+		m_last_progress_tick = now;
+		if ((now - m_start_tick) > m_total_timeout_ms)
+			return E_ABORT;
+		return S_OK;
+	}
+	STDMETHODIMP OnStopBinding(HRESULT, LPCWSTR) override
+	{
+		{
+			std::lock_guard<std::mutex> lk(m_mtx);
+			m_stop = true;
+		}
+		m_cv.notify_all();
+		return S_OK;
+	}
+	STDMETHODIMP GetBindInfo(DWORD* grfBINDF, BINDINFO* pbindinfo) override
+	{
+		if (!grfBINDF || !pbindinfo) return E_POINTER;
+		*grfBINDF = BINDF_ASYNCHRONOUS | BINDF_ASYNCSTORAGE | BINDF_PULLDATA;
+		ULONG cb = pbindinfo->cbSize;
+		ZeroMemory(pbindinfo, cb);
+		pbindinfo->cbSize = cb;
+		pbindinfo->dwBindVerb = BINDVERB_GET;
+		return S_OK;
+	}
+	STDMETHODIMP OnDataAvailable(DWORD, DWORD, FORMATETC*, STGMEDIUM*) override { return S_OK; }
+	STDMETHODIMP OnObjectAvailable(REFIID, IUnknown*) override { return S_OK; }
+
+private:
+	std::atomic<ULONG> m_ref;
+	DWORD m_total_timeout_ms;
+	DWORD m_stall_timeout_ms;
+	ULONGLONG m_start_tick;
+	std::atomic<ULONGLONG> m_last_progress_tick;
+	IBinding* m_binding;
+	std::atomic<bool> m_stop;
+	std::thread m_watchdog;
+	std::mutex m_mtx;
+	std::condition_variable m_cv;
+};
+
+static HRESULT url_download_to_file_with_timeout(
+	LPCWSTR url, LPCWSTR filename, DWORD total_timeout_ms, DWORD stall_timeout_ms)
+{
+	auto* cb = new timeout_bind_status_callback(total_timeout_ms, stall_timeout_ms);
+	HRESULT hr = URLDownloadToFileW(NULL, url, filename, 0, cb);
+	cb->Release();
+	return hr;
+}
+
 bool safc_update(const std::wstring& latest_release)
 {
 #ifndef __X64
@@ -191,7 +320,7 @@ bool safc_update(const std::wstring& latest_release)
 	//wsprintfW(current_file_path, L"%S%S", filename.c_str(), L"update.7z\0");
 	std::wstring link = L"https://github.com/DixelU/SAFC/releases/download/" + latest_release + L"/" + archive_name;
 
-	HRESULT co_res = URLDownloadToFileW(NULL, link.c_str(), filename.c_str(), 0, NULL);
+	HRESULT co_res = url_download_to_file_with_timeout(link.c_str(), filename.c_str(), 120000, 30000);
 	
 	auto executable_filename = boost::dll::program_location().filename().wstring();
 
@@ -251,7 +380,7 @@ bool safc_update(const std::wstring& latest_release)
 
 void safc_version_check()
 {
-	auto [maj, min, ver, build] = g_version_tuple;
+	const auto& [maj, min, ver, build] = g_version_tuple;
 	std::wcout << L"Current vesion: v" << maj << L"." << min << L"." << ver << L"." << build << L"\n";
 
 	if (!check_autoupdates)
@@ -267,12 +396,12 @@ void safc_version_check()
 		std::wstring pathway = filename;
 		filename += L"tags.json";
 		// if you have error here -> https://github.com/Microsoft/WSL/issues/22#issuecomment-207788173
-		HRESULT res = URLDownloadToFileW(NULL, SAFC_tags_link, filename.c_str(), 0, NULL);
+		HRESULT res = url_download_to_file_with_timeout(SAFC_tags_link, filename.c_str(), 10000, 5000);
 		try 
 		{
 			if (res == S_OK) 
 			{
-				auto [maj, min, ver, build] = g_version_tuple;
+				const auto& [maj, min, ver, build] = g_version_tuple;
 
 				std::string json_buffer;
 				std::ifstream input(filename);
@@ -283,9 +412,9 @@ void safc_version_check()
 				auto& git_latest_version = ((value)->AsArray()[0])->AsObject().at(L"name")->AsString();
 
 				std::uint16_t version_partied[4] = { 0,0,0,0 };
-				std::vector<std::string> ans;
+				std::vector<std::wstring> ans;
 				std::wstring git_version_numbers_only = git_latest_version.substr(1);//v?.?.?.?
-				boost::algorithm::split(ans, git_version_numbers_only, boost::is_any_of("."));
+				boost::algorithm::split(ans, git_version_numbers_only, boost::is_any_of(L"."));
 
 				int index = 0;
 				for (auto& num_val : ans) 
@@ -315,7 +444,9 @@ void safc_version_check()
 						maj == version_partied[0] && min == version_partied[1] && ver == version_partied[2] && build < version_partied[3]
 						))
 				{
-					throw_alert_warning("Update found! The app might restart soon...\nUpdate: " + std::string(git_latest_version.begin(), git_latest_version.end()));
+					std::string git_version_str(git_latest_version.size(), '\0');
+					std::transform(git_latest_version.begin(), git_latest_version.end(), git_version_str.begin(), [](wchar_t c) { return static_cast<char>(c); });
+					throw_alert_warning("Update found! The app might restart soon...\nUpdate: " + git_version_str);
 
 					flag = safc_update(git_latest_version);
 
@@ -415,7 +546,8 @@ struct file_settings
 		collapse_midi = false,
 		allow_sysex = false,
 		enable_zero_velocity = false,
-		apply_offset_after = true;
+		apply_offset_after = true,
+		ppqn_manually_set = false;
 
 	std::shared_ptr<cut_and_transpose> key_map;
 	std::shared_ptr<polyline_converter<std::uint8_t, std::uint8_t>> volume_map;
@@ -619,11 +751,20 @@ struct safc_data
 		if (!force_global_ppqn_override && (!new_ppqn || incremental_ppqn))
 		{
 			for (int i = 0; i < files.size(); i++)
-				if (new_ppqn < files[i].old_ppqn)new_ppqn = files[i].old_ppqn;
+				if (new_ppqn < files[i].old_ppqn)
+					new_ppqn = files[i].old_ppqn;
 		}
 
 		for (int i = 0; i < files.size(); i++)
+		{
+			if (!force_global_ppqn_override && files[i].ppqn_manually_set)
+				continue;
 			files[i].new_ppqn = new_ppqn;
+		}
+
+		if (force_global_ppqn_override)
+			for (int i = 0; i < files.size(); i++)
+				files[i].ppqn_manually_set = false;
 
 		global_ppqn = new_ppqn;
 	}
@@ -807,23 +948,26 @@ ui_part_type* _WH_t(const char* window, const char* element) requires std::is_ba
 	return dynamic_cast<ui_part_type*>(_WH(window, element));
 }
 
-void add_files(const std::vector<std::wstring>& Filenames)
+void add_files(const std::vector<std::wstring>& filenames)
 {
 	if(global_window_handler)
 		global_window_handler->disable_all_windows();
 
-	for (int i = 0; i < Filenames.size(); i++)
+	for (int i = 0; i < filenames.size(); i++)
 	{
-		if (Filenames[i].empty())
+		if (filenames[i].empty())
 			continue;
-		g_data.files.push_back(file_settings(Filenames[i]));
+
+		g_data.files.push_back(file_settings(filenames[i]));
+
 		auto& lastFile = g_data.files.back();
 		if (lastFile.is_midi)
 		{
 			if (global_window_handler)
 				_WH_t<selectable_properted_list>("MAIN", "List")->safe_push_back_new_string(lastFile.appearance_filename);
 
-			std::uint32_t Counter = 0;
+			std::uint32_t counter = 0;
+
 			lastFile.new_tempo = g_data.global_new_tempo;
 			lastFile.offset_ticks = g_data.global_offset;
 			lastFile.inplace_merge_enabled = g_data.inplace_merge_flag;
@@ -836,9 +980,9 @@ void add_files(const std::vector<std::wstring>& Filenames)
 			{
 				if (g_data[q].filename == lastFile.filename)
 				{
-					g_data[q].file_name_postfix = std::to_string(Counter) + "_.mid";
-					g_data[q].w_file_name_postfix = std::to_wstring(Counter) + L"_.mid";
-					Counter++;
+					g_data[q].file_name_postfix = std::to_string(counter) + "_.mid";
+					g_data[q].w_file_name_postfix = std::to_wstring(counter) + L"_.mid";
+					counter++;
 				}
 			}
 		}
@@ -938,10 +1082,12 @@ namespace props_and_sets
 		}
 
 		auto tempo_graph = (Graphing<single_midi_info_collector::tempo_graph>*)(*(*global_window_handler)["SMIC"])["TEMPO_GRAPH"];
+		auto nps_graph = (Graphing<single_midi_info_collector::notes_per_second_graph>*)(*(*global_window_handler)["SMIC"])["NPS_GRAPH"];
 		if (smic_ptr)
 		{
 			{ std::lock_guard<std::recursive_mutex> locker(tempo_graph->lock); }
 			tempo_graph->graph = nullptr;
+			nps_graph->graph = nullptr;
 		}
 
 		smic_ptr = new single_midi_info_collector(g_data.files[current_id].filename, g_data.files[current_id].old_ppqn, g_data.files[current_id].allow_legacy_rsb_meta_interaction);
@@ -968,11 +1114,14 @@ namespace props_and_sets
 				auto ticks = (input_field*)(*(*global_window_handler)["SMIC"])["INT_TIC"];
 				auto ui_tempo_graph = (Graphing<single_midi_info_collector::tempo_graph>*)(*(*global_window_handler)["SMIC"])["TEMPO_GRAPH"];
 				auto ui_poly_graph = (Graphing<single_midi_info_collector::polyphony_graph>*)(*(*global_window_handler)["SMIC"])["POLY_GRAPH"];
+				auto ui_nps_graph = (Graphing<single_midi_info_collector::notes_per_second_graph>*)(*(*global_window_handler)["SMIC"])["NPS_GRAPH"];
 
 				ui_poly_graph->enabled = false;
 				ui_poly_graph->reset();
 				ui_tempo_graph->enabled = false;
 				ui_tempo_graph->reset();
+				ui_nps_graph->enabled = false;
+				ui_nps_graph->reset();
 
 				delim->safe_string_replace(csv_delim);
 				delim->current_string = csv_delim;
@@ -1010,6 +1159,9 @@ namespace props_and_sets
 			tempo_graph->graph = &(smic_ptr->tempo_map);
 			auto poly_graph = (Graphing<single_midi_info_collector::polyphony_graph>*)(*(*global_window_handler)["SMIC"])["POLY_GRAPH"];
 			poly_graph->graph = &(smic_ptr->polyphony);
+			auto nps_graph = (Graphing<single_midi_info_collector::notes_per_second_graph>*)(*(*global_window_handler)["SMIC"])["NPS_GRAPH"];
+			nps_graph->graph = &(smic_ptr->notes_per_second);
+			nps_graph->enabled = true;
 
 			auto midi_info = (text_box*)(*(*global_window_handler)["SMIC"])["TOTAL_INFO"];
 			midi_info->safe_string_replace(
@@ -1075,18 +1227,6 @@ namespace props_and_sets
 				tempo_graph_switch->safe_string_replace("Disable graph A");
 
 			tempo_graph->enabled ^= true;
-		}
-
-		void reset_tg()
-		{
-			auto tempo_graph = (Graphing<single_midi_info_collector::tempo_graph>*)(*(*global_window_handler)["SMIC"])["TEMPO_GRAPH"];
-			tempo_graph->reset();
-		}
-
-		void reset_pg()
-		{
-			auto poly_graph = (Graphing<single_midi_info_collector::tempo_graph>*)(*(*global_window_handler)["SMIC"])["POLY_GRAPH"];
-			poly_graph->reset();
 		}
 
 		void switch_personal_use()
@@ -1364,7 +1504,7 @@ namespace props_and_sets
 			return;
 		}
 
-		std::int32_t T;
+		std::int32_t string_value;
 		std::string current_string = "";
 		auto settings_window = (*global_window_handler)["SMPAS"];
 		auto other_settings_window = (*global_window_handler)["OTHER_SETS"];
@@ -1372,9 +1512,17 @@ namespace props_and_sets
 		current_string = ((input_field*)(*settings_window)["PPQN"])->get_current_input("0");
 		if (current_string.size())
 		{
-			T = std::stoi(current_string);
-			if (T)g_data[current_id].new_ppqn = T;
-			else g_data[current_id].new_ppqn = g_data.global_ppqn;
+			string_value = std::stoi(current_string);
+			if (string_value) 
+			{
+				g_data[current_id].new_ppqn = string_value;
+				g_data[current_id].ppqn_manually_set = true;
+			}
+			else
+			{
+				g_data[current_id].new_ppqn = g_data.global_ppqn;
+				g_data[current_id].ppqn_manually_set = false;
+			}
 		}
 
 		current_string = ((input_field*)(*settings_window)["TEMPO"])->get_current_input("0");
@@ -1387,17 +1535,17 @@ namespace props_and_sets
 		current_string = ((input_field*)(*settings_window)["OFFSET"])->get_current_input("0");
 		if (current_string.size())
 		{
-			T = stoll(current_string);
-			g_data[current_id].offset_ticks = T;
+			string_value = stoll(current_string);
+			g_data[current_id].offset_ticks = string_value;
 		}
 
 		current_string = ((input_field*)(*settings_window)["GROUPID"])->get_current_input("0");
 		if (current_string.size())
 		{
-			T = stoi(current_string);
-			if (T != g_data[current_id].group_id)
+			string_value = stoi(current_string);
+			if (string_value != g_data[current_id].group_id)
 			{
-				g_data[current_id].group_id = T;
+				g_data[current_id].group_id = string_value;
 				throw_alert_warning("Manual group_id editing might cause significant drop of processing perfomance!");
 			}
 		}
@@ -1405,15 +1553,15 @@ namespace props_and_sets
 		current_string = ((input_field*)(*settings_window)["SELECT_START"])->get_current_input("0");
 		if (current_string.size())
 		{
-			T = stoll(current_string);
-			g_data[current_id].selection_start = T;
+			string_value = stoll(current_string);
+			g_data[current_id].selection_start = string_value;
 		}
 
 		current_string = ((input_field*)(*settings_window)["SELECT_LENGTH"])->get_current_input("-1");
 		if (current_string.size())
 		{
-			T = stoll(current_string);
-			g_data[current_id].selection_length = T;
+			string_value = stoll(current_string);
+			g_data[current_id].selection_length = string_value;
 		}
 
 		g_data[current_id].allow_legacy_rsb_meta_interaction = (((checkbox*)(*other_settings_window)["LEGACY_META_RSB_BEHAVIOR"])->state);
@@ -1971,8 +2119,8 @@ std::pair<float, float> get_position_for_one_of(std::int32_t Position, std::int3
 	std::pair<float, float> coords{ 0.f, 0.f };
 	std::int32_t side_count = ceil(sqrt(Amount));
 
-	coords.first = (0 - (Position % side_count) + ((side_count - 1) / 2.f)) * UnitSize;
-	coords.second = (0 - (Position / side_count) + ((side_count - 1) / 2.f)) * UnitSize * HeightRel;
+	coords.first = (0.f - static_cast<float>(Position % side_count) + ((side_count - 1) / 2.f)) * UnitSize;
+	coords.second = (0.f - static_cast<float>(Position / side_count) + ((side_count - 1) / 2.f)) * UnitSize * HeightRel;
 
 	return coords;
 }
@@ -2027,7 +2175,7 @@ void on_start()
 			std::thread([](
 				std::shared_ptr<midi_collection_threaded_merger> merger_ptr,
 				midi_processor_visualiser& vis_ref,
-				std::uint32_t id)
+				size_t id)
 			{
 				std::string SID = "SMRP_C" + std::to_string(id);
 				std::cout << SID << " Processing started" << std::endl;
@@ -2057,10 +2205,10 @@ void on_start()
 
 			(*merge_preview_container)["IM"] =
 				std::make_unique<bool_and_number_checker<decltype(global_mctm->inplace_merge_complete), decltype(global_mctm->inplace_track_count)>>
-					(-100., 0., &system_white, &(global_mctm->inplace_merge_complete), &(global_mctm->inplace_track_count));
+					(-100.f, 0.f, &system_white, &(global_mctm->inplace_merge_complete), &(global_mctm->inplace_track_count));
 			(*merge_preview_container)["RM"] =
 				std::make_unique<bool_and_number_checker<decltype(global_mctm->regular_merge_complete), decltype(global_mctm->regular_track_count)>>
-					(100., 0., &system_white, &(global_mctm->regular_merge_complete), &(global_mctm->regular_track_count));
+					(100.f, 0.f, &system_white, &(global_mctm->regular_merge_complete), &(global_mctm->regular_track_count));
 			
 			worker_singleton<struct merge_ri_stage_cleanup>::instance().push([safc_data_pointer, merge_preview_container]()
 			{
@@ -2075,7 +2223,7 @@ void on_start()
 
 				(*merge_preview_container)["FM"] = 
 					std::make_unique<bool_and_number_checker<decltype(global_mctm->complete), int>>
-						(0., 0., &system_white, &(global_mctm->complete), nullptr);
+						(0.f, 0.f, &system_white, &(global_mctm->complete), nullptr);
 			});
 		});
 
@@ -2188,7 +2336,8 @@ void restore_reg_settings()
 	try
 	{
 		std::wstring ws = settings::regestry_access.GetStringValue(L"COLLAPSEDFONTNAME_POST1P4");//COLLAPSEDFONTNAME
-		default_font_name = std::string(ws.begin(), ws.end());
+		default_font_name.resize(ws.size());
+		std::transform(ws.begin(), ws.end(), default_font_name.begin(), [](wchar_t c) { return static_cast<char>(c); });
 	}
 	catch (...) { std::cout << "Exception thrown while restoring COLLAPSEDFONTNAME_POST1P4 from registry\n"; }
 	try
@@ -2237,6 +2386,12 @@ void player_watch_func()
 	auto& info = player->get_info();
 	while (true)
 	{
+		if (!window->drawable)
+		{
+			player->stop();
+			return;
+		}
+
 		uint64_t scanned = info.scanned;
 		uint64_t size = info.size;
 
@@ -2254,10 +2409,16 @@ void player_watch_func()
 	bool was_playing = false;
 	while (was_playing <= state.playing)
 	{
+		if (!window->drawable)
+		{
+			player->stop();
+			break;
+		}
+
 		auto seconds = state.current_time_us / 1000000;
 		auto parts_of_second = state.current_time_us % 1000000;
 
-		auto position = float(state.current_tick) / player->get_info().ticks_length;
+		auto position = float(state.current_time_us) / player->get_info().total_duration_us;
 		
 		auto str = std::format("{:0>2}:{:0>2}:{:0>2}", seconds / 60, seconds % 60, parts_of_second / 10000);
 		textbox->safe_string_replace(str);
@@ -2274,11 +2435,40 @@ void player_watch_func()
 
 void on_open_player()
 {
+	if (player->get_state().playing)
+	{
+		global_window_handler->enable_window("SIMPLAYER");
+		return;
+	}
+
+	auto midis_list = _WH_t<selectable_properted_list>("MAIN", "List");
+	if (midis_list->selected_id.empty())
+	{
+		throw_alert_warning("Please first select the MIDI file before opening the player");
+		return;
+	}
+
+	if (player->get_state().paused)
+	{
+		auto window = (*global_window_handler)["SIMPLAYER"];
+		if (window->enabled)
+		{
+			global_window_handler->enable_window("SIMPLAYER");
+			return;
+		}
+
+		player->stop();
+		window->enable();
+	}
+
 	worker_singleton<struct player_thread>::instance().push([]()
 	{
 		auto midis_list = _WH_t<selectable_properted_list>("MAIN", "List");
 		if (midis_list->selected_id.empty())
+		{
+			throw_alert_error("Fastest mouse action on the wild west detected");
 			return;
+		}
 
 		auto& id = midis_list->selected_id.front();
 
@@ -2351,6 +2541,21 @@ void on_device_select(int device_id)
 
 void on_player_pause_toggle()
 {
+	if (!player->is_playing())
+	{
+		std::wstring filename = player->get_filename();
+		if (filename.empty())
+			return;
+
+		worker_singleton<struct player_watcher>::instance().push(player_watch_func);
+		worker_singleton<struct player_thread>::instance().push([filename]()
+		{
+			player->restore_device_by_name(saved_midi_device_name);
+			player->simple_run(filename);
+		});
+		return;
+	}
+
 	player->toggle_pause();
 
 	auto window = (*global_window_handler)["SIMPLAYER"];
@@ -2793,34 +2998,43 @@ void init()
 	window = new moveable_fui_window("MIDI Info Collector", system_white, -150, 200, 300, 400, 200, 1.25f, 100, 100, 5, BACKGROUND_OPQ, HEADER, BORDER);
 	(*window)["FLL"] = new text_box("--File log line--", system_white, 0, -moveable_window::window_header_size + 185, 15, 285, 10, 0, 0, 0, _Align::left);
 	(*window)["FEL"] = new text_box("--File error line--", system_red, 0, -moveable_window::window_header_size + 175, 15, 285, 10, 0, 0, 0, _Align::left);
+
 	(*window)["TEMPO_GRAPH"] = new Graphing<single_midi_info_collector::tempo_graph>(
-		0, -moveable_window::window_header_size + 145, 285, 50, (1. / 20000.), true, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F00FF, 0xFFFFFFFF, 0x7F7F7F7F, nullptr, system_white, false
-		);
+		0, -moveable_window::window_header_size + 145, 285, 50, (1. / 20000.), true, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F00FF, 0xFFFFFFFF, 0x7F7F7F7F, nullptr, system_white, false);
 	(*window)["POLY_GRAPH"] = new Graphing<single_midi_info_collector::polyphony_graph>(
 		0, -moveable_window::window_header_size + 95, 285, 50, (1. / 20000.), true, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F00FF, 0xFFFFFFFF, 0x7F7F7F7F, nullptr, system_white, false);
-	(*window)["PG_SWITCH"] = new button("Enable graph B", system_white, props_and_sets::SMIC::enable_pg, 37.5, 60 - moveable_window::window_header_size, 70, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, &system_white, "Polyphony graph");
-	(*window)["TG_SWITCH"] = new button("Enable graph A", system_white, props_and_sets::SMIC::enable_tg, -37.5, 60 - moveable_window::window_header_size, 70, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, &system_white, "Tempo graph");
-	(*window)["ALL_EXP"] = new button("Export all", system_white, props_and_sets::SMIC::export_all, 110, 60 - moveable_window::window_header_size, 65, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr);
-	(*window)["TG_EXP"] = new button("Export Tempo", system_white, props_and_sets::SMIC::export_tg, -110, 60 - moveable_window::window_header_size, 65, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr);
-	(*window)["TG_RESET"] = new button("reset graph A", system_white, props_and_sets::SMIC::reset_tg, 45, 40 - moveable_window::window_header_size, 65, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr);
-	(*window)["PG_RESET"] = new button("reset graph B", system_white, props_and_sets::SMIC::reset_pg, 45, 20 - moveable_window::window_header_size, 65, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr);
-	(*window)["LD_TIME_MAP"] = new button("Copy time map", system_white, props_and_sets::SMIC::load_time_map, 45, 0 - moveable_window::window_header_size, 65, 10, 1, 0x7F7F7F3F, 0x7F7F7FFF, 0xFFFFFFFF, 0x000000FF, 0xFFFFFFFF, nullptr);
-	(*window)["HUMANREADIBLE"] = button_buff = new button(".csv", system_white, props_and_sets::SMIC::switch_personal_use, 105, 40 - moveable_window::window_header_size, 45, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, &system_white, "Switches output format for `export all`");
+	(*window)["NPS_GRAPH"] = new Graphing<single_midi_info_collector::notes_per_second_graph>(
+		0, -moveable_window::window_header_size + 45, 285, 50, (1. / 20000.), true, 0x00FF9F7F, 0xFFFFFFFF, 0xFFAF00FF, 0xFFFFFFFF, 0x5F5F5F7F, nullptr, system_white, false);
+
+	(*window)["PG_SWITCH"] = new button("Enable graph B", system_white, props_and_sets::SMIC::enable_pg, 37.5, 10 - moveable_window::window_header_size, 70, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, &system_white, "Polyphony graph");
+	(*window)["TG_SWITCH"] = new button("Enable graph A", system_white, props_and_sets::SMIC::enable_tg, -37.5, 10 - moveable_window::window_header_size, 70, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, &system_white, "Tempo graph");
+	(*window)["ALL_EXP"] = new button("Export all", system_white, props_and_sets::SMIC::export_all, 110, 10 - moveable_window::window_header_size, 65, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr);
+	(*window)["TG_EXP"] = new button("Export Tempo", system_white, props_and_sets::SMIC::export_tg, -110, 10 - moveable_window::window_header_size, 65, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr);
+	(*window)["LD_TIME_MAP"] = new button("Copy time map", system_white, props_and_sets::SMIC::load_time_map, 45, -10 - moveable_window::window_header_size, 65, 10, 1, 0x7F7F7F3F, 0x7F7F7FFF, 0xFFFFFFFF, 0x000000FF, 0xFFFFFFFF, nullptr);
+	(*window)["HUMANREADIBLE"] = button_buff = new button(".csv", system_white, props_and_sets::SMIC::switch_personal_use, 105, -10 - moveable_window::window_header_size, 45, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, &system_white, "Switches output format for `export all`");
 	button_buff->tip->safe_change_position_argumented(_Align::right, button_buff->x_pos + button_buff->width * 0.5, button_buff->tip->cy_pos);
 	(*window)["TOTAL_INFO"] = new text_box("----", system_white, 0, -150, 35, 285, 10, 0, 0, 0, _Align::left);
-	(*window)["INT_MIN"] = new input_field("0", -132.5, 40 - moveable_window::window_header_size, 10, 20, system_white, nullptr, 0x007FFFFF, &system_white, "Minutes", 3, _Align::center, _Align::left, input_field::Type::NaturalNumbers);
-	(*window)["INT_SEC"] = new input_field("0", -107.5, 40 - moveable_window::window_header_size, 10, 20, system_white, nullptr, 0x007FFFFF, &system_white, "Seconds", 2, _Align::center, _Align::left, input_field::Type::NaturalNumbers);
-	(*window)["INT_MSC"] = new input_field("000", -80, 40 - moveable_window::window_header_size, 10, 25, system_white, nullptr, 0x007FFFFF, &system_white, "Milliseconds", 3, _Align::center, _Align::left, input_field::Type::NaturalNumbers);
-	(*window)["INTEGRATE_TICKS"] = new button("Integrate ticks", system_white, props_and_sets::SMIC::integrate_time, -27.5, 40 - moveable_window::window_header_size, 70, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, &system_white, "Result is the closest tick to that time.");
-	(*window)["INT_TIC"] = new input_field("0", -105, 20 - moveable_window::window_header_size, 10, 75, system_white, nullptr, 0x007FFFFF, &system_white, "Ticks", 17, _Align::center, _Align::left, input_field::Type::NaturalNumbers);
-	(*window)["INTEGRATE_TIME"] = new button("Integrate time", system_white, props_and_sets::SMIC::differentiate_ticks, -27.5, 20 - moveable_window::window_header_size, 70, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, &system_white, "Result is the time of that tick.");
-	(*window)["DELIM"] = new input_field(";", 137.5, 40 - moveable_window::window_header_size, 10, 7.5, system_white, &(props_and_sets::csv_delim), 0x007FFFFF, &system_white, "Delimiter", 1, _Align::center, _Align::right, input_field::Type::text);
-	(*window)["ANSWER"] = new text_box("----", system_white, -66.25, -30, 25, 152.5, 10, 0, 0, 0, _Align::center, text_box::VerticalOverflow::recalibrate);
+	(*window)["INT_MIN"] = new input_field("0", -132.5, -10 - moveable_window::window_header_size, 10, 20, system_white, nullptr, 0x007FFFFF, &system_white, "Minutes", 3, _Align::center, _Align::left, input_field::Type::NaturalNumbers);
+	(*window)["INT_SEC"] = new input_field("0", -107.5, -10 - moveable_window::window_header_size, 10, 20, system_white, nullptr, 0x007FFFFF, &system_white, "Seconds", 2, _Align::center, _Align::left, input_field::Type::NaturalNumbers);
+	(*window)["INT_MSC"] = new input_field("000", -80, -10 - moveable_window::window_header_size, 10, 25, system_white, nullptr, 0x007FFFFF, &system_white, "Milliseconds", 3, _Align::center, _Align::left, input_field::Type::NaturalNumbers);
+	(*window)["INTEGRATE_TICKS"] = new button("Integrate ticks", system_white, props_and_sets::SMIC::integrate_time, -27.5, -10 - moveable_window::window_header_size, 70, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, &system_white, "Result is the closest tick to that time.");
+	(*window)["INT_TIC"] = new input_field("0", -105, -30 - moveable_window::window_header_size, 10, 75, system_white, nullptr, 0x007FFFFF, &system_white, "Ticks", 17, _Align::center, _Align::left, input_field::Type::NaturalNumbers);
+	(*window)["INTEGRATE_TIME"] = new button("Integrate time", system_white, props_and_sets::SMIC::differentiate_ticks, -27.5, -30 - moveable_window::window_header_size, 70, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, &system_white, "Result is the time of that tick.");
+	(*window)["DELIM"] = new input_field(";", 137.5, -10 - moveable_window::window_header_size, 10, 7.5, system_white, &(props_and_sets::csv_delim), 0x007FFFFF, &system_white, "Delimiter", 1, _Align::center, _Align::right, input_field::Type::text);
+	(*window)["ANSWER"] = new text_box("----", system_white, -66.25, -80, 25, 152.5, 10, 0, 0, 0, _Align::center, text_box::VerticalOverflow::recalibrate);
 
 	(*global_window_handler)["SMIC"] = window;
 
 	window = new moveable_fui_window("Simple MIDI player", system_white, /*-200, 197.5, 400, 397.5, 150, 2.5f, 75, 75, 5*/
 		-200, 175 + moveable_window::window_header_size, 400, 375, 150, 2.5, 65, 65, 2.5, BACKGROUND_OPQ, HEADER, BORDER);
+	window->on_close = []()
+	{
+		if (simplayer_maximised)
+			global_window_handler->main_window_id = saved_simplayer_state.previous_main_window_id;
+
+		if (player)
+			player->stop();
+	};
 
 	(*window)["TEXT"] = new text_box("TIME", legacy_white, 0, 130 + moveable_window::window_header_size, 50, 175, 10, 0xFFFFFF1A, 0, 0, _Align(center | top), text_box::VerticalOverflow::cut);
 	(*window)["PAUSE"] = new button("\202", legacy_white, on_player_pause_toggle, -190, 180 - moveable_window::window_header_size, 10, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr);
@@ -2870,7 +3084,6 @@ void init()
 	//global_window_handler->enable_window("OR");
 	//global_window_handler->enable_window("SMRP_CONTAINER");
 	//global_window_handler->enable_window("APP_SETTINGS");
-	//global_window_handler->enable_window("tool_ptr");
 	//global_window_handler->enable_window("CAT");
 	//global_window_handler->enable_window("SMPAS");//Debug line
 	//global_window_handler->enable_window("PROMPT");////DEBUUUUG
@@ -3449,7 +3662,7 @@ int main(int argc, char** argv)
 	player = std::make_shared<simple_player>();
 	player->init();
 
-	g_version_tuple = ___GetVersion();
+	g_version_tuple = __get_executable_version();
 
 	std::ios_base::sync_with_stdio(false); //why not
 

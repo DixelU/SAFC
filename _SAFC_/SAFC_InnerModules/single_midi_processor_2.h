@@ -1,7 +1,7 @@
 #pragma once
 
-#ifndef SAF_SMRP2
-#define SAF_SMRP2
+#ifndef SAF_SMPR2
+#define SAF_SMPR2
 
 #include <string>
 #include <vector>
@@ -493,9 +493,7 @@ struct single_midi_processor_2
 		template<typename _head, typename... _tail>
 		static size_t __total_size(const _head& head, const _tail&... tail)
 		{
-			return
-				size_of_contained_data(head) +
-				__total_size(tail...);
+			return size_of_contained_data(head) + __total_size(tail...);
 		}
 
 		template<typename _head, typename... _tail>
@@ -541,8 +539,8 @@ struct single_midi_processor_2
 			case 3: { copy_back_traits::copy_back(vec, get_value<uint16_t>(begin, 0), get_value<uint8_t>(begin, 2)); break; }
 			case 4: { copy_back_traits::copy_back(vec, get_value<uint32_t>(begin, 0)); break; }
 			case 5: { copy_back_traits::copy_back(vec, get_value<uint32_t>(begin, 0), get_value<uint8_t>(begin, 4)); break; }
-			case 6: { copy_back_traits::copy_back(vec, get_value<uint32_t>(begin, 0), get_value<uint16_t>(begin, 2)); break; }
-			case 7: { copy_back_traits::copy_back(vec, get_value<uint32_t>(begin, 0), get_value<uint16_t>(begin, 2), get_value<uint8_t>(begin, 6)); break; }
+			case 6: { copy_back_traits::copy_back(vec, get_value<uint32_t>(begin, 0), get_value<uint16_t>(begin, 4)); break; }
+			case 7: { copy_back_traits::copy_back(vec, get_value<uint32_t>(begin, 0), get_value<uint16_t>(begin, 4), get_value<uint8_t>(begin, 6)); break; }
 			case 8: { copy_back_traits::copy_back(vec, get_value<uint64_t>(begin, 0)); break; }
 
 			//case 9: { copy_back_traits::copy_back(vec, get_value<uint64_t>(begin, 0), get_value<uint8_t>(begin, 0 + 8)); break; }
@@ -550,8 +548,8 @@ struct single_midi_processor_2
 			//case 11: { copy_back_traits::copy_back(vec, get_value<uint64_t>(begin, 0), get_value<uint16_t>(begin, 0 + 8), get_value<uint8_t>(begin, 2 + 8)); break; }
 			//case 12: { copy_back_traits::copy_back(vec, get_value<uint64_t>(begin, 0), get_value<uint32_t>(begin, 0 + 8)); break; }
 			//case 13: { copy_back_traits::copy_back(vec, get_value<uint64_t>(begin, 0), get_value<uint32_t>(begin, 0 + 8), get_value<uint8_t>(begin, 4 + 8)); break; }
-			//case 14: { copy_back_traits::copy_back(vec, get_value<uint64_t>(begin, 0), get_value<uint32_t>(begin, 0 + 8), get_value<uint16_t>(begin, 2 + 8)); break; }
-			//case 15: { copy_back_traits::copy_back(vec, get_value<uint64_t>(begin, 0), get_value<uint32_t>(begin, 0 + 8), get_value<uint16_t>(begin, 2 + 8), get_value<uint8_t>(begin, 6 + 8)); break; }
+			//case 14: { copy_back_traits::copy_back(vec, get_value<uint64_t>(begin, 0), get_value<uint32_t>(begin, 0 + 8), get_value<uint16_t>(begin, 4 + 8)); break; }
+			//case 15: { copy_back_traits::copy_back(vec, get_value<uint64_t>(begin, 0), get_value<uint32_t>(begin, 0 + 8), get_value<uint16_t>(begin, 4 + 8), get_value<uint8_t>(begin, 6 + 8)); break; }
 			//case 16: { copy_back_traits::copy_back(vec, get_value<uint64_t>(begin, 0), get_value<uint64_t>(begin, 0 + 8)); break; }
 			default:
 			{
@@ -880,6 +878,9 @@ struct single_midi_processor_2
 
 	FORCEDINLINE static tick_type convert_ppq(tick_type value, ppq_type from, ppq_type to)
 	{
+		if (from == to)
+			return value;
+
 		constexpr auto radix = 1ull << 32;
 		auto hi = value >> 32;
 		auto lo = value & (~0u);
@@ -1033,7 +1034,7 @@ struct single_midi_processor_2
 	{
 		std::multimap<base_type, event_transforming_filter> filters;
 
-		const event_transforming_filter selection_filter = [&selection_data = settings.selection_data]
+		const event_transforming_filter selection_filter = [&selection_data = settings.selection_data, &filter = settings.filter]
 		(const data_iterator& begin, const data_iterator& end, const data_iterator& cur, single_track_data& std_ref) -> bool
 		{
 			auto& tick = get_value<tick_type>(cur, tick_position);
@@ -1055,6 +1056,9 @@ struct single_midi_processor_2
 			case 0x90:
 			case 0x80:
 			{
+				if (!filter.pass_notes) [[unlikely]]
+					break;
+
 				bool is_note_on = channelless_type & 0x10;
 
 				auto& reference_event_pair = get_value<tick_type>(cur, event_param3);
@@ -1095,6 +1099,9 @@ struct single_midi_processor_2
 					case 0xA0:
 					case 0xB0:
 					{
+						if (!filter.pass_other)
+							break;
+
 						const auto& param1 = get_value<base_type>(cur, event_param1);
 						const auto& param2 = get_value<base_type>(cur, event_param2);
 						const std::uint16_t key = (type << 8) | (param1);
@@ -1103,8 +1110,15 @@ struct single_midi_processor_2
 						break;
 					}
 					case 0xC0:
+					{
+						if (filter.piano_only) [[likely]]
+							break;
+					}
 					case 0xD0:
 					{
+						if (!filter.pass_other)
+							break;
+
 						const auto& param = get_value<base_type>(cur, event_param1);
 						const std::uint16_t key = type;
 						auto& data = std_ref.selection_data.channel_events_at_selection_front[key];
@@ -1114,6 +1128,9 @@ struct single_midi_processor_2
 					}
 					case 0xE0:
 					{
+						if (!filter.pass_pitch)
+							break;
+
 						const auto& param1 = get_value<base_type>(cur, event_param1);
 						const auto& param2 = get_value<base_type>(cur, event_param2);
 						const std::uint16_t key = type;
@@ -1135,6 +1152,9 @@ struct single_midi_processor_2
 						{
 						case 0x51:
 						{
+							if (!filter.pass_tempo)
+								break;
+
 							constexpr auto base_position = get_meta_param_index(1, 0);
 							const auto& tempo_byte1 = get_value<base_type>(cur, base_position + 0);
 							const auto& tempo_byte2 = get_value<base_type>(cur, base_position + 1);
@@ -1145,20 +1165,24 @@ struct single_midi_processor_2
 						}
 						[[unlikely]] case 0x0A:
 						{
+							if (!filter.pass_other)
+								break;
+
 							constexpr auto base_position = get_meta_param_index(1, 0);
 
 							const auto& size = get_value<base_type>(cur, base_position);
 							if (size != 0x8 && size != 0xB) [[unlikely]]
 								break;
 
-							const auto& signature = get_value<base_type>(cur, base_position + 0);
+							const auto& signature = get_value<base_type>(cur, base_position + 1);
 							if (signature) [[unlikely]]
 								break;
+
 							std_ref.selection_data.frontal_color_event.is_empty = false;
 							std_ref.selection_data.frontal_color_event.size = size;
 							std_ref.selection_data.frontal_color_event.data[0] = signature;
 							for(size_t i = 1; i < size; ++i)
-								std_ref.selection_data.frontal_color_event.data[i] = get_value<base_type>(cur, event_param3 + i);
+								std_ref.selection_data.frontal_color_event.data[i] = get_value<base_type>(cur, base_position + i);
 							break;
 						}
 						default:
@@ -1168,11 +1192,13 @@ struct single_midi_processor_2
 					}
 					}
 				}
+
 				tick = disable_tick;
 			}
 
-			return false;
 			}
+
+			return false;
 		};
 
 		const event_transforming_filter program_transform = [filtering = settings.filter]
@@ -1316,8 +1342,11 @@ struct single_midi_processor_2
 			{
 				case 0xF0:
 				case 0xF7:
+				{
 					if (!filtering.pass_sysex)
 						tick = disable_tick;
+					break;
+				}
 				case 0xFF:
 				default: 
 					if (!filtering.pass_other)
@@ -1803,7 +1832,7 @@ struct single_midi_processor_2
 							settings_obj::processing_details::dummy_event[1],
 							settings_obj::processing_details::dummy_event[2],
 							settings_obj::processing_details::dummy_event[3]);
-						rsb = settings_obj::processing_details::dummy_event[0];
+						rsb = 0;
 
 						delta -= current_delta;
 					}
@@ -1984,4 +2013,4 @@ struct single_midi_processor_2
 	}
 };
 
-#endif // SAF_SMRP2
+#endif // SAF_SMPR2

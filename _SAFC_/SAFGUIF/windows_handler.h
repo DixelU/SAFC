@@ -64,8 +64,8 @@ struct windows_handler
 
 		win_map["ALERT"] = std::make_unique<moveable_fui_window>(
 			"Alert window", system_white,
-			-100, alertheight / 2, 200, alertheight,
-			150, 2.5f, alertheight / 8, alertheight / 8, 1.25f,
+			-100.f, alertheight / 2, 200.f, alertheight,
+			150.f, 2.5f, alertheight / 8, alertheight / 8, 1.25f,
 			BACKGROUND, HEADER_ALERT, BORDER);
 		{
 			auto& ptr = win_map["ALERT"];
@@ -81,7 +81,7 @@ struct windows_handler
 
 		win_map["PROMPT"] = std::make_unique<moveable_fui_window>(
 			"prompt", system_white,
-			-50, 50, 100, 100, 50, 2.5f, 25, 25, 2.5f,
+			-50.f, 50.f, 100.f, 100.f, 50.f, 2.5f, 25.f, 25.f, 2.5f,
 			BACKGROUND, HEADER_PROMPT, BORDER);
 		{
 			auto& ptr = win_map["PROMPT"];

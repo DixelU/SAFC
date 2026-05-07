@@ -15,6 +15,7 @@
 #include <ranges>
 #include <mutex>
 #include <unordered_map>
+#include <new>
 
 #include "../bbb_ffio.h"
 
@@ -627,6 +628,7 @@ struct simple_player
 		std::atomic<bool> parser_done{false};       // parser finished all events
 		std::atomic<uint64_t> parsed_up_to_us{0};   // how far ahead the parser has reached (in us)
 		std::atomic<uint64_t> sender_position_us{0}; // current sender playback position (in us)
+		std::atomic<bool> memory_failure{false};
 
 		// Lookahead limits: parser throttles when too far ahead
 		static constexpr uint64_t max_lookahead_us = 7500000;  // 5 seconds max lookahead
@@ -649,6 +651,7 @@ struct simple_player
 			parser_done = false;
 			parsed_up_to_us = 0;
 			sender_position_us = 0;
+			memory_failure = false;
 			track_states.clear();
 			send_buffer.clear();
 			visuals.reset();
@@ -707,7 +710,9 @@ struct simple_player
 		for (const auto& device : devices)
 		{
 			std::wstring wname = device.szPname;
-			names.emplace_back(wname.begin(), wname.end());
+			std::string name(wname.size(), '\0');
+			std::transform(wname.begin(), wname.end(), name.begin(), [](wchar_t c) { return static_cast<char>(c); });
+			names.push_back(std::move(name));
 		}
 
 		return names;
@@ -761,16 +766,30 @@ struct simple_player
 
 	void simple_run(std::wstring filename)
 	{
-		auto res = open(filename);
-		info.open_complete = true;
+		memory_failure_reported.store(false, std::memory_order_release);
+		cancel_requested.store(false, std::memory_order_release);
 
-		if (!res)
+		try
 		{
-			throw_alert_error("Playback failed");
-			return;
-		}
+			auto res = open(filename);
+			info.open_complete = true;
 
-		playback_thread();
+			if (cancel_requested.load(std::memory_order_acquire))
+				return;
+
+			if (!res)
+			{
+				throw_alert_error("Playback failed");
+				return;
+			}
+
+			playback_thread();
+		}
+		catch (const std::bad_alloc&)
+		{
+			info.open_complete = true;
+			handle_memory_failure(true);
+		}
 	}
 
 	const playback_state& get_state() const
@@ -855,6 +874,7 @@ struct simple_player
 	// Stop playback completely
 	void stop()
 	{
+		cancel_requested.store(true, std::memory_order_release);
 		state.stop_requested.store(true, std::memory_order_release);
 
 		// If paused, unpause so threads can exit
@@ -872,8 +892,11 @@ struct simple_player
 		return state.playing.load(std::memory_order_acquire);
 	}
 
+	const std::wstring& get_filename() const { return current_filename; }
+
 	bool open(std::wstring filename)
 	{
+		current_filename = filename;
 		// prerequisite: this is a midi file with valid header;
 		mmap = std::make_unique<bbb_mmap>(filename.c_str());
 		info = midi_info{};
@@ -902,6 +925,9 @@ struct simple_player
 
 		while (ptr < end)
 		{
+			if (cancel_requested.load(std::memory_order_acquire))
+				return false;
+
 			if(!read_through_one_track(ptr, end))
 				return false;
 
@@ -1280,53 +1306,95 @@ struct simple_player
 
 	void playback_thread()
 	{
-		state.reset();
-		state.start_time = std::chrono::steady_clock::now();
-		state.playing.store(true, std::memory_order_release);
-
-		// Start paused by default so user can select synth first
-		state.paused.store(true, std::memory_order_release);
-		state.pause_position_us.store(0, std::memory_order_release);
-
-		uint64_t skip_to_us = 0;
-		bool pause_after_seek = false;
-
-		for (;;)
+		try
 		{
-			// reset per-iteration state
-			state.stop_requested.store(false, std::memory_order_relaxed);
-			state.seeking_ff.store(false, std::memory_order_relaxed);
-			state.parser_done.store(false, std::memory_order_relaxed);
-			state.parsed_up_to_us.store(0, std::memory_order_relaxed);
-			state.sender_position_us.store(0, std::memory_order_relaxed);
-			state.send_buffer.clear();
-			state.visuals.reset();
-			state.track_states.clear();
+			state.reset();
+			state.start_time = std::chrono::steady_clock::now();
+			state.playing.store(true, std::memory_order_release);
 
-			// Launch parser and sender threads
-			std::thread parser_thread([this, skip_to_us, pause_after_seek]() {
-				parser_thread_func(skip_to_us, pause_after_seek);
-			});
-			std::thread sender_thread([this]() { sender_thread_func(); });
+			// Start paused by default so user can select synth first
+			state.paused.store(true, std::memory_order_release);
+			state.pause_position_us.store(0, std::memory_order_release);
 
-			parser_thread.join();
-			sender_thread.join();
+			uint64_t skip_to_us = 0;
+			bool pause_after_seek = false;
 
-			// Check if this was a seek (threads stopped due to seek_requested)
-			if (state.seek_requested.load(std::memory_order_acquire))
+			for (;;)
 			{
-				skip_to_us = state.seek_target_us.load(std::memory_order_relaxed);
-				pause_after_seek = state.seek_resume_paused.load(std::memory_order_relaxed);
+				// reset per-iteration state
+				state.stop_requested.store(false, std::memory_order_relaxed);
+				state.seeking_ff.store(false, std::memory_order_relaxed);
+				state.parser_done.store(false, std::memory_order_relaxed);
+				state.parsed_up_to_us.store(0, std::memory_order_relaxed);
+				state.sender_position_us.store(0, std::memory_order_relaxed);
+				state.memory_failure.store(false, std::memory_order_relaxed);
+				state.send_buffer.clear();
+				state.visuals.reset();
+				state.track_states.clear();
 
-				state.seek_requested.store(false, std::memory_order_relaxed);
-				state.paused.store(false, std::memory_order_relaxed);
+				// Launch parser and sender threads
+				std::thread parser_thread;
+				std::thread sender_thread;
 
-				all_notes_off();
-				continue;
+				try
+				{
+					parser_thread = std::thread([this, skip_to_us, pause_after_seek]() {
+						try
+						{
+							parser_thread_func(skip_to_us, pause_after_seek);
+						}
+						catch (const std::bad_alloc&)
+						{
+							handle_memory_failure();
+						}
+					});
+					sender_thread = std::thread([this]() { sender_thread_func(); });
+				}
+				catch (...)
+				{
+					state.stop_requested.store(true, std::memory_order_release);
+					state.parser_done.store(true, std::memory_order_release);
+
+					if (parser_thread.joinable())
+						parser_thread.join();
+					if (sender_thread.joinable())
+						sender_thread.join();
+
+					throw;
+				}
+
+				parser_thread.join();
+				sender_thread.join();
+
+				if (state.memory_failure.load(std::memory_order_acquire))
+				{
+					report_memory_failure_once();
+					break;
+				}
+
+				// Check if this was a seek (threads stopped due to seek_requested)
+				if (state.seek_requested.load(std::memory_order_acquire))
+				{
+					skip_to_us = state.seek_target_us.load(std::memory_order_relaxed);
+					pause_after_seek = state.seek_resume_paused.load(std::memory_order_relaxed);
+
+					state.seek_requested.store(false, std::memory_order_relaxed);
+					if (pause_after_seek)
+						state.pause_position_us.store(skip_to_us, std::memory_order_release);
+
+					state.paused.store(pause_after_seek, std::memory_order_relaxed);
+
+					all_notes_off();
+					continue;
+				}
+
+				// Normal exit
+				break;
 			}
-
-			// Normal exit
-			break;
+		}
+		catch (const std::bad_alloc&)
+		{
+			handle_memory_failure(true);
 		}
 
 		all_notes_off();
@@ -1444,6 +1512,16 @@ struct simple_player
 		}
 	};
 
+	template <float SCALE>
+	static uint8_t scale(uint8_t value)
+	{
+		// 16-bit fractional part is more than enough for uint8_t → uint8_t scaling
+		constexpr uint32_t MAGIC = static_cast<uint32_t>(SCALE * (1u << 16) + 0.5f);
+
+		uint32_t temp = static_cast<uint32_t>(value) * MAGIC;
+		return static_cast<uint8_t>(temp >> 16);
+	}
+
 	SIMPLE_PLAYER_FORCE_NO_INLINE void draw(draw_data& data)
 	{
 		constexpr int total_white = draw_data::white_keys_count();
@@ -1514,15 +1592,14 @@ struct simple_player
 						continue;
 
 					auto color_value = rotate(0xFF7F008F, note.track_id);
+					const draw_data::color color_split{
+						.r = uint8_t(color_value >> 24),
+						.g = uint8_t(color_value >> 16),
+						.b = uint8_t(color_value >> 8),
+					};
 
 					if (begin_y <= 0 && end_y >= 0)
-					{
-						keyboard_colors[index] = draw_data::color{
-							.r = uint8_t(color_value >> 24),
-							.g = uint8_t(color_value >> 16),
-							.b = uint8_t(color_value >> 8),
-						};
-					}
+						keyboard_colors[index] = color_split;
 
 					begin_y = std::clamp(begin_y, 0.f, 1.f);
 					end_y = std::clamp(end_y, 0.f, 1.f);
@@ -1621,19 +1698,32 @@ struct simple_player
 		{
 			const auto& key = data.keyboard[i];
 			auto color = keyboard_colors[i];
+			uint8_t glare = 0;
 			
 			if (color.r == 0 && color.g == 0 && color.b == 0)
 			{
 				if (i < total_white)
+				{
 					color = {1, 1, 1};
+					glare = 0xAF;
+				}
 				else
+				{
 					color = {0, 0, 0};
+					glare = 48;
+				}
 			}
 
-			glColor3ub(color.r, color.g, color.b);
+			glColor3ub(scale<0.9f>(color.r) + glare, scale<0.9f>(color.g) + glare, scale<0.9f>(color.b) + glare);
 			glVertex2f(key.tl.x, key.tl.y);
+
+			glColor3ub(color.r, color.g, color.b);
 			glVertex2f(key.tr.x, key.tr.y);
+
+			glColor3ub(scale<0.9f>(color.r) + glare, scale<0.9f>(color.g) + glare, scale<0.9f>(color.b) + glare);
 			glVertex2f(key.br.x, key.br.y);
+
+			glColor3ub(color.r, color.g, color.b);
 			glVertex2f(key.bl.x, key.bl.y);
 		}
 		glEnd();
@@ -1684,28 +1774,26 @@ struct simple_player
 	}
 
 private:
-
-	static uint32_t mul255_div_by_factor(uint32_t rgba, uint32_t divisor)
+	void handle_memory_failure(bool report_now = false)
 	{
-		// Works well when divisor is small constant: 2,3,4,5,6,8,10,...
-		// divisor must be > 0
+		state.memory_failure.store(true, std::memory_order_release);
+		state.stop_requested.store(true, std::memory_order_release);
+		state.seek_requested.store(false, std::memory_order_release);
+		state.seeking_ff.store(false, std::memory_order_release);
+		state.parser_done.store(true, std::memory_order_release);
+		state.paused.store(false, std::memory_order_release);
+		info.open_complete = true;
 
-		constexpr uint32_t MAGIC_R = (1u << 24) / 255u + 1;  // ~ 0x01010101 when using 1<<24
+		if (report_now)
+			report_memory_failure_once();
+	}
 
-		// 1. unpack
-		uint32_t rb = rgba & 0x00FF00FFu;          // R and B in low 8 bits each
-		uint32_t ga = (rgba >> 8) & 0x00FF00FFu;   // G and A
+	void report_memory_failure_once()
+	{
+		if (memory_failure_reported.exchange(true, std::memory_order_acq_rel))
+			return;
 
-		// 2. multiply + add rounding bias
-		rb = ((rb * MAGIC_R) >> 24) / divisor;
-		ga = ((ga * MAGIC_R) >> 24) / divisor;
-
-		// 3. saturate (optional but strongly recommended)
-		rb += ((rb >> 8) & 1) * 0x00FF00FFu;   // cheap saturate to 255
-		ga += ((ga >> 8) & 1) * 0x00FF00FFu;
-
-		// 4. repack
-		return (ga << 8) | rb;
+		throw_alert_error("Not enough memory to play this MIDI. Playback was stopped.");
 	}
 
 	static uint32_t rotate(uint32_t color, uint32_t shift)
@@ -2030,7 +2118,8 @@ private:
 			if (midiOutOpen(&hout_copy, device, 0, 0, 0) != MMSYSERR_NOERROR)
 			{
 				std::wstring name = devices[device].szPname;
-				auto readable_name = std::string(name.begin(), name.end());
+				std::string readable_name(name.size(), '\0');
+				std::transform(name.begin(), name.end(), readable_name.begin(), [](wchar_t c) { return static_cast<char>(c); });
 				throw_alert_error("Unable to open MIDI out '" + readable_name + "'!");
 				hout = nullptr;
 			}
@@ -2074,6 +2163,7 @@ private:
 
 	std::shared_ptr<logger_base> warnings;
 
+	std::wstring current_filename;
 	std::unique_ptr<bbb_mmap> mmap;
 
 	midi_info info;
@@ -2083,6 +2173,8 @@ private:
 	size_t current_device = ~0ULL;
 	std::vector<MIDIOUTCAPSW> devices;
 	inline static std::atomic<HMIDIOUT> hout;
+	std::atomic<bool> memory_failure_reported{false};
+	std::atomic<bool> cancel_requested{false};
 
 	void(WINAPI* short_msg)(uint32_t msg) = nullptr;
 	bool(WINAPI* kdmapi_status)() = nullptr;
@@ -2121,6 +2213,7 @@ struct player_viewer : public handleable_ui_part
 
 		data->move(dx, dy);
 	}
+
 	void safe_change_position(float NewX, float NewY) override
 	{
 		std::lock_guard<std::recursive_mutex> locker(lock);
@@ -2130,6 +2223,7 @@ struct player_viewer : public handleable_ui_part
 
 		safe_move(NewX, NewY);
 	}
+
 	void safe_change_position_argumented(std::uint8_t Arg, float NewX, float NewY) override
 	{
 		std::lock_guard<std::recursive_mutex> locker(lock);
@@ -2143,6 +2237,7 @@ struct player_viewer : public handleable_ui_part
 				) * data->height;
 		safe_change_position(NewX + CW, NewY + CH);
 	}
+
 	void rescale_and_reposition(float new_xpos, float new_ypos, float new_width, float new_height)
 	{
 		std::lock_guard<std::recursive_mutex> locker(lock);
@@ -2155,14 +2250,17 @@ struct player_viewer : public handleable_ui_part
 		data->reinit(new_width, new_height, data->last_keyboard_height * width_factor_change, data->last_keyboard_height * width_factor_change * black_relative_height, 0.f);
 		data->move(new_xpos - 0.5f * data->width, new_ypos);
 	}
+
 	void keyboard_handler(char) override
 	{
 		return;
 	}
+
 	void safe_string_replace(std::string) override
 	{
 		return;
 	}
+
 	[[nodiscard]] bool mouse_handler(float, float, char, char) override
 	{
 		return false;

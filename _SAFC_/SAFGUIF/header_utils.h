@@ -4,11 +4,11 @@
 
 #include <GL/freeglut.h>
 
-#include "../consts.h"
-
-#include <Windows.h>
 #include <string>
 #include <vector>
+#include <Windows.h>
+
+#include "../consts.h"
 
 constexpr int base_internal_range = 200;
 
