@@ -2435,11 +2435,40 @@ void player_watch_func()
 
 void on_open_player()
 {
+	if (player->get_state().playing)
+	{
+		global_window_handler->enable_window("SIMPLAYER");
+		return;
+	}
+
+	auto midis_list = _WH_t<selectable_properted_list>("MAIN", "List");
+	if (midis_list->selected_id.empty())
+	{
+		throw_alert_warning("Please first select the MIDI file before opening the player");
+		return;
+	}
+
+	if (player->get_state().paused)
+	{
+		auto window = (*global_window_handler)["SIMPLAYER"];
+		if (window->enabled)
+		{
+			global_window_handler->enable_window("SIMPLAYER");
+			return;
+		}
+
+		player->stop();
+		window->enable();
+	}
+
 	worker_singleton<struct player_thread>::instance().push([]()
 	{
 		auto midis_list = _WH_t<selectable_properted_list>("MAIN", "List");
 		if (midis_list->selected_id.empty())
+		{
+			throw_alert_error("Fastest mouse action on the wild west detected");
 			return;
+		}
 
 		auto& id = midis_list->selected_id.front();
 
