@@ -35,6 +35,11 @@ struct buffered_queue_spsc
 private:
 	static constexpr size_t slab_size = 1 << 15;
 
+	// Cap on cached empty slabs per queue. Above this, freed slabs are
+	// deleted rather than pushed to the recycle stack, so peak polyphony
+	// doesn't leave the recycle stack hoarding memory indefinitely.
+	static constexpr size_t max_recycled_slabs = 6;
+
 	struct slab
 	{
 		alignas(64) std::aligned_storage_t<sizeof(T), alignof(T)> data[slab_size];
@@ -102,6 +107,12 @@ private:
 	// lock-free recycle stack: consumer pushes, producer pops
 	alignas(64) std::atomic<slab*> recycle_head_{nullptr};
 
+	// Bound on cached slabs in recycle stack (touched by both threads)
+	alignas(64) std::atomic<size_t> recycle_count_{0};
+
+	// Approximate element count for size-based throttling (touched by both threads)
+	alignas(64) std::atomic<size_t> size_{0};
+
 	slab* producer_get_slab()
 	{
 		// Try recycle stack first (lock-free pop)
@@ -112,6 +123,7 @@ private:
 			if (recycle_head_.compare_exchange_weak(r, next,
 				std::memory_order_acquire, std::memory_order_relaxed))
 			{
+				recycle_count_.fetch_sub(1, std::memory_order_relaxed);
 				r->reset_for_reuse();
 				return r;
 			}
@@ -121,12 +133,20 @@ private:
 
 	void consumer_recycle_slab(slab* s)
 	{
+		// Cap the recycle stack so freed slabs don't accumulate after a peak
+		if (recycle_count_.load(std::memory_order_relaxed) >= max_recycled_slabs)
+		{
+			delete s;
+			return;
+		}
+
 		// lock-free push to recycle stack
 		slab* old_head = recycle_head_.load(std::memory_order_relaxed);
 		do {
 			s->next_slab.store(old_head, std::memory_order_relaxed);
 		} while (!recycle_head_.compare_exchange_weak(old_head, s,
 			std::memory_order_release, std::memory_order_relaxed));
+		recycle_count_.fetch_add(1, std::memory_order_relaxed);
 	}
 
 	void ensure_initialized_producer()
@@ -185,6 +205,7 @@ public:
 		{
 			tail_->push_producer(std::move(value));
 		}
+		size_.fetch_add(1, std::memory_order_relaxed);
 	}
 
 	// Producer: get reference to last pushed element (for pending tracking)
@@ -200,6 +221,7 @@ public:
 			return;
 
 		head_->pop_consumer();
+		size_.fetch_sub(1, std::memory_order_relaxed);
 
 		// If current slab exhausted, try to advance
 		if (head_->empty_consumer())
@@ -268,6 +290,15 @@ public:
 				break;
 			}
 		}
+		size_.store(0, std::memory_order_relaxed);
+	}
+
+	// Approximate element count. Producer/consumer use relaxed atomics, so
+	// the value may briefly drift but only ever toward the truth; safe for
+	// throttle decisions where a small overestimate just delays resumption.
+	[[nodiscard]] size_t approximate_size() const
+	{
+		return size_.load(std::memory_order_relaxed);
 	}
 
 	// Consumer iterator for traversal
@@ -622,7 +653,8 @@ struct simple_player
 		std::atomic<uint64_t> seek_target_us{0};
 		std::atomic<bool> seek_resume_paused{false};
 
-		// Lookahead buffer for pre-parsed MIDI messages (unbounded SPSC - never stalls parser)
+		// Lookahead buffer for pre-parsed MIDI messages (SPSC; parser throttles
+		// when it gets too far ahead in time or holds too many pending events).
 		buffered_queue_spsc<send_event> send_buffer;
 		std::atomic<bool> seeking_ff{false};        // parser is fast-forwarding (sender drains immediately)
 		std::atomic<bool> parser_done{false};       // parser finished all events
@@ -631,8 +663,14 @@ struct simple_player
 		std::atomic<bool> memory_failure{false};
 
 		// Lookahead limits: parser throttles when too far ahead
-		static constexpr uint64_t max_lookahead_us = 7500000;  // 5 seconds max lookahead
+		static constexpr uint64_t max_lookahead_us = 5000000;  // 5 seconds max lookahead
 		static constexpr uint64_t min_lookahead_us = 2500000;  // 2.5 seconds min before resuming parse
+
+		// Event-count throttle: caps send_buffer at dense tick clusters where
+		// the time-based throttle alone won't fire (millions of events packed
+		// into a single tick or sub-millisecond span). 1M events * 24B ~= 24MB
+		// ceiling for the lookahead buffer regardless of MIDI density.
+		static constexpr size_t max_pending_events = 1u << 26;
 
 		void reset()
 		{
@@ -1030,7 +1068,8 @@ struct simple_player
 
 			if (!fast_forwarding)
 			{
-				// Throttle: wait if we're too far ahead of the sender, or if paused
+				// Throttle: wait if we're too far ahead in time, have too many
+				// pending events buffered, or are paused.
 				while (!state.stop_requested)
 				{
 					// Wait while paused (sleep longer to avoid busy-wait)
@@ -1042,8 +1081,10 @@ struct simple_player
 
 					uint64_t sender_pos = state.sender_position_us.load(std::memory_order_acquire);
 					uint64_t lookahead = (batch_time_us > sender_pos) ? (batch_time_us - sender_pos) : 0;
+					size_t pending = state.send_buffer.approximate_size();
 
-					if (lookahead < playback_state::max_lookahead_us)
+					if (lookahead < playback_state::max_lookahead_us &&
+						pending < playback_state::max_pending_events)
 						break;
 
 					// Too far ahead - sleep until sender catches up closer
@@ -1184,9 +1225,23 @@ struct simple_player
 					}
 				}
 
-				// Push message to lookahead buffer (unbounded - never stalls)
+				// Push message to lookahead buffer.
 				if (msg_to_send != 0)
+				{
 					state.send_buffer.push({batch_tick, batch_time_us, msg_to_send});
+
+					// Per-batch (outer) throttle only fires between unique ticks,
+					// so a single dense tick could otherwise push millions of
+					// events before the next check. Enforce the size cap here too.
+					while (!fast_forwarding && !state.stop_requested &&
+						state.send_buffer.approximate_size() >= playback_state::max_pending_events)
+					{
+						if (state.paused.load(std::memory_order_acquire))
+							std::this_thread::sleep_for(std::chrono::microseconds(100));
+						else
+							std::this_thread::sleep_for(std::chrono::microseconds(10));
+					}
+				}
 
 				// Re-schedule track or remove from heap.
 				// replace_top = one sift-down vs pop+push = O(log n) instead of O(2 log n).
