@@ -1671,7 +1671,10 @@ struct simple_player
 					if (end_time != ~0ULL)
 						end_y = float(end_offset) / float(data.scroll_window_us);
 
-					if (end_y < -0.01f || begin_y > 1.01f)
+					if (begin_y > 1.01f)
+						break; // Queue is ordered by start_time_us, so later notes are even further above view.
+
+					if (end_y < -0.01f)
 						continue;
 
 					data.key_note_spans.push_back({
