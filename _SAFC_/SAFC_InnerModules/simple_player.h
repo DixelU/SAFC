@@ -402,8 +402,8 @@ struct simple_player
 		// Only accessed by parser thread - no synchronization needed
 		struct pending_entry
 		{
-			uint32_t track_id;
 			buffered_note* note_ptr;
+			uint32_t track_id;
 		};
 
 		// Per-track_id LIFO stacks of pending notes per key.
@@ -634,7 +634,7 @@ struct simple_player
 
 	struct playback_state
 	{
-		tick_type current_tick;
+		// tick_type current_tick;
 		uint64_t current_time_us;
 		std::chrono::steady_clock::time_point start_time;
 		uint64_t start_offset_us;
@@ -674,7 +674,6 @@ struct simple_player
 
 		void reset()
 		{
-			current_tick = 0;
 			current_time_us = 0;
 			start_offset_us = 0;
 			active_tracks = 0;
@@ -1325,7 +1324,6 @@ struct simple_player
 
 			// update current position for UI and parser throttling
 			state.current_time_us = ev.time_us;
-			state.current_tick = ev.tick;
 			state.sender_position_us.store(ev.time_us, std::memory_order_release);
 
 			// wait until it's time to send this event
@@ -1472,10 +1470,24 @@ struct simple_player
 		// Scratch buffers for batched note rendering (reused each frame)
 		struct note_vert  { float x, y; };
 		struct note_color { uint8_t r, g, b, a; };
+		struct note_span
+		{
+			float begin_y;
+			float end_y;
+			uint32_t color_value;
+			bool touches_keyboard;
+		};
+		struct interval
+		{
+			float begin_y;
+			float end_y;
+		};
 		std::vector<note_vert>  note_verts;
 		std::vector<note_color> note_colors;
 		std::vector<note_vert>  outline_verts;
 		std::vector<note_color> outline_colors;
+		std::vector<note_span>  key_note_spans;
+		std::vector<interval>   covered_intervals;
 
 		bool enable_simulated_lag = true;
 
@@ -1622,9 +1634,25 @@ struct simple_player
 
 			visuals.cull_expired(int64_t(current_us) - data.scroll_window_us);
 
+			size_t queued_notes = 0;
+			for (const auto& queue : visuals.falling_notes)
+				queued_notes += queue.approximate_size();
+
+			const size_t fill_vert_capacity = queued_notes * 4;
+			const size_t outline_vert_capacity = queued_notes * 8;
+			if (data.note_verts.capacity() < fill_vert_capacity)
+				data.note_verts.reserve(fill_vert_capacity);
+			if (data.note_colors.capacity() < fill_vert_capacity)
+				data.note_colors.reserve(fill_vert_capacity);
+			if (data.outline_verts.capacity() < outline_vert_capacity)
+				data.outline_verts.reserve(outline_vert_capacity);
+			if (data.outline_colors.capacity() < outline_vert_capacity)
+				data.outline_colors.reserve(outline_vert_capacity);
+
 			auto batch_notes_for_index = [&](int index)
 			{
 				uint8_t key = data.key_n[index];
+				data.key_note_spans.clear();
 
 				for (auto it = visuals.falling_notes[key].begin();
 					it != visuals.falling_notes[key].end(); ++it)
@@ -1646,27 +1674,41 @@ struct simple_player
 					if (end_y < -0.01f || begin_y > 1.01f)
 						continue;
 
-					auto color_value = rotate(0xFF7F008F, note.track_id);
-					const draw_data::color color_split{
-						.r = uint8_t(color_value >> 24),
-						.g = uint8_t(color_value >> 16),
-						.b = uint8_t(color_value >> 8),
+					data.key_note_spans.push_back({
+						std::clamp(begin_y, 0.f, 1.f),
+						std::clamp(end_y, 0.f, 1.f),
+						rotate(0xFF7F008F, note.track_id),
+						begin_y <= 0 && end_y >= 0
+					});
+				}
+
+				if (data.key_note_spans.empty())
+					return;
+
+				for (auto it = data.key_note_spans.rbegin(); it != data.key_note_spans.rend(); ++it)
+				{
+					if (!it->touches_keyboard)
+						continue;
+
+					keyboard_colors[index] = {
+						uint8_t(it->color_value >> 24),
+						uint8_t(it->color_value >> 16),
+						uint8_t(it->color_value >> 8),
 					};
+					break;
+				}
 
-					if (begin_y <= 0 && end_y >= 0)
-						keyboard_colors[index] = color_split;
+				data.covered_intervals.clear();
+				data.covered_intervals.reserve(data.key_note_spans.size());
 
-					begin_y = std::clamp(begin_y, 0.f, 1.f);
-					end_y = std::clamp(end_y, 0.f, 1.f);
+				const float lx = data.keyboard[index].tl.x;
+				const float rx = data.keyboard[index].tr.x;
 
+				auto emit_span = [&](float begin_y, float end_y, uint32_t color_value)
+				{
 					begin_y = data.keyboard->tr.y + data.height * begin_y;
 					end_y = data.keyboard->tr.y + data.height * end_y;
 
-					//begin_y = (data.keyboard->tr.y + draw_data::HEIGHT) * (1 - begin_y) + (begin_y)*data.keyboard->tr.y;
-					//end_y = (data.keyboard->tr.y + draw_data::HEIGHT) * (1 - end_y) + (end_y)*data.keyboard->tr.y;
-
-					const float lx = data.keyboard[index].tl.x;
-					const float rx = data.keyboard[index].tr.x;
 					const draw_data::note_color note_color{
 						uint8_t(color_value >> 24),
 						uint8_t(color_value >> 16),
@@ -1698,7 +1740,6 @@ struct simple_player
 					data.note_colors.push_back(note_color_shady);
 					data.note_colors.push_back(note_color_shady);
 
-					// 4 edges as GL_LINES pairs (replaces GL_LINE_LOOP)
 					data.outline_verts.push_back({lx, begin_y}); data.outline_verts.push_back({lx, end_y});
 					data.outline_verts.push_back({lx, end_y});   data.outline_verts.push_back({rx, end_y});
 					data.outline_verts.push_back({rx, end_y});   data.outline_verts.push_back({rx, begin_y});
@@ -1706,6 +1747,51 @@ struct simple_player
 
 					for (int e = 0; e < 8; ++e)
 						data.outline_colors.push_back(note_border_col);
+				};
+
+				auto add_covered_interval = [&](float begin_y, float end_y)
+				{
+					if (begin_y >= end_y)
+						return;
+
+					auto insert_it = data.covered_intervals.begin();
+					while (insert_it != data.covered_intervals.end() && insert_it->end_y < begin_y)
+						++insert_it;
+
+					float merged_begin = begin_y;
+					float merged_end = end_y;
+					while (insert_it != data.covered_intervals.end() && insert_it->begin_y <= merged_end)
+					{
+						merged_begin = std::min(merged_begin, insert_it->begin_y);
+						merged_end = std::max(merged_end, insert_it->end_y);
+						insert_it = data.covered_intervals.erase(insert_it);
+					}
+
+					data.covered_intervals.insert(insert_it, {merged_begin, merged_end});
+				};
+
+				for (auto it = data.key_note_spans.rbegin(); it != data.key_note_spans.rend(); ++it)
+				{
+					float cursor = it->begin_y;
+					for (const auto& covered : data.covered_intervals)
+					{
+						if (covered.end_y <= cursor)
+							continue;
+						if (covered.begin_y >= it->end_y)
+							break;
+
+						if (covered.begin_y > cursor)
+							emit_span(cursor, std::min(covered.begin_y, it->end_y), it->color_value);
+
+						cursor = std::max(cursor, covered.end_y);
+						if (cursor >= it->end_y)
+							break;
+					}
+
+					if (cursor < it->end_y)
+						emit_span(cursor, it->end_y, it->color_value);
+
+					add_covered_interval(it->begin_y, it->end_y);
 				}
 			};
 
