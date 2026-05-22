@@ -171,6 +171,7 @@ public:
 			delete head_;
 			head_ = next;
 		}
+
 		// Clean up recycle stack
 		slab* r = recycle_head_.load(std::memory_order_relaxed);
 		while (r)
@@ -202,9 +203,8 @@ public:
 			tail_ = new_slab;
 		}
 		else
-		{
 			tail_->push_producer(std::move(value));
-		}
+
 		size_.fetch_add(1, std::memory_order_relaxed);
 	}
 
@@ -538,7 +538,6 @@ struct simple_player
 
 	struct send_event
 	{
-		uint64_t tick;
 		uint64_t time_us;    // target send time in microseconds from start
 		uint32_t short_msg;  // prepared MIDI short message (0 = invalid/empty)
 	};
@@ -1227,7 +1226,7 @@ struct simple_player
 				// Push message to lookahead buffer.
 				if (msg_to_send != 0)
 				{
-					state.send_buffer.push({batch_tick, batch_time_us, msg_to_send});
+					state.send_buffer.push({batch_time_us, msg_to_send});
 
 					// Per-batch (outer) throttle only fires between unique ticks,
 					// so a single dense tick could otherwise push millions of
