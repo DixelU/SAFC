@@ -71,7 +71,7 @@ struct windows_handler
 			auto& ptr = win_map["ALERT"];
 
 			(*ptr)["AlertText"] = 
-				std::make_unique<text_box>("_", system_white, 20.f, alerttext_vert_pos, alertheight - 12.5f, 155.f, 7.5f, 0, 0, 0,
+				std::make_unique<text_box>("_", system_white, 15.f, alerttext_vert_pos, alertheight - 12.5f, 145.f, 7.5f, 0, 0, 0,
 				_Align::left, text_box::VerticalOverflow::recalibrate);
 			(*ptr)["AlertSign"] = 
 				std::make_unique<special_sign_handler>(special_signs::draw_a_circle, -78.5f, -17.f, 12.f, 0x000000FF, 0x001FFFFF);

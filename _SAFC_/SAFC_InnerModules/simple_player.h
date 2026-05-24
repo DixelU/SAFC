@@ -1494,7 +1494,7 @@ struct simple_player
 		std::vector<interval>   covered_intervals;
 
 		bool enable_simulated_lag = true;
-		uint8_t remove_overlaps = 1;
+		uint8_t remove_overlaps = 0;
 
 		static constexpr uint8_t MAX_OVERLAPS_REMOVAL_VERSION = 1;
 		static constexpr float DEFAULT_WIDTH = 400, DEFAULT_HEIGHT = 250;
@@ -1729,6 +1729,7 @@ struct simple_player
 		GLsizei white_fill_verts = 0;
 		GLsizei white_outline_verts = 0;
 
+		try
 		{
 			// lock against visuals.reset() which may be called by playback_thread on seek/restart.
 			std::lock_guard<std::mutex> visuals_lock(visuals.access_mutex);
@@ -1877,6 +1878,11 @@ struct simple_player
 			white_outline_verts = static_cast<GLsizei>(data.outline_verts.size());
 			for (int index = total_white; index < 128; ++index)
 				batch_notes_for_index(index);
+		}
+		catch (const std::bad_alloc&)
+		{
+			handle_memory_failure(true);
+			return;
 		}
 
 		// Draw order: white fills, white outlines, black fills, black outlines.
