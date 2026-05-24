@@ -1489,6 +1489,7 @@ struct simple_player
 		std::vector<interval>   covered_intervals;
 
 		bool enable_simulated_lag = true;
+		bool remove_overlaps = true;
 
 		static constexpr float DEFAULT_WIDTH = 400, DEFAULT_HEIGHT = 250;
 		float width = DEFAULT_WIDTH, height = DEFAULT_HEIGHT;
@@ -1700,9 +1701,6 @@ struct simple_player
 					break;
 				}
 
-				data.covered_intervals.clear();
-				data.covered_intervals.reserve(data.key_note_spans.size());
-
 				const float lx = data.keyboard[index].tl.x;
 				const float rx = data.keyboard[index].tr.x;
 
@@ -1750,6 +1748,17 @@ struct simple_player
 					for (int e = 0; e < 8; ++e)
 						data.outline_colors.push_back(note_border_col);
 				};
+
+				if (!data.remove_overlaps)
+				{
+					for (const auto& span : data.key_note_spans)
+						emit_span(span.begin_y, span.end_y, span.color_value);
+
+					return;
+				}
+
+				data.covered_intervals.clear();
+				data.covered_intervals.reserve(data.key_note_spans.size());
 
 				auto add_covered_interval = [&](float begin_y, float end_y)
 				{

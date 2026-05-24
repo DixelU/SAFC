@@ -116,6 +116,7 @@ struct Graphing : handleable_ui_part
 			}
 			glVertex2f(cx_pos + 0.5f * width, (is_last_loop_complete) ? prev_value : t_prev_value);
 			glEnd();
+
 			if (assigned_x_selection_by_key > 0.5f)
 			{
 				__glcolor(selection_color);
@@ -130,6 +131,7 @@ struct Graphing : handleable_ui_part
 					glEnd();
 				}
 			}
+
 			if (auto_adjusting)
 			{
 				if (min_value != max_value) {
@@ -139,6 +141,7 @@ struct Graphing : handleable_ui_part
 						scale_coef = new_scale_coef;
 				}
 			}
+
 			if (is_hovered)
 			{
 				local_fp_type cur_x = (((mx_pos - cx_pos) / width) / horizontal_scaling - central_point + 0.5f) * (end - begin) + begin;
@@ -197,8 +200,8 @@ struct Graphing : handleable_ui_part
 			glVertex2f(cx_pos + 0.5f * width, cy_pos - target_height * 0.5f);
 			glVertex2f(cx_pos - 0.5f * width, cy_pos - target_height * 0.5f);
 			glEnd();
-			if (stl_info->current_text != "graph disabled")
-				stl_info->safe_string_replace("graph disabled");
+			if (stl_info->current_text != "Graph disabled")
+				stl_info->safe_string_replace("Graph disabled");
 		}
 
 		stl_info->draw();

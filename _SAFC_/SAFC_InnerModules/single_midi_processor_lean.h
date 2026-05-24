@@ -492,6 +492,7 @@ struct single_midi_processor_lean
 		writer.push(0xFF);
 		writer.push(0x2F);
 		writer.push(0x00);
+
 		if (!track_ended)
 			(*buffers.warning) << "Track ended without explicit EOT — synthesized";
 

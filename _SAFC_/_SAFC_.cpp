@@ -2605,6 +2605,17 @@ void on_unbuffered_switch()
 	buffering_switch->safe_string_replace(player_view->data->enable_simulated_lag ? "Simulate lag" : "Allow unbuffered");
 }
 
+void on_overlap_removal_switch()
+{
+	auto window = (*global_window_handler)["SIMPLAYER"];
+	auto player_view = (player_viewer*)(*window)["VIEW"];
+	auto overlap_switch = (button*)(*window)["OVERLAP_SWITCH"];
+
+	player_view->data->remove_overlaps ^= true;
+
+	overlap_switch->safe_string_replace(player_view->data->remove_overlaps ? "Overlaps removed" : "Overlaps drawn");
+}
+
 void on_playback_seek_to(float value)
 {
 	if (!player || !player->is_playing())
@@ -2621,6 +2632,7 @@ struct simplayer_saved_state {
 	float pause_x, pause_y;
 	float stop_x, stop_y;
 	float buf_switch_x, buf_switch_y;
+	float overlap_switch_x, overlap_switch_y;
 	float max_x, max_y;
 	float vls_x, vls_y;
 	float seek_x, seek_y, seek_track_length;
@@ -2643,6 +2655,7 @@ void apply_simplayer_maximised_layout()
 	auto stop_btn = (button*)(*window)["STOP"];
 	auto vls = (slider*)(*window)["VIEW_LEN_SLIDER"];
 	auto buf_sw = (button*)(*window)["BUFFERING_SWITCH"];
+	auto overlap_sw = (button*)(*window)["OVERLAP_SWITCH"];
 	auto seek_to = (slider*)(*window)["SEEK_TO"];
 	auto max_btn = (button*)(*window)["MAXIMISE"];
 	auto dev_list = (selectable_properted_list*)(*window)["DEVICE_LIST"];
@@ -2660,6 +2673,7 @@ void apply_simplayer_maximised_layout()
 	// Position controls near the top
 	float row1_y = half_h - 10;
 	float row2_y = row1_y - 25;
+	float row3_y = row2_y - 5;
 
 	pause_btn->safe_change_position(-half_w + 10, row1_y);
 	stop_btn->safe_change_position(-half_w + 25, row1_y);
@@ -2669,6 +2683,8 @@ void apply_simplayer_maximised_layout()
 
 	max_btn->safe_change_position(half_w - 30, row2_y + 10);
 	dev_list->safe_change_position(-half_w + 60, row2_y + 15);
+
+	overlap_sw->safe_change_position(half_w - 50, row3_y);
 
 	// Stretch seek slider
 	float seek_y = row2_y - 15;
@@ -2695,6 +2711,7 @@ void switch_maximise()
 	auto stop_btn = (button*)(*window)["STOP"];
 	auto vls = (slider*)(*window)["VIEW_LEN_SLIDER"];
 	auto buf_sw = (button*)(*window)["BUFFERING_SWITCH"];
+	auto overlap_sw = (button*)(*window)["OVERLAP_SWITCH"];
 	auto seek_to = (slider*)(*window)["SEEK_TO"];
 	auto max_btn = (button*)(*window)["MAXIMISE"];
 	auto dev_list = (selectable_properted_list*)(*window)["DEVICE_LIST"];
@@ -2717,6 +2734,8 @@ void switch_maximise()
 		state.vls_y = vls->y_pos;
 		state.buf_switch_x = buf_sw->x_pos;
 		state.buf_switch_y = buf_sw->y_pos;
+		state.overlap_switch_x = overlap_sw->x_pos;
+		state.overlap_switch_y = overlap_sw->y_pos;
 		state.seek_x = seek_to->x_pos;
 		state.seek_y = seek_to->y_pos;
 		state.seek_track_length = seek_to->track_length;
@@ -2758,6 +2777,7 @@ void switch_maximise()
 		stop_btn->safe_change_position(state.stop_x, state.stop_y);
 		vls->safe_change_position(state.vls_x, state.vls_y);
 		buf_sw->safe_change_position(state.buf_switch_x, state.buf_switch_y);
+		overlap_sw->safe_change_position(state.overlap_switch_x, state.overlap_switch_y);
 		seek_to->safe_change_position(state.seek_x, state.seek_y);
 		seek_to->track_length = state.seek_track_length;
 		max_btn->safe_change_position(state.max_x, state.max_y);
@@ -3047,6 +3067,11 @@ void init()
 		system_white, 
 		on_unbuffered_switch,
 		155, 180 - moveable_window::window_header_size, 80, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr);
+	(*window)["OVERLAP_SWITCH"] = new button(
+		player_view->data->remove_overlaps ? "Overlaps removed" : "Overlaps drawn",
+		system_white,
+		on_overlap_removal_switch,
+		155, 150 - moveable_window::window_header_size, 80, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr);
 
 	(*window)["SEEK_TO"] = new slider(slider::Orientation::horizontal, 0, 130 - moveable_window::window_header_size, 375, 0, 1, 0, on_playback_seek_to, 0x808080FF, 0xFFFFFFFF, 0xAACFFFFF, 0x007FFFFF, 0x808080FF, 10, 4);
 
