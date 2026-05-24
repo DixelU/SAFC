@@ -2605,15 +2605,27 @@ void on_unbuffered_switch()
 	buffering_switch->safe_string_replace(player_view->data->enable_simulated_lag ? "Simulate lag" : "Allow unbuffered");
 }
 
-void on_overlap_removal_switch()
+void on_overlap_removal_switch_action(bool with_increment)
 {
 	auto window = (*global_window_handler)["SIMPLAYER"];
 	auto player_view = (player_viewer*)(*window)["VIEW"];
 	auto overlap_switch = (button*)(*window)["OVERLAP_SWITCH"];
 
-	player_view->data->remove_overlaps ^= true;
+	if (with_increment)
+	{
+		player_view->data->remove_overlaps += 1;
+		if (player_view->data->remove_overlaps > 1)
+			player_view->data->remove_overlaps = 0xFF;
+	}
 
-	overlap_switch->safe_string_replace(player_view->data->remove_overlaps ? "Overlaps removed" : "Overlaps drawn");
+	const char* states[] = {"Overlaps drawn", "Naive OR", "R/t OR (Beta)"};
+
+	overlap_switch->safe_string_replace( states[(player_view->data->remove_overlaps + 1) & 0xFF]);
+}
+
+void on_overlap_removal_switch()
+{
+	on_overlap_removal_switch_action(true);
 }
 
 void on_playback_seek_to(float value)
@@ -3068,7 +3080,7 @@ void init()
 		on_unbuffered_switch,
 		155, 180 - moveable_window::window_header_size, 80, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr);
 	(*window)["OVERLAP_SWITCH"] = new button(
-		player_view->data->remove_overlaps ? "Overlaps removed" : "Overlaps drawn",
+		"R/t OR",
 		system_white,
 		on_overlap_removal_switch,
 		155, 150 - moveable_window::window_header_size, 80, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr);
@@ -3113,6 +3125,8 @@ void init()
 	//global_window_handler->enable_window("SMPAS");//Debug line
 	//global_window_handler->enable_window("PROMPT");////DEBUUUUG
 	//global_window_handler->enable_window("OTHER_SETS");
+
+	on_overlap_removal_switch_action(false);
 
 	DragAcceptFiles(hWnd, true);
 	OleInitialize(nullptr);

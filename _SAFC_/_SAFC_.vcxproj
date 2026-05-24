@@ -282,6 +282,7 @@
       <AdditionalOptions>/Zc:lambda %(AdditionalOptions)</AdditionalOptions>
       <AssemblerOutput>All</AssemblerOutput>
       <CallingConvention>FastCall</CallingConvention>
+      <FloatingPointExceptions>false</FloatingPointExceptions>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
