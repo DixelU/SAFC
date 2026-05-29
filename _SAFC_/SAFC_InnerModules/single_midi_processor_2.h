@@ -960,7 +960,7 @@ struct single_midi_processor_2
 	{
 		auto db_current = data_buffer.begin();
 
-#pragma pack (push, 1)
+#pragma pack (push, 4)
 		struct data
 		{
 			tick_type tick;
