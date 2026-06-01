@@ -983,7 +983,7 @@ struct single_midi_processor_2
 			(*buffers.log) << "Prepairing buffer (size: " + std::to_string(size) + ")";
 
 		std::vector<data> data_pointers;
-		data_pointers.reserve(2500000);
+		data_pointers.reserve(data_buffer.size() / expected_size(base_type(0x80)));
 
 		tick_type i = 0;
 
