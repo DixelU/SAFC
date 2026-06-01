@@ -300,8 +300,7 @@ struct single_midi_processor_lean
 			{
 				if (rsb_in < 0x80) [[unlikely]]
 				{
-					(*buffers.error) << (std::to_string(in.tellg()) +
-						": Unexpected data byte with no running status");
+					(*buffers.error) << log_event{log_event_type::unexpected_zero_rsb, (uint64_t)(std::streamoff)in.tellg()};
 					return false;
 				}
 
@@ -475,14 +474,12 @@ struct single_midi_processor_lean
 					}
 					else
 					{
-						(*buffers.error) << (std::to_string(in.tellg()) +
-							": Unsupported 0xFx status " + std::to_string(cmd));
+						(*buffers.error) << log_event{log_event_type::unknown_event_type, (uint64_t)(std::streamoff)in.tellg(), (uint64_t)cmd};
 						return false;
 					}
 				}
 				default: {
-					(*buffers.error) << (std::to_string(in.tellg()) +
-						": Unknown event type " + std::to_string(cmd));
+					(*buffers.error) << log_event{log_event_type::unknown_event_type, (uint64_t)(std::streamoff)in.tellg(), (uint64_t)cmd};
 					return false;
 				}
 			}
@@ -492,9 +489,6 @@ struct single_midi_processor_lean
 		writer.push(0xFF);
 		writer.push(0x2F);
 		writer.push(0x00);
-
-		if (!track_ended)
-			(*buffers.warning) << "Track ended without explicit EOT — synthesized";
 
 		const bool skip = settings.proc_details.remove_empty_tracks && !any_event;
 		if (writer.finish(skip))
@@ -536,7 +530,7 @@ struct single_midi_processor_lean
 				tracks_written);
 
 			loggers.last_input_position = file_input.tellg();
-			(*loggers.log) << (std::to_string(tracks_written) + " tracks written");
+			(*loggers.log) << log_event{log_event_type::tracks_processed, (uint64_t)tracks_written, 1};
 		}
 
 		file_input.close();

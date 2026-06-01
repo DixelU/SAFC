@@ -15,6 +15,7 @@ struct midi_processor_visualiser : handleable_ui_part
 	bool processing, finished, hovered;
 
 	std::unique_ptr<single_text_line> stl_log, stl_warn, stl_err, stl_info;
+	log_event log_event, warning_event, error_event, info_event;
 
 	midi_processor_visualiser(float xpos, float ypos, single_text_line_settings* stls)
 	{
@@ -25,16 +26,16 @@ struct midi_processor_visualiser : handleable_ui_part
 		auto base_rgba = stls->rgba_color;
 		stls->rgba_color = 0xFFFFFFFF;
 		stls->set_new_pos(xpos, ypos - 20);
-		this->stl_log.reset(stls->create_one("_"));
+		this->stl_log.reset(stls->create_one(" "));
 		stls->rgba_color = 0xFFFF00FF;
 		stls->set_new_pos(xpos, ypos - 30);
-		this->stl_warn.reset(stls->create_one("_"));
+		this->stl_warn.reset(stls->create_one(" "));
 		stls->rgba_color = 0xFF3F00FF;
 		stls->set_new_pos(xpos, ypos - 40);
-		this->stl_err.reset(stls->create_one("_"));
+		this->stl_err.reset(stls->create_one(" "));
 		stls->rgba_color = 0xFFFFFFFF;
 		stls->set_new_pos(xpos, ypos + 40);
-		this->stl_info.reset(stls->create_one("_"));
+		this->stl_info.reset(stls->create_one(" "));
 		stls->rgba_color = base_rgba;
 	}
 
@@ -95,17 +96,26 @@ struct midi_processor_visualiser : handleable_ui_part
 		std::lock_guard locker(lock);
 		auto& logger_ptr = processor_readeable_data.second;
 
-		auto last_logger_line = logger_ptr->log->get_last();
-		if (last_logger_line != stl_log->current_text)
-			stl_log->safe_string_replace(last_logger_line);
+		auto last_log = logger_ptr->log->get_last_event();
+		if (last_log != this->log_event)
+		{
+			this->log_event = last_log;
+			stl_log->safe_string_replace(logger_ptr->log->get_last());
+		}
 
-		auto last_warning_line = logger_ptr->warning->get_last();
-		if (last_warning_line != stl_warn->current_text)
-			stl_warn->safe_string_replace(last_warning_line);
+		auto last_warning = logger_ptr->warning->get_last_event();
+		if (last_warning != this->warning_event)
+		{
+			this->warning_event = last_warning;
+			stl_warn->safe_string_replace(logger_ptr->warning->get_last());
+		}
 
-		auto last_error_line = logger_ptr->error->get_last();
-		if (last_error_line != stl_err->current_text)
-			stl_err->safe_string_replace(last_error_line);
+		auto last_error = logger_ptr->error->get_last_event();
+		if (last_error != this->error_event)
+		{
+			this->error_event = last_error;
+			stl_err->safe_string_replace(logger_ptr->error->get_last());
+		}
 
 		if (processing != processor_readeable_data.second->processing)
 			processing = processor_readeable_data.second->processing;
@@ -130,15 +140,16 @@ struct midi_processor_visualiser : handleable_ui_part
 	void draw() override
 	{
 		std::lock_guard locker(lock);
+
 		if (!processor_readeable_data.first || !processor_readeable_data.second)
 		{
-			if (stl_err->current_text != "SMRP is NULL!")
-				stl_err->safe_string_replace("SMRP is NULL!");
+			if (stl_err->current_text != "No source")
+				stl_err->safe_string_replace("No source");
 		}
 		else
 		{
-			if (stl_err->current_text == "SMRP is NULL!")
-				stl_err->safe_string_replace("_");
+			if (stl_err->current_text == "No source")
+				stl_err->safe_string_replace(" ");
 			update_info();
 		}
 

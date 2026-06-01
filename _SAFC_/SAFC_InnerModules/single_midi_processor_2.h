@@ -26,47 +26,95 @@
 
 #include "../function_wrapper.h"
 
+enum class log_event_type : uint8_t
+{
+	none,
+	empty_buffer,
+	preparing_buffer,
+	sorting_buffer,
+	copying_buffer,
+	tracks_processed,
+	processing_failed,
+	sorting_failed,
+	off_of_non_on_note,
+	incorrect_note_ref,
+	unexpected_zero_rsb,
+	unknown_event_type,
+	unexpected_end_of_buffer,
+	track_size_mismatch,
+};
+
+struct log_event
+{
+	log_event_type type = log_event_type::none;
+	uint64_t param1 = 0;
+	uint64_t param2 = 0;
+
+	bool operator==(const log_event& rhs) const = default;
+
+	static std::string to_display_string(const log_event& e)
+	{
+		switch (e.type)
+		{
+		case log_event_type::empty_buffer:
+			return "Empty buffer";
+		case log_event_type::preparing_buffer:
+			return "Preparing buffer (size: " + std::to_string(e.param1) + ")";
+		case log_event_type::sorting_buffer:
+			return "Sorting buffer (elements: " + std::to_string(e.param1) + ")";
+		case log_event_type::copying_buffer:
+			return "Copying buffer (elements: " + std::to_string(e.param1) + ")";
+		case log_event_type::tracks_processed:
+			return std::to_string(e.param1) + " tracks processed. (" + std::to_string(e.param2) + ") new.";
+		case log_event_type::processing_failed:
+			return "Something went wrong during processing";
+		case log_event_type::sorting_failed:
+			return "Something went wrong during sorting";
+		case log_event_type::off_of_non_on_note:
+			return std::to_string(e.param1) + ": OFF of nonON Note: " + std::to_string(e.param2);
+		case log_event_type::incorrect_note_ref:
+			return std::to_string(e.param1) + ": Incorrect index of note reference " + std::to_string(e.param2);
+		case log_event_type::unexpected_zero_rsb:
+			return std::to_string(e.param1) + ": Unexpected 0 RSB";
+		case log_event_type::unknown_event_type:
+			return std::to_string(e.param1) + ": Unknown event type " + std::to_string(e.param2);
+		case log_event_type::unexpected_end_of_buffer:
+			return "B*" + std::to_string(e.param1) + ": unexpected end of buffer";
+		case log_event_type::track_size_mismatch:
+			return "Track size mismatch (expected " + std::to_string(e.param1) + ", got " + std::to_string(e.param2) + ")";
+		default:
+			return "";
+		}
+	}
+};
+
 struct logger_base
 {
 	virtual ~logger_base() = default;
-	virtual void operator<<(std::string&& message) {};
-	virtual std::string get_last() const { return ""; };
-
-	virtual void report(std::vector<std::ptrdiff_t> data, std::string&& message)
-	{
-		std::string accumulator = "{";
-
-		for (size_t i = 0; i < data.size(); ++i)
-		{
-			accumulator += std::to_string(data[i]);
-			if (i + 1 < data.size())
-				accumulator += ", ";
-		}
-		accumulator += "}";
-
-		operator<<(std::move(accumulator) + ": " + std::move(message));
-	};
+	virtual void operator<<(log_event event) {}
+	virtual log_event get_last_event() const { return {}; }
+	std::string get_last() const { return log_event::to_display_string(get_last_event()); }
 };
 
 struct logger :
 	public logger_base
 {
 protected:
-	std::vector<std::string> messages;
+	std::vector<log_event> messages;
 	mutable std::mutex mtx;
 public:
 	~logger() override {}
-	void operator<<(std::string&& message) override
+	void operator<<(log_event event) override
 	{
 		std::lock_guard locker(mtx);
-		messages.push_back(std::move(message));
+		messages.push_back(event);
 	}
-	std::string get_last() const override
+	log_event get_last_event() const override
 	{
 		std::lock_guard locker(mtx);
-		return (messages.size()) ? messages.back() : "";
+		return messages.empty() ? log_event{} : messages.back();
 	}
-	std::vector<std::string> get_all() const
+	std::vector<log_event> get_all() const
 	{
 		std::lock_guard locker(mtx);
 		return messages;
@@ -77,18 +125,18 @@ struct singleline_logger :
 	public logger
 {
 protected:
-	std::string message;
+	log_event current_event{};
 public:
 	~singleline_logger() override {}
-	void operator<<(std::string&& message) override
+	void operator<<(log_event event) override
 	{
 		std::lock_guard locker(mtx);
-		this->message = std::move(message);
+		current_event = event;
 	}
-	std::string get_last() const override
+	log_event get_last_event() const override
 	{
 		std::lock_guard locker(mtx);
-		return message;
+		return current_event;
 	}
 };
 
@@ -99,11 +147,11 @@ public:
 	std::string color;
 	printing_logger(std::string color = "37") : color(std::move(color)) {}
 	~printing_logger() override {}
-	void operator<<(std::string&& message) override
+	void operator<<(log_event event) override
 	{
 		std::lock_guard locker(mtx);
-		this->message = std::move(message);
-		std::osyncstream(std::cout) << "\x1b[0;" + color + "m " << this->message << "\x1b[0m" << std::endl;
+		current_event = event;
+		std::osyncstream(std::cout) << "\x1b[0;" + color + "m " << log_event::to_display_string(event) << "\x1b[0m" << std::endl;
 	}
 };
 
@@ -115,23 +163,24 @@ public:
 	nonrepeating_logger(std::string color = "37")
 		:printing_logger(color)
 	{}
-	void operator<<(std::string&& message) override
+	void operator<<(log_event event) override
 	{
-		std::unique_lock locker(mtx);
-
-		if (message == "flush")
-			return used_messages.clear();
-
-		auto pos = message.find_last_of('}');
-		if (pos == std::string::npos)
-			pos = 0;
-
-		auto [it, success] = used_messages.insert(message.substr(pos));
-		if (success)
-			printing_logger::operator<<(std::move(message));
+		{
+			std::lock_guard locker(mtx);
+			auto [it, success] = used_events.insert(static_cast<uint8_t>(event.type));
+			if (!success)
+				return;
+			current_event = event;
+		}
+		std::osyncstream(std::cout) << "\x1b[0;" + color + "m " << log_event::to_display_string(event) << "\x1b[0m" << std::endl;
+	}
+	void flush_dedup()
+	{
+		std::lock_guard locker(mtx);
+		used_events.clear();
 	}
 private:
-	std::unordered_set<std::string> used_messages;
+	std::unordered_set<uint8_t> used_events;
 };
 
 struct single_midi_processor_2
@@ -682,7 +731,7 @@ struct single_midi_processor_2
 			if (command < 0x80)
 			{
 				is_good = false;
-				(*buffers.error) << (std::to_string(file_input.tellg()) + ": Unexpected 0 RSB");
+				(*buffers.error) << log_event{log_event_type::unexpected_zero_rsb, (uint64_t)(std::streamoff)file_input.tellg()};
 				break;
 			}
 
@@ -716,15 +765,14 @@ struct single_midi_processor_2
 					else
 					{
 						polyphony_error = true;
-						(*buffers.warning) << (std::to_string(file_input.tellg()) +
-							": Incorrect index of note reference " + std::to_string(other_note_reference));
+						(*buffers.warning) << log_event{log_event_type::incorrect_note_ref, (uint64_t)(std::streamoff)file_input.tellg(), (uint64_t)other_note_reference};
 					}
 				}
 				else
 				{
 					polyphony_error = true;
 					++noteoff_misses;
-					(*buffers.warning) << (std::to_string(file_input.tellg()) + ": OFF of nonON Note: " + std::to_string(noteoff_misses));
+					(*buffers.warning) << log_event{log_event_type::off_of_non_on_note, (uint64_t)(std::streamoff)file_input.tellg(), (uint64_t)noteoff_misses};
 				}
 
 				if (polyphony_error) [[unlikely]]
@@ -809,7 +857,7 @@ struct single_midi_processor_2
 				break;
 			}
 			default: {
-				(*buffers.error) << (std::to_string(file_input.tellg()) + ": Unknown event type " + std::to_string(command));
+				(*buffers.error) << log_event{log_event_type::unknown_event_type, (uint64_t)(std::streamoff)file_input.tellg(), (uint64_t)command};
 				break;
 			}
 			}
@@ -912,7 +960,7 @@ struct single_midi_processor_2
 		auto size = data_buffer.size();
 
 		if (size == 0) [[unlikely]]
-			return ((*buffers.log) << "Empty buffer"), false;
+			return ((*buffers.log) << log_event{log_event_type::empty_buffer}), false;
 
 		std::size_t i = 0;
 
@@ -922,7 +970,7 @@ struct single_midi_processor_2
 
 			if (i + 8 >= size) [[unlikely]]
 			{
-				(*buffers.error) << ("B*" + std::to_string(i) + ": unexpected end of buffer");
+				(*buffers.error) << log_event{log_event_type::unexpected_end_of_buffer, (uint64_t)i};
 				break;
 			}
 
@@ -978,9 +1026,9 @@ struct single_midi_processor_2
 		auto size = data_buffer.size();
 
 		if (size == 0) // [[unlikely]]
-			return ((*buffers.log) << "Empty buffer (sort)"), false;
+			return ((*buffers.log) << log_event{log_event_type::empty_buffer}), false;
 		else
-			(*buffers.log) << "Prepairing buffer (size: " + std::to_string(size) + ")";
+			(*buffers.log) << log_event{log_event_type::preparing_buffer, size};
 
 		std::vector<data> data_pointers;
 		data_pointers.reserve(data_buffer.size() / expected_size(base_type(0x80)));
@@ -993,7 +1041,7 @@ struct single_midi_processor_2
 
 			if (i + 8 >= size) // [[unlikely]]
 			{
-				(*buffers.error) << ("B*" + std::to_string(i) + ": unexpected end of buffer");
+				(*buffers.error) << log_event{log_event_type::unexpected_end_of_buffer, (uint64_t)i};
 				break;
 			}
 
@@ -1008,11 +1056,11 @@ struct single_midi_processor_2
 			i += di;
 		}
 
-		(*buffers.log) << "Sorting buffer (elements: " + std::to_string(data_pointers.size()) + ")";
+		(*buffers.log) << log_event{log_event_type::sorting_buffer, data_pointers.size()};
 
 		std::sort(data_pointers.begin(), data_pointers.end());
 
-		(*buffers.log) << "Copying buffer (elements: " + std::to_string(data_pointers.size()) + ")";
+		(*buffers.log) << log_event{log_event_type::copying_buffer, data_pointers.size()};
 
 		std::vector<base_type> sorted_data_buffer;
 		sorted_data_buffer.reserve(data_buffer.size());
@@ -1792,7 +1840,7 @@ struct single_midi_processor_2
 
 			if (i + 8 >= size) [[unlikely]]
 			{
-				(*buffers.error) << ("B*" + std::to_string(i) + ": unexpected end of buffer");
+				(*buffers.error) << log_event{log_event_type::unexpected_end_of_buffer, (uint64_t)i};
 				break;
 			}
 			
@@ -1955,7 +2003,7 @@ struct single_midi_processor_2
 					process_buffer(track_buffers.data_buffer, filter_iters, track_processing_data, loggers);
 
 				if (!successful_processing)
-					(*loggers.error) << "Something went wrong during processing";
+					(*loggers.error) << log_event{log_event_type::processing_failed};
 				else
 					post_processing(track_buffers.data_buffer, track_processing_data, data);
 			}
@@ -1965,7 +2013,7 @@ struct single_midi_processor_2
 				bool successful_processing =
 					sort_buffer(track_buffers.data_buffer, track_processing_data, loggers);
 				if (!successful_processing)
-					(*loggers.error) << "Something went wrong during sorting";
+					(*loggers.error) << log_event{log_event_type::sorting_failed};
 			}
 
 			size_t current_count;
@@ -1998,7 +2046,7 @@ struct single_midi_processor_2
 			}
 
 			loggers.last_input_position = file_input.tellg();
-			(*loggers.log) << (std::to_string(track_counter) + " tracks processed. (" + std::to_string(current_count) + ") new.");
+			(*loggers.log) << log_event{log_event_type::tracks_processed, (uint64_t)track_counter, (uint64_t)current_count};
 		}
 
 		file_input.close();
