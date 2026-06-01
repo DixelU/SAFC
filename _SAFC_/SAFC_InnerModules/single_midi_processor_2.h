@@ -78,7 +78,6 @@ struct singleline_logger :
 {
 protected:
 	std::string message;
-	mutable std::mutex mtx;
 public:
 	~singleline_logger() override {}
 	void operator<<(std::string&& message) override
@@ -118,6 +117,8 @@ public:
 	{}
 	void operator<<(std::string&& message) override
 	{
+		std::unique_lock locker(mtx);
+
 		if (message == "flush")
 			return used_messages.clear();
 
@@ -367,7 +368,7 @@ struct single_midi_processor_2
 
 	FORCEDINLINE static void ostream_write(std::vector<base_type>& vec, std::ostream& out)
 	{
-		out.write(((char*)vec.data()), vec.size());;
+		out.write(((char*)vec.data()), vec.size());
 	}
 
 	FORCEDINLINE static uint8_t push_vlv(uint32_t value, std::vector<base_type>& vec)
@@ -579,7 +580,7 @@ struct single_midi_processor_2
 	template<typename T>
 	FORCEDINLINE static bool is_valid_index(std::vector<base_type>& vec, size_t index)
 	{
-		return vec.size() <= index + sizeof(T);
+		return index + sizeof(T) <= vec.size();
 	}
 
 	struct data_buffers
