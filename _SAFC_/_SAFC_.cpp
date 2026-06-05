@@ -731,7 +731,7 @@ struct safc_data
 		inplace_merge_flag = false;
 		is_cli_mode = false;
 		collapse_midi = false;
-		save_path = to_cchar_t("");
+		save_path.clear();
 		channels_split = rsb_compression = false;
 		apply_offset_after = true;
 	}
@@ -743,7 +743,7 @@ struct safc_data
 
 		if (files.empty())
 		{
-			save_path = to_cchar_t("");
+			save_path.clear();
 			return;
 		}
 		else
@@ -3613,7 +3613,7 @@ struct safc_cli_runtime:
 
 		try
 		{
-			auto config_path = std::filesystem::u8path(argv[1]);
+			auto config_path = std::filesystem::path(argv[1]);
 			std::ifstream fin(config_path);
 			std::stringstream ss;
 			ss << fin.rdbuf();

@@ -1583,11 +1583,7 @@ struct single_midi_processor_2
 		return filters;
 	}
 
-	template<bool channels_split>
-	struct track_data;
-
-	template<>
-	struct track_data<false>
+	struct track_data_single
 	{
 		static constexpr bool fill_empty_track_with_at_least_one_event = false;
 
@@ -1597,7 +1593,7 @@ struct single_midi_processor_2
 		{
 			return data;
 		}
-		inline void swap(track_data<false>& track)
+		inline void swap(track_data_single& track)
 		{
 			data.swap(track.data);
 			std::swap(prev_tick, track.prev_tick);
@@ -1651,10 +1647,9 @@ struct single_midi_processor_2
 		inline void swap_zero_and_channel(uint8_t) { return; }
 	};
 
-	template<>
-	struct track_data<true>
+	struct track_data_split
 	{
-		track_data<false> data[16]{};
+		track_data_single data[16]{};
 		uint8_t last_channel{0};
 
 		inline std::vector<uint8_t>& get_vec(uint8_t channel)
@@ -1697,6 +1692,9 @@ struct single_midi_processor_2
 				singleData.reserve(size);
 		}
 	};
+
+	template<bool channels_split>
+	using track_data = std::conditional_t<channels_split, track_data_split, track_data_single>;
 
 	template<bool compression, bool channels_split>
 	inline static void write_selection_front(
