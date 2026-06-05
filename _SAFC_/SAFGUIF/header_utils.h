@@ -2,11 +2,19 @@
 #ifndef SAFGUIF_HEADER
 #define SAFGUIF_HEADER
 
-#include <GL/freeglut.h>
-
 #include <string>
 #include <vector>
+#include <ctime>
+#include <memory>
+
+#include "../platform_compat.h"
+
+#ifndef SAFC_CLI_ONLY
+#include <GL/freeglut.h>
+#ifdef _WIN32
 #include <Windows.h>
+#endif
+#endif
 
 #include "../consts.h"
 
@@ -15,10 +23,10 @@ constexpr int base_internal_range = 200;
 float internal_range = base_internal_range, mouse_x_position = 0.f, mouse_y_position = 0.f;
 
 const char* window_title = "SAFC\0";
-std::wstring default_reg_path = L"Software\\SAFC\\";
+std_unicode_string default_reg_path = to_cchar_t("Software\\SAFC\\");
 
 std::string default_font_name = "Arial";
-std::wstring saved_midi_device_name = L"";
+std_unicode_string saved_midi_device_name = to_cchar_t("");
 bool is_fonted = true;
 
 //#define ROT_ANGLE 0.7
@@ -62,7 +70,11 @@ inline float __slowdprog(float a, float b, float progressrate)
 
 inline void __glcolor(std::uint32_t uINT)
 {
+#ifndef SAFC_CLI_ONLY
 	glColor4ub(((uINT & 0xFF000000) >> 24), ((uINT & 0xFF0000) >> 16), ((uINT & 0xFF00) >> 8), (uINT & 0xFF));
+#else
+	(void)uINT;
+#endif
 }
 
 template<typename T>
@@ -81,9 +93,13 @@ std::uint32_t timer_v = 0;
 std::int16_t years_old = -1;
 
 
+#ifndef SAFC_CLI_ONLY
+#ifdef _WIN32
 HWND hWnd;
 HDC hDc;
 auto hand_cursor = ::LoadCursor(NULL, IDC_HAND), all_direct_cursor = ::LoadCursor(NULL, IDC_CROSS), nwse_cursor = ::LoadCursor(NULL, IDC_SIZENWSE);
+#endif
+#endif
 //const float singlepixwidth = (float)RANGE / WINDXSIZE;
 
 bool check_autoupdates = true;
@@ -96,6 +112,7 @@ void inline rotate_view(float& x, float& y);
 
 int collect_time_data()
 {
+#ifdef _WIN32
 	SYSTEMTIME t;
 	GetLocalTime(&t);
 
@@ -107,6 +124,9 @@ int collect_time_data()
 		month_beginning = true;
 
 	return t.wMilliseconds + (t.wSecond * 1000) + t.wMinute * 60000;
+#else
+	return static_cast<int>(time(nullptr) % 100000);
+#endif
 }
 
 template<unsigned nx, unsigned ny>
@@ -137,7 +157,9 @@ unsigned point_in_poly(float (&vertx)[nx], float (&verty)[ny], float testx, floa
 
 void throw_alert_error(std::string&& AlertText);
 void throw_alert_warning(std::string&& AlertText);
-void add_files(const std::vector<std::wstring>& Filenames);
+void add_files(const std::vector<std_unicode_string>& Filenames);
+#ifdef _MSC_VER
 #pragma warning(disable : 4996)
+#endif
 
 #endif // !SAFGUIF_HU

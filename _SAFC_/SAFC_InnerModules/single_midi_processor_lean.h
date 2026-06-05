@@ -504,8 +504,7 @@ struct single_midi_processor_lean
 		std::vector<base_type> track(track_writer::capacity); // 1 MiB fixed buffer
 
 		bbb_ffr file_input(data.filename.c_str());
-		std::ofstream file_output(data.filename + data.postfix,
-			std::ios::binary | std::ios::out);
+		auto file_output = open_binary_output(data.filename + data.postfix);
 
 		for (int i = 0; i < 12 && file_input.good(); ++i)
 			file_output.put(file_input.get());

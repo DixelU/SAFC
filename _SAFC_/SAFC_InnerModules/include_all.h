@@ -9,6 +9,8 @@
 #include "single_midi_processor_lean.h"
 #include "midi_collection_threaded_merger.h"
 #include "fast_midi_checker.h"
+#ifndef SAFC_CLI_ONLY
 #include "simple_player.h"
+#endif
 
 #endif

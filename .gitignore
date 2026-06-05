@@ -353,7 +353,7 @@ SAFC*.7z
 
 cmake-build-*
 .idea/
-build/*
+build*
 *.APS
 *.aps
 _SAFC_\_SAFC_.APS

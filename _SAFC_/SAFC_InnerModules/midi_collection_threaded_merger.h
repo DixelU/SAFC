@@ -158,7 +158,7 @@ struct midi_collection_threaded_merger
 	midi_collection_threaded_merger(
 		std::vector<proc_data_ptr> processing_data,
 		std::uint16_t final_ppqn,
-		std::wstring save_to,
+		std_unicode_string save_to,
 		bool is_console_oriented) :
 		save_to_(std::move(save_to)),
 		final_ppqn_(final_ppqn),
@@ -293,7 +293,7 @@ struct midi_collection_threaded_merger
 	}
 
 private:
-	std::wstring save_to_;
+	std_unicode_string save_to_;
 	std::uint16_t final_ppqn_;
 	bool remnants_remove_;
 
@@ -321,7 +321,7 @@ private:
 	static std::uint64_t do_inplace_merge_impl(
 		const std::vector<std::pair<proc_data_ptr, message_buffer_ptr>>& candidates,
 		std::uint16_t ppqn,
-		const std::wstring& save_to)
+		const std_unicode_string& save_to)
 	{
 		if (candidates.empty())
 			return 0;
@@ -338,7 +338,7 @@ private:
 				s->get();
 		}
 
-		std::ofstream out(save_to + L".I.mid", std::ios::binary | std::ios::out);
+		auto out = open_binary_output(save_to + to_cchar_t(".I.mid").operator std_unicode_string());
 		out << "MThd" << '\0' << '\0' << '\0' << (char)6 << '\0' << (char)1;
 		out.put(0); out.put(0); // track count placeholder, updated at the end
 		out.put((char)(ppqn >> 8));
@@ -593,7 +593,7 @@ private:
 		{
 			streams[i]->close();
 			if (candidates[i].first->settings.proc_details.remove_remnants)
-				_wremove((candidates[i].first->filename + candidates[i].first->postfix).c_str());
+				file_remove(candidates[i].first->filename + candidates[i].first->postfix);
 		}
 
 		out.seekp(10, std::ios::beg);
@@ -608,27 +608,27 @@ private:
 	static std::uint64_t do_regular_merge_impl(
 		const std::vector<std::pair<proc_data_ptr, message_buffer_ptr>>& candidates,
 		std::uint16_t ppqn,
-		const std::wstring& save_to)
+		const std_unicode_string& save_to)
 	{
 		if (candidates.empty())
 			return 0;
 
 		std::uint64_t track_count = 0;
-		auto save_path = save_to + L".R.mid";
+		auto save_path = save_to + to_cchar_t(".R.mid").operator std_unicode_string();
 
 		if (candidates.size() == 1)
 		{
 			auto& pd = *candidates.front().first;
-			std::wstring src = pd.filename + pd.postfix;
-			_wremove(save_path.c_str());
-			_wrename(src.c_str(), save_path.c_str());
+			std_unicode_string src = pd.filename + pd.postfix;
+			file_remove(save_path);
+			file_rename(src, save_path);
 			return pd.tracks_count.load();
 		}
 
 		constexpr std::size_t buffer_size = 20'000'000;
 		auto buffer = std::make_unique<std::uint8_t[]>(buffer_size);
 
-		std::ofstream out(save_path, std::ios::binary | std::ios::out);
+		auto out = open_binary_output(save_path);
 		out.rdbuf()->pubsetbuf((char*)buffer.get(), buffer_size);
 
 		out << "MThd" << '\0' << '\0' << '\0' << (char)6 << '\0' << (char)1;
@@ -642,7 +642,7 @@ private:
 		for (auto it = candidates.begin(); it != candidates.end(); ++it)
 		{
 			auto& pd = *it->first;
-			std::wstring src = pd.filename + pd.postfix;
+			std_unicode_string src = pd.filename + pd.postfix;
 			if (it != candidates.begin())
 				file_input.reopen_next_file(src.c_str());
 			for (int i = 0; i < 14; i++)
@@ -650,7 +650,7 @@ private:
 			file_input.put_into_ostream(out);
 			track_count += pd.tracks_count;
 			if (pd.settings.proc_details.remove_remnants)
-				_wremove(src.c_str());
+				file_remove(src);
 		}
 
 		out.seekp(10, std::ios::beg);
@@ -663,13 +663,13 @@ private:
 	}
 
 	static void do_final_merge_impl(
-		const std::wstring& save_to,
+		const std_unicode_string& save_to,
 		std::uint64_t ii_count,
 		std::uint64_t ir_count,
 		bool remove_remnants)
 	{
-		auto inplace_path = save_to + L".I.mid";
-		auto regular_path = save_to + L".R.mid";
+		auto inplace_path = save_to + to_cchar_t(".I.mid").operator std_unicode_string();
+		auto regular_path = save_to + to_cchar_t(".R.mid").operator std_unicode_string();
 
 		auto im = std::make_unique<bbb_ffr>(inplace_path.c_str());
 		auto rm = std::make_unique<bbb_ffr>(regular_path.c_str());
@@ -682,9 +682,9 @@ private:
 			im->close();
 			rm->close();
 
-			auto r_del = _wremove(save_to.c_str());
-			auto r_i   = _wrename(inplace_path.c_str(), save_to.c_str());
-			auto r_r   = _wrename(regular_path.c_str(), save_to.c_str()); // one of these will not work
+			auto r_del = file_remove(save_to);
+			auto r_i   = file_rename(inplace_path, save_to);
+			auto r_r   = file_rename(regular_path, save_to); // one of these will not work
 
 			std::osyncstream(std::cout)
 				<< "S2 status: " << r_del
@@ -703,7 +703,7 @@ private:
 			total_tracks = 0xFFFF;
 		}
 
-		std::ofstream out(save_to, std::ios::binary | std::ios::out);
+		auto out = open_binary_output(save_to);
 		out << "MThd";
 		out.put(0); out.put(0); out.put(0); out.put(6);
 		out.put(0); out.put(1);
@@ -726,8 +726,8 @@ private:
 
 		if (remove_remnants)
 		{
-			_wremove(inplace_path.c_str());
-			_wremove(regular_path.c_str());
+			file_remove(inplace_path);
+			file_remove(regular_path);
 		}
 	}
 };

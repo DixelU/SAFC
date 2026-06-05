@@ -2,7 +2,12 @@
 
 #include <algorithm>
 #include <cstdlib>
+#include <cmath>
+#include <sstream>
+#include <string_view>
+#ifdef _WIN32
 #include <io.h>
+#endif
 #include <tuple>
 #include <mutex>
 #include <atomic>
@@ -16,11 +21,11 @@
 #include <iterator>
 #include <map>
 #include <thread>
-#include <boost/algorithm/string.hpp>
 
+#ifdef _WIN32
+#include <boost/algorithm/string.hpp>
 #include <WinSock2.h>
 #include <urlmon.h>
-
 #pragma comment (lib, "Version.lib")//Urlmon.lib
 #pragma comment (lib, "Urlmon.lib")//Urlmon.lib
 #pragma comment (lib, "wininet.lib")//Urlmon.lib
@@ -31,16 +36,25 @@
 #pragma comment (lib, "XmlLite.lib")
 
 #include "WinRegWrappers.h"
+#endif
 
 #include "JSON/JSON.h"
 #include "JSON/JSON.cpp"
 #include "JSON/JSONValue.cpp"
 
 #include "btree/btree_map.h"
+#include "platform_compat.h"
+
+#ifndef SAFC_CLI_ONLY
 #include "SAFGUIF/fonted_manip.h"
 #include "SAFGUIF/SAFGUIF.h"
+#else
+#include "SAFGUIF/header_utils.h"
+#endif
 #include "SAFC_InnerModules/include_all.h"
+#ifndef SAFC_CLI_ONLY
 #include "SAFCGUIF_Local/SAFGUIF_L.h"
+#endif
 
 #include "SAFC_InnerModules/single_midi_processor_2.h"
 #include "SAFC_InnerModules/bool_settings.h"
@@ -48,11 +62,17 @@
 
 #include "background_worker.h"
 
+#ifdef _WIN32
 #include <boost/dll.hpp>
 #include <archive.h>
 #include <archive_entry.h>
+#else
+#include <unistd.h>
+#endif
 
 std::tuple<std::uint16_t, std::uint16_t, std::uint16_t, std::uint16_t> g_version_tuple;
+
+#ifdef _WIN32
 std::tuple<std::uint16_t, std::uint16_t, std::uint16_t, std::uint16_t> __get_executable_version() 
 {
 	// get the filename of the executable containing the version resource
@@ -480,9 +500,16 @@ void safc_version_check()
 		}
 	});
 }
+#else
+std::tuple<std::uint16_t, std::uint16_t, std::uint16_t, std::uint16_t> __get_executable_version()
+{
+	return { 0, 0, 0, 0 };
+}
+#endif
 
 size_t get_available_memory() 
 {
+#ifdef _WIN32
 	static std::mutex mutex; 
 	std::lock_guard<std::mutex> locker(mutex);
 
@@ -511,20 +538,29 @@ size_t get_available_memory()
 	}
 
 	return ret;
+#else
+	auto pages = sysconf(_SC_AVPHYS_PAGES);
+	auto page_size = sysconf(_SC_PAGE_SIZE);
+	if (pages <= 0 || page_size <= 0)
+		return 2048;
+	return static_cast<size_t>((pages * page_size) >> 20);
+#endif
 }
 
 //////////////////////////////
 ////TRUE USAGE STARTS HERE////
 //////////////////////////////
 
+#ifndef SAFC_CLI_ONLY
 button_settings* bs_list_black_small = new button_settings(&system_white, 0, 0, 100, 10, 1, 0, 0, 0xFFEFDFFF, 0x00003F7F, 0x7F7F7FFF);
+#endif
 
 std::uint32_t default_bool_settings = _BoolSettings::remove_remnants | _BoolSettings::remove_empty_tracks | _BoolSettings::all_instruments_to_piano;
 
 struct file_settings
 {////per file settings
-	std::wstring filename;
-	std::wstring postprocessed_file_name, w_file_name_postfix;
+	std_unicode_string filename;
+	std_unicode_string postprocessed_file_name, w_file_name_postfix;
 	std::string appearance_filename, appearance_path, file_name_postfix;
 
 	double new_tempo = 0;
@@ -555,16 +591,14 @@ struct file_settings
 
 	single_midi_info_collector::time_graph time_map;
 
-	file_settings(const std::wstring& filename): 
+	file_settings(const std_unicode_string& filename): 
 		filename(filename),
 		file_name_postfix("_.mid"),
-		w_file_name_postfix(L"_.mid")
+		w_file_name_postfix(to_cchar_t("_.mid"))
 	{
-		auto pos = filename.rfind('\\');
-		for (; pos < filename.size(); pos++)
-			appearance_filename.push_back(filename[pos] & 0xFF);
-		for (int i = 0; i < filename.size(); i++)
-			appearance_path.push_back((char)(filename[i] & 0xFF));
+		appearance_path = path_to_display_string(filename);
+		auto pos = appearance_path.find_last_of("/\\");
+		appearance_filename = (pos == std::string::npos) ? appearance_path : appearance_path.substr(pos + 1);
 
 		//cout << appearance_path << " ::\n";
 
@@ -674,7 +708,7 @@ struct safc_data
 {
 	////overall settings and storing perfile settings....
 	std::vector<file_settings> files;
-	std::wstring save_path;
+	std_unicode_string save_path;
 	std::uint16_t global_ppqn;
 	std::int32_t global_offset;
 
@@ -697,7 +731,7 @@ struct safc_data
 		inplace_merge_flag = false;
 		is_cli_mode = false;
 		collapse_midi = false;
-		save_path = L"";
+		save_path = to_cchar_t("");
 		channels_split = rsb_compression = false;
 		apply_offset_after = true;
 	}
@@ -709,11 +743,11 @@ struct safc_data
 
 		if (files.empty())
 		{
-			save_path = L"";
+			save_path = to_cchar_t("");
 			return;
 		}
 		else
-			save_path = files[0].filename + L".AfterSAFC.mid";
+			save_path = files[0].filename + to_cchar_t(".AfterSAFC.mid").operator std_unicode_string();
 
 		if (files.size() == 1)
 		{
@@ -815,18 +849,62 @@ void throw_alert_error(std::string&& AlertText)
 {
 	std::cerr << AlertText << std::endl;
 
+#ifndef SAFC_CLI_ONLY
 	if (global_window_handler)
 		global_window_handler->throw_alert(AlertText, "ERROR!", special_signs::draw_ex_triangle, true, 0xFFAF00FF, 0xFF);
+#endif
 }
 
 void throw_alert_warning(std::string&& AlertText)
 {
 	std::cout << AlertText << std::endl;
 
+#ifndef SAFC_CLI_ONLY
 	if (global_window_handler)
 		global_window_handler->throw_alert(AlertText, "Warning!", special_signs::draw_ex_triangle, true, 0x7F7F7FFF, 0xFFFFFFAF);
+#endif
 }
 
+#ifdef SAFC_CLI_ONLY
+void add_files(const std::vector<std_unicode_string>& filenames)
+{
+	for (const auto& filename : filenames)
+	{
+		if (filename.empty())
+			continue;
+
+		g_data.files.emplace_back(filename);
+		auto& last_file = g_data.files.back();
+		if (!last_file.is_midi)
+		{
+			g_data.files.pop_back();
+			continue;
+		}
+
+		last_file.new_tempo = g_data.global_new_tempo;
+		last_file.offset_ticks = g_data.global_offset;
+		last_file.inplace_merge_enabled = g_data.inplace_merge_flag;
+		last_file.channels_split = g_data.channels_split;
+		last_file.rsb_compression = g_data.rsb_compression;
+		last_file.collapse_midi = g_data.collapse_midi;
+		last_file.apply_offset_after = g_data.apply_offset_after;
+
+		std::uint32_t counter = 0;
+		for (auto& file : g_data.files)
+		{
+			if (file.filename == last_file.filename)
+			{
+				file.file_name_postfix = std::to_string(counter) + "_.mid";
+				file.w_file_name_postfix = path_from_ascii_string(file.file_name_postfix);
+				counter++;
+			}
+		}
+	}
+
+	g_data.set_global_ppqn();
+	g_data.resolve_subdivision_problem_group_id_assign();
+}
+#else
 std::vector<std::wstring> multiple_open_file_dialog(const wchar_t* Title)
 {
 	OPENFILENAME ofn;       // common dialog box structure
@@ -3382,12 +3460,14 @@ void gl_special_key(int Key, int x, int y)
 void gl_exit(int a)
 {
 }
+#endif // SAFC_CLI_ONLY
 
 struct safc_runtime
 {
 	virtual void operator()(int argc, char** argv) = 0;
 };
 
+#ifndef SAFC_CLI_ONLY
 struct safc_gui_runtime :
 	public safc_runtime
 {
@@ -3454,6 +3534,7 @@ struct safc_gui_runtime :
 		glutMainLoop();
 	}
 };
+#endif
 
 struct safc_cli_runtime:
 	public safc_runtime
@@ -3497,7 +3578,9 @@ struct safc_cli_runtime:
 
 	virtual void operator()(int argc, char** argv) override
 	{
+#ifdef _WIN32
 		ShowWindow(GetConsoleWindow(), SW_SHOW);
+#endif
 		g_data.detected_threads =
 			std::max(
 				std::min((std::uint16_t)(
@@ -3574,13 +3657,13 @@ struct safc_cli_runtime:
 			g_data.set_global_offset(global_offset->second->AsNumber());
 
 		auto& files_array = files->second->AsArray();
-		std::vector<std::wstring> filenames;
+		std::vector<std_unicode_string> filenames;
 
 		for (auto& single_entry : files_array)
 		{
 			auto& object = single_entry->AsObject();
 			auto& filename = object.at(L"filename")->AsString();
-			filenames.push_back(filename);
+			filenames.push_back(path_from_json_string(filename));
 		}
 
 		add_files(filenames);
@@ -3676,10 +3759,10 @@ struct safc_cli_runtime:
 		auto save_to = config.find(L"save_to");
 		if (save_to != config.end())
 		{
-			g_data.save_path = (save_to->second->AsString());
-			size_t Pos = g_data.save_path.rfind(L".mid");
+			g_data.save_path = path_from_json_string(save_to->second->AsString());
+			size_t Pos = g_data.save_path.rfind(to_cchar_t(".mid").operator std_unicode_string());
 			if (Pos >= g_data.save_path.size() || Pos <= g_data.save_path.size() - 4)
-				g_data.save_path += L".mid";
+				g_data.save_path += to_cchar_t(".mid").operator std_unicode_string();
 		}
 
 		auto local_mctm = g_data.mctm_constructor();
@@ -3698,8 +3781,10 @@ struct safc_cli_runtime:
 
 int main(int argc, char** argv)
 {
+#ifndef SAFC_CLI_ONLY
 	player = std::make_shared<simple_player>();
 	player->init();
+#endif
 
 	g_version_tuple = __get_executable_version();
 
@@ -3707,12 +3792,16 @@ int main(int argc, char** argv)
 
 	std::shared_ptr<safc_runtime> runtime;
 
+#ifndef SAFC_CLI_ONLY
 	restore_reg_settings();
 
 	if (argc > 1)
 		runtime = std::make_shared<safc_cli_runtime>();
 	else
 		runtime = std::make_shared<safc_gui_runtime>();
+#else
+	runtime = std::make_shared<safc_cli_runtime>();
+#endif
 
 	(*runtime)(argc, argv);
 

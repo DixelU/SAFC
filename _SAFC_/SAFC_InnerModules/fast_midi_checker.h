@@ -6,17 +6,19 @@
 #include <string>
 #include <filesystem>
 
+#include "../platform_compat.h"
+
 struct fast_midi_checker
 {
-	std::wstring filename;
+	std_unicode_string filename;
 	bool is_acssessible, is_midi;
 	std::uint16_t PPQN, expected_track_number;
 	std::uint64_t filesize;
 
-	fast_midi_checker(std::wstring filename):
+	fast_midi_checker(std_unicode_string filename):
 		filename(filename)
 	{
-		std::ifstream f(filename, std::ios::in);
+		auto f = open_binary_input(filename);
 		
 		if (f)
 			is_acssessible = true;
@@ -34,7 +36,7 @@ struct fast_midi_checker
 	{
 		constexpr uint32_t MThd_header = 1297377380;
 
-		std::ifstream f(filename, std::ios::in | std::ios::binary);
+		auto f = open_binary_input(filename);
 		std::uint32_t header = 0;
 
 		for(int i = 0; i < 4; ++i)
@@ -49,7 +51,7 @@ struct fast_midi_checker
 			PPQN = (PPQN << 8) | (f.get());
 			PPQN = (PPQN << 8) | (f.get());
 			f.close();
-			filesize = std::filesystem::file_size(filename);
+			filesize = std::filesystem::file_size(path_to_filesystem(filename));
 		}
 		else
 		{

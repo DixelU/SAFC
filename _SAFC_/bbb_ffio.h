@@ -3,7 +3,45 @@
 #define BBB_FFIO
 
 #include <stdio.h>
+#include <cerrno>
+#include <ostream>
+#ifndef _WIN32
+#include <sys/types.h>
+#endif
+
+#include "platform_compat.h"
+
+#ifdef _WIN32
 #include <fileapi.h>
+#endif
+
+inline int safc_fopen(FILE*& file, const cchar_t* filename, const cchar_t* mode)
+{
+#ifdef _WIN32
+	return _wfopen_s(&file, filename, mode);
+#else
+	file = fopen(filename, mode);
+	return file ? 0 : errno;
+#endif
+}
+
+inline size_t safc_fread(void* ptr, size_t size, size_t count, FILE* file)
+{
+#ifdef _WIN32
+	return _fread_nolock_s(ptr, size * count, size, count, file);
+#else
+	return fread(ptr, size, count, file);
+#endif
+}
+
+inline int safc_fseek(FILE* file, unsigned long long int pos)
+{
+#ifdef _WIN32
+	return _fseeki64_nolock(file, pos, SEEK_SET);
+#else
+	return fseeko(file, static_cast<off_t>(pos), SEEK_SET);
+#endif
+}
 
 typedef struct byte_by_byte_fast_file_reader
 {
@@ -21,7 +59,7 @@ private:
 	{
 		if (!next_chunk_is_unavailable)
 		{
-			size_t new_buffer_len = _fread_nolock_s(buffer, buffer_size, 1, buffer_size, file);
+			size_t new_buffer_len = safc_fread(buffer, 1, buffer_size, file);
 			if (new_buffer_len != buffer_size)
 			{
 				buffer_size = new_buffer_len;
@@ -52,9 +90,9 @@ private:
 		}
 	}
 public:
-	byte_by_byte_fast_file_reader(const wchar_t* filename, int default_buffer_size = 20000000) :true_buffer_size(default_buffer_size)
+	byte_by_byte_fast_file_reader(const cchar_t* filename, int default_buffer_size = 20000000) :true_buffer_size(default_buffer_size)
 	{
-		auto err_no = _wfopen_s(&file, filename, L"rb");
+		auto err_no = safc_fopen(file, filename, to_cchar_t("rb"));
 		is_open = !(err_no);
 		next_chunk_is_unavailable = (is_eof = (file) ? feof(file) : true);
 		if (err_no || is_eof)
@@ -80,10 +118,10 @@ public:
 		delete[] buffer;
 		buffer = nullptr;
 	}
-	inline void reopen_next_file(const wchar_t* filename)
+	inline void reopen_next_file(const cchar_t* filename)
 	{
 		close();
-		auto err_no = _wfopen_s(&file, filename, L"rb");
+		auto err_no = safc_fopen(file, filename, to_cchar_t("rb"));
 		is_open = !(err_no);
 		next_chunk_is_unavailable = (is_eof = (file) ? feof(file) : true);
 		if ((err_no || is_eof) && buffer_size)
@@ -123,7 +161,7 @@ public:
 		}
 		else
 		{
-			_fseeki64_nolock(file, file_pos = abs_pos, SEEK_SET);
+			safc_fseek(file, file_pos = abs_pos);
 			__read_next_chunk();
 		}
 	}
@@ -159,6 +197,7 @@ public:
 	}
 } bbb_ffr;
 
+#ifdef _WIN32
 typedef struct byte_by_byte_memory_mapped_file
 {
 private:
@@ -322,6 +361,7 @@ public:
 		return tellg() >= size;
 	}
 } bbb_mmap;
+#endif
 
 
 #endif

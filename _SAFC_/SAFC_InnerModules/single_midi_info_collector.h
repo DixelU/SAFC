@@ -136,7 +136,7 @@ struct single_midi_info_collector
 
 	bool processing, finished;
 
-	std::wstring filename;
+	std_unicode_string filename;
 	std::string log_line;
 	std::string error_line;
 
@@ -150,7 +150,7 @@ struct single_midi_info_collector
 
 	bool allow_legacy_rsb_meta_interaction;
 
-	single_midi_info_collector(std::wstring filename, std::uint16_t ppq, bool allow_legacy_rsb_meta_interaction = false) : filename(filename), log_line(" "), processing(0), finished(0), ppq(ppq), allow_legacy_rsb_meta_interaction(allow_legacy_rsb_meta_interaction)
+	single_midi_info_collector(std_unicode_string filename, std::uint16_t ppq, bool allow_legacy_rsb_meta_interaction = false) : filename(filename), log_line(" "), processing(0), finished(0), ppq(ppq), allow_legacy_rsb_meta_interaction(allow_legacy_rsb_meta_interaction)
 	{}
 
 	void fetch_data() 
