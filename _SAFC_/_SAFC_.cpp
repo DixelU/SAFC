@@ -86,7 +86,11 @@ std::tuple<std::uint16_t, std::uint16_t, std::uint16_t, std::uint16_t> __get_exe
 std::wstring extract_directory(const std::wstring& path) 
 {
 	constexpr wchar_t delim = (L"\\")[0];
-	return path.substr(0, path.find_last_of(delim) + 1);
+	auto last_delim_pos = path.find_last_of(delim);
+	if (last_delim_pos == std::wstring::npos)
+		return L"";
+
+	return path.substr(0, last_delim_pos + 1);
 }
 
 static int copy_data(struct archive* ar, struct archive* aw)
@@ -297,7 +301,7 @@ static HRESULT url_download_to_file_with_timeout(
 	return hr;
 }
 
-bool safc_update(const std::wstring& latest_release)
+bool safc_update(const std::wstring& latest_release, std::wstring& file_location)
 {
 #ifndef __X64
 	constexpr wchar_t* const archive_name = (wchar_t* const)L"SAFC32.7z";;
@@ -322,12 +326,10 @@ bool safc_update(const std::wstring& latest_release)
 
 	HRESULT co_res = url_download_to_file_with_timeout(link.c_str(), filename.c_str(), 120000, 30000);
 	
-	auto executable_filename = boost::dll::program_location().filename().wstring();
-
 	if (co_res == S_OK) 
 	{
 		errno = 0;
-		_wrename((pathway + executable_filename).c_str(), (pathway + L"_s").c_str());
+		_wrename(current_file_path, (pathway + L"_s").c_str());
 		std::cout << "Rename status " << strerror(errno) << std::endl;
 		if (!errno) try
 		{
@@ -341,7 +343,8 @@ bool safc_update(const std::wstring& latest_release)
 
 			if (!_waccess((pathway + L"SAFC.exe").c_str(), 0))
 			{
-				_wrename((pathway + L"SAFC.exe").c_str(), (pathway + executable_filename).c_str());
+				_wrename((pathway + L"SAFC.exe").c_str(), current_file_path);
+				file_location = current_file_path;
 				updated_flag = true;
 			}
 			else
@@ -372,8 +375,8 @@ bool safc_update(const std::wstring& latest_release)
 	else
 		std::cout << std::move(error_msg) << std::endl;
 
-	if(error_msg.size())
-		_wrename((pathway + L"_s").c_str(), (pathway + executable_filename).c_str());
+	if (error_msg.size())
+		_wrename((pathway + L"_s").c_str(), current_file_path);
 
 	return updated_flag;
 }
@@ -391,12 +394,12 @@ void safc_version_check()
 		bool flag = false;
 		_wremove(L"_s");
 		constexpr wchar_t* SAFC_tags_link = (wchar_t* const)L"https://api.github.com/repos/DixelU/SAFC/tags";
-		auto current_file_path = boost::dll::program_location().filename().wstring();
-		std::wstring filename = extract_directory(current_file_path);
-		std::wstring pathway = filename;
-		filename += L"tags.json";
+		const auto tag_temp_specifier = std::to_wstring(std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now().time_since_epoch()).count());
+
+		std::wstring tag_data_filename = L"%TEMP%/" + tag_temp_specifier + L"tags.json";
+		std::wstring safc_file_path;
 		// if you have error here -> https://github.com/Microsoft/WSL/issues/22#issuecomment-207788173
-		HRESULT res = url_download_to_file_with_timeout(SAFC_tags_link, filename.c_str(), 10000, 5000);
+		HRESULT res = url_download_to_file_with_timeout(SAFC_tags_link, tag_data_filename.c_str(), 10000, 5000);
 		try 
 		{
 			if (res == S_OK) 
@@ -404,14 +407,14 @@ void safc_version_check()
 				const auto& [maj, min, ver, build] = g_version_tuple;
 
 				std::string json_buffer;
-				std::ifstream input(filename);
+				std::ifstream input(tag_data_filename);
 				std::getline(input, json_buffer);
 				input.close();
 
 				auto value = JSON::Parse(json_buffer.c_str());
 				auto& git_latest_version = ((value)->AsArray()[0])->AsObject().at(L"name")->AsString();
 
-				std::uint16_t version_partied[4] = { 0,0,0,0 };
+				std::uint16_t version_partied[4] = { 0, 0, 0, 0 };
 				std::vector<std::wstring> ans;
 				std::wstring git_version_numbers_only = git_latest_version.substr(1);//v?.?.?.?
 				boost::algorithm::split(ans, git_version_numbers_only, boost::is_any_of(L"."));
@@ -448,7 +451,7 @@ void safc_version_check()
 					std::transform(git_latest_version.begin(), git_latest_version.end(), git_version_str.begin(), [](wchar_t c) { return static_cast<char>(c); });
 					throw_alert_warning("Update found! The app might restart soon...\nUpdate: " + git_version_str);
 
-					flag = safc_update(git_latest_version);
+					flag = safc_update(git_latest_version, safc_file_path);
 
 					if (flag)
 						throw_alert_warning("SAFC will restart in 3 seconds...");
@@ -468,13 +471,13 @@ void safc_version_check()
 				std::string() + e.what());
 		}
 
-		_wremove(filename.c_str());
+		_wremove(tag_data_filename.c_str());
 
-		if (flag)
+		if (flag && !safc_file_path.empty())
 		{
-			Sleep(3000);
+			std::this_thread::sleep_for(std::chrono::seconds(3));
 
-			ShellExecuteW(NULL, L"open", current_file_path.c_str(), NULL, NULL, SW_SHOWNORMAL);
+			ShellExecuteW(NULL, L"open", safc_file_path.c_str(), NULL, NULL, SW_SHOWNORMAL);
 			//_wsystem((L"start \"" + executablepath + L"\"").c_str());
 			exit(0);
 		}
