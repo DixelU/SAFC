@@ -16,6 +16,13 @@
 #include <iterator>
 #include <map>
 #include <thread>
+#include <array>
+#include <chrono>
+#include <cstdint>
+#include <memory>
+#include <optional>
+#include <sstream>
+#include <string_view>
 #include <boost/algorithm/string.hpp>
 
 #include <WinSock2.h>
@@ -52,8 +59,10 @@
 #include <archive.h>
 #include <archive_entry.h>
 
-std::tuple<std::uint16_t, std::uint16_t, std::uint16_t, std::uint16_t> g_version_tuple;
-std::tuple<std::uint16_t, std::uint16_t, std::uint16_t, std::uint16_t> __get_executable_version() 
+// major.minor.patch.build; std::array gives lexicographic <, ==, > for free
+using version_t = std::array<std::uint16_t, 4>;
+version_t g_version_tuple{};
+version_t get_executable_version()
 {
 	// get the filename of the executable containing the version resource
 	TCHAR szFilename[MAX_PATH + 1] = { 0 };
@@ -301,12 +310,134 @@ static HRESULT url_download_to_file_with_timeout(
 	return hr;
 }
 
+// Network/IO timeouts for the update machinery, in milliseconds.
+namespace update_timeouts
+{
+
+constexpr uint32_t tags_total = 10000;
+constexpr uint32_t tags_stall = 5000;
+constexpr uint32_t archive_total = 120000;
+constexpr uint32_t archive_stall = 30000;
+
+}
+
+// Drops the high byte of each wchar_t. Only valid for known-ASCII payloads
+// (version tags, GitHub release names), which is all we use it for.
+static std::string narrow_ascii(const std::wstring& w)
+{
+	std::string s(w.size(), '\0');
+	std::transform(w.begin(), w.end(), s.begin(),
+		[](wchar_t c) { return static_cast<char>(c); });
+	return s;
+}
+
+// "vX.Y.Z.W" / "X.Y.Z" -> version_t. Missing trailing fields default to 0.
+// Returns nullopt on a malformed tag instead of half-filling the result.
+static std::optional<version_t> parse_version(std::wstring_view tag)
+{
+	if (!tag.empty() && (tag.front() == L'v' || tag.front() == L'V'))
+		tag.remove_prefix(1);
+
+	std::vector<std::wstring> parts;
+	boost::algorithm::split(parts, std::wstring(tag), boost::is_any_of(L"."));
+
+	version_t out{ 0, 0, 0, 0 };
+	if (parts.empty() || parts.size() > out.size())
+		return std::nullopt;
+
+	for (std::size_t i = 0; i < parts.size(); ++i)
+	{
+		try { out[i] = static_cast<std::uint16_t>(std::stoi(parts[i])); }
+		catch (...) { return std::nullopt; }
+	}
+	return out;
+}
+
+// Builds an absolute path inside the user's %TEMP% directory. Win32 file APIs
+// do not expand environment variables, so this resolves it explicitly.
+static std::wstring temp_file_path(const std::wstring& name)
+{
+	wchar_t dir[MAX_PATH + 1] = { 0 };
+	DWORD n = GetTempPathW(MAX_PATH, dir);
+	if (n == 0 || n > MAX_PATH)
+		return name; // fall back to CWD
+	return std::wstring(dir, n) + name;
+}
+
+static std::string read_file_text(const std::wstring& path)
+{
+	std::ifstream in(path, std::ios::binary);
+	std::stringstream ss;
+	ss << in.rdbuf();
+	return ss.str();
+}
+
+struct latest_release_info
+{
+	version_t version;
+	std::wstring tag; // original tag name, e.g. "v1.2.3.4" — used to build the download URL
+};
+
+// Fetches the newest tag from the GitHub API and parses its version.
+// Returns nullopt on any network/parse failure (caller decides how loud to be).
+// NOTE: uses /tags (newest tag) to preserve existing behaviour; /releases/latest
+// would be cleaner but changes semantics, so it's left as a deliberate choice.
+static std::optional<latest_release_info> fetch_latest_release_version()
+{
+	constexpr const wchar_t* tags_link = L"https://api.github.com/repos/DixelU/SAFC/tags";
+	const auto stamp = std::to_wstring(std::chrono::duration_cast<std::chrono::microseconds>(
+		std::chrono::steady_clock::now().time_since_epoch()).count());
+	const std::wstring json_path = temp_file_path(stamp + L"tags.json");
+
+	// if you have error here -> https://github.com/Microsoft/WSL/issues/22#issuecomment-207788173
+	HRESULT res = url_download_to_file_with_timeout(
+		tags_link, json_path.c_str(), update_timeouts::tags_total, update_timeouts::tags_stall);
+	if (res != S_OK)
+	{
+		_wremove(json_path.c_str());
+		return std::nullopt;
+	}
+
+	const std::string json_text = read_file_text(json_path);
+	_wremove(json_path.c_str());
+
+	std::unique_ptr<JSONValue> root(JSON::Parse(json_text.c_str()));
+	if (!root || !root->IsArray())
+		return std::nullopt;
+
+	const JSONArray& arr = root->AsArray();
+	if (arr.empty() || !arr[0]->IsObject())
+		return std::nullopt;
+
+	const JSONObject& obj = arr[0]->AsObject();
+	auto it = obj.find(L"name");
+	if (it == obj.end() || !it->second->IsString())
+		return std::nullopt;
+
+	const std::wstring tag = it->second->AsString();
+	auto parsed = parse_version(tag);
+	if (!parsed)
+		return std::nullopt;
+
+	return latest_release_info{ *parsed, tag };
+}
+
+// Absolute path of the backup the updater renames the running exe to. Must be
+// computed the same way by both safc_update and its startup cleanup, otherwise
+// a failed update leaves an orphaned backup behind.
+static std::wstring self_backup_path()
+{
+	wchar_t exe[MAX_PATH] = { 0 };
+	GetModuleFileNameW(NULL, exe, MAX_PATH);
+	return extract_directory(exe) + L"_s";
+}
+
 bool safc_update(const std::wstring& latest_release, std::wstring& file_location)
 {
 #ifndef __X64
-	constexpr wchar_t* const archive_name = (wchar_t* const)L"SAFC32.7z";;
+	constexpr const wchar_t* archive_name = L"SAFC32.7z";
 #else
-	constexpr wchar_t* const archive_name = (wchar_t* const)L"SAFC64.7z";
+	constexpr const wchar_t* archive_name = L"SAFC64.7z";
 #endif
 
 	bool updated_flag = false;
@@ -319,17 +450,19 @@ bool safc_update(const std::wstring& latest_release, std::wstring& file_location
 	//std::wstring executablepath = current_file_path;
 	std::wstring filename = extract_directory(current_file_path);
 	std::wstring pathway = filename;
+	const std::wstring backup = self_backup_path();
 
 	filename += L"update.7z";
 	//wsprintfW(current_file_path, L"%S%S", filename.c_str(), L"update.7z\0");
 	std::wstring link = L"https://github.com/DixelU/SAFC/releases/download/" + latest_release + L"/" + archive_name;
 
-	HRESULT co_res = url_download_to_file_with_timeout(link.c_str(), filename.c_str(), 120000, 30000);
-	
-	if (co_res == S_OK) 
+	HRESULT co_res = url_download_to_file_with_timeout(
+		link.c_str(), filename.c_str(), update_timeouts::archive_total, update_timeouts::archive_stall);
+
+	if (co_res == S_OK)
 	{
 		errno = 0;
-		_wrename(current_file_path, (pathway + L"_s").c_str());
+		_wrename(current_file_path, backup.c_str());
 		std::cout << "Rename status " << strerror(errno) << std::endl;
 		if (!errno) try
 		{
@@ -354,13 +487,13 @@ bool safc_update(const std::wstring& latest_release, std::wstring& file_location
 				error_msg = std::string("No SAFC executable found in unpacked data... Aborting...\n") + strerror(errno);
 			}
 		}
-		catch (const std::exception& e) 
+		catch (const std::exception& e)
 		{
-			error_msg = std::string("Autoudate error (unpack exception):\n") + e.what();
+			error_msg = std::string("Autoupdate error (unpack exception):\n") + e.what();
 		}
-		else 
+		else
 		{
-			error_msg = std::string("Autoudate error (unable to access self): \n") + strerror(errno);
+			error_msg = std::string("Autoupdate error (unable to access self): \n") + strerror(errno);
 		}
 
 		_wremove(filename.c_str());
@@ -376,110 +509,65 @@ bool safc_update(const std::wstring& latest_release, std::wstring& file_location
 		std::cout << std::move(error_msg) << std::endl;
 
 	if (error_msg.size())
-		_wrename((pathway + L"_s").c_str(), current_file_path);
+		_wrename(backup.c_str(), current_file_path);
 
 	return updated_flag;
 }
 
+static std::wstring format_version(const version_t& v)
+{
+	return L"v" + std::to_wstring(v[0]) + L"." + std::to_wstring(v[1]) +
+		L"." + std::to_wstring(v[2]) + L"." + std::to_wstring(v[3]);
+}
+
 void safc_version_check()
 {
-	const auto& [maj, min, ver, build] = g_version_tuple;
-	std::wcout << L"Current vesion: v" << maj << L"." << min << L"." << ver << L"." << build << L"\n";
+	std::wcout << L"Current version: " << format_version(g_version_tuple) << L"\n";
 
 	if (!check_autoupdates)
 		return;
 
-	worker_singleton<struct version_check>::instance().push([]() 
+	worker_singleton<struct version_check>::instance().push([]()
 	{
-		bool flag = false;
-		_wremove(L"_s");
-		constexpr wchar_t* SAFC_tags_link = (wchar_t* const)L"https://api.github.com/repos/DixelU/SAFC/tags";
-		const auto tag_temp_specifier = std::to_wstring(std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now().time_since_epoch()).count());
+		// Clean up any backup left behind by a previously interrupted update.
+		_wremove(self_backup_path().c_str());
 
-		std::wstring tag_data_filename = L"%TEMP%/" + tag_temp_specifier + L"tags.json";
-		std::wstring safc_file_path;
-		// if you have error here -> https://github.com/Microsoft/WSL/issues/22#issuecomment-207788173
-		HRESULT res = url_download_to_file_with_timeout(SAFC_tags_link, tag_data_filename.c_str(), 10000, 5000);
-		try 
+		try
 		{
-			if (res == S_OK) 
+			auto latest = fetch_latest_release_version();
+			if (!latest)
 			{
-				const auto& [maj, min, ver, build] = g_version_tuple;
-
-				std::string json_buffer;
-				std::ifstream input(tag_data_filename);
-				std::getline(input, json_buffer);
-				input.close();
-
-				auto value = JSON::Parse(json_buffer.c_str());
-				auto& git_latest_version = ((value)->AsArray()[0])->AsObject().at(L"name")->AsString();
-
-				std::uint16_t version_partied[4] = { 0, 0, 0, 0 };
-				std::vector<std::wstring> ans;
-				std::wstring git_version_numbers_only = git_latest_version.substr(1);//v?.?.?.?
-				boost::algorithm::split(ans, git_version_numbers_only, boost::is_any_of(L"."));
-
-				int index = 0;
-				for (auto& num_val : ans) 
-				{
-					try 
-					{
-						version_partied[index] = std::stoi(num_val);
-					}
-					catch (...)
-					{
-						break;
-					}
-
-					if (index == 3)
-						break;
-
-					index++;
-				}
-
-				std::wcout << L"Git latest version: v" << 
-					version_partied[0] << L"." << version_partied[1] << L"." << version_partied[2] << L"." << version_partied[3] << L"\n";
-
-				if (check_autoupdates &&
-					(maj < version_partied[0] ||
-						maj == version_partied[0] && min < version_partied[1] ||
-						maj == version_partied[0] && min == version_partied[1] && ver < version_partied[2] ||
-						maj == version_partied[0] && min == version_partied[1] && ver == version_partied[2] && build < version_partied[3]
-						))
-				{
-					std::string git_version_str(git_latest_version.size(), '\0');
-					std::transform(git_latest_version.begin(), git_latest_version.end(), git_version_str.begin(), [](wchar_t c) { return static_cast<char>(c); });
-					throw_alert_warning("Update found! The app might restart soon...\nUpdate: " + git_version_str);
-
-					flag = safc_update(git_latest_version, safc_file_path);
-
-					if (flag)
-						throw_alert_warning("SAFC will restart in 3 seconds...");
-				}
-			}
-			else if (check_autoupdates)
-			{
-				auto msg = "Most likely your internet connection is unstable\nSAFC cannot check for updates";
-
+				const auto* msg = "Most likely your internet connection is unstable\nSAFC cannot check for updates";
 				throw_alert_warning(msg);
 				std::cout << msg;
+				return;
 			}
-		}
-		catch (const std::exception& e)
-		{
-			throw_alert_warning("SAFC just almost crashed while checking the update...\nTell developer about that " +
-				std::string() + e.what());
-		}
 
-		_wremove(tag_data_filename.c_str());
+			std::wcout << L"Git latest version: " << format_version(latest->version) << L"\n";
 
-		if (flag && !safc_file_path.empty())
-		{
+			// std::array compares lexicographically, so this is the full
+			// major.minor.patch.build precedence in one line.
+			if (g_version_tuple >= latest->version)
+				return;
+
+			throw_alert_warning("Update found! The app might restart soon...\nUpdate: " +
+				narrow_ascii(latest->tag));
+
+			std::wstring safc_file_path;
+			if (!safc_update(latest->tag, safc_file_path) || safc_file_path.empty())
+				return;
+
+			throw_alert_warning("SAFC will restart in 3 seconds...");
 			std::this_thread::sleep_for(std::chrono::seconds(3));
 
 			ShellExecuteW(NULL, L"open", safc_file_path.c_str(), NULL, NULL, SW_SHOWNORMAL);
 			//_wsystem((L"start \"" + executablepath + L"\"").c_str());
 			exit(0);
+		}
+		catch (const std::exception& e)
+		{
+			throw_alert_warning("SAFC just almost crashed while checking the update...\nTell developer about that " +
+				std::string() + e.what());
 		}
 	});
 }
@@ -3704,7 +3792,7 @@ int main(int argc, char** argv)
 	player = std::make_shared<simple_player>();
 	player->init();
 
-	g_version_tuple = __get_executable_version();
+	g_version_tuple = get_executable_version();
 
 	std::ios_base::sync_with_stdio(false); //why not
 
