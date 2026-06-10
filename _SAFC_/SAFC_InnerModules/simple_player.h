@@ -14,8 +14,8 @@
 #include <array>
 #include <ranges>
 #include <mutex>
-#include <unordered_map>
 #include <new>
+#include <limits>
 
 #include "../bbb_ffio.h"
 
@@ -100,9 +100,11 @@ private:
 
 	// Producer-owned
 	alignas(64) slab* tail_ = nullptr;
+	size_t pushed_local_ = 0; // plain mirror of pushed_, avoids re-reading the atomic
 
 	// Consumer-owned
 	alignas(64) slab* head_ = nullptr;
+	size_t popped_local_ = 0; // plain mirror of popped_
 
 	// lock-free recycle stack: consumer pushes, producer pops
 	alignas(64) std::atomic<slab*> recycle_head_{nullptr};
@@ -110,8 +112,12 @@ private:
 	// Bound on cached slabs in recycle stack (touched by both threads)
 	alignas(64) std::atomic<size_t> recycle_count_{0};
 
-	// Approximate element count for size-based throttling (touched by both threads)
-	alignas(64) std::atomic<size_t> size_{0};
+	// Approximate element count for size-based throttling, split into
+	// monotonic per-side counters so neither thread does an atomic RMW
+	// on a shared cache line: each side bumps its local mirror and
+	// publishes it with a relaxed store to its own line.
+	alignas(64) std::atomic<size_t> pushed_{0};
+	alignas(64) std::atomic<size_t> popped_{0};
 
 	slab* producer_get_slab()
 	{
@@ -205,7 +211,7 @@ public:
 		else
 			tail_->push_producer(std::move(value));
 
-		size_.fetch_add(1, std::memory_order_relaxed);
+		pushed_.store(++pushed_local_, std::memory_order_relaxed);
 	}
 
 	// Producer: get reference to last pushed element (for pending tracking)
@@ -221,7 +227,7 @@ public:
 			return;
 
 		head_->pop_consumer();
-		size_.fetch_sub(1, std::memory_order_relaxed);
+		popped_.store(++popped_local_, std::memory_order_relaxed);
 
 		// If current slab exhausted, try to advance
 		if (head_->empty_consumer())
@@ -290,15 +296,23 @@ public:
 				break;
 			}
 		}
-		size_.store(0, std::memory_order_relaxed);
+		// clear() only runs with the producer stopped (reset/seek restart),
+		// so resetting the producer-side counter here is safe.
+		pushed_local_ = 0;
+		popped_local_ = 0;
+		pushed_.store(0, std::memory_order_relaxed);
+		popped_.store(0, std::memory_order_relaxed);
 	}
 
-	// Approximate element count. Producer/consumer use relaxed atomics, so
-	// the value may briefly drift but only ever toward the truth; safe for
-	// throttle decisions where a small overestimate just delays resumption.
+	// Approximate element count. The two counters are published with relaxed
+	// stores, so the loads may be mutually stale; clamp because a reader can
+	// observe popped_ ahead of pushed_. The producer sees an exact-or-over
+	// estimate, the consumer exact-or-under - both safe for throttling.
 	[[nodiscard]] size_t approximate_size() const
 	{
-		return size_.load(std::memory_order_relaxed);
+		size_t p = pushed_.load(std::memory_order_relaxed);
+		size_t c = popped_.load(std::memory_order_relaxed);
+		return p > c ? p - c : 0;
 	}
 
 	// Consumer iterator for traversal
@@ -407,31 +421,84 @@ struct simple_player
 		};
 
 		// Per-track_id LIFO stacks of pending notes per key.
-		// O(1) push and find_and_remove via hash map instead of O(n) linear scan.
+		// Flat open-addressing hash table (linear probing, power-of-two size):
+		// a lookup is one probe into a contiguous array instead of
+		// unordered_map's bucket->node pointer chase, and emptied stacks keep
+		// their slot and capacity, so steady-state playback doesn't allocate.
 		// Parser-private: only accessed by parser thread
 		struct pending_list
 		{
-			// track_id -> LIFO stack of note pointers awaiting note_off
-			std::unordered_map<uint32_t, std::vector<buffered_note*>> stacks;
+			// track_id is (track_index << 4) | channel and never reaches ~0u
+			static constexpr uint32_t empty_id = ~0u;
+
+			struct slot
+			{
+				uint32_t track_id = empty_id;
+				std::vector<buffered_note*> stack; // LIFO of notes awaiting note_off
+			};
+
+			std::vector<slot> slots; // power-of-two size
+			size_t used = 0;         // occupied slots (including emptied stacks)
+
+			static size_t hash(uint32_t id)
+			{
+				// Fibonacci hash: track_ids are dense sequential ints
+				return static_cast<size_t>((id * 0x9E3779B97F4A7C15ull) >> 32);
+			}
+
+			// Returns the slot holding track_id, or the empty slot where it
+			// belongs. Load factor stays below 3/4, so the probe terminates.
+			slot* find_slot(uint32_t track_id)
+			{
+				const size_t mask = slots.size() - 1;
+				size_t i = hash(track_id) & mask;
+				while (slots[i].track_id != track_id && slots[i].track_id != empty_id)
+					i = (i + 1) & mask;
+				return &slots[i];
+			}
+
+			void grow()
+			{
+				std::vector<slot> old(slots.empty() ? 16 : slots.size() * 2);
+				old.swap(slots);
+				for (auto& s : old)
+					if (s.track_id != empty_id)
+						*find_slot(s.track_id) = std::move(s);
+			}
 
 			void push(uint32_t track_id, buffered_note* ptr)
 			{
-				stacks[track_id].push_back(ptr);
+				if (used * 4 >= slots.size() * 3)
+					grow();
+
+				slot* s = find_slot(track_id);
+				if (s->track_id == empty_id)
+				{
+					s->track_id = track_id;
+					++used;
+				}
+				s->stack.push_back(ptr);
 			}
 
-			// O(1) average: hash lookup then back-pop (LIFO per track_id)
 			buffered_note* find_and_remove(uint32_t track_id)
 			{
-				auto it = stacks.find(track_id);
-				if (it == stacks.end() || it->second.empty())
+				if (slots.empty())
 					return nullptr;
 
-				buffered_note* result = it->second.back();
-				it->second.pop_back();
+				slot* s = find_slot(track_id);
+				if (s->track_id == empty_id || s->stack.empty())
+					return nullptr;
+
+				buffered_note* result = s->stack.back();
+				s->stack.pop_back();
 				return result;
 			}
 
-			void clear() { stacks.clear(); }
+			void clear()
+			{
+				slots.clear();
+				used = 0;
+			}
 		};
 
 		// Per-key SPSC queues for falling notes visualization
@@ -1036,6 +1103,8 @@ struct simple_player
 
 		state.active_tracks = info.tracks.size();
 
+		uint32_t cap_check_counter = 0;
+
 		while (!event_queue.empty() && !state.stop_requested)
 		{
 			// get the tick for this batch
@@ -1103,7 +1172,7 @@ struct simple_player
 					break;
 
 				auto ref = event_queue.top();
-				// pop deferred: see replace_top/pop at bottom of loop body
+				// pop/replace_top deferred until the end of this track's run
 
 				auto& track = state.track_states[ref.track_index];
 
@@ -1118,146 +1187,171 @@ struct simple_player
 					continue;
 				}
 
-				// process the event
-				uint8_t command = get_value_and_increment(track.position, track.end);
-				uint8_t data1 = 0;
-				uint8_t data2 = 0;
-
-				if (command < 0x80)
+				// Process a run of events from this track. Black MIDIs store
+				// chords as consecutive zero-delta events within one track, so
+				// while the next delta is zero stay on this track and skip the
+				// heap entirely.
+				bool reschedule = false;
+				for (;;)
 				{
-					// running status
-					data1 = command;
-					command = track.rsb;
-				}
-				else
-				{
-					if (command < 0xF0)
-						track.rsb = command;
+					// process the event
+					uint8_t command = get_value_and_increment(track.position, track.end);
+					uint8_t data1 = 0;
+					uint8_t data2 = 0;
 
-					if (command < 0xF0 || command == 0xFF)
-						data1 = get_value_and_increment(track.position, track.end);
+					if (command < 0x80)
+					{
+						// running status
+						data1 = command;
+						command = track.rsb;
+					}
 					else
-						data1 = 0xFF;
-				}
-
-				if (command < 0x80)
-				{
-					track.done = true;
-					--state.active_tracks;
-					event_queue.pop();
-					continue;
-				}
-
-				uint32_t msg_to_send = 0;
-
-				switch (command >> 4)
-				{
-					case 0x8: // note off
 					{
-						data2 = get_value_and_increment(track.position, track.end);
+						if (command < 0xF0)
+							track.rsb = command;
 
-						if (!fast_forwarding)
-						{
-							msg_to_send = make_smsg(command, data1, data2);
-							uint8_t channel = command & 0x0F;
-							state.visuals.push_note_off(data1, batch_time_us, ref.track_index, channel);
-						}
-						break;
-					}
-					case 0x9: // note on
-					{
-						data2 = get_value_and_increment(track.position, track.end);
-
-						if (!fast_forwarding)
-						{
-							msg_to_send = make_smsg(command, data1, data2);
-							uint8_t channel = command & 0x0F;
-
-							if (data2 > 0)
-								state.visuals.push_note_on(data1, batch_time_us, ref.track_index, channel, data2);
-							else
-								state.visuals.push_note_off(data1, batch_time_us, ref.track_index, channel);
-						}
-						break;
-					}
-					case 0xA: // aftertouch (transient - skip during fast-forward)
-					{
-						data2 = get_value_and_increment(track.position, track.end);
-						if (!fast_forwarding)
-							msg_to_send = make_smsg(command, data1, data2);
-						break;
-					}
-					case 0xB: // control change
-					case 0xE: // pitch bend
-					{
-						data2 = get_value_and_increment(track.position, track.end);
-						msg_to_send = make_smsg(command, data1, data2);
-						break;
-					}
-					case 0xC: // program change
-					case 0xD: // channel pressure
-					{
-						msg_to_send = make_smsg(command, data1);
-						break;
-					}
-					case 0xF: // meta/sysex
-					{
-						uint8_t type = data1;
-						bool end_of_track = (type == 0x2F && command == 0xFF);
-
-						if (command == 0xFF)
-							track.rsb = 0; // reset RSB on meta events
-
-						if (end_of_track)
-						{
-							track.done = true;
-							--state.active_tracks;
-							event_queue.pop();
-							continue;
-						}
-
-						// skip meta/sysex data (tempo already handled during initial parsing)
-						auto length = get_vlv(track.position, track.end);
-						track.position += length;
-						break;
-					}
-				}
-
-				// Push message to lookahead buffer.
-				if (msg_to_send != 0)
-				{
-					state.send_buffer.push({batch_time_us, msg_to_send});
-
-					// Per-batch (outer) throttle only fires between unique ticks,
-					// so a single dense tick could otherwise push millions of
-					// events before the next check. Enforce the size cap here too.
-					while (!fast_forwarding && !state.stop_requested &&
-						state.send_buffer.approximate_size() >= playback_state::max_pending_events)
-					{
-						if (state.paused.load(std::memory_order_acquire))
-							std::this_thread::sleep_for(std::chrono::microseconds(100));
+						if (command < 0xF0 || command == 0xFF)
+							data1 = get_value_and_increment(track.position, track.end);
 						else
-							std::this_thread::sleep_for(std::chrono::microseconds(10));
+							data1 = 0xFF;
 					}
+
+					if (command < 0x80)
+					{
+						track.done = true;
+						--state.active_tracks;
+						break;
+					}
+
+					uint32_t msg_to_send = 0;
+
+					switch (command >> 4)
+					{
+						case 0x8: // note off
+						{
+							data2 = get_value_and_increment(track.position, track.end);
+
+							if (!fast_forwarding)
+							{
+								msg_to_send = make_smsg(command, data1, data2);
+								uint8_t channel = command & 0x0F;
+								state.visuals.push_note_off(data1, batch_time_us, ref.track_index, channel);
+							}
+							break;
+						}
+						case 0x9: // note on
+						{
+							data2 = get_value_and_increment(track.position, track.end);
+
+							if (!fast_forwarding)
+							{
+								msg_to_send = make_smsg(command, data1, data2);
+								uint8_t channel = command & 0x0F;
+
+								if (data2 > 0)
+									state.visuals.push_note_on(data1, batch_time_us, ref.track_index, channel, data2);
+								else
+									state.visuals.push_note_off(data1, batch_time_us, ref.track_index, channel);
+							}
+							break;
+						}
+						case 0xA: // aftertouch (transient - skip during fast-forward)
+						{
+							data2 = get_value_and_increment(track.position, track.end);
+							if (!fast_forwarding)
+								msg_to_send = make_smsg(command, data1, data2);
+							break;
+						}
+						case 0xB: // control change
+						case 0xE: // pitch bend
+						{
+							data2 = get_value_and_increment(track.position, track.end);
+							msg_to_send = make_smsg(command, data1, data2);
+							break;
+						}
+						case 0xC: // program change
+						case 0xD: // channel pressure
+						{
+							msg_to_send = make_smsg(command, data1);
+							break;
+						}
+						case 0xF: // meta/sysex
+						{
+							uint8_t type = data1;
+							bool end_of_track = (type == 0x2F && command == 0xFF);
+
+							if (command == 0xFF)
+								track.rsb = 0; // reset RSB on meta events
+
+							if (end_of_track)
+							{
+								track.done = true;
+								--state.active_tracks;
+								break;
+							}
+
+							// skip meta/sysex data (tempo already handled during initial parsing)
+							auto length = get_vlv(track.position, track.end);
+							track.position += length;
+							break;
+						}
+					}
+
+					if (track.done) // end of track / RSB error above
+						break;
+
+					// Push message to lookahead buffer.
+					if (msg_to_send != 0)
+					{
+						state.send_buffer.push({batch_time_us, msg_to_send});
+
+						// Per-batch (outer) throttle only fires between unique
+						// ticks, so a single dense tick could otherwise push
+						// millions of events before the next check. Enforce the
+						// size cap here too, sampled every 1024 pushes: checking
+						// the consumer-written pop counter on every push would
+						// reintroduce the cross-core traffic the split queue
+						// counters removed, and against a 2^26 cap an overshoot
+						// of up to 1023 events is noise.
+						if ((++cap_check_counter & 1023u) == 0)
+						{
+							while (!fast_forwarding && !state.stop_requested &&
+								state.send_buffer.approximate_size() >= playback_state::max_pending_events)
+							{
+								if (state.paused.load(std::memory_order_acquire))
+									std::this_thread::sleep_for(std::chrono::microseconds(100));
+								else
+									std::this_thread::sleep_for(std::chrono::microseconds(10));
+							}
+						}
+					}
+
+					if (track.position >= track.end)
+					{
+						track.done = true;
+						--state.active_tracks;
+						break;
+					}
+
+					auto delta = get_vlv(track.position, track.end);
+					if (delta != 0)
+					{
+						track.next_event_tick = batch_tick + delta;
+						reschedule = true;
+						break;
+					}
+
+					// delta == 0: this track's next event is at the same tick
+					if (state.stop_requested)
+						break;
 				}
 
 				// Re-schedule track or remove from heap.
 				// replace_top = one sift-down vs pop+push = O(log n) instead of O(2 log n).
-				if (track.position < track.end && !track.done)
-				{
-					auto delta = get_vlv(track.position, track.end);
-					track.next_event_tick = batch_tick + delta;
+				if (reschedule)
 					event_queue.replace_top({track.next_event_tick, ref.track_index});
-				}
 				else
-				{
-					if (!track.done)
-					{
-						track.done = true;
-						--state.active_tracks;
-					}
 					event_queue.pop();
-				}
 			}
 		}
 
@@ -1268,11 +1362,23 @@ struct simple_player
 	// During seek fast-forward (seeking_ff == true), drains buffer immediately
 	SIMPLE_PLAYER_FORCE_NO_INLINE void sender_thread_func()
 	{
+		// Cached clock reading: dense same-tick bursts send thousands of
+		// already-due events back to back; for those the clock isn't
+		// re-queried and the position isn't re-published.
+		constexpr int64_t clock_unknown = std::numeric_limits<int64_t>::min();
+		int64_t cached_elapsed_us = clock_unknown;
+		uint64_t last_published_us = ~0ULL;
+
 		while (!state.stop_requested)
 		{
 			// Fast-forward mode: drain buffer immediately, no timing
 			if (state.seeking_ff.load(std::memory_order_acquire))
 			{
+				// Parser resets start_time/start_offset_us when FF completes,
+				// so any cached clock reading is stale.
+				cached_elapsed_us = clock_unknown;
+				last_published_us = ~0ULL;
+
 				if (!state.send_buffer.empty())
 				{
 					auto& ev = state.send_buffer.front();
@@ -1299,9 +1405,9 @@ struct simple_player
 				if (state.stop_requested)
 					break;
 
-				// Resume: recalculate timing based on where we paused
-				// start_offset_us was updated by resume(), start_time was reset
-				// so we just continue - next event will be timed relative to new start
+				// Resume: resume() updated start_offset_us and reset start_time,
+				// so the cached clock reading is stale.
+				cached_elapsed_us = clock_unknown;
 			}
 
 			if (state.stop_requested)
@@ -1319,32 +1425,42 @@ struct simple_player
 			}
 
 			auto& ev = state.send_buffer.front();
-			uint64_t target_us = ev.time_us - state.start_offset_us;
 
 			// update current position for UI and parser throttling
-			state.current_time_us = ev.time_us;
-			state.sender_position_us.store(ev.time_us, std::memory_order_release);
-
-			// wait until it's time to send this event
-			auto elapsed = std::chrono::steady_clock::now() - state.start_time;
-			auto elapsed_us = std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count();
-
-			if (static_cast<int64_t>(target_us) > elapsed_us)
+			// (only when it changes - events in a burst share one timestamp)
+			if (ev.time_us != last_published_us)
 			{
-				auto wait_us = target_us - elapsed_us;
-				if (wait_us > 1000)
-				{
-					// sleep for most of the wait time
-					std::this_thread::sleep_for(std::chrono::microseconds(wait_us - 50));
-				}
+				last_published_us = ev.time_us;
+				state.current_time_us = ev.time_us;
+				state.sender_position_us.store(ev.time_us, std::memory_order_release);
+			}
 
-				// spin-wait for final precision
-				while (!state.stop_requested)
+			uint64_t target_us = ev.time_us - state.start_offset_us;
+
+			// wait until it's time to send this event; if the cached clock
+			// already passed the target, send immediately without re-querying
+			if (static_cast<int64_t>(target_us) > cached_elapsed_us)
+			{
+				auto elapsed = std::chrono::steady_clock::now() - state.start_time;
+				cached_elapsed_us = std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count();
+
+				if (static_cast<int64_t>(target_us) > cached_elapsed_us)
 				{
-					elapsed = std::chrono::steady_clock::now() - state.start_time;
-					elapsed_us = std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count();
-					if (elapsed_us >= static_cast<int64_t>(target_us))
-						break;
+					auto wait_us = target_us - cached_elapsed_us;
+					if (wait_us > 1000)
+					{
+						// sleep for most of the wait time
+						std::this_thread::sleep_for(std::chrono::microseconds(wait_us - 50));
+					}
+
+					// spin-wait for final precision
+					while (!state.stop_requested)
+					{
+						elapsed = std::chrono::steady_clock::now() - state.start_time;
+						cached_elapsed_us = std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count();
+						if (cached_elapsed_us >= static_cast<int64_t>(target_us))
+							break;
+					}
 				}
 			}
 
