@@ -1,7 +1,0 @@
-﻿
-  _SAFC_.cpp
-  Generating code
-  Finished generating code
-  _SAFC_.vcxproj -> C:\Users\User\SAFC_v1\_SAFC_\x64\Release\SAFC.exe
-  "pwsh.exe" не является внутренней или внешней
-  командой, исполняемой программой или пакетным файлом.
