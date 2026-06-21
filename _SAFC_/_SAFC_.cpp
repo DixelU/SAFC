@@ -62,12 +62,32 @@
 // major.minor.patch.build; std::array gives lexicographic <, ==, > for free
 using version_t = std::array<std::uint16_t, 4>;
 version_t g_version_tuple{};
+
+// Fully-qualified path of the running executable. GetModuleFileNameW(NULL, ...)
+// has been observed to return a bare "SAFC.exe" (no directory) when the process
+// is launched from the Start Menu, which collapses every path the updater
+// derives from it (backup, downloaded archive, re-extracted exe) down to the
+// current working directory -- making the auto-update a no-op. QueryFullProcessImageNameW
+// is kernel-backed and always yields the fully qualified image path regardless
+// of how the process was started; GetModuleFileNameW is kept only as a fallback.
+std::wstring get_self_path()
+{
+	wchar_t buffer[MAX_PATH] = { 0 };
+	DWORD size = MAX_PATH;
+	if (QueryFullProcessImageNameW(GetCurrentProcess(), 0, buffer, &size) && size)
+		return std::wstring(buffer, size);
+
+	DWORD len = GetModuleFileNameW(NULL, buffer, MAX_PATH);
+	return std::wstring(buffer, len);
+}
+
 version_t get_executable_version()
 {
 	// get the filename of the executable containing the version resource
-	TCHAR szFilename[MAX_PATH + 1] = { 0 };
-	if (GetModuleFileName(NULL, szFilename, MAX_PATH) == 0)
+	const std::wstring exe_path = get_self_path();
+	if (exe_path.empty())
 		return { 0,0,0,0 };
+	const wchar_t* szFilename = exe_path.c_str();
 	// allocate a block of memory for the version info
 	DWORD dummy;
 	std::uint32_t dwSize = GetFileVersionInfoSize(szFilename, &dummy);
@@ -427,9 +447,7 @@ static std::optional<latest_release_info> fetch_latest_release_version()
 // a failed update leaves an orphaned backup behind.
 static std::wstring self_backup_path()
 {
-	wchar_t exe[MAX_PATH] = { 0 };
-	GetModuleFileNameW(NULL, exe, MAX_PATH);
-	return extract_directory(exe) + L"_s";
+	return extract_directory(get_self_path()) + L"_s";
 }
 
 bool safc_update(const std::wstring& latest_release, std::wstring& file_location)
@@ -443,9 +461,7 @@ bool safc_update(const std::wstring& latest_release, std::wstring& file_location
 	bool updated_flag = false;
 	std::string error_msg;
 
-	wchar_t current_file_path[MAX_PATH];
-	//GetCurrentDirectoryW(MAX_PATH, current_file_path);
-	GetModuleFileNameW(NULL, current_file_path, MAX_PATH);
+	const std::wstring current_file_path = get_self_path();
 
 	//std::wstring executablepath = current_file_path;
 	std::wstring filename = extract_directory(current_file_path);
@@ -462,7 +478,7 @@ bool safc_update(const std::wstring& latest_release, std::wstring& file_location
 	if (co_res == S_OK)
 	{
 		errno = 0;
-		_wrename(current_file_path, backup.c_str());
+		_wrename(current_file_path.c_str(), backup.c_str());
 		std::cout << "Rename status " << strerror(errno) << std::endl;
 		if (!errno) try
 		{
@@ -476,7 +492,7 @@ bool safc_update(const std::wstring& latest_release, std::wstring& file_location
 
 			if (!_waccess((pathway + L"SAFC.exe").c_str(), 0))
 			{
-				_wrename((pathway + L"SAFC.exe").c_str(), current_file_path);
+				_wrename((pathway + L"SAFC.exe").c_str(), current_file_path.c_str());
 				file_location = current_file_path;
 				updated_flag = true;
 			}
@@ -509,7 +525,7 @@ bool safc_update(const std::wstring& latest_release, std::wstring& file_location
 		std::cout << std::move(error_msg) << std::endl;
 
 	if (error_msg.size())
-		_wrename(backup.c_str(), current_file_path);
+		_wrename(backup.c_str(), current_file_path.c_str());
 
 	return updated_flag;
 }
