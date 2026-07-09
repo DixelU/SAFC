@@ -679,6 +679,56 @@ private:
 		std::string description() const override { return "Edit Controller Lane"; }
 	};
 
+	struct raw_control_change_batch_op : edit_operation
+	{
+		struct entry
+		{
+			tick_type tick;
+			std::uint16_t value;
+			std::optional<raw_event> previous;
+		};
+
+		std::uint8_t track;
+		control_lane lane;
+		std::uint8_t channel;
+		std::vector<entry> entries;
+
+		raw_control_change_batch_op(std::uint8_t tr, control_lane ln, std::uint8_t ch,
+			std::vector<std::pair<tick_type, std::uint16_t>> points)
+			: track(tr), lane(ln), channel(ch)
+		{
+			entries.reserve(points.size());
+			for (const auto& [tick, value] : points)
+				entries.push_back({tick, value, std::nullopt});
+		}
+
+		void execute(midi_editor& editor) override
+		{
+			for (auto& en : entries)
+			{
+				en.previous = editor.remove_control_event_at(track, lane, channel, en.tick);
+				editor.raw_track_events[track].push_back({en.tick,
+					editor.make_control_event_bytes(lane, channel, en.value)});
+			}
+			editor.sort_raw_track(track);
+			editor.mark_dirty();
+		}
+
+		void undo(midi_editor& editor) override
+		{
+			for (const auto& en : entries)
+			{
+				editor.remove_control_event_at(track, lane, channel, en.tick);
+				if (en.previous)
+					editor.raw_track_events[track].push_back(*en.previous);
+			}
+			editor.sort_raw_track(track);
+			editor.mark_dirty();
+		}
+
+		std::string description() const override { return "Edit Controller Lane"; }
+	};
+
 	// Track edits apply to (piano roll focus); notes of other tracks are shown dimmed
 	std::uint8_t active_track = 0;
 
@@ -1863,6 +1913,33 @@ public:
 		std::lock_guard<std::recursive_mutex> lock(editor_mutex);
 		auto op = std::make_unique<raw_control_change_op>(track, lane,
 			std::uint8_t(channel & 0x0F), tick, clamp_control_value(lane, value));
+		op->execute(*this);
+		push_undo(std::move(op));
+	}
+
+	void set_channel_control_points(std::uint8_t track, std::uint8_t channel,
+		control_lane lane, std::vector<std::pair<tick_type, std::uint16_t>> points)
+	{
+		std::lock_guard<std::recursive_mutex> lock(editor_mutex);
+		if (points.empty())
+			return;
+
+		for (auto& [_, value] : points)
+			value = clamp_control_value(lane, value);
+
+		std::sort(points.begin(), points.end(),
+			[](const auto& a, const auto& b)
+		{
+			return a.first < b.first;
+		});
+		points.erase(std::unique(points.begin(), points.end(),
+			[](const auto& a, const auto& b)
+		{
+			return a.first == b.first;
+		}), points.end());
+
+		auto op = std::make_unique<raw_control_change_batch_op>(track, lane,
+			std::uint8_t(channel & 0x0F), std::move(points));
 		op->execute(*this);
 		push_undo(std::move(op));
 	}

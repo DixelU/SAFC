@@ -1004,6 +1004,7 @@ struct midi_editor_viewer : public handleable_ui_part
 		if (t0 > t1)
 			std::swap(t0, t1);
 
+		std::vector<std::pair<tick_type, std::uint16_t>> points;
 		const auto step = std::max<tick_type>(1, snap_ticks(editor->get_ppqn()));
 		for (auto tick = (t0 / step) * step; tick <= t1; tick += step)
 		{
@@ -1013,10 +1014,12 @@ struct midi_editor_viewer : public handleable_ui_part
 					float(sgtick_type(tick_b) - sgtick_type(tick_a));
 			const int value = int(value_a + (float(value_b) - float(value_a)) *
 				std::clamp(f, 0.f, 1.f) + 0.5f);
-			set_control_lane_point(tick, std::uint8_t(std::clamp(value, 0, 127)));
+			points.push_back({tick, lane_value_to_control(std::uint8_t(std::clamp(value, 0, 127)))});
 			if (t1 - tick < step)
 				break;
 		}
+		editor->set_channel_control_points(editor->get_active_track(),
+			effective_draw_channel(), editor_control_lane(), std::move(points));
 	}
 
 	void record_velocity_change(const piano_note& ident, std::uint8_t new_vel)
@@ -1369,6 +1372,14 @@ struct midi_editor_viewer : public handleable_ui_part
 
 		if (!right_down && right_press && in_notes_area)
 		{
+			if (editor->has_selection())
+			{
+				editor->clear_selection();
+				if (on_status)
+					on_status("Selection cleared");
+				return true;
+			}
+
 			const auto tick_tolerance = tick_type(3.f / l.notes_w * float(view_duration)) + 1;
 			piano_note picked;
 

@@ -2309,6 +2309,8 @@ void on_playback_seek_to(float value)
 // MIDI Editor Functions
 // ============================================================================
 
+std::uint32_t editor_channel_button_color(int track, int channel, bool hover = false);
+
 void update_channel_indicator()
 {
 	auto editor_view = _WH_t<midi_editor_viewer>("MIDI_EDITOR", "VIEW");
@@ -2317,12 +2319,17 @@ void update_channel_indicator()
 
 	// Brackets mark the channel new notes will be drawn on
 	const int current = editor_view->effective_draw_channel();
+	const int active_track = editor && editor->is_file_loaded()
+		? editor->get_active_track()
+		: 0;
 	for (int channel = 0; channel < 16; ++channel)
 	{
 		auto chan_btn = _WH_t<button>("MIDI_EDITOR", ("CH" + std::to_string(channel)).c_str());
 		if (chan_btn)
 		{
 			chan_btn->safe_string_replace(std::to_string(channel + 1));
+			chan_btn->rgba_background = editor_channel_button_color(active_track, channel);
+			chan_btn->hovered_rgba_background = editor_channel_button_color(active_track, channel, true);
 			chan_btn->rgba_border = channel == current ? 0xFFFFFFFF : 0xFFFFFF7F;
 			chan_btn->hovered_rgba_border = channel == current ? 0xFFFFFFFF : 0xFFFFFFFF;
 			chan_btn->border_width = channel == current ? 2 : 1;
@@ -2330,11 +2337,11 @@ void update_channel_indicator()
 	}
 }
 
-std::uint32_t editor_channel_button_color(int channel, bool hover = false)
+std::uint32_t editor_channel_button_color(int track, int channel, bool hover)
 {
 	std::uint8_t r, g, b;
 	midi_editor_viewer::hsv_to_rgb(
-		midi_editor_viewer::track_hue(0, std::uint8_t(channel & 0x0F)),
+		midi_editor_viewer::track_hue(std::uint8_t(track & 0xFF), std::uint8_t(channel & 0x0F)),
 		hover ? 0.70f : 0.85f,
 		hover ? 0.95f : 0.68f,
 		r, g, b);
@@ -3394,7 +3401,7 @@ void init()
 		-200, 197.5f, 400, 397.5f, 300, 2.5f, 100, 100, 5, BACKGROUND_OPQ, HEADER, BORDER);
 
 	// Editor viewer (piano roll visualization) - main area, left of the button column
-	auto editor_view = new midi_editor_viewer(-45, -25, editor.get());
+	auto editor_view = new midi_editor_viewer(-45, -30, editor.get());
 	editor_view->data.width = 300;
 	editor_view->data.height = 300;
 	editor_view->on_track_changed = update_editor_status_text;
@@ -3427,10 +3434,10 @@ void init()
 			std::to_string(channel + 1), system_white,
 			[channel]() { on_editor_channel_select(channel); },
 			chan_x, 140, 14, 10, 1,
-			editor_channel_button_color(channel),
+			editor_channel_button_color(0, channel),
 			0xFFFFFF7F,
 			0xFFFFFFFF,
-			editor_channel_button_color(channel, true),
+			editor_channel_button_color(0, channel, true),
 			0xFFFFFFFF,
 			nullptr, "Channel for new notes");
 	}
@@ -3445,10 +3452,10 @@ void init()
 	// Velocity lane visibility
 	(*window)["VEL_LANE"] = new button("Hide Lane", system_white, on_editor_toggle_lane, 150, 55, 75, 12, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr, "Show/hide the bottom lane (drag its divider to resize)");
 
-	(*window)["LANE_VEL"] = new button("Vel", system_white, []() { on_editor_lane_mode(midi_editor_viewer::lane_mode::note_velocity); }, -185, 126.5, 32, 10, 2, 0x007FFF3F, 0xFFFFFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr, "Edit note velocity");
-	(*window)["LANE_PITCH"] = new button("Pitch", system_white, []() { on_editor_lane_mode(midi_editor_viewer::lane_mode::pitch_bend); }, -149, 126.5, 32, 10, 1, 0x7F3FFF3F, 0xFFFFFFFF, 0xFFFFFFFF, 0x7F3FFFFF, 0xFFFFFFFF, nullptr, "Edit channel pitch bend");
-	(*window)["LANE_PAN"] = new button("Pan", system_white, []() { on_editor_lane_mode(midi_editor_viewer::lane_mode::pan); }, -113, 126.5, 32, 10, 1, 0xFFAF003F, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFAF00FF, 0xFFFFFFFF, nullptr, "Edit channel pan CC10");
-	(*window)["LANE_CCVOL"] = new button("CCVol", system_white, []() { on_editor_lane_mode(midi_editor_viewer::lane_mode::channel_volume); }, -77, 126.5, 36, 10, 1, 0x00AF7F3F, 0xFFFFFFFF, 0xFFFFFFFF, 0x00AF7FFF, 0xFFFFFFFF, nullptr, "Edit channel volume CC7");
+	(*window)["LANE_VEL"] = new button("Vel", system_white, []() { on_editor_lane_mode(midi_editor_viewer::lane_mode::note_velocity); }, -180, 126.5, 30, 10, 2, 0x007FFF3F, 0xFFFFFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr, "Edit note velocity");
+	(*window)["LANE_PITCH"] = new button("Pitch", system_white, []() { on_editor_lane_mode(midi_editor_viewer::lane_mode::pitch_bend); }, -145, 126.5, 30, 10, 1, 0x7F3FFF3F, 0xFFFFFFFF, 0xFFFFFFFF, 0x7F3FFFFF, 0xFFFFFFFF, nullptr, "Edit channel pitch bend");
+	(*window)["LANE_PAN"] = new button("Pan", system_white, []() { on_editor_lane_mode(midi_editor_viewer::lane_mode::pan); }, -110, 126.5, 30, 10, 1, 0xFFAF003F, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFAF00FF, 0xFFFFFFFF, nullptr, "Edit channel pan CC10");
+	(*window)["LANE_CCVOL"] = new button("CCVol", system_white, []() { on_editor_lane_mode(midi_editor_viewer::lane_mode::channel_volume); }, -75, 126.5, 30, 10, 1, 0x00AF7F3F, 0xFFFFFFFF, 0xFFFFFFFF, 0x00AF7FFF, 0xFFFFFFFF, nullptr, "Edit channel volume CC7");
 
 	auto editor_track_list = new selectable_properted_list(
 		bs_list_black_small,
