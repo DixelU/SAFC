@@ -736,6 +736,21 @@ struct simple_player
 			on_device_changed(device_index);
 	}
 
+	// Whether a MIDI out sink is ready for immediate messages
+	bool has_output() const
+	{
+		return short_msg != nullptr;
+	}
+
+	// Send an immediate note on/off outside of playback (piano roll audition)
+	void preview_note(uint8_t channel, uint8_t key, uint8_t velocity, bool on)
+	{
+		if (!short_msg)
+			return;
+
+		short_msg(make_smsg((on ? 0x90 : 0x80) | (channel & 0x0F), key & 0x7F, on ? (velocity & 0x7F) : 0x40));
+	}
+
 	// Restore device by name (for registry persistence)
 	bool restore_device_by_name(const std::wstring& device_name)
 	{

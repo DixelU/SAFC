@@ -311,6 +311,7 @@
     <ClInclude Include="SAFCGUIF_Local\cut_and_transpose_piano.h" />
     <ClInclude Include="SAFCGUIF_Local\drag_n_drop_handler.h" />
     <ClInclude Include="SAFCGUIF_Local\graphing.h" />
+    <ClInclude Include="SAFCGUIF_Local\midi_editor_viewer.h" />
     <ClInclude Include="SAFCGUIF_Local\volume_graph.h" />
     <ClInclude Include="SAFCGUIF_Local\SAFGUIF_L.h" />
     <ClInclude Include="SAFCGUIF_Local\midi_processor_visualiser.h" />

@@ -162,6 +162,9 @@
     <ClInclude Include="SAFC_InnerModules\midi_editor.h">
       <Filter>Файлы заголовков</Filter>
     </ClInclude>
+    <ClInclude Include="SAFCGUIF_Local\midi_editor_viewer.h">
+      <Filter>Файлы заголовков\SAFGUIF\Specific</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="_SAFC_.cpp">

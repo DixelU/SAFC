@@ -2309,6 +2309,25 @@ void on_playback_seek_to(float value)
 // MIDI Editor Functions
 // ============================================================================
 
+void update_editor_status_text()
+{
+	auto textbox = _WH_t<text_box>("MIDI_EDITOR", "TEXT");
+	if (!textbox || !editor)
+		return;
+
+	if (!editor->is_file_loaded())
+	{
+		textbox->safe_string_replace("Load a MIDI file to begin editing");
+		return;
+	}
+
+	auto filename = editor->get_filename();
+	textbox->safe_string_replace(
+		std::format("{} | {} notes",
+			editor->get_track_label(editor->get_active_track()),
+			editor->get_note_count()));
+}
+
 void on_editor_load_file()
 {
 	worker_singleton<struct editor_load>::instance().push([]()
@@ -2318,25 +2337,12 @@ void on_editor_load_file()
 		{
 			if (editor->load_file(filenames[0]))
 			{
-				auto textbox = _WH_t<text_box>("MIDI_EDITOR", "TEXT");
-				if (textbox)
-				{
-					textbox->safe_string_replace(
-						"Loaded: " + std::string(filenames[0].begin(), filenames[0].end()) +
-						"\nNotes: " + std::to_string(editor->get_note_count()) +
-						"\nPPQN: " + std::to_string(editor->get_ppqn()) +
-						"\nDuration: " + std::to_string(editor->get_total_seconds()) + "s"
-					);
-				}
-				
 				// Update editor viewer; the editor fits the view to the file on load
-				auto editor_window = (*global_window_handler)["MIDI_EDITOR"];
-				if (editor_window)
-				{
-					auto editor_view = (midi_editor_viewer*)(*editor_window)["VIEW"];
-					if (editor_view)
-						editor_view->set_editor(editor.get());
-				}
+				auto editor_view = _WH_t<midi_editor_viewer>("MIDI_EDITOR", "VIEW");
+				if (editor_view)
+					editor_view->set_editor(editor.get());
+
+				update_editor_status_text();
 			}
 			else
 			{
@@ -2397,78 +2403,121 @@ void on_editor_redo()
 	editor->redo();
 }
 
-void on_editor_zoom_in()
+std::wstring editor_playback_snapshot_path()
 {
-	if (!editor || !editor->is_file_loaded())
-		return;
-	
-	editor->zoom_in(1.5f);
-}
-
-void on_editor_zoom_out()
-{
-	if (!editor || !editor->is_file_loaded())
-		return;
-	
-	editor->zoom_out(1.5f);
+	wchar_t tmp[MAX_PATH]{};
+	GetTempPathW(MAX_PATH, tmp);
+	return std::wstring(tmp) + L"safc_editor_preview.mid";
 }
 
 void on_editor_play()
 {
-	if (!editor || !editor->is_file_loaded())
+	if (!editor || !editor->is_file_loaded() || !player)
 		return;
-	
-	// Integrate with simple_player for playback
-	if (player)
-	{
-		player->restore_device_by_name(saved_midi_device_name);
-		player->simple_run(editor->get_filename());
-	}
-}
 
-void on_editor_load_current()
-{
-	// Load currently selected file from main list
-	worker_singleton<struct editor_load_current>::instance().push([]()
+	auto play_btn = _WH_t<button>("MIDI_EDITOR", "PLAY");
+
+	// Toggle: stop if already playing
+	if (player->is_playing())
 	{
-		auto ptr = _WH_t<selectable_properted_list>("MAIN", "List");
-		if (ptr->selected_id.empty())
+		player->stop();
+		if (play_btn)
+			play_btn->safe_string_replace("Play");
+		return;
+	}
+
+	// simple_run blocks until playback ends, keep it off the UI thread
+	worker_singleton<struct editor_playback>::instance().push([play_btn]()
+	{
+		// Play the current in-memory state (unsaved edits included),
+		// not the file on disk
+		auto snapshot = editor_playback_snapshot_path();
+		if (!editor->export_current(snapshot))
 		{
-			throw_alert_warning("No MIDI file selected in main list");
+			throw_alert_error("Failed to prepare playback snapshot");
 			return;
 		}
 
-		auto& id = ptr->selected_id.front();
-		if (id < g_data.files.size())
+		player->restore_device_by_name(saved_midi_device_name);
+		player->simple_run(snapshot);
+		if (play_btn)
+			play_btn->safe_string_replace("Play");
+	});
+
+	// Playback starts paused (player convention); unpause once it is up
+	worker_singleton<struct editor_playback_unpause>::instance().push([play_btn]()
+	{
+		for (int i = 0; i < 500 && !player->is_playing(); ++i)
+			std::this_thread::sleep_for(std::chrono::milliseconds(10));
+
+		if (player->is_playing())
 		{
-			if (editor->load_file(g_data[id].filename))
-			{
-				auto textbox = _WH_t<text_box>("MIDI_EDITOR", "TEXT");
-				if (textbox)
-				{
-					textbox->safe_string_replace(
-						"Loaded: " + std::string(g_data[id].filename.begin(), g_data[id].filename.end()) +
-						"\nNotes: " + std::to_string(editor->get_note_count()) +
-						"\nPPQN: " + std::to_string(editor->get_ppqn())
-					);
-				}
-				
-				// Update editor viewer; the editor fits the view to the file on load
-				auto editor_window = (*global_window_handler)["MIDI_EDITOR"];
-				if (editor_window)
-				{
-					auto editor_view = (midi_editor_viewer*)(*editor_window)["VIEW"];
-					if (editor_view)
-						editor_view->set_editor(editor.get());
-				}
-			}
-			else
-			{
-				throw_alert_error("Failed to load MIDI file");
-			}
+			player->resume();
+			if (play_btn)
+				play_btn->safe_string_replace("Stop");
 		}
 	});
 }
+
+void on_editor_mode_cycle()
+{
+	auto editor_view = _WH_t<midi_editor_viewer>("MIDI_EDITOR", "VIEW");
+	auto mode_btn = _WH_t<button>("MIDI_EDITOR", "MODE");
+	if (!editor_view || !mode_btn)
+		return;
+
+	switch (editor_view->get_tool())
+	{
+	case midi_editor_viewer::tool_mode::select:
+		editor_view->set_tool(midi_editor_viewer::tool_mode::draw);
+		mode_btn->safe_string_replace("Mode: Draw");
+		break;
+	case midi_editor_viewer::tool_mode::draw:
+		editor_view->set_tool(midi_editor_viewer::tool_mode::erase);
+		mode_btn->safe_string_replace("Mode: Erase");
+		break;
+	case midi_editor_viewer::tool_mode::erase:
+		editor_view->set_tool(midi_editor_viewer::tool_mode::select);
+		mode_btn->safe_string_replace("Mode: Select");
+		break;
+	}
+}
+
+void on_editor_toggle_lane()
+{
+	auto editor_view = _WH_t<midi_editor_viewer>("MIDI_EDITOR", "VIEW");
+	auto lane_btn = _WH_t<button>("MIDI_EDITOR", "VEL_LANE");
+	if (!editor_view || !lane_btn)
+		return;
+
+	editor_view->toggle_velocity_lane();
+	lane_btn->safe_string_replace(editor_view->velocity_lane_visible ? "Hide Lane" : "Show Lane");
+}
+
+void on_editor_velocity_up()
+{
+	if (editor && editor->is_file_loaded())
+		editor->adjust_velocity_selected(10);
+}
+
+void on_editor_velocity_down()
+{
+	if (editor && editor->is_file_loaded())
+		editor->adjust_velocity_selected(-10);
+}
+
+void editor_switch_track(int direction)
+{
+	if (!editor || !editor->is_file_loaded())
+		return;
+
+	// Cycle only through tracks that actually contain notes
+	editor->set_active_track(editor->next_track_with_notes(direction));
+	update_editor_status_text();
+}
+
+void on_editor_track_next() { editor_switch_track(1); }
+void on_editor_track_prev() { editor_switch_track(-1); }
 
 bool simplayer_maximised = false;
 
@@ -2493,15 +2542,20 @@ struct midieditor_saved_state {
 	float text_x, text_y;
 	float load_file_x, load_file_y;
 	float save_file_x, save_file_y;
-	float load_current_x, load_current_y;
+	float mode_x, mode_y;
 	float zoom_in_x, zoom_in_y;
 	float zoom_out_x, zoom_out_y;
 	float play_x, play_y;
+	float track_next_x, track_next_y;
+	float track_prev_x, track_prev_y;
+	float vel_up_x, vel_up_y;
+	float vel_down_x, vel_down_y;
 	float undo_x, undo_y;
 	float redo_x, redo_y;
 	float delete_x, delete_y;
 	float back_x, back_y;
 	float max_x, max_y;
+	float lane_x, lane_y;
 	float view_x, view_y, view_width, view_height;
 	std::string previous_main_window_id;
 } saved_midieditor_state;
@@ -2518,15 +2572,18 @@ void apply_midieditor_maximised_layout()
 	auto text = (text_box*)(*window)["TEXT"];
 	auto load_file_btn = (button*)(*window)["LOAD_FILE"];
 	auto save_file_btn = (button*)(*window)["SAVE_FILE"];
-	auto load_current_btn = (button*)(*window)["LOAD_CURRENT"];
-	auto zoom_in_btn = (button*)(*window)["ZOOM_IN"];
-	auto zoom_out_btn = (button*)(*window)["ZOOM_OUT"];
+	auto mode_btn = (button*)(*window)["MODE"];
 	auto play_btn = (button*)(*window)["PLAY"];
+	auto track_next_btn = (button*)(*window)["TRACK_NEXT"];
+	auto track_prev_btn = (button*)(*window)["TRACK_PREV"];
+	auto vel_up_btn = (button*)(*window)["VEL_UP"];
+	auto vel_down_btn = (button*)(*window)["VEL_DOWN"];
 	auto undo_btn = (button*)(*window)["UNDO"];
 	auto redo_btn = (button*)(*window)["REDO"];
 	auto delete_btn = (button*)(*window)["DELETE"];
 	auto back_btn = (button*)(*window)["BACK_TO_MAIN"];
 	auto max_btn = (button*)(*window)["MAXIMISE"];
+	auto lane_btn = (button*)(*window)["VEL_LANE"];
 
 	// move window so top-left aligns with viewport top-left
 	float dx = (-half_w) - window->x_window_pos;
@@ -2541,37 +2598,30 @@ void apply_midieditor_maximised_layout()
 	// Button column on the right
 	float button_x = half_w - 45;
 
-	// Position file operation buttons
-	float row1_y = half_h - 10;
-	float row2_y = row1_y - 15;
-	float row3_y = row2_y - 15;
+	// File operations
+	float row_y = half_h - 10;
+	load_file_btn->safe_change_position(button_x, row_y);
+	save_file_btn->safe_change_position(button_x, row_y -= 15);
 
-	load_file_btn->safe_change_position(button_x, row1_y);
-	save_file_btn->safe_change_position(button_x, row2_y);
-	load_current_btn->safe_change_position(button_x, row3_y);
+	// Tool and view controls
+	mode_btn->safe_change_position(button_x, row_y -= 20);
 
-	// Position view control buttons
-	float row4_y = row3_y - 20;
-	float row5_y = row4_y - 15;
+	// Playback, maximise, velocity lane
+	play_btn->safe_change_position(button_x, row_y -= 20);
+	max_btn->safe_change_position(button_x, row_y -= 15);
+	lane_btn->safe_change_position(button_x, row_y -= 15);
 
-	zoom_in_btn->safe_change_position(button_x, row4_y);
-	zoom_out_btn->safe_change_position(button_x, row5_y);
+	// Track / velocity / edit operations (bottom cluster)
+	float bottom_y = -half_h + 130;
+	track_next_btn->safe_change_position(button_x, bottom_y);
+	track_prev_btn->safe_change_position(button_x, bottom_y -= 15);
+	vel_up_btn->safe_change_position(button_x, bottom_y -= 20);
+	vel_down_btn->safe_change_position(button_x, bottom_y -= 15);
+	undo_btn->safe_change_position(button_x, bottom_y -= 20);
+	redo_btn->safe_change_position(button_x, bottom_y -= 15);
+	delete_btn->safe_change_position(button_x, bottom_y -= 15);
 
-	// Position play and maximise buttons
-	float row6_y = row5_y - 20;
-	play_btn->safe_change_position(button_x, row6_y);
-	max_btn->safe_change_position(button_x, row6_y - 15);
-
-	// Position edit operation buttons (bottom area)
-	float row7_y = -half_h + 70;
-	float row8_y = row7_y - 15;
-	float row9_y = row8_y - 15;
-
-	undo_btn->safe_change_position(button_x, row7_y);
-	redo_btn->safe_change_position(button_x, row8_y);
-	delete_btn->safe_change_position(button_x, row9_y);
-
-	// Position back button
+	// Back button
 	back_btn->safe_change_position(button_x, -half_h + 15);
 
 	// Resize editor viewer to fill the window area (minus button space)
@@ -2587,7 +2637,7 @@ void apply_midieditor_maximised_layout()
 	editor_view->ypos = view_center_y;
 
 	// Status text above the viewer
-	text->safe_change_position(view_center_x, half_h - 5);
+	text->safe_change_position(view_center_x, half_h - 15);
 }
 
 void switch_midieditor_maximise()
@@ -2597,15 +2647,18 @@ void switch_midieditor_maximise()
 	auto text = (text_box*)(*window)["TEXT"];
 	auto load_file_btn = (button*)(*window)["LOAD_FILE"];
 	auto save_file_btn = (button*)(*window)["SAVE_FILE"];
-	auto load_current_btn = (button*)(*window)["LOAD_CURRENT"];
-	auto zoom_in_btn = (button*)(*window)["ZOOM_IN"];
-	auto zoom_out_btn = (button*)(*window)["ZOOM_OUT"];
+	auto mode_btn = (button*)(*window)["MODE"];
 	auto play_btn = (button*)(*window)["PLAY"];
+	auto track_next_btn = (button*)(*window)["TRACK_NEXT"];
+	auto track_prev_btn = (button*)(*window)["TRACK_PREV"];
+	auto vel_up_btn = (button*)(*window)["VEL_UP"];
+	auto vel_down_btn = (button*)(*window)["VEL_DOWN"];
 	auto undo_btn = (button*)(*window)["UNDO"];
 	auto redo_btn = (button*)(*window)["REDO"];
 	auto delete_btn = (button*)(*window)["DELETE"];
 	auto back_btn = (button*)(*window)["BACK_TO_MAIN"];
 	auto max_btn = (button*)(*window)["MAXIMISE"];
+	auto lane_btn = (button*)(*window)["VEL_LANE"];
 
 	if (!midieditor_maximised)
 	{
@@ -2621,14 +2674,18 @@ void switch_midieditor_maximise()
 		state.load_file_y = load_file_btn->y_pos;
 		state.save_file_x = save_file_btn->x_pos;
 		state.save_file_y = save_file_btn->y_pos;
-		state.load_current_x = load_current_btn->x_pos;
-		state.load_current_y = load_current_btn->y_pos;
-		state.zoom_in_x = zoom_in_btn->x_pos;
-		state.zoom_in_y = zoom_in_btn->y_pos;
-		state.zoom_out_x = zoom_out_btn->x_pos;
-		state.zoom_out_y = zoom_out_btn->y_pos;
+		state.mode_x = mode_btn->x_pos;
+		state.mode_y = mode_btn->y_pos;
 		state.play_x = play_btn->x_pos;
 		state.play_y = play_btn->y_pos;
+		state.track_next_x = track_next_btn->x_pos;
+		state.track_next_y = track_next_btn->y_pos;
+		state.track_prev_x = track_prev_btn->x_pos;
+		state.track_prev_y = track_prev_btn->y_pos;
+		state.vel_up_x = vel_up_btn->x_pos;
+		state.vel_up_y = vel_up_btn->y_pos;
+		state.vel_down_x = vel_down_btn->x_pos;
+		state.vel_down_y = vel_down_btn->y_pos;
 		state.undo_x = undo_btn->x_pos;
 		state.undo_y = undo_btn->y_pos;
 		state.redo_x = redo_btn->x_pos;
@@ -2639,6 +2696,8 @@ void switch_midieditor_maximise()
 		state.back_y = back_btn->y_pos;
 		state.max_x = max_btn->x_pos;
 		state.max_y = max_btn->y_pos;
+		state.lane_x = lane_btn->x_pos;
+		state.lane_y = lane_btn->y_pos;
 		state.view_x = editor_view->xpos;
 		state.view_y = editor_view->ypos;
 		state.view_width = editor_view->data.width;
@@ -2670,15 +2729,18 @@ void switch_midieditor_maximise()
 		text->safe_change_position(state.text_x, state.text_y);
 		load_file_btn->safe_change_position(state.load_file_x, state.load_file_y);
 		save_file_btn->safe_change_position(state.save_file_x, state.save_file_y);
-		load_current_btn->safe_change_position(state.load_current_x, state.load_current_y);
-		zoom_in_btn->safe_change_position(state.zoom_in_x, state.zoom_in_y);
-		zoom_out_btn->safe_change_position(state.zoom_out_x, state.zoom_out_y);
+		mode_btn->safe_change_position(state.mode_x, state.mode_y);
 		play_btn->safe_change_position(state.play_x, state.play_y);
+		track_next_btn->safe_change_position(state.track_next_x, state.track_next_y);
+		track_prev_btn->safe_change_position(state.track_prev_x, state.track_prev_y);
+		vel_up_btn->safe_change_position(state.vel_up_x, state.vel_up_y);
+		vel_down_btn->safe_change_position(state.vel_down_x, state.vel_down_y);
 		undo_btn->safe_change_position(state.undo_x, state.undo_y);
 		redo_btn->safe_change_position(state.redo_x, state.redo_y);
 		delete_btn->safe_change_position(state.delete_x, state.delete_y);
 		back_btn->safe_change_position(state.back_x, state.back_y);
 		max_btn->safe_change_position(state.max_x, state.max_y);
+		lane_btn->safe_change_position(state.lane_x, state.lane_y);
 
 		editor_view->xpos = state.view_x;
 		editor_view->ypos = state.view_y;
@@ -3142,6 +3204,16 @@ void init()
 	auto editor_view = new midi_editor_viewer(-45, -25, editor.get());
 	editor_view->data.width = 300;
 	editor_view->data.height = 300;
+	editor_view->on_track_changed = update_editor_status_text;
+	editor_view->note_audition = [](std::uint8_t key, std::uint8_t velocity, std::uint8_t channel, bool on)
+	{
+		if (!player)
+			return;
+		if (on && !player->has_output())
+			if (!player->restore_device_by_name(saved_midi_device_name))
+				player->set_device(player->get_current_device());
+		player->preview_note(channel, key, velocity, on);
+	};
 	(*window)["VIEW"] = editor_view;
 
 	// Status text (above the viewer)
@@ -3150,22 +3222,31 @@ void init()
 	// File operation buttons (right side, aligned with MAIN window pattern)
 	(*window)["LOAD_FILE"] = new button("Load MIDI", system_black, on_editor_load_file, 150, 167.5, 75, 12, 1, 0xFFFFFFAF, 0x0F0F0FFF, 0xFFFFFFFF, 0x000000FF, 0xFFFFFFFF, nullptr, "Load MIDI file for editing");
 	(*window)["SAVE_FILE"] = new button("Save MIDI", system_black, on_editor_save_file, 150, 155, 75, 12, 1, 0xFFFFFFAF, 0x0F0F0FFF, 0xFFFFFFFF, 0x000000FF, 0xFFFFFFFF, nullptr, "Save edited MIDI file");
-	(*window)["LOAD_CURRENT"] = new button("Load Selected", system_black, on_editor_load_current, 150, 142.5, 75, 12, 1, 0xFFFFFFAF, 0x0F0F0FFF, 0xFFFFFFFF, 0x000000FF, 0xFFFFFFFF, nullptr, "Load currently selected file from main list");
 
-	// View control buttons
-	(*window)["ZOOM_IN"] = new button("Zoom +", system_black, on_editor_zoom_in, 150, 117.5, 75, 12, 1, 0xFFFFFFAF, 0x0F0F0FFF, 0xFFFFFFFF, 0x000000FF, 0xFFFFFFFF, nullptr, "Zoom in piano roll");
-	(*window)["ZOOM_OUT"] = new button("Zoom -", system_black, on_editor_zoom_out, 150, 105, 75, 12, 1, 0xFFFFFFAF, 0x0F0F0FFF, 0xFFFFFFFF, 0x000000FF, 0xFFFFFFFF, nullptr, "Zoom out piano roll");
+	// Tool mode: select / draw / erase
+	(*window)["MODE"] = new button("Mode: Select", system_black, on_editor_mode_cycle, 150, 142.5, 75, 12, 1, 0xFFFFFFAF, 0x0F0F0FFF, 0xFFFFFFFF, 0x000000FF, 0xFFFFFFFF, nullptr, "Cycle tool: Select / Draw / Erase");
 
 	// Playback button
-	(*window)["PLAY"] = new button("Play", system_black, on_editor_play, 150, 92.5, 75, 12, 1, 0xFFFFFFAF, 0x0F0F0FFF, 0xFFFFFFFF, 0x000000FF, 0xFFFFFFFF, nullptr, "Play current MIDI");
+	(*window)["PLAY"] = new button("Play", system_black, on_editor_play, 150, 92.5, 75, 12, 1, 0xFFFFFFAF, 0x0F0F0FFF, 0xFFFFFFFF, 0x000000FF, 0xFFFFFFFF, nullptr, "Play / stop current MIDI");
 
 	// Maximise button
 	(*window)["MAXIMISE"] = new button("Maximise", system_white, switch_midieditor_maximise, 150, 80, 75, 12, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr, "Expand editor to full window");
 
+	// Velocity lane visibility
+	(*window)["VEL_LANE"] = new button("Hide Lane", system_white, on_editor_toggle_lane, 150, 67.5, 75, 12, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr, "Show/hide the velocity lane (drag its divider to resize)");
+
+	// Track navigation (right-clicking a gray note also switches track)
+	(*window)["TRACK_NEXT"] = new button("Track +", system_white, on_editor_track_next, 150, -87.5, 75, 12, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr, "Next track (or right-click a gray note)");
+	(*window)["TRACK_PREV"] = new button("Track -", system_white, on_editor_track_prev, 150, -100, 75, 12, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr, "Previous track");
+
+	// Velocity of the selected notes
+	(*window)["VEL_UP"] = new button("Vel +10", system_white, on_editor_velocity_up, 150, -115, 75, 12, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr, "Raise velocity of selected notes");
+	(*window)["VEL_DOWN"] = new button("Vel -10", system_white, on_editor_velocity_down, 150, -127.5, 75, 12, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr, "Lower velocity of selected notes");
+
 	// Edit operation buttons (bottom area)
-	(*window)["UNDO"] = new button("Undo", legacy_white, on_editor_undo, 150, -140, 75, 12, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr, "Undo last edit");
-	(*window)["REDO"] = new button("Redo", legacy_white, on_editor_redo, 150, -152.5, 75, 12, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr, "Redo undone edit");
-	(*window)["DELETE"] = new button("Delete", legacy_white, on_editor_delete, 150, -165, 75, 12, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr, "Delete selected notes");
+	(*window)["UNDO"] = new button("Undo", system_white, on_editor_undo, 150, -142.5, 75, 12, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr, "Undo last edit");
+	(*window)["REDO"] = new button("Redo", system_white, on_editor_redo, 150, -155, 75, 12, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr, "Redo undone edit");
+	(*window)["DELETE"] = new button("Delete", system_white, on_editor_delete, 150, -167.5, 75, 12, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr, "Delete selected notes");
 
 	// Back to main window button
 	(*window)["BACK_TO_MAIN"] = new button("Back", system_white, []() {
@@ -3174,7 +3255,7 @@ void init()
 		global_window_handler->main_window_id = "MAIN";
 		global_window_handler->disable_all_windows();
 		global_window_handler->enable_window("MAIN");
-	}, 150, -177.5, 75, 12, 1, 0x5F5F5FAF, 0xFFFFFFFF, 0x5F5F5FAF, 0xFFFFFFFF, 0xF7F7F7FF, nullptr, "Return to main window");
+	}, 150, -182.5, 75, 12, 1, 0x5F5F5FAF, 0xFFFFFFFF, 0x5F5F5FAF, 0xFFFFFFFF, 0xF7F7F7FF, nullptr, "Return to main window");
 
 	(*global_window_handler)["MIDI_EDITOR"] = window;
 

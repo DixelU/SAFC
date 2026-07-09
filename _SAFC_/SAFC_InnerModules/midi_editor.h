@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <fstream>
 #include <cstring>
+#include <set>
 
 #include "../bbb_ffio.h"
 #include "single_midi_processor_2.h"
@@ -86,26 +87,31 @@ struct midi_editor
      */
     struct selection
     {
+        static constexpr std::uint8_t all_tracks = 0xFF;
+
         tick_type begin_tick;
         tick_type end_tick;
         std::uint8_t key_begin;
         std::uint8_t key_end;
+        std::uint8_t track_filter; // all_tracks or a specific track index
         bool has_selection;
 
-        selection() : begin_tick(0), end_tick(0), key_begin(0), key_end(127), has_selection(false) {}
+        selection() : begin_tick(0), end_tick(0), key_begin(0), key_end(127),
+                      track_filter(all_tracks), has_selection(false) {}
 
         bool is_active() const { return has_selection && begin_tick < end_tick; }
-        
+
         bool contains(tick_type tick, std::uint8_t key) const
         {
             if (!has_selection) return false;
-            return tick >= begin_tick && tick < end_tick && 
+            return tick >= begin_tick && tick < end_tick &&
                    key >= key_begin && key <= key_end;
         }
 
         bool intersects(const piano_note& note) const
         {
             if (!has_selection) return false;
+            if (track_filter != all_tracks && note.track_index != track_filter) return false;
             return note.start_tick < end_tick && note.end_tick > begin_tick &&
                    note.key >= key_begin && note.key <= key_end;
         }
@@ -365,6 +371,138 @@ struct midi_editor
     };
 
     /**
+     * Functor for adjusting note velocity by a relative amount
+     */
+    struct velocity_adjust_op : edit_operation
+    {
+        selection sel;
+        int delta;
+        std::vector<std::pair<piano_note, std::uint8_t>> changes; // note (pre-change), old_velocity
+
+        velocity_adjust_op(selection s, int d) : sel(s), delta(d) {}
+
+        void execute(midi_editor& editor) override
+        {
+            changes.clear();
+            for (auto& note : editor.notes)
+            {
+                if (sel.intersects(note))
+                {
+                    changes.emplace_back(note, note.velocity);
+                    note.velocity = std::uint8_t(std::clamp(int(note.velocity) + delta, 1, 127));
+                }
+            }
+            editor.mark_dirty();
+        }
+
+        void undo(midi_editor& editor) override
+        {
+            for (auto& [note, old_vel] : changes)
+            {
+                for (auto& n : editor.notes)
+                {
+                    if (n.start_tick == note.start_tick &&
+                        n.key == note.key &&
+                        n.channel == note.channel &&
+                        n.track_index == note.track_index)
+                    {
+                        n.velocity = old_vel;
+                        break;
+                    }
+                }
+            }
+            editor.mark_dirty();
+        }
+
+        std::string description() const override
+        {
+            return "Adjust Velocity (" + std::to_string(delta) + ")";
+        }
+    };
+
+    /**
+     * Functor for deleting one exact note (eraser tool)
+     */
+    struct delete_single_note_op : edit_operation
+    {
+        piano_note target;
+        bool applied = false;
+
+        delete_single_note_op(piano_note n) : target(n) {}
+
+        void execute(midi_editor& editor) override
+        {
+            applied = false;
+            auto& notes = editor.notes;
+            for (auto it = notes.begin(); it != notes.end(); ++it)
+            {
+                if (it->start_tick == target.start_tick &&
+                    it->end_tick == target.end_tick &&
+                    it->key == target.key &&
+                    it->channel == target.channel &&
+                    it->track_index == target.track_index)
+                {
+                    notes.erase(it);
+                    applied = true;
+                    break;
+                }
+            }
+            editor.mark_dirty();
+        }
+
+        void undo(midi_editor& editor) override
+        {
+            if (applied)
+                editor.notes.push_back(target);
+            editor.mark_dirty();
+        }
+
+        std::string description() const override { return "Erase Note"; }
+    };
+
+    /**
+     * Undo entry for a velocity-lane gesture: per-note old/new velocities recorded
+     * while the drag was applied transiently, committed as one operation.
+     */
+    struct recorded_velocity_op : edit_operation
+    {
+        struct entry
+        {
+            piano_note note; // identity (velocity field is ignored for matching)
+            std::uint8_t old_velocity;
+            std::uint8_t new_velocity;
+        };
+        std::vector<entry> entries;
+
+        recorded_velocity_op(std::vector<entry>&& e) : entries(std::move(e)) {}
+
+        void apply(midi_editor& editor, bool use_new)
+        {
+            for (const auto& en : entries)
+            {
+                for (auto& n : editor.notes)
+                {
+                    if (n.start_tick == en.note.start_tick &&
+                        n.end_tick == en.note.end_tick &&
+                        n.key == en.note.key &&
+                        n.channel == en.note.channel &&
+                        n.track_index == en.note.track_index)
+                    {
+                        n.velocity = use_new ? en.new_velocity : en.old_velocity;
+                        break;
+                    }
+                }
+            }
+            editor.mark_dirty();
+        }
+
+        void execute(midi_editor& editor) override { apply(editor, true); }
+        void undo(midi_editor& editor) override { apply(editor, false); }
+
+        std::string description() const override { return "Edit Velocities"; }
+    };
+
+    /**
      * Functor for quantizing notes to grid
      */
     struct quantize_op : edit_operation
@@ -534,8 +672,25 @@ private:
     std::vector<piano_note> notes;
     std::map<std::uint8_t, track_info> tracks;
 
-    // Tempo map captured from the source file (tick, microseconds per quarter note)
+    // Tempo map captured from the source file (tick, microseconds per quarter note).
+    // Used for time computations only; the events themselves live in raw_track_events.
     std::vector<std::pair<tick_type, std::uint32_t>> tempo_events;
+
+    /**
+     * Non-note event captured verbatim from the source file so it survives a save
+     * (CC, program change, pitch bend, aftertouch, meta, sysex).
+     * bytes holds the full normalized event: status byte, data, and for meta/sysex
+     * the type byte and VLV-encoded length.
+     */
+    struct raw_event
+    {
+        tick_type tick;
+        std::vector<base_type> bytes;
+    };
+    std::map<std::uint8_t, std::vector<raw_event>> raw_track_events;
+
+    // Track edits apply to (piano roll focus); notes of other tracks are shown dimmed
+    std::uint8_t active_track = 0;
 
     // Selection state
     selection current_selection;
@@ -587,9 +742,11 @@ public:
         notes.clear();
         tracks.clear();
         tempo_events.clear();
+        raw_track_events.clear();
         undo_stack.clear();
         redo_stack.clear();
         current_selection = selection();
+        active_track = 0;
 
         mmap_file = std::make_unique<bbb_mmap>(filepath.c_str());
         if (!mmap_file || !mmap_file->good())
@@ -637,6 +794,10 @@ public:
         std::lock_guard<std::recursive_mutex> lock(editor_mutex);
 
         view_start_tick = 0;
+        view_duration_ticks = tick_type(ppqn) * 4 * 4;
+
+        return;
+
         const auto total = get_total_ticks();
         view_duration_ticks = total ? total : tick_type(ppqn) * 4;
 
@@ -673,6 +834,9 @@ public:
     {
         tick_type current_tick = 0;
         std::uint8_t rsb = 0;
+        std::uint8_t primary_channel = 0xFF;
+        std::string track_name;
+        std::vector<raw_event> captured_events;
         
         // Track state for note parsing
         struct pending_note
@@ -745,6 +909,8 @@ public:
                     {
                         std::uint16_t note_key = (std::uint16_t(command & 0x0F) << 8) | data1;
                         active_notes[note_key] = { current_tick, data1, data2, static_cast<std::uint8_t>(command & 0x0F) };
+                        if (primary_channel == 0xFF)
+                            primary_channel = command & 0x0F;
                     }
                     else
                     {
@@ -776,11 +942,16 @@ public:
                     break;
                 }
                 case 0xA: case 0xB: case 0xE:
-                    cur++; // Skip second data byte
+                {
+                    data2 = *(cur++);
+                    captured_events.push_back({ current_tick, { command, data1, data2 } });
                     break;
+                }
                 case 0xC: case 0xD:
-                    // Single byte events
+                {
+                    captured_events.push_back({ current_tick, { command, data1 } });
                     break;
+                }
                 case 0xF:
                 {
                     if (command == 0xFF && data1 == 0x2F)
@@ -789,7 +960,7 @@ public:
                         cur = track_end;
                         continue;
                     }
-                    
+
                     // Read meta/sysex length
                     std::uint32_t length = 0;
                     do
@@ -798,10 +969,26 @@ public:
                         length = (length << 7) | (byte & 0x7F);
                     } while (byte & 0x80 && cur < track_end);
 
-                    // Capture tempo changes so they survive a save round-trip
-                    if (command == 0xFF && data1 == 0x51 && length == 3 && cur + 3 <= track_end)
-                        tempo_events.emplace_back(current_tick,
-                            (std::uint32_t(cur[0]) << 16) | (std::uint32_t(cur[1]) << 8) | cur[2]);
+                    if (cur + length <= track_end)
+                    {
+                        // Tempo map for time computations
+                        if (command == 0xFF && data1 == 0x51 && length == 3)
+                            tempo_events.emplace_back(current_tick,
+                                (std::uint32_t(cur[0]) << 16) | (std::uint32_t(cur[1]) << 8) | cur[2]);
+
+                        // Track name meta
+                        if (command == 0xFF && data1 == 0x03 && track_name.empty())
+                            track_name.assign(reinterpret_cast<const char*>(cur), length);
+
+                        // Keep the event verbatim so it survives a save
+                        raw_event ev{ current_tick, {} };
+                        ev.bytes.push_back(command);
+                        if (command == 0xFF)
+                            ev.bytes.push_back(data1);
+                        single_midi_processor_2::push_vlv(length, ev.bytes);
+                        ev.bytes.insert(ev.bytes.end(), cur, cur + length);
+                        captured_events.push_back(std::move(ev));
+                    }
 
                     cur += length;
                     break;
@@ -812,11 +999,17 @@ public:
         // Close any remaining active notes (malformed MIDI)
         for (auto& [key, note] : active_notes)
         {
-            notes.emplace_back(note.start, current_tick + 1, 
+            notes.emplace_back(note.start, current_tick + 1,
                              note.key, note.velocity, note.channel, track_index);
         }
 
-        tracks[track_index] = track_info();
+        auto& info = tracks[track_index];
+        info.name = std::move(track_name);
+        info.channel = primary_channel;
+
+        if (!captured_events.empty())
+            raw_track_events[track_index] = std::move(captured_events);
+
         return true;
     }
 
@@ -943,13 +1136,166 @@ public:
     // ========================================================================
 
     void insert_note(tick_type start, tick_type end, std::uint8_t key,
-                    std::uint8_t velocity, std::uint8_t channel = 0)
+                    std::uint8_t velocity, std::uint8_t channel = 0, std::uint8_t track = 0)
     {
         std::lock_guard<std::recursive_mutex> lock(editor_mutex);
         auto op = std::make_unique<insert_note_op>(
-            piano_note(start, end, key, velocity, channel));
+            piano_note(start, end, key, velocity, channel, track));
         op->execute(*this);
         push_undo(std::move(op));
+    }
+
+    /**
+     * Insert a note into the active track using its primary channel
+     */
+    void insert_note_active_track(tick_type start, tick_type end,
+                                  std::uint8_t key, std::uint8_t velocity)
+    {
+        std::lock_guard<std::recursive_mutex> lock(editor_mutex);
+        std::uint8_t channel = 0;
+        auto it = tracks.find(active_track);
+        if (it != tracks.end() && it->second.channel != 0xFF)
+            channel = it->second.channel;
+        insert_note(start, end, key, velocity, channel, active_track);
+    }
+
+    /**
+     * Set one note's velocity immediately without touching undo history.
+     * Used by the velocity lane during a drag; the whole gesture is then
+     * committed as one undo entry via commit_velocity_gesture().
+     * Returns false if the note was not found; old_velocity receives the prior value.
+     */
+    bool set_note_velocity_transient(const piano_note& ident, std::uint8_t velocity,
+                                     std::uint8_t& old_velocity)
+    {
+        std::lock_guard<std::recursive_mutex> lock(editor_mutex);
+        for (auto& n : notes)
+        {
+            if (n.start_tick == ident.start_tick &&
+                n.end_tick == ident.end_tick &&
+                n.key == ident.key &&
+                n.channel == ident.channel &&
+                n.track_index == ident.track_index)
+            {
+                old_velocity = n.velocity;
+                n.velocity = std::clamp<std::uint8_t>(velocity, 1, 127);
+                mark_dirty();
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Push an already-applied velocity gesture onto the undo stack
+     */
+    void commit_velocity_gesture(std::vector<recorded_velocity_op::entry>&& entries)
+    {
+        std::lock_guard<std::recursive_mutex> lock(editor_mutex);
+        if (entries.empty())
+            return;
+        push_undo(std::make_unique<recorded_velocity_op>(std::move(entries)));
+        mark_dirty();
+    }
+
+    void adjust_velocity_selected(int delta)
+    {
+        std::lock_guard<std::recursive_mutex> lock(editor_mutex);
+        if (!current_selection.is_active() || !delta)
+            return;
+
+        auto op = std::make_unique<velocity_adjust_op>(current_selection, delta);
+        op->execute(*this);
+        push_undo(std::move(op));
+    }
+
+    /**
+     * Erase the topmost note at (tick, key). track_filter = selection::all_tracks
+     * erases from any track, otherwise only from the given one.
+     */
+    bool erase_note_at(tick_type tick, std::uint8_t key,
+                       std::uint8_t track_filter = selection::all_tracks)
+    {
+        std::lock_guard<std::recursive_mutex> lock(editor_mutex);
+
+        const piano_note* found = nullptr;
+        for (const auto& note : notes)
+        {
+            if (note.key == key && tick >= note.start_tick && tick < note.end_tick &&
+                (track_filter == selection::all_tracks || note.track_index == track_filter))
+                found = &note; // last one wins: it is drawn on top
+        }
+        if (!found)
+            return false;
+
+        auto op = std::make_unique<delete_single_note_op>(*found);
+        op->execute(*this);
+        push_undo(std::move(op));
+        return true;
+    }
+
+    /**
+     * Find the topmost note at (tick, key) across all tracks.
+     * With tolerances > 0, falls back to the nearest note within
+     * ±key_tolerance semitones and ±tick_tolerance ticks of the point.
+     */
+    bool find_note_at(tick_type tick, std::uint8_t key, piano_note& out,
+                      tick_type tick_tolerance = 0, std::uint8_t key_tolerance = 0) const
+    {
+        std::lock_guard<std::recursive_mutex> lock(editor_mutex);
+
+        bool found = false;
+        for (const auto& note : notes)
+        {
+            if (note.key == key && tick >= note.start_tick && tick < note.end_tick)
+            {
+                out = note;
+                found = true;
+            }
+        }
+        if (found || (!tick_tolerance && !key_tolerance))
+            return found;
+
+        const auto lo_tick = tick > tick_tolerance ? tick - tick_tolerance : 0;
+        const auto hi_tick = tick + tick_tolerance;
+        for (const auto& note : notes)
+        {
+            if (std::abs(int(note.key) - int(key)) <= int(key_tolerance) &&
+                note.start_tick <= hi_tick && note.end_tick > lo_tick)
+            {
+                out = note;
+                found = true;
+            }
+        }
+        return found;
+    }
+
+    /**
+     * Next/previous track that actually contains notes, in cyclic order.
+     * Returns the current active track if no track has notes.
+     */
+    std::uint8_t next_track_with_notes(int direction) const
+    {
+        std::lock_guard<std::recursive_mutex> lock(editor_mutex);
+
+        std::set<std::uint8_t> populated;
+        for (const auto& note : notes)
+            populated.insert(note.track_index);
+        if (populated.empty())
+            return active_track;
+
+        if (direction >= 0)
+        {
+            auto it = populated.upper_bound(active_track);
+            if (it == populated.end())
+                it = populated.begin();
+            return *it;
+        }
+
+        auto it = populated.lower_bound(active_track);
+        if (it == populated.begin())
+            it = populated.end();
+        return *(--it);
     }
 
     void delete_selected_notes()
@@ -972,6 +1318,20 @@ public:
         auto op = std::make_unique<move_notes_op>(current_selection, delta_ticks, delta_keys);
         op->execute(*this);
         push_undo(std::move(op));
+
+        // Keep the selection rectangle attached to the moved notes
+        auto& sel = current_selection;
+        auto new_begin = sgtick_type(sel.begin_tick) + delta_ticks;
+        auto new_end = sgtick_type(sel.end_tick) + delta_ticks;
+        if (new_begin >= 0 && new_end >= 0)
+        {
+            sel.begin_tick = tick_type(new_begin);
+            sel.end_tick = tick_type(new_end);
+        }
+        int kb = std::clamp(int(sel.key_begin) + delta_keys, 0, 127);
+        int ke = std::clamp(int(sel.key_end) + delta_keys, 0, 127);
+        sel.key_begin = std::uint8_t(kb);
+        sel.key_end = std::uint8_t(ke);
     }
 
     void resize_note(tick_type start_tick, std::uint8_t key, tick_type new_length)
@@ -1084,14 +1444,64 @@ public:
     // ========================================================================
 
     void set_selection(tick_type begin, tick_type end,
-                      std::uint8_t key_begin = 0, std::uint8_t key_end = 127)
+                      std::uint8_t key_begin = 0, std::uint8_t key_end = 127,
+                      std::uint8_t track_filter = selection::all_tracks)
     {
         std::lock_guard<std::recursive_mutex> lock(editor_mutex);
         current_selection.begin_tick = begin;
         current_selection.end_tick = end;
         current_selection.key_begin = key_begin;
         current_selection.key_end = key_end;
+        current_selection.track_filter = track_filter;
         current_selection.has_selection = (begin < end);
+    }
+
+    // ========================================================================
+    // Active Track
+    // ========================================================================
+
+    void set_active_track(std::uint8_t track)
+    {
+        std::lock_guard<std::recursive_mutex> lock(editor_mutex);
+        active_track = track;
+        current_selection.has_selection = false; // selection belongs to a track
+    }
+
+    std::uint8_t get_active_track() const
+    {
+        std::lock_guard<std::recursive_mutex> lock(editor_mutex);
+        return active_track;
+    }
+
+    std::string get_track_label(std::uint8_t track) const
+    {
+        std::lock_guard<std::recursive_mutex> lock(editor_mutex);
+        std::string label = "Track " + std::to_string(track);
+        auto it = tracks.find(track);
+        if (it != tracks.end() && !it->second.name.empty())
+            label += " (" + it->second.name + ")";
+        return label;
+    }
+
+    std::uint8_t get_track_count() const
+    {
+        std::lock_guard<std::recursive_mutex> lock(editor_mutex);
+        return std::uint8_t(tracks.size());
+    }
+
+    std::uint8_t get_track_primary_channel(std::uint8_t track) const
+    {
+        std::lock_guard<std::recursive_mutex> lock(editor_mutex);
+        auto it = tracks.find(track);
+        if (it != tracks.end() && it->second.channel != 0xFF)
+            return it->second.channel;
+        return 0;
+    }
+
+    std::uint8_t get_active_track_channel() const
+    {
+        std::lock_guard<std::recursive_mutex> lock(editor_mutex);
+        return get_track_primary_channel(active_track);
     }
 
     void clear_selection()
@@ -1198,6 +1608,18 @@ public:
         return true;
     }
 
+    /**
+     * Write the current in-memory state to a file without treating it as a save
+     * (dirty flag untouched). Used for playback of unsaved edits.
+     */
+    bool export_current(const std::wstring& filepath)
+    {
+        std::lock_guard<std::recursive_mutex> lock(editor_mutex);
+        if (!is_loaded)
+            return false;
+        return write_midi_from_notes(filepath);
+    }
+
 private:
     static void write_be16(std::ostream& out, std::uint16_t v)
     {
@@ -1235,85 +1657,84 @@ private:
         for (const auto& note : notes)
             notes_by_track[note.track_index].push_back(note);
 
-        // Track 0 is a conductor track carrying the tempo map
+        // A track is written if it has notes or captured non-note events
+        std::vector<std::uint8_t> track_ids;
+        for (const auto& [id, _] : notes_by_track)
+            track_ids.push_back(id);
+        for (const auto& [id, _] : raw_track_events)
+            if (!notes_by_track.count(id))
+                track_ids.push_back(id);
+        std::sort(track_ids.begin(), track_ids.end());
+
         out.write("MThd", 4);
         write_be32(out, 6);
         write_be16(out, 1); // format 1
-        write_be16(out, std::uint16_t(notes_by_track.size() + 1));
+        write_be16(out, std::uint16_t(std::max<size_t>(track_ids.size(), 1)));
         write_be16(out, ppqn);
 
-        write_conductor_track(out);
+        if (track_ids.empty())
+        {
+            // Keep the file valid: one empty track
+            std::vector<base_type> track_data;
+            finish_and_write_track(out, track_data);
+            return out.good();
+        }
 
-        for (auto& [track_idx, track_notes] : notes_by_track)
-            write_midi_track(out, track_idx, track_notes);
+        static const std::vector<piano_note> no_notes;
+        static const std::vector<raw_event> no_raw;
+        for (auto id : track_ids)
+        {
+            auto notes_it = notes_by_track.find(id);
+            auto raw_it = raw_track_events.find(id);
+            write_midi_track(out,
+                notes_it != notes_by_track.end() ? notes_it->second : no_notes,
+                raw_it != raw_track_events.end() ? raw_it->second : no_raw);
+        }
 
         return out.good();
     }
 
-    void write_conductor_track(std::ostream& out)
+    void write_midi_track(std::ostream& out,
+                          const std::vector<piano_note>& track_notes,
+                          const std::vector<raw_event>& raw_events)
     {
-        std::vector<base_type> track_data;
-        tick_type current_tick = 0;
-
-        for (const auto& [tick, tempo] : tempo_events)
-        {
-            single_midi_processor_2::push_vlv_s(tick - current_tick, track_data);
-            track_data.push_back(0xFF);
-            track_data.push_back(0x51);
-            track_data.push_back(0x03);
-            track_data.push_back(base_type(tempo >> 16));
-            track_data.push_back(base_type(tempo >> 8));
-            track_data.push_back(base_type(tempo));
-            current_tick = tick;
-        }
-
-        finish_and_write_track(out, track_data);
-    }
-
-    void write_midi_track(std::ostream& out, std::uint8_t track_idx,
-                         std::vector<piano_note>& track_notes)
-    {
-        // Sort notes by start time
-        std::sort(track_notes.begin(), track_notes.end());
-
-        // Build event list (note on + note off pairs)
-        struct midi_event
+        // Merged output event: notes are reconstructed, everything else verbatim.
+        // Order at equal ticks: note-offs, then raw events, then note-ons.
+        struct out_event
         {
             tick_type tick;
-            std::uint8_t type;  // 0x90 or 0x80
-            std::uint8_t key;
-            std::uint8_t velocity;
-            std::uint8_t channel;
-
-            bool operator<(const midi_event& other) const
-            {
-                if (tick != other.tick) return tick < other.tick;
-                return type < other.type; // Note offs before note ons at same tick
-            }
+            std::uint8_t order;
+            std::vector<base_type> bytes;
         };
 
-        std::vector<midi_event> events;
+        std::vector<out_event> events;
+        events.reserve(track_notes.size() * 2 + raw_events.size());
+
         for (const auto& note : track_notes)
         {
             // Velocity 0 on a note-on would read as a note-off, clamp to 1
-            events.push_back({ note.start_tick, 0x90, note.key,
-                std::max<std::uint8_t>(note.velocity, 1), note.channel });
-            events.push_back({ note.end_tick, 0x80, note.key, 0, note.channel });
+            events.push_back({ note.start_tick, 2,
+                { base_type(0x90 | note.channel), note.key, std::max<base_type>(note.velocity, 1) } });
+            events.push_back({ note.end_tick, 0,
+                { base_type(0x80 | note.channel), note.key, 0x40 } });
         }
-        std::sort(events.begin(), events.end());
+        for (const auto& raw : raw_events)
+            events.push_back({ raw.tick, 1, raw.bytes });
 
-        // Serialize to MIDI track buffer
+        std::stable_sort(events.begin(), events.end(),
+            [](const out_event& a, const out_event& b)
+            {
+                if (a.tick != b.tick) return a.tick < b.tick;
+                return a.order < b.order;
+            });
+
         std::vector<base_type> track_data;
         tick_type current_tick = 0;
 
         for (const auto& event : events)
         {
             single_midi_processor_2::push_vlv_s(event.tick - current_tick, track_data);
-
-            track_data.push_back(event.type | event.channel);
-            track_data.push_back(event.key);
-            track_data.push_back(event.velocity);
-
+            track_data.insert(track_data.end(), event.bytes.begin(), event.bytes.end());
             current_tick = event.tick;
         }
 
