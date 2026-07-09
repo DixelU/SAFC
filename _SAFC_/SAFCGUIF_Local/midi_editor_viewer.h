@@ -1213,36 +1213,51 @@ struct midi_editor_viewer : public handleable_ui_part
 				}
 				editor->set_view_range(tick_type(new_start), view_duration);
 			}
+
+			if (middle_release)
+			{
+				middle_down = false;
+				panning = false;
+				pan_accum_ticks = 0.f;
+			}
+
 			return true;
 		}
 
 		// ---- Right button: move the selected notes (ghost until release) ----
 
-
 		if (right_down && !right_release)
 		{
-			// a gray note only switches to its track (near-misses
-			// are forgiven by ~3 pixels / 1 semitone of tolerance).
 			const auto tick = tick_at_clamped(mx);
 			const auto key = key_at(my);
-			if (!editor->erase_note_at(tick, key, editor->get_active_track()))
-			{
-				const auto tick_tolerance = tick_type(3.f / l.notes_w * float(view_duration)) + 1;
-				piano_note picked;
-				if (editor->find_note_at(tick, key, picked, tick_tolerance, 1) &&
-					picked.track_index != editor->get_active_track())
-				{
-					editor->set_active_track(picked.track_index);
-					if (on_track_changed)
-						on_track_changed();
-				}
-			}
+			if (editor->erase_note_at(tick, key, editor->get_active_track()))
+				return true; 
+		}
 
-			right_down = true;
+		if (right_release)
+		{
+			right_down = false;
+			return true;
 		}
 
 		if (!right_down && right_press && in_notes_area)
 		{
+			const auto tick_tolerance = tick_type(3.f / l.notes_w * float(view_duration)) + 1;
+			piano_note picked;
+
+			// a gray note only switches to its track (near-misses
+			// are forgiven by ~3 pixels / 1 semitone of tolerance).
+			const auto tick = tick_at_clamped(mx);
+			const auto key = key_at(my);
+			if (editor->find_note_at(tick, key, picked, tick_tolerance, 1) &&
+				picked.track_index != editor->get_active_track())
+			{
+				editor->set_active_track(picked.track_index);
+				if (on_track_changed)
+					on_track_changed();
+				return true;
+			}
+
 			right_down = true;
 			return true;
 		}
@@ -1257,6 +1272,14 @@ struct midi_editor_viewer : public handleable_ui_part
 			anchor_key = key_at(my);
 			move_delta_ticks = 0;
 			move_delta_keys = 0;
+			return true;
+		}
+
+		if (middle_release)
+		{
+			middle_down = false;
+			panning = false;
+			pan_accum_ticks = 0.f;
 			return true;
 		}
 
