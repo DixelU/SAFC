@@ -773,7 +773,7 @@ struct simple_player
 	// Callback for when device changes (for UI updates)
 	void(*on_device_changed)(size_t device_index) = nullptr;
 
-	void simple_run(std::wstring filename)
+	void simple_run(std::wstring filename, double start_fraction = 0.0)
 	{
 		auto res = open(filename);
 		info.open_complete = true;
@@ -784,7 +784,8 @@ struct simple_player
 			return;
 		}
 
-		playback_thread();
+		start_fraction = std::clamp(start_fraction, 0.0, 1.0);
+		playback_thread(static_cast<uint64_t>(start_fraction * info.total_duration_us));
 	}
 
 	const playback_state& get_state() const
@@ -1292,7 +1293,7 @@ struct simple_player
 		}
 	}
 
-	void playback_thread()
+	void playback_thread(uint64_t initial_skip_to_us = 0)
 	{
 		state.reset();
 		state.start_time = std::chrono::steady_clock::now();
@@ -1302,8 +1303,8 @@ struct simple_player
 		state.paused.store(true, std::memory_order_release);
 		state.pause_position_us.store(0, std::memory_order_release);
 
-		uint64_t skip_to_us = 0;
-		bool pause_after_seek = false;
+		uint64_t skip_to_us = initial_skip_to_us;
+		bool pause_after_seek = initial_skip_to_us > 0;
 
 		for (;;)
 		{

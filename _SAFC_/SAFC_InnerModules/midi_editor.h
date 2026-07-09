@@ -95,6 +95,15 @@ struct midi_editor
 	 */
 	enum class select_mode : std::uint8_t { replace, add, remove };
 
+	enum class control_lane : std::uint8_t { pitch_bend, pan, channel_volume };
+
+	struct channel_control_point
+	{
+		tick_type tick = 0;
+		std::uint8_t channel = 0;
+		std::uint16_t value = 0; // pitch bend: 0..16383, CC lanes: 0..127
+	};
+
 	// ========================================================================
 	// Functor System - Edit Operations
 	// ========================================================================
@@ -633,6 +642,42 @@ private:
 		std::vector<base_type> bytes;
 	};
 	std::map<std::uint8_t, std::vector<raw_event>> raw_track_events;
+
+	struct raw_control_change_op : edit_operation
+	{
+		std::uint8_t track;
+		control_lane lane;
+		std::uint8_t channel;
+		tick_type tick;
+		std::uint16_t value;
+		std::optional<raw_event> previous;
+
+		raw_control_change_op(std::uint8_t tr, control_lane ln, std::uint8_t ch,
+			tick_type tk, std::uint16_t val)
+			: track(tr), lane(ln), channel(ch), tick(tk), value(val)
+		{
+		}
+
+		void execute(midi_editor& editor) override
+		{
+			previous = editor.remove_control_event_at(track, lane, channel, tick);
+			editor.raw_track_events[track].push_back({tick,
+				editor.make_control_event_bytes(lane, channel, value)});
+			editor.sort_raw_track(track);
+			editor.mark_dirty();
+		}
+
+		void undo(midi_editor& editor) override
+		{
+			editor.remove_control_event_at(track, lane, channel, tick);
+			if (previous)
+				editor.raw_track_events[track].push_back(*previous);
+			editor.sort_raw_track(track);
+			editor.mark_dirty();
+		}
+
+		std::string description() const override { return "Edit Controller Lane"; }
+	};
 
 	// Track edits apply to (piano roll focus); notes of other tracks are shown dimmed
 	std::uint8_t active_track = 0;
@@ -1520,6 +1565,108 @@ private:
 
 	void mark_dirty() { is_dirty = true; }
 
+	static std::uint16_t clamp_control_value(control_lane lane, std::uint16_t value)
+	{
+		return std::min<std::uint16_t>(value,
+			lane == control_lane::pitch_bend ? 0x3FFF : 127);
+	}
+
+	static std::uint8_t control_cc_number(control_lane lane)
+	{
+		return lane == control_lane::pan ? 10 : 7;
+	}
+
+	static std::vector<base_type> make_control_event_bytes(control_lane lane,
+		std::uint8_t channel, std::uint16_t value)
+	{
+		value = clamp_control_value(lane, value);
+		if (lane == control_lane::pitch_bend)
+			return {
+				base_type(0xE0 | (channel & 0x0F)),
+				base_type(value & 0x7F),
+				base_type((value >> 7) & 0x7F)
+			};
+
+		return {
+			base_type(0xB0 | (channel & 0x0F)),
+			control_cc_number(lane),
+			base_type(value & 0x7F)
+		};
+	}
+
+	static std::vector<base_type> make_track_name_event_bytes(const std::string& name)
+	{
+		std::vector<base_type> bytes{0xFF, 0x03};
+		single_midi_processor_2::push_vlv(std::uint32_t(name.size()), bytes);
+		bytes.insert(bytes.end(), name.begin(), name.end());
+		return bytes;
+	}
+
+	static bool is_track_name_event(const raw_event& ev)
+	{
+		return ev.bytes.size() >= 3 && ev.bytes[0] == 0xFF && ev.bytes[1] == 0x03;
+	}
+
+	static bool decode_control_event(const raw_event& ev, control_lane lane,
+		std::uint8_t channel, std::uint16_t& value)
+	{
+		if (ev.bytes.size() < 3)
+			return false;
+
+		const auto status = ev.bytes[0];
+		if ((status & 0x0F) != (channel & 0x0F))
+			return false;
+
+		if (lane == control_lane::pitch_bend)
+		{
+			if ((status & 0xF0) != 0xE0)
+				return false;
+			value = std::uint16_t(ev.bytes[1] & 0x7F) |
+				(std::uint16_t(ev.bytes[2] & 0x7F) << 7);
+			return true;
+		}
+
+		if ((status & 0xF0) != 0xB0 || ev.bytes[1] != control_cc_number(lane))
+			return false;
+
+		value = ev.bytes[2] & 0x7F;
+		return true;
+	}
+
+	std::optional<raw_event> remove_control_event_at(std::uint8_t track,
+		control_lane lane, std::uint8_t channel, tick_type tick)
+	{
+		auto it = raw_track_events.find(track);
+		if (it == raw_track_events.end())
+			return std::nullopt;
+
+		auto& events = it->second;
+		for (auto ev_it = events.begin(); ev_it != events.end(); ++ev_it)
+		{
+			std::uint16_t ignored = 0;
+			if (ev_it->tick == tick && decode_control_event(*ev_it, lane, channel, ignored))
+			{
+				auto old = *ev_it;
+				events.erase(ev_it);
+				return old;
+			}
+		}
+		return std::nullopt;
+	}
+
+	void sort_raw_track(std::uint8_t track)
+	{
+		auto it = raw_track_events.find(track);
+		if (it == raw_track_events.end())
+			return;
+
+		std::stable_sort(it->second.begin(), it->second.end(),
+			[](const raw_event& a, const raw_event& b)
+		{
+			return a.tick < b.tick;
+		});
+	}
+
 public:
 	// ========================================================================
 	// Selection Management (note-id set)
@@ -1660,6 +1807,64 @@ public:
 		if (it != tracks.end() && !it->second.name.empty())
 			label += " (" + it->second.name + ")";
 		return label;
+	}
+
+	void set_track_name(std::uint8_t track, const std::string& name)
+	{
+		std::lock_guard<std::recursive_mutex> lock(editor_mutex);
+		auto& info = tracks[track];
+		info.name = name;
+
+		auto& events = raw_track_events[track];
+		const auto bytes = make_track_name_event_bytes(name);
+		bool replaced = false;
+		for (auto& ev : events)
+		{
+			if (is_track_name_event(ev))
+			{
+				ev.tick = 0;
+				ev.bytes = bytes;
+				replaced = true;
+				break;
+			}
+		}
+		if (!replaced)
+			events.push_back({0, bytes});
+		sort_raw_track(track);
+		mark_dirty();
+	}
+
+	std::vector<channel_control_point> get_channel_control_points(
+		std::uint8_t track, std::uint8_t channel, control_lane lane,
+		tick_type start, tick_type end) const
+	{
+		std::lock_guard<std::recursive_mutex> lock(editor_mutex);
+		std::vector<channel_control_point> result;
+
+		auto it = raw_track_events.find(track);
+		if (it == raw_track_events.end())
+			return result;
+
+		for (const auto& ev : it->second)
+		{
+			if (ev.tick < start || ev.tick >= end)
+				continue;
+
+			std::uint16_t value = 0;
+			if (decode_control_event(ev, lane, channel, value))
+				result.push_back({ev.tick, std::uint8_t(channel & 0x0F), value});
+		}
+		return result;
+	}
+
+	void set_channel_control_point(std::uint8_t track, std::uint8_t channel,
+		control_lane lane, tick_type tick, std::uint16_t value)
+	{
+		std::lock_guard<std::recursive_mutex> lock(editor_mutex);
+		auto op = std::make_unique<raw_control_change_op>(track, lane,
+			std::uint8_t(channel & 0x0F), tick, clamp_control_value(lane, value));
+		op->execute(*this);
+		push_undo(std::move(op));
 	}
 
 	std::uint8_t get_track_count() const
@@ -1941,9 +2146,20 @@ public:
 	double get_total_seconds() const
 	{
 		std::lock_guard<std::recursive_mutex> lock(editor_mutex);
+		return seconds_at_tick_unlocked(get_total_ticks());
+	}
 
+	double get_seconds_at_tick(tick_type target_tick) const
+	{
+		std::lock_guard<std::recursive_mutex> lock(editor_mutex);
+		return seconds_at_tick_unlocked(target_tick);
+	}
+
+private:
+	double seconds_at_tick_unlocked(tick_type target_tick) const
+	{
 		constexpr double default_tempo_us = 500000.0; // 120 BPM
-		const auto total = get_total_ticks();
+		const auto total = target_tick;
 		const double us_per_tick_divisor = double(ppqn) * 1000000.0;
 
 		double seconds = 0;
@@ -1962,6 +2178,8 @@ public:
 		seconds += double(total - last_tick) * current_tempo_us / us_per_tick_divisor;
 		return seconds;
 	}
+
+public:
 
 	const std::map<std::uint8_t, track_info>& get_tracks() const { return tracks; }
 	const std::wstring& get_filename() const { return filename; }

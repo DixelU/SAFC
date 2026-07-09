@@ -29,15 +29,16 @@
  *  - left-click on a note  pick up its length/velocity/channel as the draw
  *                          defaults and select it (active track only)
  *  - Shift + left-drag     additive rubber-band selection; Shift+Alt removes
- *  - middle-drag           move the selected notes (ghost preview);
+ *  - left-drag selected    move the selected notes (ghost preview);
  *                          holding Alt bypasses the snap grid
  *  - right-click note      active track: delete it; gray note: switch to its track
- *  - right-drag notes      pan time
+ *  - middle-drag notes     pan time
  *  - wheel over notes      zoom time around the cursor
  *  - wheel over keyboard   zoom pitch around the cursor
  *  - right-drag keyboard   scroll pitch
- *  - velocity lane         left-drag paints velocities, right-drag draws a linear ramp;
- *                          applies to the selection when one is active
+ *  - bottom lane           left-drag paints the selected controller, right-drag draws
+ *                          a linear ramp; note velocity applies to the selection
+ *                          when one is active
  * Keys: Del deletes the selection; Ctrl+Z/Y undo/redo; Ctrl+C/V/B copy, paste,
  * duplicate; Ctrl+A selects the active track; Ctrl+D deselects.
  */
@@ -74,6 +75,8 @@ struct midi_editor_viewer : public handleable_ui_part
 	// Velocity lane under the roll
 	bool velocity_lane_visible = true;
 	float velocity_lane_height = 55.f;
+	enum class lane_mode : std::uint8_t { note_velocity, pitch_bend, pan, channel_volume };
+	lane_mode current_lane_mode = lane_mode::note_velocity;
 
 	// Called after a right-click switches the active track
 	std::function<void()> on_track_changed;
@@ -179,6 +182,24 @@ struct midi_editor_viewer : public handleable_ui_part
 		std::lock_guard<std::recursive_mutex> locker(lock);
 		snap_level_index = (snap_level_index + 1) % int(std::size(snap_levels));
 		return snap_label();
+	}
+
+	void set_lane_mode(lane_mode mode)
+	{
+		std::lock_guard<std::recursive_mutex> locker(lock);
+		current_lane_mode = mode;
+		cancel_interactions();
+	}
+
+	std::string lane_mode_label() const
+	{
+		switch (current_lane_mode)
+		{
+			case lane_mode::pitch_bend: return "Pitch";
+			case lane_mode::pan: return "Pan";
+			case lane_mode::channel_volume: return "CC Vol";
+			default: return "Vel";
+		}
 	}
 
 	void toggle_velocity_lane()
@@ -726,36 +747,61 @@ struct midi_editor_viewer : public handleable_ui_part
 		glVertex2f(l.left, l.lane_top + divider_height);
 		glEnd();
 
-		// Velocity bars of the active track's visible notes
-		const auto notes = editor->get_notes_in_range(view_start, view_start + view_duration);
 		const auto active_track = editor->get_active_track();
 		const bool has_selection = !selected_ids.empty();
 		const float usable_h = lane_h - 3.f;
 
 		glBegin(GL_QUADS);
-		for (const auto& note : notes)
+		if (current_lane_mode == lane_mode::note_velocity)
 		{
-			if (note.track_index != active_track || note.start_tick < view_start)
-				continue;
-
-			const float x = l.notes_x + float(note.start_tick - view_start) / float(view_duration) * l.notes_w;
-			if (x < l.notes_x || x > l.notes_x + l.notes_w - 1.f)
-				continue;
-
-			const bool selected = selected_ids.count(note.id) != 0;
-			std::uint8_t r, g, b;
-			note_fill_color(note.track_index, note.channel, note.velocity, selected, r, g, b);
-			if (has_selection && !selected)
+			// Velocity bars of the active track's visible notes
+			const auto notes = editor->get_notes_in_range(view_start, view_start + view_duration);
+			for (const auto& note : notes)
 			{
-				r /= 3; g /= 3; b /= 3; // dim non-selected bars while a selection is active
-			}
+				if (note.track_index != active_track || note.start_tick < view_start)
+					continue;
 
-			const float h = 2.f + usable_h * note.velocity / 127.f;
-			glColor3ub(r, g, b);
-			glVertex2f(x, l.lane_bottom + 1.f);
-			glVertex2f(x + 2.f, l.lane_bottom + 1.f);
-			glVertex2f(x + 2.f, l.lane_bottom + 1.f + h);
-			glVertex2f(x, l.lane_bottom + 1.f + h);
+				const float x = l.notes_x + float(note.start_tick - view_start) / float(view_duration) * l.notes_w;
+				if (x < l.notes_x || x > l.notes_x + l.notes_w - 1.f)
+					continue;
+
+				const bool selected = selected_ids.count(note.id) != 0;
+				std::uint8_t r, g, b;
+				note_fill_color(note.track_index, note.channel, note.velocity, selected, r, g, b);
+				if (has_selection && !selected)
+				{
+					r /= 3; g /= 3; b /= 3; // dim non-selected bars while a selection is active
+				}
+
+				const float h = 2.f + usable_h * note.velocity / 127.f;
+				glColor3ub(r, g, b);
+				glVertex2f(x, l.lane_bottom + 1.f);
+				glVertex2f(x + 2.f, l.lane_bottom + 1.f);
+				glVertex2f(x + 2.f, l.lane_bottom + 1.f + h);
+				glVertex2f(x, l.lane_bottom + 1.f + h);
+			}
+		}
+		else
+		{
+			const auto points = editor->get_channel_control_points(active_track,
+				effective_draw_channel(), editor_control_lane(),
+				view_start, view_start + view_duration);
+			for (const auto& point : points)
+			{
+				const float x = l.notes_x + float(point.tick - view_start) / float(view_duration) * l.notes_w;
+				if (x < l.notes_x || x > l.notes_x + l.notes_w - 1.f)
+					continue;
+
+				const auto value = lane_value_from_control(point.value);
+				const float h = 2.f + usable_h * value / 127.f;
+				std::uint8_t r, g, b;
+				note_fill_color(active_track, effective_draw_channel(), std::uint8_t(std::max(1, value)), false, r, g, b);
+				glColor3ub(r, g, b);
+				glVertex2f(x, l.lane_bottom + 1.f);
+				glVertex2f(x + 3.f, l.lane_bottom + 1.f);
+				glVertex2f(x + 3.f, l.lane_bottom + 1.f + h);
+				glVertex2f(x, l.lane_bottom + 1.f + h);
+			}
 		}
 		glEnd();
 
@@ -903,7 +949,74 @@ struct midi_editor_viewer : public handleable_ui_part
 	{
 		const float lane_h = l.lane_top - l.lane_bottom;
 		const float rel = (std::clamp(my, l.lane_bottom, l.lane_top) - l.lane_bottom) / std::max(lane_h, 1.f);
-		return std::uint8_t(std::clamp(int(rel * 127.f + 0.5f), 1, 127));
+		const int min_value = current_lane_mode == lane_mode::note_velocity ? 1 : 0;
+		return std::uint8_t(std::clamp(int(rel * 127.f + 0.5f), min_value, 127));
+	}
+
+	midi_editor::control_lane editor_control_lane() const
+	{
+		switch (current_lane_mode)
+		{
+			case lane_mode::pitch_bend: return midi_editor::control_lane::pitch_bend;
+			case lane_mode::pan: return midi_editor::control_lane::pan;
+			default: return midi_editor::control_lane::channel_volume;
+		}
+	}
+
+	std::uint8_t lane_value_from_control(std::uint16_t value) const
+	{
+		if (current_lane_mode == lane_mode::pitch_bend)
+			return std::uint8_t(std::clamp<int>(int(value) * 127 / 0x3FFF, 0, 127));
+		return std::uint8_t(std::clamp<int>(value, 0, 127));
+	}
+
+	std::uint16_t lane_value_to_control(std::uint8_t value) const
+	{
+		if (current_lane_mode == lane_mode::pitch_bend)
+			return std::uint16_t(std::clamp<int>(int(value) * 0x3FFF / 127, 0, 0x3FFF));
+		return value;
+	}
+
+	void set_control_lane_point(tick_type tick, std::uint8_t value)
+	{
+		editor->set_channel_control_point(editor->get_active_track(),
+			effective_draw_channel(), editor_control_lane(), tick,
+			lane_value_to_control(value));
+	}
+
+	void lane_apply_control_flat(tick_type t0, tick_type t1, std::uint8_t value)
+	{
+		if (t0 > t1)
+			std::swap(t0, t1);
+		const auto step = std::max<tick_type>(1, snap_ticks(editor->get_ppqn()));
+		for (auto tick = (t0 / step) * step; tick <= t1; tick += step)
+		{
+			set_control_lane_point(tick, value);
+			if (t1 - tick < step)
+				break;
+		}
+	}
+
+	void lane_apply_control_ramp(tick_type tick_a, std::uint8_t value_a,
+		tick_type tick_b, std::uint8_t value_b)
+	{
+		auto t0 = tick_a, t1 = tick_b;
+		if (t0 > t1)
+			std::swap(t0, t1);
+
+		const auto step = std::max<tick_type>(1, snap_ticks(editor->get_ppqn()));
+		for (auto tick = (t0 / step) * step; tick <= t1; tick += step)
+		{
+			float f = 0.f;
+			if (tick_b != tick_a)
+				f = float(sgtick_type(tick) - sgtick_type(tick_a)) /
+					float(sgtick_type(tick_b) - sgtick_type(tick_a));
+			const int value = int(value_a + (float(value_b) - float(value_a)) *
+				std::clamp(f, 0.f, 1.f) + 0.5f);
+			set_control_lane_point(tick, std::uint8_t(std::clamp(value, 0, 127)));
+			if (t1 - tick < step)
+				break;
+		}
 	}
 
 	void record_velocity_change(const piano_note& ident, std::uint8_t new_vel)
@@ -1056,12 +1169,16 @@ struct midi_editor_viewer : public handleable_ui_part
 
 			if (lane_painting)
 			{
-				lane_apply_flat(lane_last_tick, cur_tick, cur_vel, selected);
+				if (current_lane_mode == lane_mode::note_velocity)
+					lane_apply_flat(lane_last_tick, cur_tick, cur_vel, selected);
+				else
+					lane_apply_control_flat(lane_last_tick, cur_tick, cur_vel);
 				lane_last_tick = cur_tick;
 				if (left_release)
 				{
 					lane_painting = false;
-					commit_lane_gesture();
+					if (current_lane_mode == lane_mode::note_velocity)
+						commit_lane_gesture();
 				}
 				return true;
 			}
@@ -1072,8 +1189,15 @@ struct midi_editor_viewer : public handleable_ui_part
 			if (right_release)
 			{
 				lane_line = false;
-				lane_apply_ramp(lane_anchor_tick, lane_anchor_vel, cur_tick, cur_vel, selected);
-				commit_lane_gesture();
+				if (current_lane_mode == lane_mode::note_velocity)
+				{
+					lane_apply_ramp(lane_anchor_tick, lane_anchor_vel, cur_tick, cur_vel, selected);
+					commit_lane_gesture();
+				}
+				else
+				{
+					lane_apply_control_ramp(lane_anchor_tick, lane_anchor_vel, cur_tick, cur_vel);
+				}
 			}
 			return true;
 		}
@@ -1155,8 +1279,11 @@ struct midi_editor_viewer : public handleable_ui_part
 				lane_last_tick = cur_tick;
 				// A plain click gets a few pixels of tolerance around the cursor
 				const auto tol = tick_type(2.f / l.notes_w * float(view_duration)) + 1;
-				lane_apply_flat(cur_tick > tol ? cur_tick - tol : 0, cur_tick + tol,
-					cur_vel, editor->get_selected_ids());
+				if (current_lane_mode == lane_mode::note_velocity)
+					lane_apply_flat(cur_tick > tol ? cur_tick - tol : 0, cur_tick + tol,
+						cur_vel, editor->get_selected_ids());
+				else
+					lane_apply_control_flat(cur_tick, cur_tick, cur_vel);
 			}
 			else
 			{
@@ -1224,7 +1351,7 @@ struct midi_editor_viewer : public handleable_ui_part
 			return true;
 		}
 
-		// ---- Right button: move the selected notes (ghost until release) ----
+		// ---- Right button: delete active-track notes, or switch to a gray note's track ----
 
 		if (right_down && !right_release)
 		{
@@ -1262,19 +1389,6 @@ struct midi_editor_viewer : public handleable_ui_part
 			return true;
 		}
 
-		// ---- Middle button: move the selected notes (ghost until release) ----
-		if (middle_press && in_notes_area && !moving)
-		{
-			if (!editor->has_selection())
-				return true;
-			moving = true;
-			anchor_tick = tick_at_clamped(mx);
-			anchor_key = key_at(my);
-			move_delta_ticks = 0;
-			move_delta_keys = 0;
-			return true;
-		}
-
 		if (middle_release)
 		{
 			middle_down = false;
@@ -1306,7 +1420,7 @@ struct midi_editor_viewer : public handleable_ui_part
 			if (move_delta_keys != prev_keys)
 				audition_start(cur_key, draw_velocity, effective_draw_channel());
 
-			if (middle_release)
+			if (left_release)
 			{
 				if (move_delta_ticks || move_delta_keys)
 					editor->move_selected_notes(move_delta_ticks, move_delta_keys);
@@ -1344,6 +1458,16 @@ struct midi_editor_viewer : public handleable_ui_part
 			piano_note under;
 			if (editor->find_note_at(tick, key, under, 0, 0, editor->get_active_track()))
 			{
+				if (editor->is_note_selected(under.id))
+				{
+					moving = true;
+					anchor_tick = tick;
+					anchor_key = key;
+					move_delta_ticks = 0;
+					move_delta_keys = 0;
+					return true;
+				}
+
 				// Pick up the clicked note's state as the draw defaults
 				picking = true;
 				draw_length_ticks = under.length();
