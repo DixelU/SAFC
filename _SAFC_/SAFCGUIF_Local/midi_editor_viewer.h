@@ -123,7 +123,7 @@ struct midi_editor_viewer : public handleable_ui_part
 	tick_type lane_last_tick = 0;
 	float lane_cursor_x = 0.f, lane_cursor_y = 0.f; // line tool guide endpoint
 	// Accumulated gesture: identity -> (old, new); committed as one undo entry
-	std::map<std::tuple<tick_type, tick_type, std::uint8_t, std::uint8_t, std::uint8_t>, velocity_entry> gesture;
+	std::map<std::tuple<tick_type, tick_type, std::uint8_t, std::uint8_t, std::uint16_t>, velocity_entry> gesture;
 
 	// Audition state
 	int audition_key = -1;
@@ -795,7 +795,7 @@ struct midi_editor_viewer : public handleable_ui_part
 				const auto value = lane_value_from_control(point.value);
 				const float h = 2.f + usable_h * value / 127.f;
 				std::uint8_t r, g, b;
-				note_fill_color(active_track, effective_draw_channel(), std::uint8_t(std::max(1, value)), false, r, g, b);
+				note_fill_color(active_track, effective_draw_channel(), std::uint8_t(std::max<int>(1, value)), false, r, g, b);
 				glColor3ub(r, g, b);
 				glVertex2f(x, l.lane_bottom + 1.f);
 				glVertex2f(x + 3.f, l.lane_bottom + 1.f);
