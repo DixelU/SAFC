@@ -269,14 +269,11 @@ struct midi_editor_processor_integration
      * Helper to convert editor operations to processor filters
      */
     static bulk_edit_filter create_filter_from_editor(
-        const midi_editor& editor,
-        const midi_editor::selection& sel)
+        const midi_editor& editor)
     {
         bulk_edit_filter filter;
-        
-        auto notes = editor.get_notes_in_range(
-            sel.begin_tick, sel.end_tick,
-            sel.key_begin, sel.key_end);
+
+        auto notes = editor.get_selected_notes();
 
         for (const auto& note : notes)
         {

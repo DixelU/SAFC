@@ -156,7 +156,9 @@ struct moveable_window : handleable_ui_part
 		if (mx - x_window_pos < width && mx - x_window_pos > 0
 			&& y_window_pos - my > 0 && y_window_pos - my < height)
 		{
-			if (button_btn) return true;
+			// Swallow any click (middle button arrives as 0 with a state);
+			// only pure motion (0, 0) passes through by the children's verdict
+			if (button_btn || state) return true;
 			else return flag;
 		}
 		else

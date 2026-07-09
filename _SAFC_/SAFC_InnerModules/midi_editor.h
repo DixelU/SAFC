@@ -51,12 +51,15 @@ struct midi_editor
                 std::uint8_t velocity;     // 1-127
                 std::uint8_t channel;      // 0-15
                 std::uint16_t track_index;  // Track identifier
+                // Stable identity minted by the editor on load/insert; selection and
+                // undo target notes through it, so it survives moves and edits
+                std::uint32_t id;
 
-                piano_note() : start_tick(0), end_tick(0), key(60), velocity(100), channel(0), track_index(0) {}
+                piano_note() : start_tick(0), end_tick(0), key(60), velocity(100), channel(0), track_index(0), id(0) {}
 
                 piano_note(tick_type start, tick_type end, std::uint8_t k, std::uint8_t vel,
                         std::uint8_t ch = 0, std::uint16_t track = 0)
-                        : start_tick(start), end_tick(end), key(k), velocity(vel), channel(ch), track_index(track)
+                        : start_tick(start), end_tick(end), key(k), velocity(vel), channel(ch), track_index(track), id(0)
                 {
                 }
 
@@ -84,42 +87,13 @@ struct midi_editor
                 track_info() : channel(0xFF), is_visible(true), is_solo(false), is_muted(false) {}
         };
 
+        static constexpr std::uint8_t all_tracks = 0xFF;
+
         /**
-         * Selection state for piano roll operations
+         * How a selection gesture combines with the current note set:
+         * replace it, add the hit notes, or remove them (Shift+Alt).
          */
-        struct selection
-        {
-                static constexpr std::uint8_t all_tracks = 0xFF;
-
-                tick_type begin_tick;
-                tick_type end_tick;
-                std::uint8_t key_begin;
-                std::uint8_t key_end;
-                std::uint8_t track_filter; // all_tracks or a specific track index
-                bool has_selection;
-
-                selection() : begin_tick(0), end_tick(0), key_begin(0), key_end(127),
-                        track_filter(all_tracks), has_selection(false)
-                {
-                }
-
-                bool is_active() const { return has_selection && begin_tick < end_tick; }
-
-                bool contains(tick_type tick, std::uint8_t key) const
-                {
-                        if (!has_selection) return false;
-                        return tick >= begin_tick && tick < end_tick &&
-                                key >= key_begin && key <= key_end;
-                }
-
-                bool intersects(const piano_note& note) const
-                {
-                        if (!has_selection) return false;
-                        if (track_filter != all_tracks && note.track_index != track_filter) return false;
-                        return note.start_tick < end_tick && note.end_tick > begin_tick &&
-                                note.key >= key_begin && note.key <= key_end;
-                }
-        };
+        enum class select_mode : std::uint8_t { replace, add, remove };
 
         // ========================================================================
         // Functor System - Edit Operations
@@ -139,7 +113,7 @@ struct midi_editor
         };
 
         /**
-         * Functor for inserting a note
+         * Functor for inserting a note (id preassigned by the editor)
          */
         struct insert_note_op : edit_operation
         {
@@ -155,7 +129,7 @@ struct midi_editor
 
                 void undo(midi_editor& editor) override
                 {
-                        editor.remove_note_by_position(note);
+                        editor.remove_note_by_id(note.id);
                         editor.mark_dirty();
                 }
 
@@ -163,24 +137,25 @@ struct midi_editor
         };
 
         /**
-         * Functor for deleting selected notes
+         * Functor for deleting a set of notes by id
          */
         struct delete_notes_op : edit_operation
         {
+                std::vector<std::uint32_t> ids;
                 std::vector<piano_note> removed_notes;
-                selection sel;
 
-                delete_notes_op(selection s) : sel(s) {}
+                delete_notes_op(std::vector<std::uint32_t>&& target_ids) : ids(std::move(target_ids)) {}
 
                 void execute(midi_editor& editor) override
                 {
                         removed_notes.clear();
+                        const std::set<std::uint32_t> id_set(ids.begin(), ids.end());
                         auto& notes = editor.notes;
                         notes.erase(
                                 std::remove_if(notes.begin(), notes.end(),
-                                        [this, &editor](const piano_note& note)
+                                        [this, &id_set](const piano_note& note)
                         {
-                                if (sel.intersects(note))
+                                if (id_set.count(note.id))
                                 {
                                         removed_notes.push_back(note);
                                         return true;
@@ -206,45 +181,43 @@ struct midi_editor
          */
         struct move_notes_op : edit_operation
         {
-                selection sel;
-                std::vector<std::pair<piano_note, piano_note>> changes; // before, after
+                std::vector<std::uint32_t> ids;
+                std::vector<std::pair<std::uint32_t, piano_note>> before; // id, prior geometry
                 sgtick_type delta_ticks;
                 int delta_keys;
 
-                move_notes_op(selection s, sgtick_type dt = 0, int dk = 0)
-                        : sel(s), delta_ticks(dt), delta_keys(dk)
+                move_notes_op(std::vector<std::uint32_t>&& target_ids, sgtick_type dt = 0, int dk = 0)
+                        : ids(std::move(target_ids)), delta_ticks(dt), delta_keys(dk)
                 {
                 }
 
                 void execute(midi_editor& editor) override
                 {
-                        changes.clear();
+                        before.clear();
+                        const std::set<std::uint32_t> id_set(ids.begin(), ids.end());
                         for (auto& note : editor.notes)
                         {
-                                if (sel.intersects(note))
+                                if (!id_set.count(note.id))
+                                        continue;
+
+                                before.emplace_back(note.id, note);
+
+                                if (delta_ticks != 0)
                                 {
-                                        piano_note before = note;
-
-                                        if (delta_ticks != 0)
+                                        auto new_start = sgtick_type(note.start_tick) + delta_ticks;
+                                        auto new_end = sgtick_type(note.end_tick) + delta_ticks;
+                                        if (new_start >= 0 && new_end >= 0)
                                         {
-                                                auto new_start = sgtick_type(note.start_tick) + delta_ticks;
-                                                auto new_end = sgtick_type(note.end_tick) + delta_ticks;
-                                                if (new_start >= 0 && new_end >= 0)
-                                                {
-                                                        note.start_tick = tick_type(new_start);
-                                                        note.end_tick = tick_type(new_end);
-                                                }
+                                                note.start_tick = tick_type(new_start);
+                                                note.end_tick = tick_type(new_end);
                                         }
+                                }
 
-                                        if (delta_keys != 0)
-                                        {
-                                                int new_key = int(note.key) + delta_keys;
-                                                if (new_key >= 0 && new_key <= 127)
-                                                        note.key = base_type(new_key);
-                                        }
-
-                                        if (before.start_tick != note.start_tick || before.key != note.key)
-                                                changes.emplace_back(before, note);
+                                if (delta_keys != 0)
+                                {
+                                        int new_key = int(note.key) + delta_keys;
+                                        if (new_key >= 0 && new_key <= 127)
+                                                note.key = base_type(new_key);
                                 }
                         }
                         editor.mark_dirty();
@@ -252,21 +225,13 @@ struct midi_editor
 
                 void undo(midi_editor& editor) override
                 {
-                        for (auto& [before, after] : changes)
+                        for (auto& [id, prior] : before)
                         {
-                                for (auto& note : editor.notes)
+                                if (auto* note = editor.find_note_by_id(id))
                                 {
-                                        if (note.start_tick == after.start_tick &&
-                                                note.end_tick == after.end_tick &&
-                                                note.key == after.key &&
-                                                note.channel == after.channel &&
-                                                note.track_index == after.track_index)
-                                        {
-                                                note.start_tick = before.start_tick;
-                                                note.end_tick = before.end_tick;
-                                                note.key = before.key;
-                                                break;
-                                        }
+                                        note->start_tick = prior.start_tick;
+                                        note->end_tick = prior.end_tick;
+                                        note->key = prior.key;
                                 }
                         }
                         editor.mark_dirty();
@@ -284,28 +249,21 @@ struct midi_editor
          */
         struct resize_note_op : edit_operation
         {
-                piano_note target_note;
+                std::uint32_t target_id;
                 tick_type new_length;
                 tick_type old_length = 0;
                 bool applied = false;
 
-                resize_note_op(piano_note n, tick_type len) : target_note(n), new_length(len) {}
+                resize_note_op(std::uint32_t id, tick_type len) : target_id(id), new_length(len) {}
 
                 void execute(midi_editor& editor) override
                 {
                         applied = false;
-                        for (auto& note : editor.notes)
+                        if (auto* note = editor.find_note_by_id(target_id))
                         {
-                                if (note.start_tick == target_note.start_tick &&
-                                        note.key == target_note.key &&
-                                        note.channel == target_note.channel &&
-                                        note.track_index == target_note.track_index)
-                                {
-                                        old_length = note.length();
-                                        note.end_tick = note.start_tick + new_length;
-                                        applied = true;
-                                        break;
-                                }
+                                old_length = note->length();
+                                note->end_tick = note->start_tick + new_length;
+                                applied = true;
                         }
                         editor.mark_dirty();
                 }
@@ -314,17 +272,8 @@ struct midi_editor
                 {
                         if (!applied)
                                 return;
-                        for (auto& note : editor.notes)
-                        {
-                                if (note.start_tick == target_note.start_tick &&
-                                        note.key == target_note.key &&
-                                        note.channel == target_note.channel &&
-                                        note.track_index == target_note.track_index)
-                                {
-                                        note.end_tick = note.start_tick + old_length;
-                                        break;
-                                }
-                        }
+                        if (auto* note = editor.find_note_by_id(target_id))
+                                note->end_tick = note->start_tick + old_length;
                         editor.mark_dirty();
                 }
 
@@ -336,20 +285,24 @@ struct midi_editor
          */
         struct velocity_change_op : edit_operation
         {
-                selection sel;
+                std::vector<std::uint32_t> ids;
                 std::uint8_t new_velocity;
-                std::vector<std::pair<piano_note, std::uint8_t>> changes; // note, old_velocity
+                std::vector<std::pair<std::uint32_t, std::uint8_t>> changes; // id, old velocity
 
-                velocity_change_op(selection s, std::uint8_t vel) : sel(s), new_velocity(vel) {}
+                velocity_change_op(std::vector<std::uint32_t>&& target_ids, std::uint8_t vel)
+                        : ids(std::move(target_ids)), new_velocity(vel)
+                {
+                }
 
                 void execute(midi_editor& editor) override
                 {
                         changes.clear();
+                        const std::set<std::uint32_t> id_set(ids.begin(), ids.end());
                         for (auto& note : editor.notes)
                         {
-                                if (sel.intersects(note))
+                                if (id_set.count(note.id))
                                 {
-                                        changes.emplace_back(note, note.velocity);
+                                        changes.emplace_back(note.id, note.velocity);
                                         note.velocity = new_velocity;
                                 }
                         }
@@ -358,19 +311,10 @@ struct midi_editor
 
                 void undo(midi_editor& editor) override
                 {
-                        for (auto& [note, old_vel] : changes)
+                        for (auto& [id, old_vel] : changes)
                         {
-                                for (auto& n : editor.notes)
-                                {
-                                        if (n.start_tick == note.start_tick &&
-                                                n.key == note.key &&
-                                                n.channel == note.channel &&
-                                                n.track_index == note.track_index)
-                                        {
-                                                n.velocity = old_vel;
-                                                break;
-                                        }
-                                }
+                                if (auto* note = editor.find_note_by_id(id))
+                                        note->velocity = old_vel;
                         }
                         editor.mark_dirty();
                 }
@@ -383,20 +327,24 @@ struct midi_editor
          */
         struct velocity_adjust_op : edit_operation
         {
-                selection sel;
+                std::vector<std::uint32_t> ids;
                 int delta;
-                std::vector<std::pair<piano_note, std::uint8_t>> changes; // note (pre-change), old_velocity
+                std::vector<std::pair<std::uint32_t, std::uint8_t>> changes; // id, old velocity
 
-                velocity_adjust_op(selection s, int d) : sel(s), delta(d) {}
+                velocity_adjust_op(std::vector<std::uint32_t>&& target_ids, int d)
+                        : ids(std::move(target_ids)), delta(d)
+                {
+                }
 
                 void execute(midi_editor& editor) override
                 {
                         changes.clear();
+                        const std::set<std::uint32_t> id_set(ids.begin(), ids.end());
                         for (auto& note : editor.notes)
                         {
-                                if (sel.intersects(note))
+                                if (id_set.count(note.id))
                                 {
-                                        changes.emplace_back(note, note.velocity);
+                                        changes.emplace_back(note.id, note.velocity);
                                         note.velocity = std::uint8_t(std::clamp(int(note.velocity) + delta, 1, 127));
                                 }
                         }
@@ -405,19 +353,10 @@ struct midi_editor
 
                 void undo(midi_editor& editor) override
                 {
-                        for (auto& [note, old_vel] : changes)
+                        for (auto& [id, old_vel] : changes)
                         {
-                                for (auto& n : editor.notes)
-                                {
-                                        if (n.start_tick == note.start_tick &&
-                                                n.key == note.key &&
-                                                n.channel == note.channel &&
-                                                n.track_index == note.track_index)
-                                        {
-                                                n.velocity = old_vel;
-                                                break;
-                                        }
-                                }
+                                if (auto* note = editor.find_note_by_id(id))
+                                        note->velocity = old_vel;
                         }
                         editor.mark_dirty();
                 }
@@ -429,43 +368,54 @@ struct midi_editor
         };
 
         /**
-         * Functor for deleting one exact note (eraser tool)
+         * Functor for deleting one exact note (right-click removal)
          */
         struct delete_single_note_op : edit_operation
         {
-                piano_note target;
-                bool applied = false;
+                piano_note target; // full copy, id included
 
                 delete_single_note_op(piano_note n) : target(n) {}
 
                 void execute(midi_editor& editor) override
                 {
-                        applied = false;
-                        auto& notes = editor.notes;
-                        for (auto it = notes.begin(); it != notes.end(); ++it)
-                        {
-                                if (it->start_tick == target.start_tick &&
-                                        it->end_tick == target.end_tick &&
-                                        it->key == target.key &&
-                                        it->channel == target.channel &&
-                                        it->track_index == target.track_index)
-                                {
-                                        notes.erase(it);
-                                        applied = true;
-                                        break;
-                                }
-                        }
+                        editor.remove_note_by_id(target.id);
                         editor.mark_dirty();
                 }
 
                 void undo(midi_editor& editor) override
                 {
-                        if (applied)
-                                editor.notes.push_back(target);
+                        editor.notes.push_back(target);
                         editor.mark_dirty();
                 }
 
                 std::string description() const override { return "Erase Note"; }
+        };
+
+        /**
+         * Functor for inserting a batch of notes at once (paste, duplicate);
+         * ids are preassigned by the editor
+         */
+        struct insert_notes_op : edit_operation
+        {
+                std::vector<piano_note> inserted;
+
+                insert_notes_op(std::vector<piano_note>&& n) : inserted(std::move(n)) {}
+
+                void execute(midi_editor& editor) override
+                {
+                        for (const auto& note : inserted)
+                                editor.notes.push_back(note);
+                        editor.mark_dirty();
+                }
+
+                void undo(midi_editor& editor) override
+                {
+                        for (const auto& note : inserted)
+                                editor.remove_note_by_id(note.id);
+                        editor.mark_dirty();
+                }
+
+                std::string description() const override { return "Insert Notes"; }
         };
 
         /**
@@ -476,7 +426,7 @@ struct midi_editor
         {
                 struct entry
                 {
-                        piano_note note; // identity (velocity field is ignored for matching)
+                        piano_note note; // identity (matched by note.id)
                         std::uint8_t old_velocity;
                         std::uint8_t new_velocity;
                 };
@@ -488,18 +438,8 @@ struct midi_editor
                 {
                         for (const auto& en : entries)
                         {
-                                for (auto& n : editor.notes)
-                                {
-                                        if (n.start_tick == en.note.start_tick &&
-                                                n.end_tick == en.note.end_tick &&
-                                                n.key == en.note.key &&
-                                                n.channel == en.note.channel &&
-                                                n.track_index == en.note.track_index)
-                                        {
-                                                n.velocity = use_new ? en.new_velocity : en.old_velocity;
-                                                break;
-                                        }
-                                }
+                                if (auto* note = editor.find_note_by_id(en.note.id))
+                                        note->velocity = use_new ? en.new_velocity : en.old_velocity;
                         }
                         editor.mark_dirty();
                 }
@@ -515,59 +455,56 @@ struct midi_editor
          */
         struct quantize_op : edit_operation
         {
-                selection sel;
+                std::vector<std::uint32_t> ids;
                 tick_type grid_resolution;
-                std::vector<std::pair<piano_note, piano_note>> changes;
+                std::vector<std::pair<std::uint32_t, piano_note>> changes; // id, prior geometry
 
-                quantize_op(selection s, tick_type grid) : sel(s), grid_resolution(grid) {}
+                quantize_op(std::vector<std::uint32_t>&& target_ids, tick_type grid)
+                        : ids(std::move(target_ids)), grid_resolution(grid)
+                {
+                }
 
                 void execute(midi_editor& editor) override
                 {
                         changes.clear();
+                        const std::set<std::uint32_t> id_set(ids.begin(), ids.end());
                         for (auto& note : editor.notes)
                         {
-                                if (sel.intersects(note))
-                                {
-                                        piano_note before = note;
+                                if (!id_set.count(note.id))
+                                        continue;
 
-                                        // Quantize start
-                                        auto remainder = note.start_tick % grid_resolution;
-                                        if (remainder < grid_resolution / 2)
-                                                note.start_tick -= remainder;
-                                        else
-                                                note.start_tick += (grid_resolution - remainder);
+                                piano_note before = note;
 
-                                        // Adjust end to maintain relative length
-                                        auto length_before = before.length();
-                                        auto length_after = length_before;
-                                        // Optionally quantize length too
-                                        auto end_remainder = note.end_tick % grid_resolution;
-                                        if (end_remainder < grid_resolution / 2)
-                                                note.end_tick = note.start_tick + (length_before - end_remainder);
-                                        else
-                                                note.end_tick = note.start_tick + (length_before + (grid_resolution - end_remainder));
+                                // Quantize start
+                                auto remainder = note.start_tick % grid_resolution;
+                                if (remainder < grid_resolution / 2)
+                                        note.start_tick -= remainder;
+                                else
+                                        note.start_tick += (grid_resolution - remainder);
 
-                                        if (before.start_tick != note.start_tick)
-                                                changes.emplace_back(before, note);
-                                }
+                                // Adjust end to maintain relative length
+                                auto length_before = before.length();
+                                // Optionally quantize length too
+                                auto end_remainder = note.end_tick % grid_resolution;
+                                if (end_remainder < grid_resolution / 2)
+                                        note.end_tick = note.start_tick + (length_before - end_remainder);
+                                else
+                                        note.end_tick = note.start_tick + (length_before + (grid_resolution - end_remainder));
+
+                                if (before.start_tick != note.start_tick)
+                                        changes.emplace_back(note.id, before);
                         }
                         editor.mark_dirty();
                 }
 
                 void undo(midi_editor& editor) override
                 {
-                        for (auto& [before, after] : changes)
+                        for (auto& [id, prior] : changes)
                         {
-                                for (auto& note : editor.notes)
+                                if (auto* note = editor.find_note_by_id(id))
                                 {
-                                        if (note.start_tick == after.start_tick &&
-                                                note.end_tick == after.end_tick &&
-                                                note.key == after.key)
-                                        {
-                                                note.start_tick = before.start_tick;
-                                                note.end_tick = before.end_tick;
-                                                break;
-                                        }
+                                        note->start_tick = prior.start_tick;
+                                        note->end_tick = prior.end_tick;
                                 }
                         }
                         editor.mark_dirty();
@@ -700,8 +637,16 @@ private:
         // Track edits apply to (piano roll focus); notes of other tracks are shown dimmed
         std::uint8_t active_track = 0;
 
-        // Selection state
-        selection current_selection;
+        // Note-set selection: ids of the selected notes. Ids are stable across
+        // moves and velocity edits, so the selection follows the notes.
+        std::set<std::uint32_t> selected_notes;
+
+        // Monotonic source for piano_note::id; never reused within a session
+        std::uint32_t next_note_id = 1;
+
+        // Copy/paste buffer; notes keep their original ticks and channels,
+        // paste retargets them onto the active track
+        std::vector<piano_note> clipboard;
 
         // Undo/Redo stacks
         std::vector<std::unique_ptr<edit_operation>> undo_stack;
@@ -755,7 +700,8 @@ public:
                 raw_track_events.clear();
                 undo_stack.clear();
                 redo_stack.clear();
-                current_selection = selection();
+                selected_notes.clear();
+                next_note_id = 1;
                 active_track = 0;
 
                 mmap_file = std::make_unique<bbb_mmap>(filepath.c_str());
@@ -933,6 +879,7 @@ public:
                                                         notes.emplace_back(it->second.start, current_tick,
                                                                 it->second.key, it->second.velocity,
                                                                 it->second.channel, track_index);
+                                                        notes.back().id = next_note_id++;
                                                         active_notes.erase(it);
                                                 }
                                         }
@@ -948,6 +895,7 @@ public:
                                                 notes.emplace_back(it->second.start, current_tick,
                                                         it->second.key, it->second.velocity,
                                                         it->second.channel, track_index);
+                                                notes.back().id = next_note_id++;
                                                 active_notes.erase(it);
                                         }
                                         break;
@@ -1013,6 +961,7 @@ public:
                 {
                         notes.emplace_back(note.start, current_tick + 1,
                                 note.key, note.velocity, note.channel, track_index);
+                        notes.back().id = next_note_id++;
                 }
 
                 auto& info = tracks[track_index];
@@ -1147,14 +1096,19 @@ public:
         // Edit Operations (with Undo/Redo)
         // ========================================================================
 
-        void insert_note(tick_type start, tick_type end, std::uint8_t key,
+        /**
+         * Insert a note; returns its freshly minted id
+         */
+        std::uint32_t insert_note(tick_type start, tick_type end, std::uint8_t key,
                 std::uint8_t velocity, std::uint8_t channel = 0, std::uint8_t track = 0)
         {
                 std::lock_guard<std::recursive_mutex> lock(editor_mutex);
-                auto op = std::make_unique<insert_note_op>(
-                        piano_note(start, end, key, velocity, channel, track));
+                piano_note note(start, end, key, velocity, channel, track);
+                note.id = next_note_id++;
+                auto op = std::make_unique<insert_note_op>(note);
                 op->execute(*this);
                 push_undo(std::move(op));
+                return note.id;
         }
 
         /**
@@ -1181,19 +1135,12 @@ public:
                 std::uint8_t& old_velocity)
         {
                 std::lock_guard<std::recursive_mutex> lock(editor_mutex);
-                for (auto& n : notes)
+                if (auto* note = find_note_by_id(ident.id))
                 {
-                        if (n.start_tick == ident.start_tick &&
-                                n.end_tick == ident.end_tick &&
-                                n.key == ident.key &&
-                                n.channel == ident.channel &&
-                                n.track_index == ident.track_index)
-                        {
-                                old_velocity = n.velocity;
-                                n.velocity = std::clamp<std::uint8_t>(velocity, 1, 127);
-                                mark_dirty();
-                                return true;
-                        }
+                        old_velocity = note->velocity;
+                        note->velocity = std::clamp<std::uint8_t>(velocity, 1, 127);
+                        mark_dirty();
+                        return true;
                 }
                 return false;
         }
@@ -1213,20 +1160,20 @@ public:
         void adjust_velocity_selected(int delta)
         {
                 std::lock_guard<std::recursive_mutex> lock(editor_mutex);
-                if (!current_selection.is_active() || !delta)
+                if (selected_notes.empty() || !delta)
                         return;
 
-                auto op = std::make_unique<velocity_adjust_op>(current_selection, delta);
+                auto op = std::make_unique<velocity_adjust_op>(selected_ids_vector(), delta);
                 op->execute(*this);
                 push_undo(std::move(op));
         }
 
         /**
-         * Erase the topmost note at (tick, key). track_filter = selection::all_tracks
+         * Erase the topmost note at (tick, key). track_filter = all_tracks
          * erases from any track, otherwise only from the given one.
          */
         bool erase_note_at(tick_type tick, std::uint8_t key,
-                std::uint8_t track_filter = selection::all_tracks)
+                std::uint8_t track_filter = all_tracks)
         {
                 std::lock_guard<std::recursive_mutex> lock(editor_mutex);
 
@@ -1234,31 +1181,36 @@ public:
                 for (const auto& note : notes)
                 {
                         if (note.key == key && tick >= note.start_tick && tick < note.end_tick &&
-                                (track_filter == selection::all_tracks || note.track_index == track_filter))
+                                (track_filter == all_tracks || note.track_index == track_filter))
                                 found = &note; // last one wins: it is drawn on top
                 }
                 if (!found)
                         return false;
 
+                const auto id = found->id;
                 auto op = std::make_unique<delete_single_note_op>(*found);
                 op->execute(*this);
                 push_undo(std::move(op));
+                selected_notes.erase(id);
                 return true;
         }
 
         /**
-         * Find the topmost note at (tick, key) across all tracks.
+         * Find the topmost note at (tick, key), optionally limited to one track.
          * With tolerances > 0, falls back to the nearest note within
          * ±key_tolerance semitones and ±tick_tolerance ticks of the point.
          */
         bool find_note_at(tick_type tick, std::uint8_t key, piano_note& out,
-                tick_type tick_tolerance = 0, std::uint8_t key_tolerance = 0) const
+                tick_type tick_tolerance = 0, std::uint8_t key_tolerance = 0,
+                std::uint8_t track_filter = all_tracks) const
         {
                 std::lock_guard<std::recursive_mutex> lock(editor_mutex);
 
                 bool found = false;
                 for (const auto& note : notes)
                 {
+                        if (track_filter != all_tracks && note.track_index != track_filter)
+                                continue;
                         if (note.key == key && tick >= note.start_tick && tick < note.end_tick)
                         {
                                 out = note;
@@ -1272,6 +1224,8 @@ public:
                 const auto hi_tick = tick + tick_tolerance;
                 for (const auto& note : notes)
                 {
+                        if (track_filter != all_tracks && note.track_index != track_filter)
+                                continue;
                         if (std::abs(int(note.key) - int(key)) <= int(key_tolerance) &&
                                 note.start_tick <= hi_tick && note.end_tick > lo_tick)
                         {
@@ -1313,47 +1267,136 @@ public:
         void delete_selected_notes()
         {
                 std::lock_guard<std::recursive_mutex> lock(editor_mutex);
-                if (!current_selection.is_active())
+                if (selected_notes.empty())
                         return;
 
-                auto op = std::make_unique<delete_notes_op>(current_selection);
+                auto op = std::make_unique<delete_notes_op>(selected_ids_vector());
                 op->execute(*this);
                 push_undo(std::move(op));
+                selected_notes.clear();
+        }
+
+        /**
+         * Copy the selected notes into the clipboard.
+         * The clipboard survives track switches, so notes can be pasted across tracks.
+         * Returns the number of notes copied.
+         */
+        std::size_t copy_selected_notes()
+        {
+                std::lock_guard<std::recursive_mutex> lock(editor_mutex);
+                if (selected_notes.empty())
+                        return 0;
+
+                std::vector<piano_note> copied;
+                for (const auto& note : notes)
+                        if (selected_notes.count(note.id))
+                                copied.push_back(note);
+
+                if (copied.empty())
+                        return 0;
+                clipboard = std::move(copied);
+                return clipboard.size();
+        }
+
+        bool has_clipboard() const
+        {
+                std::lock_guard<std::recursive_mutex> lock(editor_mutex);
+                return !clipboard.empty();
+        }
+
+        /**
+         * Paste the clipboard into the active track at the original position.
+         * Notes take the target track's primary channel (kept as copied when the
+         * target is multi-channel) and fresh ids. The pasted notes become the new
+         * selection, so they can be moved right away. Returns the number pasted.
+         */
+        std::size_t paste_clipboard()
+        {
+                std::lock_guard<std::recursive_mutex> lock(editor_mutex);
+                if (clipboard.empty())
+                        return 0;
+
+                std::uint8_t channel_override = 0xFF;
+                auto it = tracks.find(active_track);
+                if (it != tracks.end() && it->second.channel != 0xFF)
+                        channel_override = it->second.channel;
+
+                auto pasted = clipboard;
+                std::set<std::uint32_t> new_ids;
+                for (auto& note : pasted)
+                {
+                        note.id = next_note_id++;
+                        note.track_index = active_track;
+                        if (channel_override != 0xFF)
+                                note.channel = channel_override;
+                        new_ids.insert(note.id);
+                }
+
+                const auto count = pasted.size();
+                auto op = std::make_unique<insert_notes_op>(std::move(pasted));
+                op->execute(*this);
+                push_undo(std::move(op));
+
+                selected_notes = std::move(new_ids);
+                return count;
+        }
+
+        /**
+         * Duplicate the selected notes right after the group ends (Ctrl+B):
+         * copies shifted right by the group's tick extent. The selection moves
+         * onto the duplicate, so repeated presses chain. Returns the copy count.
+         */
+        std::size_t duplicate_selected()
+        {
+                std::lock_guard<std::recursive_mutex> lock(editor_mutex);
+
+                tick_type begin = 0, end = 0;
+                std::uint8_t key_low = 0, key_high = 0;
+                if (!get_selection_bounds(begin, end, key_low, key_high))
+                        return 0;
+                const auto shift = end - begin;
+
+                std::vector<piano_note> copies;
+                std::set<std::uint32_t> new_ids;
+                for (const auto& note : notes)
+                {
+                        if (!selected_notes.count(note.id))
+                                continue;
+                        auto copy = note;
+                        copy.id = next_note_id++;
+                        copy.start_tick += shift;
+                        copy.end_tick += shift;
+                        new_ids.insert(copy.id);
+                        copies.push_back(copy);
+                }
+                if (copies.empty())
+                        return 0;
+
+                const auto count = copies.size();
+                auto op = std::make_unique<insert_notes_op>(std::move(copies));
+                op->execute(*this);
+                push_undo(std::move(op));
+
+                selected_notes = std::move(new_ids);
+                return count;
         }
 
         void move_selected_notes(sgtick_type delta_ticks = 0, int delta_keys = 0)
         {
                 std::lock_guard<std::recursive_mutex> lock(editor_mutex);
-                if (!current_selection.is_active())
+                if (selected_notes.empty())
                         return;
 
-                auto op = std::make_unique<move_notes_op>(current_selection, delta_ticks, delta_keys);
+                auto op = std::make_unique<move_notes_op>(selected_ids_vector(), delta_ticks, delta_keys);
                 op->execute(*this);
                 push_undo(std::move(op));
-
-                // Keep the selection rectangle attached to the moved notes
-                auto& sel = current_selection;
-                auto new_begin = sgtick_type(sel.begin_tick) + delta_ticks;
-                auto new_end = sgtick_type(sel.end_tick) + delta_ticks;
-                if (new_begin >= 0 && new_end >= 0)
-                {
-                        sel.begin_tick = tick_type(new_begin);
-                        sel.end_tick = tick_type(new_end);
-                }
-                int kb = std::clamp(int(sel.key_begin) + delta_keys, 0, 127);
-                int ke = std::clamp(int(sel.key_end) + delta_keys, 0, 127);
-                sel.key_begin = std::uint8_t(kb);
-                sel.key_end = std::uint8_t(ke);
+                // Ids are stable, so the selection follows the moved notes by itself
         }
 
-        void resize_note(tick_type start_tick, std::uint8_t key, tick_type new_length)
+        void resize_note(std::uint32_t note_id, tick_type new_length)
         {
                 std::lock_guard<std::recursive_mutex> lock(editor_mutex);
-                piano_note target;
-                target.start_tick = start_tick;
-                target.key = key;
-
-                auto op = std::make_unique<resize_note_op>(target, new_length);
+                auto op = std::make_unique<resize_note_op>(note_id, new_length);
                 op->execute(*this);
                 push_undo(std::move(op));
         }
@@ -1361,10 +1404,10 @@ public:
         void change_velocity_selected(std::uint8_t velocity)
         {
                 std::lock_guard<std::recursive_mutex> lock(editor_mutex);
-                if (!current_selection.is_active())
+                if (selected_notes.empty())
                         return;
 
-                auto op = std::make_unique<velocity_change_op>(current_selection, velocity);
+                auto op = std::make_unique<velocity_change_op>(selected_ids_vector(), velocity);
                 op->execute(*this);
                 push_undo(std::move(op));
         }
@@ -1372,10 +1415,10 @@ public:
         void quantize_selected(tick_type grid_resolution)
         {
                 std::lock_guard<std::recursive_mutex> lock(editor_mutex);
-                if (!current_selection.is_active() || !grid_resolution)
+                if (selected_notes.empty() || !grid_resolution)
                         return;
 
-                auto op = std::make_unique<quantize_op>(current_selection, grid_resolution);
+                auto op = std::make_unique<quantize_op>(selected_ids_vector(), grid_resolution);
                 op->execute(*this);
                 push_undo(std::move(op));
         }
@@ -1394,6 +1437,7 @@ public:
                 undo_stack.pop_back();
                 op->undo(*this);
                 redo_stack.push_back(std::move(op));
+                prune_selection();
         }
 
         void redo()
@@ -1406,6 +1450,7 @@ public:
                 redo_stack.pop_back();
                 op->redo(*this);
                 undo_stack.push_back(std::move(op));
+                prune_selection();
         }
 
         bool can_undo() const
@@ -1435,38 +1480,159 @@ private:
                 redo_stack.clear();
         }
 
-        void remove_note_by_position(const piano_note& note)
+        piano_note* find_note_by_id(std::uint32_t id)
         {
-                notes.erase(
-                        std::remove_if(notes.begin(), notes.end(),
-                                [&note](const piano_note& n)
+                for (auto& note : notes)
+                        if (note.id == id)
+                                return &note;
+                return nullptr;
+        }
+
+        bool remove_note_by_id(std::uint32_t id)
+        {
+                for (auto it = notes.begin(); it != notes.end(); ++it)
                 {
-                        return n.start_tick == note.start_tick &&
-                                n.key == note.key &&
-                                n.channel == note.channel &&
-                                n.track_index == note.track_index;
-                }),
-                        notes.end());
+                        if (it->id == id)
+                        {
+                                notes.erase(it);
+                                return true;
+                        }
+                }
+                return false;
+        }
+
+        std::vector<std::uint32_t> selected_ids_vector() const
+        {
+                return std::vector<std::uint32_t>(selected_notes.begin(), selected_notes.end());
+        }
+
+        // Drop selected ids whose notes no longer exist (after undo of an insert etc.)
+        void prune_selection()
+        {
+                if (selected_notes.empty())
+                        return;
+                std::set<std::uint32_t> alive;
+                for (const auto& note : notes)
+                        if (selected_notes.count(note.id))
+                                alive.insert(note.id);
+                selected_notes.swap(alive);
         }
 
         void mark_dirty() { is_dirty = true; }
 
 public:
         // ========================================================================
-        // Selection Management
+        // Selection Management (note-id set)
         // ========================================================================
 
-        void set_selection(tick_type begin, tick_type end,
-                std::uint8_t key_begin = 0, std::uint8_t key_end = 127,
-                std::uint8_t track_filter = selection::all_tracks)
+        /**
+         * Combine all notes intersecting the rectangle with the selection
+         * according to the mode. Returns the resulting selection size.
+         */
+        std::size_t select_rect(tick_type begin, tick_type end,
+                std::uint8_t key_begin, std::uint8_t key_end,
+                std::uint8_t track_filter = all_tracks,
+                select_mode mode = select_mode::replace)
         {
                 std::lock_guard<std::recursive_mutex> lock(editor_mutex);
-                current_selection.begin_tick = begin;
-                current_selection.end_tick = end;
-                current_selection.key_begin = key_begin;
-                current_selection.key_end = key_end;
-                current_selection.track_filter = track_filter;
-                current_selection.has_selection = (begin < end);
+                if (mode == select_mode::replace)
+                        selected_notes.clear();
+
+                for (const auto& note : notes)
+                {
+                        if (track_filter != all_tracks && note.track_index != track_filter)
+                                continue;
+                        if (note.start_tick >= end || note.end_tick <= begin ||
+                                note.key < key_begin || note.key > key_end)
+                                continue;
+
+                        if (mode == select_mode::remove)
+                                selected_notes.erase(note.id);
+                        else
+                                selected_notes.insert(note.id);
+                }
+                return selected_notes.size();
+        }
+
+        void select_note(std::uint32_t id, select_mode mode = select_mode::replace)
+        {
+                std::lock_guard<std::recursive_mutex> lock(editor_mutex);
+                if (mode == select_mode::replace)
+                        selected_notes.clear();
+                if (mode == select_mode::remove)
+                        selected_notes.erase(id);
+                else
+                        selected_notes.insert(id);
+        }
+
+        void set_selected_ids(std::set<std::uint32_t> ids)
+        {
+                std::lock_guard<std::recursive_mutex> lock(editor_mutex);
+                selected_notes = std::move(ids);
+        }
+
+        std::set<std::uint32_t> get_selected_ids() const
+        {
+                std::lock_guard<std::recursive_mutex> lock(editor_mutex);
+                return selected_notes;
+        }
+
+        std::vector<piano_note> get_selected_notes() const
+        {
+                std::lock_guard<std::recursive_mutex> lock(editor_mutex);
+                std::vector<piano_note> result;
+                for (const auto& note : notes)
+                        if (selected_notes.count(note.id))
+                                result.push_back(note);
+                return result;
+        }
+
+        bool has_selection() const
+        {
+                std::lock_guard<std::recursive_mutex> lock(editor_mutex);
+                return !selected_notes.empty();
+        }
+
+        std::size_t selection_count() const
+        {
+                std::lock_guard<std::recursive_mutex> lock(editor_mutex);
+                return selected_notes.size();
+        }
+
+        bool is_note_selected(std::uint32_t id) const
+        {
+                std::lock_guard<std::recursive_mutex> lock(editor_mutex);
+                return selected_notes.count(id) != 0;
+        }
+
+        /**
+         * Tick/key bounding box of the selected notes; false when nothing is selected
+         */
+        bool get_selection_bounds(tick_type& begin, tick_type& end,
+                std::uint8_t& key_low, std::uint8_t& key_high) const
+        {
+                std::lock_guard<std::recursive_mutex> lock(editor_mutex);
+                bool any = false;
+                for (const auto& note : notes)
+                {
+                        if (!selected_notes.count(note.id))
+                                continue;
+                        if (!any)
+                        {
+                                begin = note.start_tick;
+                                end = note.end_tick;
+                                key_low = key_high = note.key;
+                                any = true;
+                        }
+                        else
+                        {
+                                begin = std::min(begin, note.start_tick);
+                                end = std::max(end, note.end_tick);
+                                key_low = std::min(key_low, note.key);
+                                key_high = std::max(key_high, note.key);
+                        }
+                }
+                return any;
         }
 
         // ========================================================================
@@ -1477,7 +1643,7 @@ public:
         {
                 std::lock_guard<std::recursive_mutex> lock(editor_mutex);
                 active_track = track;
-                current_selection.has_selection = false; // selection belongs to a track
+                selected_notes.clear(); // selection gestures are per-track
         }
 
         std::uint8_t get_active_track() const
@@ -1520,13 +1686,7 @@ public:
         void clear_selection()
         {
                 std::lock_guard<std::recursive_mutex> lock(editor_mutex);
-                current_selection.has_selection = false;
-        }
-
-        selection get_selection() const
-        {
-                std::lock_guard<std::recursive_mutex> lock(editor_mutex);
-                return current_selection;
+                selected_notes.clear();
         }
 
         // ========================================================================

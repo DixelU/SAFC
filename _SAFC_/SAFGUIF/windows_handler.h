@@ -114,7 +114,8 @@ struct windows_handler
 		auto aw_iterator = active_windows.begin();
 		auto current_aw = aw_iterator;
 
-		if (!button_btn && !active_windows.empty())
+		// Pure motion is (0, 0); button 0 with a state is the middle button
+		if (!button_btn && !state && !active_windows.empty())
 		{
 			discard((*active_windows.begin())->second->mouse_handler(mx, my, 0, 0));
 		}

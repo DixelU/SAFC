@@ -7,6 +7,7 @@
 #include <GL/freeglut.h>
 #include <functional>
 #include <map>
+#include <set>
 #include <tuple>
 #include <cmath>
 
@@ -23,17 +24,22 @@
  * FL-style focus: the active track in full color, other tracks in gray;
  * right-clicking a gray note makes its track active.
  *
- * Mouse:
+ * Mouse (no tool modes; buttons + modifiers pick the gesture):
+ *  - left-drag on empty    draw a new note in the active track (snapped)
+ *  - left-click on a note  pick up its length/velocity/channel as the draw
+ *                          defaults and select it (active track only)
+ *  - Shift + left-drag     additive rubber-band selection; Shift+Alt removes
+ *  - middle-drag           move the selected notes (ghost preview);
+ *                          holding Alt bypasses the snap grid
+ *  - right-click note      active track: delete it; gray note: switch to its track
+ *  - right-drag notes      pan time
  *  - wheel over notes      zoom time around the cursor
  *  - wheel over keyboard   zoom pitch around the cursor
- *  - right-drag notes      pan time
  *  - right-drag keyboard   scroll pitch
- *  - right-click note      pick that note's track
- *  - left (select)         rubber-band selection; drag inside it to move notes
- *  - left (draw)           drag out a new note in the active track
- *  - left (erase)          delete active-track notes under the cursor
  *  - velocity lane         left-drag paints velocities, right-drag draws a linear ramp;
  *                          applies to the selection when one is active
+ * Keys: Del deletes the selection; Ctrl+Z/Y undo/redo; Ctrl+C/V/B copy, paste,
+ * duplicate; Ctrl+A selects the active track; Ctrl+D deselects.
  */
 struct midi_editor_viewer : public handleable_ui_part
 {
@@ -41,8 +47,6 @@ struct midi_editor_viewer : public handleable_ui_part
         using sgtick_type = midi_editor::sgtick_type;
         using piano_note = midi_editor::piano_note;
         using velocity_entry = midi_editor::recorded_velocity_op::entry;
-
-        enum class tool_mode : std::uint8_t { select, draw, erase };
 
         float xpos, ypos;
         midi_editor* editor;
@@ -57,7 +61,15 @@ struct midi_editor_viewer : public handleable_ui_part
         static constexpr float divider_height = 5.f;
         static constexpr float min_lane_height = 24.f;
 
-        tool_mode current_tool = tool_mode::select;
+        // Draw defaults, picked up from the last clicked note.
+        // draw_length_ticks 0 = one snap cell; draw_channel -1 = track's primary channel.
+        tick_type draw_length_ticks = 0;
+        std::uint8_t draw_velocity = 100;
+        int draw_channel = -1;
+
+        // Snap grid as note denominator (4 = quarter note, 16 = sixteenth, ...); 0 = off
+        static constexpr int snap_levels[] = {4, 8, 16, 32, 0};
+        int snap_level_index = 2; // 1/16 by default
 
         // Velocity lane under the roll
         bool velocity_lane_visible = true;
@@ -65,17 +77,25 @@ struct midi_editor_viewer : public handleable_ui_part
 
         // Called after a right-click switches the active track
         std::function<void()> on_track_changed;
+        // One-line status feedback (copy/paste/selection results)
+        std::function<void(const std::string&)> on_status;
+        // Fired when a click picks up a note's state or the draw channel changes
+        std::function<void()> on_draw_state_changed;
         // Note audition: (key, velocity, channel, on/off)
         std::function<void(std::uint8_t, std::uint8_t, std::uint8_t, bool)> note_audition;
 
         // Roll interaction state
-        bool selecting = false;
-        bool moving = false;
+        bool selecting = false;        // Shift rubber band
+        bool select_remove = false;    // Shift+Alt: band removes from the selection
+        bool moving = false;           // middle-drag moves the selection
         bool drawing = false;
-        bool erasing = false;
+        bool picking = false;          // left press picked up a note's state
         bool right_down = false;
         bool panning = false;
         bool kb_scrolling = false;
+        std::set<std::uint32_t> base_selection; // selection before the band gesture
+        tick_type sel_cur_tick = 0;
+        std::uint8_t sel_cur_key = 0;
         tick_type anchor_tick = 0;
         std::uint8_t anchor_key = 0;
         sgtick_type move_delta_ticks = 0;
@@ -120,14 +140,44 @@ struct midi_editor_viewer : public handleable_ui_part
                 cancel_interactions();
         }
 
-        void set_tool(tool_mode mode)
+        /**
+         * Channel for newly drawn notes; -1 follows the active track's primary channel
+         */
+        void set_draw_channel(int channel)
         {
                 std::lock_guard<std::recursive_mutex> locker(lock);
-                current_tool = mode;
-                cancel_interactions();
+                draw_channel = channel < 0 ? -1 : (channel & 0x0F);
         }
 
-        tool_mode get_tool() const { return current_tool; }
+        int get_draw_channel() const { return draw_channel; }
+
+        std::uint8_t effective_draw_channel() const
+        {
+                if (draw_channel >= 0)
+                        return std::uint8_t(draw_channel & 0x0F);
+                return editor ? editor->get_active_track_channel() : 0;
+        }
+
+        tick_type snap_ticks(std::uint16_t ppqn) const
+        {
+                const int denom = snap_levels[snap_level_index];
+                if (!denom)
+                        return 1;
+                return std::max<tick_type>(1, tick_type(ppqn) * 4 / denom);
+        }
+
+        std::string snap_label() const
+        {
+                const int denom = snap_levels[snap_level_index];
+                return denom ? "Snap: 1/" + std::to_string(denom) : "Snap: off";
+        }
+
+        std::string cycle_snap()
+        {
+                std::lock_guard<std::recursive_mutex> locker(lock);
+                snap_level_index = (snap_level_index + 1) % int(std::size(snap_levels));
+                return snap_label();
+        }
 
         void toggle_velocity_lane()
         {
@@ -138,13 +188,15 @@ struct midi_editor_viewer : public handleable_ui_part
 
         void cancel_interactions()
         {
-                selecting = moving = drawing = erasing = false;
+                selecting = moving = drawing = picking = false;
+                select_remove = false;
                 right_down = panning = kb_scrolling = false;
                 lane_painting = lane_line = divider_dragging = false;
                 move_delta_ticks = 0;
                 move_delta_keys = 0;
                 pan_accum_ticks = 0.f;
                 kb_accum_keys = 0.f;
+                base_selection.clear();
                 gesture.clear();
                 audition_stop();
         }
@@ -293,20 +345,24 @@ struct midi_editor_viewer : public handleable_ui_part
                 if (key_height <= 0.f)
                         return;
 
+                const auto selected = editor->get_selected_ids();
+
                 draw_key_lanes(l, key_low, key_high, key_height);
                 draw_time_grid(l, view_start, view_duration, ppqn);
                 draw_keyboard(l, key_low, key_high, key_height);
-                draw_notes(l, view_start, view_duration, key_low, key_high, key_height);
+                draw_notes(l, view_start, view_duration, key_low, key_high, key_height, selected);
 
-                const auto sel = editor->get_selection();
-                if (sel.is_active())
-                        draw_selection(sel, l, view_start, view_duration, key_low, key_high, key_height);
+                if (selecting)
+                        draw_selection_band(l, view_start, view_duration, key_low, key_high, key_height);
+
+                if (moving && (move_delta_ticks || move_delta_keys))
+                        draw_move_ghost(l, view_start, view_duration, key_low, key_high, key_height);
 
                 if (drawing)
                         draw_pending_note(l, view_start, view_duration, key_low, key_high, key_height);
 
                 if (velocity_lane_visible)
-                        draw_velocity_lane(l, view_start, view_duration, sel);
+                        draw_velocity_lane(l, view_start, view_duration, selected);
         }
 
         void draw_key_lanes(const layout& l, std::uint8_t key_low, std::uint8_t key_high, float key_height)
@@ -410,12 +466,12 @@ struct midi_editor_viewer : public handleable_ui_part
         }
 
         void draw_notes(const layout& l, tick_type view_start, tick_type view_duration,
-                std::uint8_t key_low, std::uint8_t key_high, float key_height)
+                std::uint8_t key_low, std::uint8_t key_high, float key_height,
+                const std::set<std::uint32_t>& selected_ids)
         {
                 const auto notes = editor->get_notes_in_range(
                         view_start, view_start + view_duration, key_low, key_high);
                 const auto active_track = editor->get_active_track();
-                const auto sel = editor->get_selection();
 
                 // Inactive tracks first (gray), active track on top (full color)
                 for (int pass = 0; pass < 2; ++pass)
@@ -432,7 +488,7 @@ struct midi_editor_viewer : public handleable_ui_part
                                         continue;
 
                                 std::uint8_t r, g, b;
-                                const bool selected = active_pass && sel.is_active() && sel.intersects(note);
+                                const bool selected = active_pass && selected_ids.count(note.id) != 0;
                                 if (active_pass)
                                         note_fill_color(note.track_index, note.channel, note.velocity, selected, r, g, b);
                                 else
@@ -489,17 +545,26 @@ struct midi_editor_viewer : public handleable_ui_part
                 return true;
         }
 
-        void draw_selection(const midi_editor::selection& sel, const layout& l,
-                tick_type view_start, tick_type view_duration,
+        /**
+         * In-progress rubber band; red-tinted when it removes from the selection
+         */
+        void draw_selection_band(const layout& l, tick_type view_start, tick_type view_duration,
                 std::uint8_t key_low, std::uint8_t key_high, float key_height)
         {
+                const auto t0 = std::min(anchor_tick, sel_cur_tick);
+                const auto t1 = std::max(anchor_tick, sel_cur_tick);
+                const auto k0 = std::min(anchor_key, sel_cur_key);
+                const auto k1 = std::max(anchor_key, sel_cur_key);
+
                 float x_start, x_end, y_bottom, y_top;
-                if (!selection_rect(sel.begin_tick, sel.end_tick, sel.key_begin, sel.key_end,
-                        l, view_start, view_duration, key_low, key_high, key_height,
-                        x_start, x_end, y_bottom, y_top))
+                if (!selection_rect(t0, t1 + 1, k0, k1, l, view_start, view_duration,
+                        key_low, key_high, key_height, x_start, x_end, y_bottom, y_top))
                         return;
 
-                glColor4ub(0xFF, 0xFF, 0xFF, 0x28);
+                if (select_remove)
+                        glColor4ub(0xFF, 0x50, 0x50, 0x28);
+                else
+                        glColor4ub(0xFF, 0xFF, 0xFF, 0x28);
                 glBegin(GL_QUADS);
                 glVertex2f(x_start, y_bottom);
                 glVertex2f(x_end, y_bottom);
@@ -507,7 +572,10 @@ struct midi_editor_viewer : public handleable_ui_part
                 glVertex2f(x_start, y_top);
                 glEnd();
 
-                glColor4ub(0xFF, 0xFF, 0xFF, 0xB0);
+                if (select_remove)
+                        glColor4ub(0xFF, 0x50, 0x50, 0xB0);
+                else
+                        glColor4ub(0xFF, 0xFF, 0xFF, 0xB0);
                 glLineWidth(1.f);
                 glBegin(GL_LINE_LOOP);
                 glVertex2f(x_start, y_bottom);
@@ -515,32 +583,55 @@ struct midi_editor_viewer : public handleable_ui_part
                 glVertex2f(x_end, y_top);
                 glVertex2f(x_start, y_top);
                 glEnd();
+        }
 
-                // Ghost of the selection at its pending position while dragging it
-                if (moving && (move_delta_ticks || move_delta_keys))
+        /**
+         * Shapes of the selected notes at their pending position during a middle-drag
+         */
+        void draw_move_ghost(const layout& l, tick_type view_start, tick_type view_duration,
+                std::uint8_t key_low, std::uint8_t key_high, float key_height)
+        {
+                const auto selected = editor->get_selected_notes();
+                const tick_type view_end = view_start + view_duration;
+                glLineWidth(1.f);
+
+                for (auto note : selected)
                 {
-                        const auto shift = [&](tick_type t) -> tick_type
-                        {
-                                auto v = sgtick_type(t) + move_delta_ticks;
-                                return v > 0 ? tick_type(v) : 0;
-                        };
-                        const int kb = std::clamp(int(sel.key_begin) + move_delta_keys, 0, 127);
-                        const int ke = std::clamp(int(sel.key_end) + move_delta_keys, 0, 127);
+                        const auto new_start = sgtick_type(note.start_tick) + move_delta_ticks;
+                        const auto new_end = sgtick_type(note.end_tick) + move_delta_ticks;
+                        const int new_key = int(note.key) + move_delta_keys;
+                        if (new_start < 0 || new_key < 0 || new_key > 127)
+                                continue;
 
-                        if (selection_rect(shift(sel.begin_tick), shift(sel.end_tick),
-                                std::uint8_t(kb), std::uint8_t(ke),
-                                l, view_start, view_duration, key_low, key_high, key_height,
+                        note.start_tick = tick_type(new_start);
+                        note.end_tick = tick_type(new_end);
+                        note.key = std::uint8_t(new_key);
+                        if (note.key < key_low || note.key > key_high ||
+                                note.end_tick <= view_start || note.start_tick >= view_end)
+                                continue;
+
+                        float x_start, x_end, y_bottom, y_top;
+                        if (!note_rect(note, l, view_start, view_duration, key_low, key_height,
                                 x_start, x_end, y_bottom, y_top))
-                        {
-                                glColor4ub(0x7F, 0xCF, 0xFF, 0xB0);
-                                glLineWidth(1.f);
-                                glBegin(GL_LINE_LOOP);
-                                glVertex2f(x_start, y_bottom);
-                                glVertex2f(x_end, y_bottom);
-                                glVertex2f(x_end, y_top);
-                                glVertex2f(x_start, y_top);
-                                glEnd();
-                        }
+                                continue;
+
+                        std::uint8_t r, g, b;
+                        note_fill_color(note.track_index, note.channel, note.velocity, true, r, g, b);
+                        glColor4ub(r, g, b, 0x60);
+                        glBegin(GL_QUADS);
+                        glVertex2f(x_start, y_bottom);
+                        glVertex2f(x_end, y_bottom);
+                        glVertex2f(x_end, y_top);
+                        glVertex2f(x_start, y_top);
+                        glEnd();
+
+                        glColor4ub(0xFF, 0xFF, 0xFF, 0xA0);
+                        glBegin(GL_LINE_LOOP);
+                        glVertex2f(x_start, y_bottom);
+                        glVertex2f(x_end, y_bottom);
+                        glVertex2f(x_end, y_top);
+                        glVertex2f(x_start, y_top);
+                        glEnd();
                 }
         }
 
@@ -579,9 +670,9 @@ struct midi_editor_viewer : public handleable_ui_part
                 if (draw_key < key_low || draw_key > key_high)
                         return;
 
-                piano_note pending(draw_start_tick, draw_end_tick, draw_key, 100);
+                piano_note pending(draw_start_tick, draw_end_tick, draw_key, draw_velocity);
                 pending.track_index = editor->get_active_track();
-                pending.channel = editor->get_active_track_channel();
+                pending.channel = effective_draw_channel();
 
                 float x_start, x_end, y_bottom, y_top;
                 if (!note_rect(pending, l, view_start, view_duration, key_low, key_height,
@@ -610,7 +701,7 @@ struct midi_editor_viewer : public handleable_ui_part
         }
 
         void draw_velocity_lane(const layout& l, tick_type view_start, tick_type view_duration,
-                const midi_editor::selection& sel)
+                const std::set<std::uint32_t>& selected_ids)
         {
                 const float lane_h = l.lane_top - l.lane_bottom;
                 if (lane_h <= 4.f)
@@ -636,7 +727,7 @@ struct midi_editor_viewer : public handleable_ui_part
                 // Velocity bars of the active track's visible notes
                 const auto notes = editor->get_notes_in_range(view_start, view_start + view_duration);
                 const auto active_track = editor->get_active_track();
-                const bool has_selection = sel.is_active();
+                const bool has_selection = !selected_ids.empty();
                 const float usable_h = lane_h - 3.f;
 
                 glBegin(GL_QUADS);
@@ -649,7 +740,7 @@ struct midi_editor_viewer : public handleable_ui_part
                         if (x < l.notes_x || x > l.notes_x + l.notes_w - 1.f)
                                 continue;
 
-                        const bool selected = has_selection && sel.intersects(note);
+                        const bool selected = selected_ids.count(note.id) != 0;
                         std::uint8_t r, g, b;
                         note_fill_color(note.track_index, note.channel, note.velocity, selected, r, g, b);
                         if (has_selection && !selected)
@@ -712,9 +803,66 @@ struct midi_editor_viewer : public handleable_ui_part
                 return;
         }
 
-        void keyboard_handler(char) override
+        /**
+         * Editor shortcuts. Reaches this widget only while the editor window is on
+         * top (windows_handler forwards keys to the top window alone), and runs
+         * synchronously inside the glut keyboard callback, so glutGetModifiers()
+         * is valid here. Ctrl+letter arrives as an ASCII control code
+         * (Ctrl+A = 1 ... Ctrl+Z = 26); arrow keys are re-sent through this same
+         * path as codes 1-4, hence the explicit Ctrl-modifier check.
+         */
+        void keyboard_handler(char ch) override
         {
-                return;
+                std::lock_guard<std::recursive_mutex> locker(lock);
+
+                if (!editor || !editor->is_file_loaded())
+                        return;
+
+                if (std::uint8_t(ch) == 127) // Del: delete selected notes
+                {
+                        editor->delete_selected_notes();
+                        return;
+                }
+
+                if (std::uint8_t(ch) >= 27)
+                        return;
+
+                const auto modifiers = glutGetModifiers();
+                if (!(modifiers & GLUT_ACTIVE_CTRL))
+                        return;
+
+                switch (ch)
+                {
+                case 26: // Ctrl+Z (+Shift = redo)
+                        if (modifiers & GLUT_ACTIVE_SHIFT)
+                                editor->redo();
+                        else
+                                editor->undo();
+                        break;
+                case 25: // Ctrl+Y
+                        editor->redo();
+                        break;
+                case 3: // Ctrl+C
+                        if (auto count = editor->copy_selected_notes(); count && on_status)
+                                on_status("Copied " + std::to_string(count) + " notes");
+                        break;
+                case 22: // Ctrl+V
+                        if (auto count = editor->paste_clipboard(); count && on_status)
+                                on_status("Pasted " + std::to_string(count) + " notes into " +
+                                        editor->get_track_label(editor->get_active_track()));
+                        break;
+                case 2: // Ctrl+B: duplicate selection right after itself
+                        editor->duplicate_selected();
+                        break;
+                case 1: // Ctrl+A: select every note of the active track
+                        if (auto count = editor->select_rect(0, editor->get_total_ticks() + 1,
+                                0, 127, editor->get_active_track()); on_status)
+                                on_status("Selected " + std::to_string(count) + " notes");
+                        break;
+                case 4: // Ctrl+D: deselect
+                        editor->clear_selection();
+                        break;
+                }
         }
 
         void safe_string_replace(std::string) override
@@ -773,7 +921,7 @@ struct midi_editor_viewer : public handleable_ui_part
 
         // Set velocity for active-track notes starting within [t0, t1]; honors the selection
         void lane_apply_flat(tick_type t0, tick_type t1, std::uint8_t vel,
-                const midi_editor::selection& sel)
+                const std::set<std::uint32_t>& selected_ids)
         {
                 if (t0 > t1)
                         std::swap(t0, t1);
@@ -785,7 +933,7 @@ struct midi_editor_viewer : public handleable_ui_part
                         if (note.track_index != active_track ||
                                 note.start_tick < t0 || note.start_tick > t1)
                                 continue;
-                        if (sel.is_active() && !sel.intersects(note))
+                        if (!selected_ids.empty() && !selected_ids.count(note.id))
                                 continue;
                         record_velocity_change(note, vel);
                 }
@@ -794,7 +942,7 @@ struct midi_editor_viewer : public handleable_ui_part
         // Linear ramp between (tick_a, vel_a) and (tick_b, vel_b)
         void lane_apply_ramp(tick_type tick_a, std::uint8_t vel_a,
                 tick_type tick_b, std::uint8_t vel_b,
-                const midi_editor::selection& sel)
+                const std::set<std::uint32_t>& selected_ids)
         {
                 auto t0 = tick_a, t1 = tick_b;
                 if (t0 > t1)
@@ -807,7 +955,7 @@ struct midi_editor_viewer : public handleable_ui_part
                         if (note.track_index != active_track ||
                                 note.start_tick < t0 || note.start_tick > t1)
                                 continue;
-                        if (sel.is_active() && !sel.intersects(note))
+                        if (!selected_ids.empty() && !selected_ids.count(note.id))
                                 continue;
 
                         float f = 0.f;
@@ -878,12 +1026,15 @@ struct midi_editor_viewer : public handleable_ui_part
                         const int k = int(key_low) + int((std::clamp(y, l.roll_bottom, l.top) - l.roll_bottom) / key_height);
                         return std::uint8_t(std::clamp(k, 0, 127));
                 };
-                const tick_type snap = std::max<tick_type>(1, tick_type(ppqn) / 4);
+                const tick_type snap = snap_ticks(ppqn);
 
                 const bool left_press = (button == -1 && state == -1);
                 const bool left_release = (button == -1 && state == 1);
                 const bool right_press = (button == 1 && state == -1);
                 const bool right_release = (button == 1 && state == 1);
+                // Middle button arrives as 0 with a non-zero state (0/0 is mouse motion)
+                const bool middle_press = (button == 0 && state == -1);
+                const bool middle_release = (button == 0 && state == 1);
 
                 // ---- Divider drag (lane resize) ----
                 if (divider_dragging)
@@ -897,13 +1048,13 @@ struct midi_editor_viewer : public handleable_ui_part
                 // ---- Velocity lane gestures ----
                 if (lane_painting || lane_line)
                 {
-                        const auto sel = editor->get_selection();
+                        const auto selected = editor->get_selected_ids();
                         const auto cur_tick = tick_at_clamped(mx);
                         const auto cur_vel = lane_velocity_at(my, l);
 
                         if (lane_painting)
                         {
-                                lane_apply_flat(lane_last_tick, cur_tick, cur_vel, sel);
+                                lane_apply_flat(lane_last_tick, cur_tick, cur_vel, selected);
                                 lane_last_tick = cur_tick;
                                 if (left_release)
                                 {
@@ -919,7 +1070,7 @@ struct midi_editor_viewer : public handleable_ui_part
                         if (right_release)
                         {
                                 lane_line = false;
-                                lane_apply_ramp(lane_anchor_tick, lane_anchor_vel, cur_tick, cur_vel, sel);
+                                lane_apply_ramp(lane_anchor_tick, lane_anchor_vel, cur_tick, cur_vel, selected);
                                 commit_lane_gesture();
                         }
                         return true;
@@ -1003,7 +1154,7 @@ struct midi_editor_viewer : public handleable_ui_part
                                 // A plain click gets a few pixels of tolerance around the cursor
                                 const auto tol = tick_type(2.f / l.notes_w * float(view_duration)) + 1;
                                 lane_apply_flat(cur_tick > tol ? cur_tick - tol : 0, cur_tick + tol,
-                                        cur_vel, editor->get_selection());
+                                        cur_vel, editor->get_selected_ids());
                         }
                         else
                         {
@@ -1043,16 +1194,22 @@ struct midi_editor_viewer : public handleable_ui_part
                         {
                                 if (!panning)
                                 {
-                                        // Plain right-click: switch to the track of the note under the cursor.
-                                        // Tolerance of ~3 pixels / 1 semitone forgives near-misses.
-                                        const auto tick_tolerance = tick_type(3.f / l.notes_w * float(view_duration)) + 1;
-                                        piano_note picked;
-                                        if (editor->find_note_at(tick_at_clamped(mx), key_at(my), picked, tick_tolerance, 1) &&
-                                                picked.track_index != editor->get_active_track())
+                                        // Plain right-click. A note of the active track under the cursor
+                                        // is deleted; a gray note only switches to its track (near-misses
+                                        // are forgiven by ~3 pixels / 1 semitone of tolerance).
+                                        const auto tick = tick_at_clamped(mx);
+                                        const auto key = key_at(my);
+                                        if (!editor->erase_note_at(tick, key, editor->get_active_track()))
                                         {
-                                                editor->set_active_track(picked.track_index);
-                                                if (on_track_changed)
-                                                        on_track_changed();
+                                                const auto tick_tolerance = tick_type(3.f / l.notes_w * float(view_duration)) + 1;
+                                                piano_note picked;
+                                                if (editor->find_note_at(tick, key, picked, tick_tolerance, 1) &&
+                                                        picked.track_index != editor->get_active_track())
+                                                {
+                                                        editor->set_active_track(picked.track_index);
+                                                        if (on_track_changed)
+                                                                on_track_changed();
+                                                }
                                         }
                                 }
                                 right_down = false;
@@ -1084,93 +1241,43 @@ struct midi_editor_viewer : public handleable_ui_part
                         return true;
                 }
 
-                // ---- Left button on the roll, by tool ----
-                if (!selecting && !moving && !drawing && !erasing)
+                // ---- Middle button: move the selected notes (ghost until release) ----
+                if (middle_press && in_notes_area && !moving)
                 {
-                        if (!left_press || !in_notes_area)
-                                return false;
-
-                        const auto tick = tick_at_clamped(mx);
-                        const auto key = key_at(my);
-
-                        switch (current_tool)
-                        {
-                                case tool_mode::select:
-                                {
-                                        const auto sel = editor->get_selection();
-                                        if (sel.is_active() && sel.contains(tick, key))
-                                        {
-                                                moving = true;
-                                                anchor_tick = tick;
-                                                anchor_key = key;
-                                                move_delta_ticks = 0;
-                                                move_delta_keys = 0;
-                                        }
-                                        else
-                                        {
-                                                selecting = true;
-                                                anchor_tick = tick;
-                                                anchor_key = key;
-                                                editor->set_selection(tick, tick, key, key, editor->get_active_track());
-                                        }
-
-                                        // Audition the clicked note, if any
-                                        piano_note under;
-                                        if (editor->find_note_at(tick, key, under))
-                                                audition_start(under.key, under.velocity, under.channel);
-                                        return true;
-                                }
-                                case tool_mode::draw:
-                                {
-                                        drawing = true;
-                                        draw_start_tick = (tick / snap) * snap;
-                                        draw_end_tick = draw_start_tick + snap;
-                                        draw_key = key;
-                                        audition_start(key, 100, editor->get_active_track_channel());
-                                        return true;
-                                }
-                                case tool_mode::erase:
-                                {
-                                        erasing = true;
-                                        editor->erase_note_at(tick, key, editor->get_active_track());
-                                        return true;
-                                }
-                        }
-                        return false;
-                }
-
-                // ---- Ongoing left drags on the roll ----
-                const auto cur_tick = tick_at_clamped(mx);
-                const auto cur_key = key_at(my);
-
-                if (selecting)
-                {
-                        const auto t0 = std::min(anchor_tick, cur_tick);
-                        const auto t1 = std::max(anchor_tick, cur_tick);
-                        const auto k0 = std::min(anchor_key, cur_key);
-                        const auto k1 = std::max(anchor_key, cur_key);
-                        editor->set_selection(t0, t1, k0, k1, editor->get_active_track());
-
-                        if (left_release)
-                        {
-                                selecting = false;
-                                audition_stop();
-                                if (t0 == t1) // plain click: drop the empty selection
-                                        editor->clear_selection();
-                        }
+                        if (!editor->has_selection())
+                                return true;
+                        moving = true;
+                        anchor_tick = tick_at_clamped(mx);
+                        anchor_key = key_at(my);
+                        move_delta_ticks = 0;
+                        move_delta_keys = 0;
                         return true;
                 }
 
                 if (moving)
                 {
+                        const auto cur_tick = tick_at_clamped(mx);
+                        const auto cur_key = key_at(my);
                         const auto prev_keys = move_delta_keys;
+
                         move_delta_ticks = sgtick_type(cur_tick) - sgtick_type(anchor_tick);
                         move_delta_keys = int(cur_key) - int(anchor_key);
 
-                        if (move_delta_keys != prev_keys)
-                                audition_start(cur_key, 100, editor->get_active_track_channel());
+                        // Snap the tick delta to the grid; Alt bypasses it. Polled directly
+                        // because glutGetModifiers() is invalid inside motion callbacks.
+                        const bool bypass_snap = (GetAsyncKeyState(VK_MENU) & 0x8000) != 0;
+                        if (!bypass_snap && snap > 1)
+                        {
+                                const auto half = sgtick_type(snap / 2);
+                                move_delta_ticks =
+                                        (move_delta_ticks >= 0 ? move_delta_ticks + half : move_delta_ticks - half)
+                                        / sgtick_type(snap) * sgtick_type(snap);
+                        }
 
-                        if (left_release)
+                        if (move_delta_keys != prev_keys)
+                                audition_start(cur_key, draw_velocity, effective_draw_channel());
+
+                        if (middle_release)
                         {
                                 if (move_delta_ticks || move_delta_keys)
                                         editor->move_selected_notes(move_delta_ticks, move_delta_keys);
@@ -1182,28 +1289,110 @@ struct midi_editor_viewer : public handleable_ui_part
                         return true;
                 }
 
+                // ---- Left button on the roll ----
+                if (!selecting && !drawing && !picking)
+                {
+                        if (!left_press || !in_notes_area)
+                                return false;
+
+                        const auto tick = tick_at_clamped(mx);
+                        const auto key = key_at(my);
+                        const auto modifiers = glutGetModifiers(); // valid: inside the mouse callback
+
+                        if (modifiers & GLUT_ACTIVE_SHIFT)
+                        {
+                                // Rubber-band selection: Shift adds, Shift+Alt removes
+                                selecting = true;
+                                select_remove = (modifiers & GLUT_ACTIVE_ALT) != 0;
+                                base_selection = editor->get_selected_ids();
+                                anchor_tick = tick;
+                                anchor_key = key;
+                                sel_cur_tick = tick;
+                                sel_cur_key = key;
+                                return true;
+                        }
+
+                        piano_note under;
+                        if (editor->find_note_at(tick, key, under, 0, 0, editor->get_active_track()))
+                        {
+                                // Pick up the clicked note's state as the draw defaults
+                                picking = true;
+                                draw_length_ticks = under.length();
+                                draw_velocity = under.velocity;
+                                draw_channel = under.channel;
+                                editor->select_note(under.id);
+                                audition_start(under.key, under.velocity, under.channel);
+                                if (on_draw_state_changed)
+                                        on_draw_state_changed();
+                                return true;
+                        }
+
+                        // Empty space (as far as the active track goes): draw a new note
+                        drawing = true;
+                        draw_start_tick = (tick / snap) * snap;
+                        draw_end_tick = draw_start_tick + (draw_length_ticks ? draw_length_ticks : snap);
+                        draw_key = key;
+                        audition_start(key, draw_velocity, effective_draw_channel());
+                        return true;
+                }
+
+                // ---- Ongoing left gestures on the roll ----
+                const auto cur_tick = tick_at_clamped(mx);
+                const auto cur_key = key_at(my);
+
+                if (selecting)
+                {
+                        sel_cur_tick = cur_tick;
+                        sel_cur_key = cur_key;
+
+                        const auto t0 = std::min(anchor_tick, cur_tick);
+                        const auto t1 = std::max(anchor_tick, cur_tick);
+                        const auto k0 = std::min(anchor_key, cur_key);
+                        const auto k1 = std::max(anchor_key, cur_key);
+
+                        // Live preview: the pre-gesture selection combined with the band
+                        editor->set_selected_ids(base_selection);
+                        const auto count = editor->select_rect(t0, t1 + 1, k0, k1,
+                                editor->get_active_track(),
+                                select_remove ? midi_editor::select_mode::remove
+                                        : midi_editor::select_mode::add);
+
+                        if (left_release)
+                        {
+                                selecting = false;
+                                base_selection.clear();
+                                if (on_status)
+                                        on_status("Selected " + std::to_string(count) + " notes");
+                        }
+                        return true;
+                }
+
+                if (picking)
+                {
+                        if (left_release)
+                        {
+                                picking = false;
+                                audition_stop();
+                        }
+                        return true;
+                }
+
                 if (drawing)
                 {
                         if (cur_key != draw_key)
-                                audition_start(cur_key, 100, editor->get_active_track_channel());
+                                audition_start(cur_key, draw_velocity, effective_draw_channel());
                         draw_key = cur_key;
+                        const auto min_length = draw_length_ticks ? draw_length_ticks : snap;
                         const auto end_snapped = ((cur_tick + snap) / snap) * snap;
-                        draw_end_tick = std::max(draw_start_tick + snap, end_snapped);
+                        draw_end_tick = std::max(draw_start_tick + min_length, end_snapped);
 
                         if (left_release)
                         {
                                 drawing = false;
                                 audition_stop();
-                                editor->insert_note_active_track(draw_start_tick, draw_end_tick, draw_key, 100);
+                                editor->insert_note(draw_start_tick, draw_end_tick, draw_key,
+                                        draw_velocity, effective_draw_channel(), editor->get_active_track());
                         }
-                        return true;
-                }
-
-                if (erasing)
-                {
-                        editor->erase_note_at(cur_tick, cur_key, editor->get_active_track());
-                        if (left_release)
-                                erasing = false;
                         return true;
                 }
 
