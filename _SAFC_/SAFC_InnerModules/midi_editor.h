@@ -12,6 +12,8 @@
 #include <mutex>
 #include <optional>
 #include <algorithm>
+#include <fstream>
+#include <cstring>
 
 #include "../bbb_ffio.h"
 #include "single_midi_processor_2.h"
@@ -270,12 +272,14 @@ struct midi_editor
     {
         piano_note target_note;
         tick_type new_length;
-        tick_type old_length;
+        tick_type old_length = 0;
+        bool applied = false;
 
         resize_note_op(piano_note n, tick_type len) : target_note(n), new_length(len) {}
-        
+
         void execute(midi_editor& editor) override
         {
+            applied = false;
             for (auto& note : editor.notes)
             {
                 if (note.start_tick == target_note.start_tick &&
@@ -285,14 +289,17 @@ struct midi_editor
                 {
                     old_length = note.length();
                     note.end_tick = note.start_tick + new_length;
+                    applied = true;
                     break;
                 }
             }
             editor.mark_dirty();
         }
-        
+
         void undo(midi_editor& editor) override
         {
+            if (!applied)
+                return;
             for (auto& note : editor.notes)
             {
                 if (note.start_tick == target_note.start_tick &&
@@ -526,19 +533,25 @@ private:
     // Editor-friendly note list (piano roll view)
     std::vector<piano_note> notes;
     std::map<std::uint8_t, track_info> tracks;
-    
+
+    // Tempo map captured from the source file (tick, microseconds per quarter note)
+    std::vector<std::pair<tick_type, std::uint32_t>> tempo_events;
+
     // Selection state
     selection current_selection;
-    
+
     // Undo/Redo stacks
     std::vector<std::unique_ptr<edit_operation>> undo_stack;
     std::vector<std::unique_ptr<edit_operation>> redo_stack;
     static constexpr size_t max_undo_depth = 100;
-    
+
     // State flags
     std::atomic_bool is_dirty;
     std::atomic_bool is_loaded;
-    std::mutex editor_mutex;
+    // Recursive: public entry points lock, and some of them call other locking getters.
+    // Guards notes/tracks/tempo/selection/view state against the GL thread drawing
+    // while a worker thread loads or edits.
+    mutable std::recursive_mutex editor_mutex;
     
     // PPQN from MIDI file
     std::uint16_t ppqn;
@@ -567,43 +580,90 @@ public:
      */
     bool load_file(const std::wstring& filepath)
     {
-        std::lock_guard<std::mutex> lock(editor_mutex);
-        
+        std::lock_guard<std::recursive_mutex> lock(editor_mutex);
+
+        is_loaded = false;
+        is_dirty = false;
+        notes.clear();
+        tracks.clear();
+        tempo_events.clear();
+        undo_stack.clear();
+        redo_stack.clear();
+        current_selection = selection();
+
         mmap_file = std::make_unique<bbb_mmap>(filepath.c_str());
         if (!mmap_file || !mmap_file->good())
             return false;
 
         filename = filepath;
-        
+
         const auto begin = mmap_file->begin();
         const auto size = mmap_file->length();
         const auto end = begin + size;
 
-        if (size < 18)
+        if (size < 18 || std::memcmp(begin, "MThd", 4) != 0)
             return false;
 
-        // Read header
+        // Read division; SMPTE division is unsupported, fall back to a sane default
         ppqn = (begin[12] << 8) | (begin[13]);
+        if (ppqn == 0 || (ppqn & 0x8000))
+            ppqn = 480;
         ticks_per_beat = ppqn;
 
         // Parse tracks and extract notes
         auto ptr = begin + 14;
         std::uint8_t track_index = 0;
 
-        while (ptr < end)
+        while (ptr < end && track_index < 0xFF)
         {
             if (!parse_track_mmap(ptr, end, track_index++))
                 break;
         }
 
+        std::sort(tempo_events.begin(), tempo_events.end());
+        std::sort(notes.begin(), notes.end());
+
         is_loaded = true;
-        is_dirty = false;
-        
-        // Initialize view to show entire file
-        view_start_tick = 0;
-        view_duration_ticks = get_total_ticks() * 1.1;
-        
+
+        reset_view_to_content();
         return true;
+    }
+
+    /**
+     * Fit the viewport to the loaded notes: full length, pitch range with margins
+     */
+    void reset_view_to_content()
+    {
+        std::lock_guard<std::recursive_mutex> lock(editor_mutex);
+
+        view_start_tick = 0;
+        const auto total = get_total_ticks();
+        view_duration_ticks = total ? total : tick_type(ppqn) * 4;
+
+        if (notes.empty())
+        {
+            view_key_low = 24;
+            view_key_high = 108;
+            return;
+        }
+
+        std::uint8_t min_key = 127, max_key = 0;
+        for (const auto& note : notes)
+        {
+            min_key = std::min(min_key, note.key);
+            max_key = std::max(max_key, note.key);
+        }
+        view_key_low = min_key > 2 ? min_key - 2 : 0;
+        view_key_high = max_key < 125 ? max_key + 2 : 127;
+
+        // Keep a sensible minimum of visible lanes so short files don't look stretched
+        if (view_key_high - view_key_low < 24)
+        {
+            int mid = (int(view_key_low) + int(view_key_high)) / 2;
+            int low = std::max(0, mid - 12);
+            view_key_low = std::uint8_t(low);
+            view_key_high = std::uint8_t(std::min(127, low + 24));
+        }
     }
 
     /**
@@ -730,14 +790,19 @@ public:
                         continue;
                     }
                     
-                    // Skip meta/sysex data
+                    // Read meta/sysex length
                     std::uint32_t length = 0;
                     do
                     {
                         byte = *(cur++);
                         length = (length << 7) | (byte & 0x7F);
                     } while (byte & 0x80 && cur < track_end);
-                    
+
+                    // Capture tempo changes so they survive a save round-trip
+                    if (command == 0xFF && data1 == 0x51 && length == 3 && cur + 3 <= track_end)
+                        tempo_events.emplace_back(current_tick,
+                            (std::uint32_t(cur[0]) << 16) | (std::uint32_t(cur[1]) << 8) | cur[2]);
+
                     cur += length;
                     break;
                 }
@@ -766,6 +831,7 @@ public:
         tick_type start_tick, tick_type end_tick,
         std::uint8_t key_low = 0, std::uint8_t key_high = 127) const
     {
+        std::lock_guard<std::recursive_mutex> lock(editor_mutex);
         std::vector<piano_note> result;
         for (const auto& note : notes)
         {
@@ -783,6 +849,7 @@ public:
      */
     std::vector<piano_note> get_notes_at_tick(tick_type tick) const
     {
+        std::lock_guard<std::recursive_mutex> lock(editor_mutex);
         std::vector<piano_note> result;
         for (const auto& note : notes)
         {
@@ -799,6 +866,7 @@ public:
      */
     std::vector<piano_note> get_notes_on_key(std::uint8_t key) const
     {
+        std::lock_guard<std::recursive_mutex> lock(editor_mutex);
         std::vector<piano_note> result;
         for (const auto& note : notes)
         {
@@ -874,9 +942,10 @@ public:
     // Edit Operations (with Undo/Redo)
     // ========================================================================
 
-    void insert_note(tick_type start, tick_type end, std::uint8_t key, 
+    void insert_note(tick_type start, tick_type end, std::uint8_t key,
                     std::uint8_t velocity, std::uint8_t channel = 0)
     {
+        std::lock_guard<std::recursive_mutex> lock(editor_mutex);
         auto op = std::make_unique<insert_note_op>(
             piano_note(start, end, key, velocity, channel));
         op->execute(*this);
@@ -885,9 +954,10 @@ public:
 
     void delete_selected_notes()
     {
+        std::lock_guard<std::recursive_mutex> lock(editor_mutex);
         if (!current_selection.is_active())
             return;
-        
+
         auto op = std::make_unique<delete_notes_op>(current_selection);
         op->execute(*this);
         push_undo(std::move(op));
@@ -895,9 +965,10 @@ public:
 
     void move_selected_notes(sgtick_type delta_ticks = 0, int delta_keys = 0)
     {
+        std::lock_guard<std::recursive_mutex> lock(editor_mutex);
         if (!current_selection.is_active())
             return;
-        
+
         auto op = std::make_unique<move_notes_op>(current_selection, delta_ticks, delta_keys);
         op->execute(*this);
         push_undo(std::move(op));
@@ -905,10 +976,11 @@ public:
 
     void resize_note(tick_type start_tick, std::uint8_t key, tick_type new_length)
     {
+        std::lock_guard<std::recursive_mutex> lock(editor_mutex);
         piano_note target;
         target.start_tick = start_tick;
         target.key = key;
-        
+
         auto op = std::make_unique<resize_note_op>(target, new_length);
         op->execute(*this);
         push_undo(std::move(op));
@@ -916,9 +988,10 @@ public:
 
     void change_velocity_selected(std::uint8_t velocity)
     {
+        std::lock_guard<std::recursive_mutex> lock(editor_mutex);
         if (!current_selection.is_active())
             return;
-        
+
         auto op = std::make_unique<velocity_change_op>(current_selection, velocity);
         op->execute(*this);
         push_undo(std::move(op));
@@ -926,9 +999,10 @@ public:
 
     void quantize_selected(tick_type grid_resolution)
     {
-        if (!current_selection.is_active())
+        std::lock_guard<std::recursive_mutex> lock(editor_mutex);
+        if (!current_selection.is_active() || !grid_resolution)
             return;
-        
+
         auto op = std::make_unique<quantize_op>(current_selection, grid_resolution);
         op->execute(*this);
         push_undo(std::move(op));
@@ -940,9 +1014,10 @@ public:
 
     void undo()
     {
+        std::lock_guard<std::recursive_mutex> lock(editor_mutex);
         if (undo_stack.empty())
             return;
-        
+
         auto op = std::move(undo_stack.back());
         undo_stack.pop_back();
         op->undo(*this);
@@ -951,20 +1026,30 @@ public:
 
     void redo()
     {
+        std::lock_guard<std::recursive_mutex> lock(editor_mutex);
         if (redo_stack.empty())
             return;
-        
+
         auto op = std::move(redo_stack.back());
         redo_stack.pop_back();
         op->redo(*this);
         undo_stack.push_back(std::move(op));
     }
 
-    bool can_undo() const { return !undo_stack.empty(); }
-    bool can_redo() const { return !redo_stack.empty(); }
+    bool can_undo() const
+    {
+        std::lock_guard<std::recursive_mutex> lock(editor_mutex);
+        return !undo_stack.empty();
+    }
+    bool can_redo() const
+    {
+        std::lock_guard<std::recursive_mutex> lock(editor_mutex);
+        return !redo_stack.empty();
+    }
 
     void clear_undo_history()
     {
+        std::lock_guard<std::recursive_mutex> lock(editor_mutex);
         undo_stack.clear();
         redo_stack.clear();
     }
@@ -998,9 +1083,10 @@ public:
     // Selection Management
     // ========================================================================
 
-    void set_selection(tick_type begin, tick_type end, 
+    void set_selection(tick_type begin, tick_type end,
                       std::uint8_t key_begin = 0, std::uint8_t key_end = 127)
     {
+        std::lock_guard<std::recursive_mutex> lock(editor_mutex);
         current_selection.begin_tick = begin;
         current_selection.end_tick = end;
         current_selection.key_begin = key_begin;
@@ -1010,10 +1096,15 @@ public:
 
     void clear_selection()
     {
+        std::lock_guard<std::recursive_mutex> lock(editor_mutex);
         current_selection.has_selection = false;
     }
 
-    const selection& get_selection() const { return current_selection; }
+    selection get_selection() const
+    {
+        std::lock_guard<std::recursive_mutex> lock(editor_mutex);
+        return current_selection;
+    }
 
     // ========================================================================
     // View/Viewport Management
@@ -1021,30 +1112,35 @@ public:
 
     void set_view_range(tick_type start, tick_type duration)
     {
+        std::lock_guard<std::recursive_mutex> lock(editor_mutex);
         view_start_tick = start;
-        view_duration_ticks = duration;
+        view_duration_ticks = std::max<tick_type>(duration, min_view_duration);
     }
 
     void set_view_keys(std::uint8_t low, std::uint8_t high)
     {
-        view_key_low = low;
-        view_key_high = high;
+        std::lock_guard<std::recursive_mutex> lock(editor_mutex);
+        view_key_low = std::min(low, high);
+        view_key_high = std::max(low, high);
     }
 
     void zoom_in(float factor = 1.5f)
     {
+        std::lock_guard<std::recursive_mutex> lock(editor_mutex);
         zoom_level *= factor;
-        view_duration_ticks = tick_type(view_duration_ticks / factor);
+        set_zoomed_duration(tick_type(view_duration_ticks / factor));
     }
 
     void zoom_out(float factor = 1.5f)
     {
+        std::lock_guard<std::recursive_mutex> lock(editor_mutex);
         zoom_level /= factor;
-        view_duration_ticks = tick_type(view_duration_ticks * factor);
+        set_zoomed_duration(tick_type(view_duration_ticks * factor));
     }
 
     void scroll_left(tick_type amount)
     {
+        std::lock_guard<std::recursive_mutex> lock(editor_mutex);
         if (view_start_tick >= amount)
             view_start_tick -= amount;
         else
@@ -1053,8 +1149,25 @@ public:
 
     void scroll_right(tick_type amount)
     {
+        std::lock_guard<std::recursive_mutex> lock(editor_mutex);
         view_start_tick += amount;
     }
+
+private:
+    static constexpr tick_type min_view_duration = 16;
+
+    // Change zoom while keeping the view centre in place
+    void set_zoomed_duration(tick_type new_duration)
+    {
+        const auto max_duration = std::max({ get_total_ticks(), tick_type(ppqn) * 4, min_view_duration }) * 2;
+        new_duration = std::clamp(new_duration, min_view_duration, max_duration);
+
+        const auto center = view_start_tick + view_duration_ticks / 2;
+        view_duration_ticks = new_duration;
+        view_start_tick = center > new_duration / 2 ? center - new_duration / 2 : 0;
+    }
+
+public:
 
     // Getters for viewer
     tick_type get_view_start_tick() const { return view_start_tick; }
@@ -1068,29 +1181,47 @@ public:
 
     /**
      * Save edited MIDI back to file
-     * Applies all editor changes through the processor's filter system
+     * Rebuilds the file from the editor's note list and the captured tempo map.
+     * Non-note events other than tempo are not preserved.
      */
     bool save_file(const std::wstring& filepath)
     {
+        std::lock_guard<std::recursive_mutex> lock(editor_mutex);
+
         if (!is_loaded)
             return false;
 
-        std::lock_guard<std::mutex> lock(editor_mutex);
+        if (!write_midi_from_notes(filepath))
+            return false;
 
-        // Build filters from editor state
-        single_midi_processor_2::filters_multimap filters;
-        
-        // Add deletion filter for removed notes
-        // (In a real implementation, track which notes were deleted)
-        
-        // Add velocity modification filter
-        // (In a real implementation, track velocity changes)
-        
-        // Use single_midi_processor_2 to write the file with filters applied
-        // This would require extending single_midi_processor_2 with a save function
-        
-        // For now, we'll write directly from the notes list
-        return write_midi_from_notes(filepath);
+        is_dirty = false;
+        return true;
+    }
+
+private:
+    static void write_be16(std::ostream& out, std::uint16_t v)
+    {
+        const char bytes[2] = { char(v >> 8), char(v) };
+        out.write(bytes, 2);
+    }
+
+    static void write_be32(std::ostream& out, std::uint32_t v)
+    {
+        const char bytes[4] = { char(v >> 24), char(v >> 16), char(v >> 8), char(v) };
+        out.write(bytes, 4);
+    }
+
+    static void finish_and_write_track(std::ostream& out, std::vector<base_type>& track_data)
+    {
+        // End of track meta event
+        single_midi_processor_2::push_vlv(0, track_data);
+        track_data.push_back(0xFF);
+        track_data.push_back(0x2F);
+        track_data.push_back(0x00);
+
+        out.write("MTrk", 4);
+        write_be32(out, std::uint32_t(track_data.size()));
+        out.write(reinterpret_cast<const char*>(track_data.data()), track_data.size());
     }
 
     bool write_midi_from_notes(const std::wstring& filepath)
@@ -1099,34 +1230,47 @@ public:
         if (!out)
             return false;
 
-        // Write MThd header
-        out.write("MThd", 4);
-        std::uint32_t header_size = 6;
-        out.write(reinterpret_cast<char*>(&header_size), 4);
-        std::uint16_t format = 1; // Multi-track
-        std::uint16_t num_tracks = tracks.size();
-        std::uint16_t ppqn_be = ppqn; // Already in big-endian order
-        out.write(reinterpret_cast<char*>(&format), 2);
-        out.write(reinterpret_cast<char*>(&num_tracks), 2);
-        out.write(reinterpret_cast<char*>(&ppqn_be), 2);
-
         // Group notes by track
         std::map<std::uint8_t, std::vector<piano_note>> notes_by_track;
         for (const auto& note : notes)
-        {
             notes_by_track[note.track_index].push_back(note);
-        }
 
-        // Write each track
+        // Track 0 is a conductor track carrying the tempo map
+        out.write("MThd", 4);
+        write_be32(out, 6);
+        write_be16(out, 1); // format 1
+        write_be16(out, std::uint16_t(notes_by_track.size() + 1));
+        write_be16(out, ppqn);
+
+        write_conductor_track(out);
+
         for (auto& [track_idx, track_notes] : notes_by_track)
-        {
             write_midi_track(out, track_idx, track_notes);
-        }
 
-        return true;
+        return out.good();
     }
 
-    void write_midi_track(std::ostream& out, std::uint8_t track_idx, 
+    void write_conductor_track(std::ostream& out)
+    {
+        std::vector<base_type> track_data;
+        tick_type current_tick = 0;
+
+        for (const auto& [tick, tempo] : tempo_events)
+        {
+            single_midi_processor_2::push_vlv_s(tick - current_tick, track_data);
+            track_data.push_back(0xFF);
+            track_data.push_back(0x51);
+            track_data.push_back(0x03);
+            track_data.push_back(base_type(tempo >> 16));
+            track_data.push_back(base_type(tempo >> 8));
+            track_data.push_back(base_type(tempo));
+            current_tick = tick;
+        }
+
+        finish_and_write_track(out, track_data);
+    }
+
+    void write_midi_track(std::ostream& out, std::uint8_t track_idx,
                          std::vector<piano_note>& track_notes)
     {
         // Sort notes by start time
@@ -1151,7 +1295,9 @@ public:
         std::vector<midi_event> events;
         for (const auto& note : track_notes)
         {
-            events.push_back({ note.start_tick, 0x90, note.key, note.velocity, note.channel });
+            // Velocity 0 on a note-on would read as a note-off, clamp to 1
+            events.push_back({ note.start_tick, 0x90, note.key,
+                std::max<std::uint8_t>(note.velocity, 1), note.channel });
             events.push_back({ note.end_tick, 0x80, note.key, 0, note.channel });
         }
         std::sort(events.begin(), events.end());
@@ -1162,30 +1308,19 @@ public:
 
         for (const auto& event : events)
         {
-            // Write delta time
-            auto delta = event.tick - current_tick;
-            single_midi_processor_2::push_vlv(delta, track_data);
-            
-            // Write event
+            single_midi_processor_2::push_vlv_s(event.tick - current_tick, track_data);
+
             track_data.push_back(event.type | event.channel);
             track_data.push_back(event.key);
             track_data.push_back(event.velocity);
-            
+
             current_tick = event.tick;
         }
 
-        // Write end of track
-        single_midi_processor_2::push_vlv(0, track_data);
-        track_data.push_back(0xFF);
-        track_data.push_back(0x2F);
-        track_data.push_back(0x00);
-
-        // Write track header
-        out.write("MTrk", 4);
-        std::uint32_t track_size = track_data.size();
-        out.write(reinterpret_cast<char*>(&track_size), 4);
-        out.write(reinterpret_cast<char*>(track_data.data()), track_data.size());
+        finish_and_write_track(out, track_data);
     }
+
+public:
 
     // ========================================================================
     // Getters
@@ -1202,7 +1337,7 @@ public:
     
     tick_type get_total_ticks() const
     {
-        if (notes.empty()) return 0;
+        std::lock_guard<std::recursive_mutex> lock(editor_mutex);
         tick_type max_tick = 0;
         for (const auto& note : notes)
             max_tick = std::max(max_tick, note.end_tick);
@@ -1211,9 +1346,27 @@ public:
 
     double get_total_seconds() const
     {
-        // Approximate using default tempo (120 BPM)
+        std::lock_guard<std::recursive_mutex> lock(editor_mutex);
+
         constexpr double default_tempo_us = 500000.0; // 120 BPM
-        return (get_total_ticks() * default_tempo_us) / (ppqn * 1000000.0);
+        const auto total = get_total_ticks();
+        const double us_per_tick_divisor = double(ppqn) * 1000000.0;
+
+        double seconds = 0;
+        tick_type last_tick = 0;
+        double current_tempo_us = default_tempo_us;
+
+        // tempo_events is sorted on load
+        for (const auto& [tick, tempo] : tempo_events)
+        {
+            if (tick >= total)
+                break;
+            seconds += double(tick - last_tick) * current_tempo_us / us_per_tick_divisor;
+            last_tick = tick;
+            current_tempo_us = double(tempo);
+        }
+        seconds += double(total - last_tick) * current_tempo_us / us_per_tick_divisor;
+        return seconds;
     }
 
     const std::map<std::uint8_t, track_info>& get_tracks() const { return tracks; }
