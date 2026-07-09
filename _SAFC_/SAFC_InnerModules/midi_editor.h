@@ -897,7 +897,7 @@ public:
 			std::uint8_t velocity;
 			std::uint8_t channel;
 		};
-		std::unordered_map<std::uint16_t, pending_note> active_notes; // key=(channel<<8)|key
+		std::unordered_map<std::uint16_t, std::deque<pending_note>> active_notes; // key=(channel<<8)|key
 
 		// Skip to MTrk header
 		std::uint32_t header = 0;
@@ -960,7 +960,8 @@ public:
 					if (data2 > 0)
 					{
 						std::uint16_t note_key = (std::uint16_t(command & 0x0F) << 8) | data1;
-						active_notes[note_key] = {current_tick, data1, data2, static_cast<std::uint8_t>(command & 0x0F)};
+						active_notes[note_key].push_back(
+							{current_tick, data1, data2, static_cast<std::uint8_t>(command & 0x0F)});
 						if (primary_channel == 0xFF)
 							primary_channel = command & 0x0F;
 					}
@@ -969,13 +970,16 @@ public:
 						// Note On with velocity 0 = Note Off
 						std::uint16_t note_key = (std::uint16_t(command & 0x0F) << 8) | data1;
 						auto it = active_notes.find(note_key);
-						if (it != active_notes.end())
+						if (it != active_notes.end() && !it->second.empty())
 						{
-							notes.emplace_back(it->second.start, current_tick,
-								it->second.key, it->second.velocity,
-								it->second.channel, track_index);
+							auto note = it->second.front();
+							it->second.pop_front();
+							notes.emplace_back(note.start, current_tick,
+								note.key, note.velocity,
+								note.channel, track_index);
 							notes.back().id = next_note_id++;
-							active_notes.erase(it);
+							if (it->second.empty())
+								active_notes.erase(it);
 						}
 					}
 					break;
@@ -985,13 +989,16 @@ public:
 					data2 = *(cur++);
 					std::uint16_t note_key = (std::uint16_t(command & 0x0F) << 8) | data1;
 					auto it = active_notes.find(note_key);
-					if (it != active_notes.end())
+					if (it != active_notes.end() && !it->second.empty())
 					{
-						notes.emplace_back(it->second.start, current_tick,
-							it->second.key, it->second.velocity,
-							it->second.channel, track_index);
+						auto note = it->second.front();
+						it->second.pop_front();
+						notes.emplace_back(note.start, current_tick,
+							note.key, note.velocity,
+							note.channel, track_index);
 						notes.back().id = next_note_id++;
-						active_notes.erase(it);
+						if (it->second.empty())
+							active_notes.erase(it);
 					}
 					break;
 				}
@@ -1052,11 +1059,14 @@ public:
 		}
 
 		// Close any remaining active notes (malformed MIDI)
-		for (auto& [key, note] : active_notes)
+		for (auto& [key, pending] : active_notes)
 		{
-			notes.emplace_back(note.start, current_tick + 1,
-				note.key, note.velocity, note.channel, track_index);
-			notes.back().id = next_note_id++;
+			for (const auto& note : pending)
+			{
+				notes.emplace_back(note.start, current_tick + 1,
+					note.key, note.velocity, note.channel, track_index);
+				notes.back().id = next_note_id++;
+			}
 		}
 
 		auto& info = tracks[track_index];
