@@ -3430,6 +3430,7 @@ void init()
 	editor_view->data.height = 300;
 	editor_view->on_track_changed = update_editor_status_text;
 	editor_view->on_status = editor_flash_status;
+	editor_view->on_status_restore = update_editor_status_text;
 	editor_view->on_draw_state_changed = update_channel_indicator;
 	editor_view->note_audition = [](std::uint8_t key, std::uint8_t velocity, std::uint8_t channel, bool on)
 	{
