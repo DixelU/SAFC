@@ -86,6 +86,9 @@ struct midi_editor_viewer : public handleable_ui_part
 	std::function<void()> on_draw_state_changed;
 	// Note audition: (key, velocity, channel, on/off)
 	std::function<void(std::uint8_t, std::uint8_t, std::uint8_t, bool)> note_audition;
+	// Current playback position in seconds, negative when not playing;
+	// drives the vertical playback cursor
+	std::function<double()> playback_seconds;
 
 	// Roll interaction state
 	bool selecting = false;        // Shift rubber band
@@ -386,6 +389,33 @@ struct midi_editor_viewer : public handleable_ui_part
 
 		if (velocity_lane_visible)
 			draw_velocity_lane(l, view_start, view_duration, selected);
+
+		draw_playback_cursor(l, view_start, view_duration);
+	}
+
+	/**
+	 * Vertical line at the current playback position (spans roll + lane)
+	 */
+	void draw_playback_cursor(const layout& l, tick_type view_start, tick_type view_duration)
+	{
+		if (!playback_seconds)
+			return;
+
+		const double seconds = playback_seconds();
+		if (seconds < 0.0)
+			return;
+
+		const auto tick = editor->get_tick_at_seconds(seconds);
+		if (tick < view_start || tick >= view_start + view_duration)
+			return;
+
+		const float x = l.notes_x + float(tick - view_start) / float(view_duration) * l.notes_w;
+		glColor4ub(0xFF, 0xFF, 0xFF, 0xE0);
+		glLineWidth(2.f);
+		glBegin(GL_LINES);
+		glVertex2f(x, l.bottom);
+		glVertex2f(x, l.top);
+		glEnd();
 	}
 
 	void draw_key_lanes(const layout& l, std::uint8_t key_low, std::uint8_t key_high, float key_height)

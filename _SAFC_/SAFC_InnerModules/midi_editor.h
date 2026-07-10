@@ -2242,6 +2242,33 @@ public:
 		return seconds_at_tick_unlocked(target_tick);
 	}
 
+	// Inverse of get_seconds_at_tick: walks the same tempo map
+	tick_type get_tick_at_seconds(double target_seconds) const
+	{
+		std::lock_guard<std::recursive_mutex> lock(editor_mutex);
+		if (target_seconds <= 0.0 || !ppqn)
+			return 0;
+
+		constexpr double default_tempo_us = 500000.0; // 120 BPM
+		const double us_per_tick_divisor = double(ppqn) * 1000000.0;
+
+		double seconds = 0;
+		tick_type last_tick = 0;
+		double current_tempo_us = default_tempo_us;
+
+		// tempo_events is sorted on load
+		for (const auto& [tick, tempo] : tempo_events)
+		{
+			const double segment = double(tick - last_tick) * current_tempo_us / us_per_tick_divisor;
+			if (seconds + segment >= target_seconds)
+				break;
+			seconds += segment;
+			last_tick = tick;
+			current_tempo_us = double(tempo);
+		}
+		return last_tick + tick_type((target_seconds - seconds) * us_per_tick_divisor / current_tempo_us);
+	}
+
 private:
 	double seconds_at_tick_unlocked(tick_type target_tick) const
 	{

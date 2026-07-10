@@ -2466,11 +2466,32 @@ void on_editor_redo()
 	editor->redo();
 }
 
+// The global player is shared with the SIMPLAYER window; the editor's playback
+// cursor is only meaningful while the player is running the editor's snapshot
+std::atomic<bool> editor_playback_active = false;
+
 std::wstring editor_playback_snapshot_path()
 {
 	static std::atomic_uint64_t snapshot_counter = 0;
 	wchar_t tmp[MAX_PATH]{};
 	GetTempPathW(MAX_PATH, tmp);
+
+	// First use: sweep snapshots left behind by crashed sessions. A file another
+	// live instance is currently playing is still mapped, so its delete just fails.
+	static std::once_flag sweep_once;
+	std::call_once(sweep_once, [&tmp]()
+	{
+		const auto pattern = std::wstring(tmp) + L"safc_editor_preview_*.mid";
+		WIN32_FIND_DATAW found{};
+		const auto handle = FindFirstFileW(pattern.c_str(), &found);
+		if (handle == INVALID_HANDLE_VALUE)
+			return;
+		do
+			DeleteFileW((std::wstring(tmp) + found.cFileName).c_str());
+		while (FindNextFileW(handle, &found));
+		FindClose(handle);
+	});
+
 	return std::wstring(tmp) + L"safc_editor_preview_" +
 		std::to_wstring(GetCurrentProcessId()) + L"_" +
 		std::to_wstring(++snapshot_counter) + L".mid";
@@ -2515,7 +2536,10 @@ void on_editor_play_from(bool from_view_start)
 		}
 
 		player->restore_device_by_name(saved_midi_device_name);
+		editor_playback_active = true;
 		player->simple_run(snapshot, seek_fraction);
+		editor_playback_active = false;
+		DeleteFileW(snapshot.c_str()); // simple_run released its mapping
 		if (play_btn)
 			play_btn->safe_string_replace("Play");
 	});
@@ -3415,6 +3439,12 @@ void init()
 			if (!player->restore_device_by_name(saved_midi_device_name))
 				player->set_device(player->get_current_device());
 		player->preview_note(channel, key, velocity, on);
+	};
+	editor_view->playback_seconds = []() -> double
+	{
+		if (!player || !editor_playback_active.load(std::memory_order_acquire) || !player->is_playing())
+			return -1.0;
+		return double(player->get_position_us()) / 1000000.0;
 	};
 	(*window)["VIEW"] = editor_view;
 

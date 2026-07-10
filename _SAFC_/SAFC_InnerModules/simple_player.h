@@ -781,11 +781,16 @@ struct simple_player
 		if (!res)
 		{
 			throw_alert_error("Playback failed");
+			mmap.reset();
 			return;
 		}
 
 		start_fraction = std::clamp(start_fraction, 0.0, 1.0);
 		playback_thread(static_cast<uint64_t>(start_fraction * info.total_duration_us));
+
+		// Release the mapping so the caller can delete or replace the file.
+		// info.tracks' pointers into it stay dead until the next open().
+		mmap.reset();
 	}
 
 	const playback_state& get_state() const
@@ -885,6 +890,23 @@ struct simple_player
 	bool is_playing() const
 	{
 		return state.playing.load(std::memory_order_acquire);
+	}
+
+	// Current playback position in microseconds, wall-clock-smooth (same timing
+	// the falling-notes visualization uses). Returns the pause point while
+	// paused and 0 when stopped.
+	uint64_t get_position_us() const
+	{
+		if (state.playing.load(std::memory_order_acquire) &&
+			!state.paused.load(std::memory_order_acquire))
+		{
+			auto elapsed = std::chrono::steady_clock::now() - state.start_time;
+			return state.start_offset_us +
+				std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count();
+		}
+		if (state.paused.load(std::memory_order_acquire))
+			return state.pause_position_us.load(std::memory_order_acquire);
+		return 0;
 	}
 
 	bool open(std::wstring filename)
@@ -1458,21 +1480,7 @@ struct simple_player
 		auto& visuals = get_visuals();
 
 		// Compute current playback position from wall-clock for smooth visualization
-		uint64_t current_us;
-		const auto& st = get_state();
-		if (st.playing.load(std::memory_order_acquire) && !st.paused.load(std::memory_order_acquire))
-		{
-			auto elapsed = std::chrono::steady_clock::now() - st.start_time;
-			current_us = st.start_offset_us + std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count();
-		}
-		else if (st.paused.load(std::memory_order_acquire))
-		{
-			current_us = st.pause_position_us.load(std::memory_order_acquire);
-		}
-		else
-		{
-			current_us = 0;
-		}
+		uint64_t current_us = get_position_us();
 
 		if (data.enable_simulated_lag)
 		{
