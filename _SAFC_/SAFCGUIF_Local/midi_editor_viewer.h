@@ -1345,7 +1345,7 @@ struct midi_editor_viewer : public handleable_ui_part
 				int new_low = std::clamp(int(key_low) + dkeys, 0, 127 - span);
 				editor->set_view_keys(std::uint8_t(new_low), std::uint8_t(new_low + span));
 			}
-			if (right_release)
+			if (middle_release)
 				kb_scrolling = false;
 			return true;
 		}
@@ -1424,7 +1424,7 @@ struct midi_editor_viewer : public handleable_ui_part
 		}
 
 		// ---- Keyboard middle-drag scroll ----
-		if (middle_press && in_keyboard)
+		if (!kb_scrolling && middle_press && in_keyboard)
 		{
 			kb_scrolling = true;
 			kb_last_my = my;
