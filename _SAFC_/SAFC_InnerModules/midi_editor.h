@@ -4,6 +4,7 @@
 
 #include <vector>
 #include <string>
+#include <cmath>
 #include <map>
 #include <unordered_map>
 #include <memory>
@@ -287,6 +288,116 @@ struct midi_editor
 		}
 
 		std::string description() const override { return "Resize Note"; }
+	};
+
+	/**
+	 * Functor for changing the length of a set of notes by a common delta.
+	 * Each note squashes to a 1-tick minimum instead of vanishing.
+	 */
+	struct resize_notes_op : edit_operation
+	{
+		std::vector<std::uint32_t> ids;
+		sgtick_type delta_length;
+		std::vector<std::pair<std::uint32_t, tick_type>> before; // id, prior end_tick
+
+		resize_notes_op(std::vector<std::uint32_t>&& target_ids, sgtick_type delta)
+			: ids(std::move(target_ids)), delta_length(delta)
+		{
+		}
+
+		void execute(midi_editor& editor) override
+		{
+			before.clear();
+			const std::set<std::uint32_t> id_set(ids.begin(), ids.end());
+			for (auto& note : editor.notes)
+			{
+				if (!id_set.count(note.id))
+					continue;
+
+				before.emplace_back(note.id, note.end_tick);
+				const auto new_length = std::max<sgtick_type>(1,
+					sgtick_type(note.length()) + delta_length);
+				note.end_tick = note.start_tick + tick_type(new_length);
+			}
+			editor.mark_dirty();
+		}
+
+		void undo(midi_editor& editor) override
+		{
+			for (auto& [id, prior_end] : before)
+			{
+				if (auto* note = editor.find_note_by_id(id))
+					note->end_tick = prior_end;
+			}
+			editor.mark_dirty();
+		}
+
+		std::string description() const override
+		{
+			return "Resize Notes (" + std::to_string(delta_length) + " ticks)";
+		}
+	};
+
+	/**
+	 * Functor for scaling notes in time about a pivot tick (FL-style selection
+	 * scale handle). Both edges move proportionally; a note that would collapse
+	 * squashes to a 1-tick minimum instead.
+	 */
+	struct stretch_notes_op : edit_operation
+	{
+		std::vector<std::uint32_t> ids;
+		tick_type pivot;
+		double factor;
+		std::vector<std::pair<std::uint32_t, piano_note>> before; // id, prior geometry
+
+		stretch_notes_op(std::vector<std::uint32_t>&& target_ids, tick_type pivot_tick, double f)
+			: ids(std::move(target_ids)), pivot(pivot_tick), factor(f)
+		{
+		}
+
+		void execute(midi_editor& editor) override
+		{
+			before.clear();
+			const std::set<std::uint32_t> id_set(ids.begin(), ids.end());
+			for (auto& note : editor.notes)
+			{
+				if (!id_set.count(note.id))
+					continue;
+
+				before.emplace_back(note.id, note);
+
+				auto new_start = std::llround(double(pivot) +
+					(double(note.start_tick) - double(pivot)) * factor);
+				auto new_end = std::llround(double(pivot) +
+					(double(note.end_tick) - double(pivot)) * factor);
+				if (new_start < 0)
+					new_start = 0;
+				if (new_end <= new_start)
+					new_end = new_start + 1;
+
+				note.start_tick = tick_type(new_start);
+				note.end_tick = tick_type(new_end);
+			}
+			editor.mark_dirty();
+		}
+
+		void undo(midi_editor& editor) override
+		{
+			for (auto& [id, prior] : before)
+			{
+				if (auto* note = editor.find_note_by_id(id))
+				{
+					note->start_tick = prior.start_tick;
+					note->end_tick = prior.end_tick;
+				}
+			}
+			editor.mark_dirty();
+		}
+
+		std::string description() const override
+		{
+			return "Scale Notes (" + std::to_string(int(std::lround(factor * 100.0))) + "%)";
+		}
 	};
 
 	/**
@@ -1533,6 +1644,35 @@ public:
 	{
 		std::lock_guard<std::recursive_mutex> lock(editor_mutex);
 		auto op = std::make_unique<resize_note_op>(note_id, new_length);
+		op->execute(*this);
+		push_undo(std::move(op));
+	}
+
+	/**
+	 * Change the length of the given notes by a common delta (tail drag);
+	 * notes squash to a 1-tick minimum instead of vanishing
+	 */
+	void resize_notes_by(std::vector<std::uint32_t> ids, sgtick_type delta_length)
+	{
+		std::lock_guard<std::recursive_mutex> lock(editor_mutex);
+		if (ids.empty() || !delta_length)
+			return;
+
+		auto op = std::make_unique<resize_notes_op>(std::move(ids), delta_length);
+		op->execute(*this);
+		push_undo(std::move(op));
+	}
+
+	/**
+	 * Scale the selected notes in time about the pivot tick (selection scale handle)
+	 */
+	void stretch_selected_notes(double factor, tick_type pivot)
+	{
+		std::lock_guard<std::recursive_mutex> lock(editor_mutex);
+		if (selected_notes.empty() || factor <= 0.0 || factor == 1.0)
+			return;
+
+		auto op = std::make_unique<stretch_notes_op>(selected_ids_vector(), pivot, factor);
 		op->execute(*this);
 		push_undo(std::move(op));
 	}
