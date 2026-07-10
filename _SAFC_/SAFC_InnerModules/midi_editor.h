@@ -426,7 +426,7 @@ struct midi_editor
 					note.velocity = new_velocity;
 				}
 			}
-			editor.mark_dirty();
+			editor.mark_dirty_keep_order();
 		}
 
 		void undo(midi_editor& editor) override
@@ -436,7 +436,7 @@ struct midi_editor
 				if (auto* note = editor.find_note_by_id(id))
 					note->velocity = old_vel;
 			}
-			editor.mark_dirty();
+			editor.mark_dirty_keep_order();
 		}
 
 		std::string description() const override { return "Change Velocity"; }
@@ -468,7 +468,7 @@ struct midi_editor
 					note.velocity = std::uint8_t(std::clamp(int(note.velocity) + delta, 1, 127));
 				}
 			}
-			editor.mark_dirty();
+			editor.mark_dirty_keep_order();
 		}
 
 		void undo(midi_editor& editor) override
@@ -478,7 +478,7 @@ struct midi_editor
 				if (auto* note = editor.find_note_by_id(id))
 					note->velocity = old_vel;
 			}
-			editor.mark_dirty();
+			editor.mark_dirty_keep_order();
 		}
 
 		std::string description() const override
@@ -561,7 +561,7 @@ struct midi_editor
 				if (auto* note = editor.find_note_by_id(en.note.id))
 					note->velocity = use_new ? en.new_velocity : en.old_velocity;
 			}
-			editor.mark_dirty();
+			editor.mark_dirty_keep_order();
 		}
 
 		void execute(midi_editor& editor) override { apply(editor, true); }
@@ -752,9 +752,21 @@ private:
 		on_load_progress(std::uint64_t(cur - progress_begin), progress_total);
 	}
 
-	// Editor-friendly note list (piano roll view)
-	std::vector<piano_note> notes;
+	// Editor-friendly note list (piano roll view).
+	// Kept sorted by start_tick so range queries can binary-search instead of
+	// scanning every note; mutable because the sort is restored lazily inside
+	// const queries (see ensure_note_order).
+	mutable std::vector<piano_note> notes;
 	std::map<std::uint8_t, track_info> tracks;
+
+	// Sorted-scan query acceleration (rebuilt lazily by ensure_note_order):
+	// any note intersecting [a, b) must start in [a - max_typical_length, b),
+	// except the few outliers longer than that, kept in a side list.
+	// Deliberately O(1) extra memory per note — the multibillion-note goal.
+	mutable bool notes_order_dirty = true;
+	mutable tick_type max_typical_length = 0;
+	mutable tick_type cached_max_end_tick = 0;
+	mutable std::vector<std::size_t> long_note_indices;
 
 	// Tempo map captured from the source file (tick, microseconds per quarter note).
 	// Used for time computations only; the events themselves live in raw_track_events.
@@ -794,7 +806,7 @@ private:
 			editor.raw_track_events[track].push_back({tick,
 				editor.make_control_event_bytes(lane, channel, value)});
 			editor.sort_raw_track(track);
-			editor.mark_dirty();
+			editor.mark_dirty_keep_order();
 		}
 
 		void undo(midi_editor& editor) override
@@ -803,7 +815,7 @@ private:
 			if (previous)
 				editor.raw_track_events[track].push_back(*previous);
 			editor.sort_raw_track(track);
-			editor.mark_dirty();
+			editor.mark_dirty_keep_order();
 		}
 
 		std::string description() const override { return "Edit Controller Lane"; }
@@ -841,7 +853,7 @@ private:
 					editor.make_control_event_bytes(lane, channel, en.value)});
 			}
 			editor.sort_raw_track(track);
-			editor.mark_dirty();
+			editor.mark_dirty_keep_order();
 		}
 
 		void undo(midi_editor& editor) override
@@ -853,7 +865,7 @@ private:
 					editor.raw_track_events[track].push_back(*en.previous);
 			}
 			editor.sort_raw_track(track);
-			editor.mark_dirty();
+			editor.mark_dirty_keep_order();
 		}
 
 		std::string description() const override { return "Edit Controller Lane"; }
@@ -970,6 +982,7 @@ public:
 
 		std::sort(tempo_events.begin(), tempo_events.end());
 		std::sort(notes.begin(), notes.end());
+		notes_order_dirty = true; // recompute scan bounds for the new file
 
 		is_loaded = true;
 
@@ -1234,14 +1247,12 @@ public:
 	{
 		std::lock_guard<std::recursive_mutex> lock(editor_mutex);
 		std::vector<piano_note> result;
-		for (const auto& note : notes)
+		for_each_note_intersecting(start_tick, end_tick,
+			[&](const piano_note& note)
 		{
-			if (note.key >= key_low && note.key <= key_high &&
-				note.start_tick < end_tick && note.end_tick > start_tick)
-			{
+			if (note.key >= key_low && note.key <= key_high)
 				result.push_back(note);
-			}
-		}
+		});
 		return result;
 	}
 
@@ -1252,13 +1263,11 @@ public:
 	{
 		std::lock_guard<std::recursive_mutex> lock(editor_mutex);
 		std::vector<piano_note> result;
-		for (const auto& note : notes)
+		for_each_note_intersecting(tick, tick + 1,
+			[&](const piano_note& note)
 		{
-			if (tick >= note.start_tick && tick < note.end_tick)
-			{
-				result.push_back(note);
-			}
-		}
+			result.push_back(note);
+		});
 		return result;
 	}
 
@@ -1386,7 +1395,7 @@ public:
 		{
 			old_velocity = note->velocity;
 			note->velocity = std::clamp<std::uint8_t>(velocity, 1, 127);
-			mark_dirty();
+			mark_dirty_keep_order();
 			return true;
 		}
 		return false;
@@ -1401,7 +1410,7 @@ public:
 		if (entries.empty())
 			return;
 		push_undo(std::make_unique<recorded_velocity_op>(std::move(entries)));
-		mark_dirty();
+		mark_dirty_keep_order();
 	}
 
 	void adjust_velocity_selected(int delta)
@@ -1425,12 +1434,13 @@ public:
 		std::lock_guard<std::recursive_mutex> lock(editor_mutex);
 
 		const piano_note* found = nullptr;
-		for (const auto& note : notes)
+		for_each_note_intersecting(tick, tick + 1,
+			[&](const piano_note& note)
 		{
-			if (note.key == key && tick >= note.start_tick && tick < note.end_tick &&
+			if (note.key == key &&
 				(track_filter == all_tracks || note.track_index == track_filter))
 				found = &note; // last one wins: it is drawn on top
-		}
+		});
 		if (!found)
 			return false;
 
@@ -1454,32 +1464,33 @@ public:
 		std::lock_guard<std::recursive_mutex> lock(editor_mutex);
 
 		bool found = false;
-		for (const auto& note : notes)
+		for_each_note_intersecting(tick, tick + 1,
+			[&](const piano_note& note)
 		{
 			if (track_filter != all_tracks && note.track_index != track_filter)
-				continue;
-			if (note.key == key && tick >= note.start_tick && tick < note.end_tick)
+				return;
+			if (note.key == key)
 			{
 				out = note;
 				found = true;
 			}
-		}
+		});
 		if (found || (!tick_tolerance && !key_tolerance))
 			return found;
 
 		const auto lo_tick = tick > tick_tolerance ? tick - tick_tolerance : 0;
 		const auto hi_tick = tick + tick_tolerance;
-		for (const auto& note : notes)
+		for_each_note_intersecting(lo_tick, hi_tick + 1,
+			[&](const piano_note& note)
 		{
 			if (track_filter != all_tracks && note.track_index != track_filter)
-				continue;
-			if (std::abs(int(note.key) - int(key)) <= int(key_tolerance) &&
-				note.start_tick <= hi_tick && note.end_tick > lo_tick)
+				return;
+			if (std::abs(int(note.key) - int(key)) <= int(key_tolerance))
 			{
 				out = note;
 				found = true;
 			}
-		}
+		});
 		return found;
 	}
 
@@ -1794,7 +1805,88 @@ private:
 		selected_notes.swap(alive);
 	}
 
-	void mark_dirty() { is_dirty = true; }
+	void mark_dirty()
+	{
+		is_dirty = true;
+		notes_order_dirty = true; // geometry may have changed; re-index lazily
+	}
+
+	// For edits that cannot change note geometry (velocity, raw/meta events):
+	// the sorted-scan index stays valid, so skip the O(N) re-index
+	void mark_dirty_keep_order() { is_dirty = true; }
+
+	/**
+	 * Restore the sorted-scan invariants after a geometry edit. Lazy: runs on
+	 * the next query, not per edit. Requires editor_mutex to be held.
+	 */
+	void ensure_note_order() const
+	{
+		if (!notes_order_dirty)
+			return;
+
+		// Edits leave the vector nearly sorted; the is_sorted fast path makes
+		// the common "only velocities changed via undo" case O(N)
+		if (!std::is_sorted(notes.begin(), notes.end()))
+			std::sort(notes.begin(), notes.end());
+
+		// Notes longer than the threshold go to a side list so that one long
+		// pad does not widen every scan window. If long notes are not rare in
+		// this file, fold them back in and accept the wider window instead of
+		// scanning a huge side list on every query.
+		const auto threshold = tick_type(ppqn) * 16;
+		long_note_indices.clear();
+		max_typical_length = 0;
+		cached_max_end_tick = 0;
+		for (std::size_t i = 0; i < notes.size(); ++i)
+		{
+			const auto length = notes[i].length();
+			cached_max_end_tick = std::max(cached_max_end_tick, notes[i].end_tick);
+			if (length > threshold)
+				long_note_indices.push_back(i);
+			else
+				max_typical_length = std::max(max_typical_length, length);
+		}
+		if (long_note_indices.size() > notes.size() / 16 + 64)
+		{
+			long_note_indices.clear();
+			for (const auto& note : notes)
+				max_typical_length = std::max(max_typical_length, note.length());
+		}
+
+		notes_order_dirty = false;
+	}
+
+	/**
+	 * Visit every note intersecting [start, end), in draw order (long outliers
+	 * first — they started earlier — then start-tick order). Cost is
+	 * O(log N + notes near the range), not O(N). Requires editor_mutex.
+	 */
+	template<typename func_type>
+	void for_each_note_intersecting(tick_type start, tick_type end, func_type&& fn) const
+	{
+		ensure_note_order();
+
+		const auto scan_from = start > max_typical_length ? start - max_typical_length : 0;
+
+		// Outliers starting inside the scan window are reported by the main
+		// loop below, so only take the ones starting before it
+		for (const auto index : long_note_indices)
+		{
+			const auto& note = notes[index];
+			if (note.start_tick >= end)
+				break; // side list is start-sorted too
+			if (note.start_tick < scan_from && note.end_tick > start)
+				fn(note);
+		}
+
+		auto it = std::lower_bound(notes.begin(), notes.end(), scan_from,
+			[](const piano_note& note, tick_type t) { return note.start_tick < t; });
+		for (; it != notes.end() && it->start_tick < end; ++it)
+		{
+			if (it->end_tick > start)
+				fn(*it);
+		}
+	}
 
 	static std::uint16_t clamp_control_value(control_lane lane, std::uint16_t value)
 	{
@@ -2062,7 +2154,7 @@ public:
 		if (!replaced)
 			events.push_back({0, bytes});
 		sort_raw_track(track);
-		mark_dirty();
+		mark_dirty_keep_order();
 	}
 
 	std::vector<channel_control_point> get_channel_control_points(
@@ -2395,10 +2487,8 @@ public:
 	tick_type get_total_ticks() const
 	{
 		std::lock_guard<std::recursive_mutex> lock(editor_mutex);
-		tick_type max_tick = 0;
-		for (const auto& note : notes)
-			max_tick = std::max(max_tick, note.end_tick);
-		return max_tick;
+		ensure_note_order();
+		return cached_max_end_tick;
 	}
 
 	double get_total_seconds() const

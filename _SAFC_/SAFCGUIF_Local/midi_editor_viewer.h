@@ -31,12 +31,6 @@
  *  - Shift + left-drag     additive rubber-band selection; Shift+Alt removes
  *  - left-drag selected    move the selected notes (ghost preview);
  *                          holding Alt bypasses the snap grid
- *  - left-drag note tail   change the note's length (last few pixels of the
- *                          note); with a selection, all selected notes change
- *                          together; Alt bypasses the snap grid
- *  - drag the ◆ handle     a rhombus at the selection's right edge scales the
- *                          selected group in time about its start;
- *                          Alt snaps the factor to 25% steps
  *  - right-click note      active track: delete it; gray note: switch to its track
  *  - middle-drag notes     pan time
  *  - wheel over notes      zoom time around the cursor
@@ -129,19 +123,6 @@ struct midi_editor_viewer : public handleable_ui_part
 	float pan_accum_ticks = 0.f;   // fractional pan remainder, matters at deep zoom
 	float kb_last_my = 0.f;
 	float kb_accum_keys = 0.f;
-
-	// Selection scale handle (rhombus at the selection's right edge)
-	static constexpr float handle_radius = 5.f;
-	bool scaling = false;
-	double scale_factor = 1.0;
-	tick_type scale_pivot = 0;    // selection start tick, fixed during the drag
-	tick_type scale_orig_end = 0; // selection end tick when the drag started
-
-	// Note tail drag (length change)
-	bool resizing = false;
-	sgtick_type resize_delta_ticks = 0;
-	tick_type resize_anchor_tick = 0;
-	std::vector<piano_note> resize_targets; // snapshot: ghost preview + commit ids
 
 	// Velocity lane interaction state
 	bool lane_painting = false;
@@ -250,10 +231,6 @@ struct midi_editor_viewer : public handleable_ui_part
 	{
 		selecting = moving = drawing = picking = false;
 		select_remove = false;
-		scaling = resizing = false;
-		scale_factor = 1.0;
-		resize_delta_ticks = 0;
-		resize_targets.clear();
 		left_down = middle_down = right_down = panning = kb_scrolling = false;
 		lane_painting = lane_line = divider_dragging = false;
 		move_delta_ticks = 0;
@@ -303,13 +280,6 @@ struct midi_editor_viewer : public handleable_ui_part
 	// Colors
 	// ========================================================================
 
-	static std::uint32_t rotate31(std::uint32_t color, std::uint32_t shift)
-	{
-		constexpr int base = 31;
-		auto rem = shift % base;
-		return color << (base - rem) | color >> rem;
-	}
-
 	static void hsv_to_rgb(float h, float s, float v,
 		std::uint8_t& r, std::uint8_t& g, std::uint8_t& b)
 	{
@@ -340,19 +310,7 @@ struct midi_editor_viewer : public handleable_ui_part
 	 */
 	static float track_hue(std::uint8_t track, std::uint8_t channel)
 	{
-		const auto id = (std::uint32_t(track) << 4) | (channel & 0x0F);
-		const auto c = rotate31(0xFF7F008F, id);
-		const float r = float((c >> 24) & 0xFF), g = float((c >> 16) & 0xFF), b = float((c >> 8) & 0xFF);
-		const float mx = std::max({r, g, b}), mn = std::min({r, g, b});
-
-		if (mx - mn < 24.f) // near-gray rotation: spread by golden angle instead
-			return std::fmod(id * 137.508f, 360.f);
-
-		float h;
-		if (mx == r)      h = 60.f * std::fmod((g - b) / (mx - mn), 6.f);
-		else if (mx == g) h = 60.f * ((b - r) / (mx - mn) + 2.f);
-		else              h = 60.f * ((r - g) / (mx - mn) + 4.f);
-		return h;
+		return std::fmodf((22.5f * (channel + track)), 360.f);
 	}
 
 	static void note_fill_color(std::uint8_t track, std::uint8_t channel,
@@ -422,17 +380,8 @@ struct midi_editor_viewer : public handleable_ui_part
 		if (moving && (move_delta_ticks || move_delta_keys))
 			draw_move_ghost(l, view_start, view_duration, key_low, key_high, key_height);
 
-		if (scaling)
-			draw_scale_ghost(l, view_start, view_duration, key_low, key_high, key_height);
-
-		if (resizing && resize_delta_ticks)
-			draw_resize_ghost(l, view_start, view_duration, key_low, key_high, key_height);
-
 		if (drawing)
 			draw_pending_note(l, view_start, view_duration, key_low, key_high, key_height);
-
-		if (!selected.empty() && !selecting && !moving && !drawing && !resizing)
-			draw_scale_handle(l, view_start, view_duration, key_low, key_high, key_height);
 
 		if (velocity_lane_visible)
 			draw_velocity_lane(l, view_start, view_duration, selected);
@@ -742,148 +691,6 @@ struct midi_editor_viewer : public handleable_ui_part
 			glVertex2f(x_start, y_top);
 			glEnd();
 		}
-	}
-
-	/**
-	 * Translucent shape of one note at a pending position (shared ghost style)
-	 */
-	void draw_ghost_note_rect(const piano_note& note, const layout& l,
-		tick_type view_start, tick_type view_duration,
-		std::uint8_t key_low, float key_height)
-	{
-		float x_start, x_end, y_bottom, y_top;
-		if (!note_rect(note, l, view_start, view_duration, key_low, key_height,
-			x_start, x_end, y_bottom, y_top))
-			return;
-
-		std::uint8_t r, g, b;
-		note_fill_color(note.track_index, note.channel, note.velocity, true, r, g, b);
-		glColor4ub(r, g, b, 0x60);
-		glBegin(GL_QUADS);
-		glVertex2f(x_start, y_bottom);
-		glVertex2f(x_end, y_bottom);
-		glVertex2f(x_end, y_top);
-		glVertex2f(x_start, y_top);
-		glEnd();
-
-		glColor4ub(0xFF, 0xFF, 0xFF, 0xA0);
-		glBegin(GL_LINE_LOOP);
-		glVertex2f(x_start, y_bottom);
-		glVertex2f(x_end, y_bottom);
-		glVertex2f(x_end, y_top);
-		glVertex2f(x_start, y_top);
-		glEnd();
-	}
-
-	/**
-	 * Selected notes at their pending geometry while the scale handle is dragged
-	 */
-	void draw_scale_ghost(const layout& l, tick_type view_start, tick_type view_duration,
-		std::uint8_t key_low, std::uint8_t key_high, float key_height)
-	{
-		const auto selected = editor->get_selected_notes();
-		const tick_type view_end = view_start + view_duration;
-		glLineWidth(1.f);
-
-		for (auto note : selected)
-		{
-			auto new_start = std::llround(double(scale_pivot) +
-				(double(note.start_tick) - double(scale_pivot)) * scale_factor);
-			auto new_end = std::llround(double(scale_pivot) +
-				(double(note.end_tick) - double(scale_pivot)) * scale_factor);
-			if (new_start < 0)
-				new_start = 0;
-			if (new_end <= new_start)
-				new_end = new_start + 1;
-
-			note.start_tick = tick_type(new_start);
-			note.end_tick = tick_type(new_end);
-			if (note.key < key_low || note.key > key_high ||
-				note.end_tick <= view_start || note.start_tick >= view_end)
-				continue;
-
-			draw_ghost_note_rect(note, l, view_start, view_duration, key_low, key_height);
-		}
-	}
-
-	/**
-	 * Affected notes at their pending length during a tail drag
-	 */
-	void draw_resize_ghost(const layout& l, tick_type view_start, tick_type view_duration,
-		std::uint8_t key_low, std::uint8_t key_high, float key_height)
-	{
-		const tick_type view_end = view_start + view_duration;
-		glLineWidth(1.f);
-
-		for (auto note : resize_targets)
-		{
-			const auto new_length = std::max<sgtick_type>(1,
-				sgtick_type(note.length()) + resize_delta_ticks);
-			note.end_tick = note.start_tick + tick_type(new_length);
-			if (note.key < key_low || note.key > key_high ||
-				note.end_tick <= view_start || note.start_tick >= view_end)
-				continue;
-
-			draw_ghost_note_rect(note, l, view_start, view_duration, key_low, key_height);
-		}
-	}
-
-	/**
-	 * Where the scale handle sits: x at the selection's right edge (pending
-	 * position while dragging), y at the vertical centre of the selected key
-	 * span, clamped into the roll. False when there is no selection or the
-	 * handle is outside the visible time range.
-	 */
-	bool scale_handle_pos(const layout& l, tick_type view_start, tick_type view_duration,
-		std::uint8_t key_low, std::uint8_t key_high, float key_height,
-		float& hx, float& hy) const
-	{
-		tick_type begin = 0, end = 0;
-		std::uint8_t sel_key_low = 0, sel_key_high = 0;
-		if (!editor->get_selection_bounds(begin, end, sel_key_low, sel_key_high))
-			return false;
-
-		if (scaling)
-		{
-			const auto scaled = std::llround(double(scale_pivot) +
-				(double(scale_orig_end) - double(scale_pivot)) * scale_factor);
-			end = tick_type(std::max<long long>(0, scaled));
-		}
-
-		if (end < view_start || end > view_start + view_duration)
-			return false;
-
-		hx = l.notes_x + float(end - view_start) / float(view_duration) * l.notes_w;
-
-		const float y0 = l.roll_bottom + float(int(sel_key_low) - int(key_low)) * key_height;
-		const float y1 = l.roll_bottom + (float(int(sel_key_high) - int(key_low)) + 1.f) * key_height;
-		hy = std::clamp((y0 + y1) * 0.5f, l.roll_bottom, l.top);
-		return true;
-	}
-
-	void draw_scale_handle(const layout& l, tick_type view_start, tick_type view_duration,
-		std::uint8_t key_low, std::uint8_t key_high, float key_height)
-	{
-		float hx, hy;
-		if (!scale_handle_pos(l, view_start, view_duration, key_low, key_high, key_height, hx, hy))
-			return;
-
-		glColor4ub(0xFF, 0xFF, 0xFF, scaling ? 0xFF : 0xD0);
-		glBegin(GL_QUADS);
-		glVertex2f(hx - handle_radius, hy);
-		glVertex2f(hx, hy - handle_radius);
-		glVertex2f(hx + handle_radius, hy);
-		glVertex2f(hx, hy + handle_radius);
-		glEnd();
-
-		glColor3ub(0x00, 0x00, 0x00);
-		glLineWidth(1.f);
-		glBegin(GL_LINE_LOOP);
-		glVertex2f(hx - handle_radius, hy);
-		glVertex2f(hx, hy - handle_radius);
-		glVertex2f(hx + handle_radius, hy);
-		glVertex2f(hx, hy + handle_radius);
-		glEnd();
 	}
 
 	bool selection_rect(tick_type begin_tick, tick_type end_tick,
@@ -1743,71 +1550,6 @@ struct midi_editor_viewer : public handleable_ui_part
 			return true;
 		}
 
-		// ---- Scale handle drag: proportional time scale about the selection start ----
-		if (scaling)
-		{
-			const auto cur_tick = tick_at_clamped(mx);
-			const double denom = double(scale_orig_end) - double(scale_pivot);
-			double factor = (double(cur_tick) - double(scale_pivot)) / denom;
-
-			// Alt snaps the factor to the nearest 25% step (never 0%). Polled
-			// directly because glutGetModifiers() is invalid inside motion callbacks.
-			if ((GetAsyncKeyState(VK_MENU) & 0x8000) != 0)
-				factor = std::max(0.25, std::round(factor * 4.0) / 4.0);
-
-			// Keep at least one tick of group width
-			scale_factor = std::max(factor, 1.0 / denom);
-
-			if (on_status)
-				on_status("Scale: " + std::to_string(int(std::lround(scale_factor * 100.0))) + "%");
-
-			if (left_release)
-			{
-				scaling = false;
-				if (scale_factor != 1.0)
-					editor->stretch_selected_notes(scale_factor, scale_pivot);
-				scale_factor = 1.0;
-			}
-			return true;
-		}
-
-		// ---- Note tail drag: length change for the grabbed note / selection ----
-		if (resizing)
-		{
-			const auto cur_tick = tick_at_clamped(mx);
-			resize_delta_ticks = sgtick_type(cur_tick) - sgtick_type(resize_anchor_tick);
-
-			// Snap the length delta to the grid; Alt bypasses it (polled, see above)
-			const bool bypass_snap = (GetAsyncKeyState(VK_MENU) & 0x8000) != 0;
-			if (!bypass_snap && snap > 1)
-			{
-				const auto half = sgtick_type(snap / 2);
-				resize_delta_ticks =
-					(resize_delta_ticks >= 0 ? resize_delta_ticks + half : resize_delta_ticks - half)
-					/ sgtick_type(snap) * sgtick_type(snap);
-			}
-
-			if (on_status)
-				on_status("Length " + std::string(resize_delta_ticks >= 0 ? "+" : "") +
-					std::to_string(resize_delta_ticks) + " ticks");
-
-			if (left_release)
-			{
-				if (resize_delta_ticks)
-				{
-					std::vector<std::uint32_t> ids;
-					ids.reserve(resize_targets.size());
-					for (const auto& note : resize_targets)
-						ids.push_back(note.id);
-					editor->resize_notes_by(std::move(ids), resize_delta_ticks);
-				}
-				resizing = false;
-				resize_delta_ticks = 0;
-				resize_targets.clear();
-			}
-			return true;
-		}
-
 		// ---- Left button on the roll ----
 		if (!selecting && !drawing && !picking)
 		{
@@ -1817,25 +1559,6 @@ struct midi_editor_viewer : public handleable_ui_part
 			const auto tick = tick_at_clamped(mx);
 			const auto key = key_at(my);
 			const auto modifiers = glutGetModifiers(); // valid: inside the mouse callback
-
-			// Scale handle grab: plain click on the rhombus starts the scale gesture
-			if (!(modifiers & GLUT_ACTIVE_SHIFT) && editor->has_selection())
-			{
-				float hx, hy;
-				if (scale_handle_pos(l, view_start, view_duration, key_low, key_high,
-					key_height, hx, hy) &&
-					std::fabs(mx - hx) + std::fabs(my - hy) <= handle_radius + 2.f)
-				{
-					tick_type sel_begin = 0, sel_end = 0;
-					std::uint8_t sel_key_low = 0, sel_key_high = 0;
-					editor->get_selection_bounds(sel_begin, sel_end, sel_key_low, sel_key_high);
-					scaling = true;
-					scale_pivot = sel_begin;
-					scale_orig_end = sel_end;
-					scale_factor = 1.0;
-					return true;
-				}
-			}
 
 			if (modifiers & GLUT_ACTIVE_SHIFT)
 			{
@@ -1853,23 +1576,6 @@ struct midi_editor_viewer : public handleable_ui_part
 			piano_note under;
 			if (editor->find_note_at(tick, key, under, 0, 0, editor->get_active_track()))
 			{
-				// Tail grab: the last few pixels of a note drag its length; a
-				// selected note drags the whole selection. The zone never covers
-				// more than the last third, so short notes stay movable.
-				const auto edge_tol = tick_type(4.f / l.notes_w * float(view_duration)) + 1;
-				const auto tail_zone = std::min<tick_type>(edge_tol, under.length() / 3);
-				if (tail_zone && under.end_tick - tick <= tail_zone)
-				{
-					resizing = true;
-					resize_anchor_tick = tick;
-					resize_delta_ticks = 0;
-					if (editor->is_note_selected(under.id))
-						resize_targets = editor->get_selected_notes();
-					else
-						resize_targets = {under};
-					return true;
-				}
-
 				if (editor->is_note_selected(under.id))
 				{
 					moving = true;
