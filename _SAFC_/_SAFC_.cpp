@@ -2310,6 +2310,7 @@ void on_playback_seek_to(float value)
 // ============================================================================
 
 std::uint32_t editor_channel_button_color(int track, int channel, bool hover = false);
+void editor_flash_status(const std::string& message);
 
 void update_channel_indicator()
 {
@@ -2406,6 +2407,15 @@ void on_editor_load_file()
 		auto filenames = multiple_open_file_dialog(L"Select MIDI file to edit");
 		if (!filenames.empty() && !filenames[0].empty())
 		{
+			// Large files parse for a while; keep the status line moving
+			editor_flash_status("Loading...");
+			editor->on_load_progress = [](std::uint64_t done, std::uint64_t total)
+			{
+				if (total)
+					editor_flash_status("Loading... " +
+						std::to_string(done * 100 / total) + "%");
+			};
+
 			if (editor->load_file(filenames[0]))
 			{
 				// Update editor viewer; the editor fits the view to the file on load

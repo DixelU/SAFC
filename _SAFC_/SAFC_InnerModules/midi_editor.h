@@ -618,9 +618,28 @@ struct midi_editor
 	// Editor State
 	// ========================================================================
 
+public:
+	// Load progress feedback: (bytes parsed, bytes total). Called from inside
+	// load_file on the loading thread, throttled to ~200 reports per file.
+	std::function<void(std::uint64_t, std::uint64_t)> on_load_progress;
+
 private:
 	std::wstring filename;
 	std::unique_ptr<bbb_mmap> mmap_file;
+
+	// Load progress state (only touched while load_file runs)
+	const std::uint8_t* progress_begin = nullptr;
+	const std::uint8_t* progress_next_report = nullptr;
+	std::uint64_t progress_total = 0;
+	std::uint64_t progress_chunk = 0;
+
+	void report_load_progress(const std::uint8_t* cur)
+	{
+		if (!on_load_progress || cur < progress_next_report)
+			return;
+		progress_next_report = cur + progress_chunk;
+		on_load_progress(std::uint64_t(cur - progress_begin), progress_total);
+	}
 
 	// Editor-friendly note list (piano roll view)
 	std::vector<piano_note> notes;
@@ -818,6 +837,12 @@ public:
 			ppqn = 480;
 		ticks_per_beat = ppqn;
 
+		// Progress reporting: at most ~200 updates, at least 1 MB apart
+		progress_begin = begin;
+		progress_total = size;
+		progress_chunk = std::max<std::uint64_t>(size / 200, std::uint64_t(1) << 20);
+		progress_next_report = begin;
+
 		// Parse tracks and extract notes
 		auto ptr = begin + 14;
 		std::uint8_t track_index = 0;
@@ -827,6 +852,10 @@ public:
 			if (!parse_track_mmap(ptr, end, track_index++))
 				break;
 		}
+
+		// The final sorts can take a moment too on huge files; signal parse done
+		if (on_load_progress)
+			on_load_progress(size, size);
 
 		std::sort(tempo_events.begin(), tempo_events.end());
 		std::sort(notes.begin(), notes.end());
@@ -916,6 +945,8 @@ public:
 
 		while (cur < track_end)
 		{
+			report_load_progress(cur);
+
 			// Read delta time (VLV)
 			std::uint64_t delta = 0;
 			std::uint8_t byte;
