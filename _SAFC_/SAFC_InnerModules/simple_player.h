@@ -14,14 +14,15 @@
 #include <array>
 #include <ranges>
 #include <mutex>
-#include <unordered_map>
+#include <new>
+#include <limits>
 
 #include "../bbb_ffio.h"
 
 #include "single_midi_processor_2.h"
 #include "single_midi_info_collector.h"
 
-#define SIMPLE_PLAYER_FORCE_NO_INLINE 
+#define SIMPLE_PLAYER_FORCE_NO_INLINE
 // __declspec(noinline)
 // __declspec(noinline)
 
@@ -33,6 +34,11 @@ struct buffered_queue_spsc
 {
 private:
 	static constexpr size_t slab_size = 1 << 15;
+
+	// Cap on cached empty slabs per queue. Above this, freed slabs are
+	// deleted rather than pushed to the recycle stack, so peak polyphony
+	// doesn't leave the recycle stack hoarding memory indefinitely.
+	static constexpr size_t max_recycled_slabs = 6;
 
 	struct slab
 	{
@@ -94,12 +100,24 @@ private:
 
 	// Producer-owned
 	alignas(64) slab* tail_ = nullptr;
+	size_t pushed_local_ = 0; // plain mirror of pushed_, avoids re-reading the atomic
 
 	// Consumer-owned
 	alignas(64) slab* head_ = nullptr;
+	size_t popped_local_ = 0; // plain mirror of popped_
 
 	// lock-free recycle stack: consumer pushes, producer pops
 	alignas(64) std::atomic<slab*> recycle_head_{nullptr};
+
+	// Bound on cached slabs in recycle stack (touched by both threads)
+	alignas(64) std::atomic<size_t> recycle_count_{0};
+
+	// Approximate element count for size-based throttling, split into
+	// monotonic per-side counters so neither thread does an atomic RMW
+	// on a shared cache line: each side bumps its local mirror and
+	// publishes it with a relaxed store to its own line.
+	alignas(64) std::atomic<size_t> pushed_{0};
+	alignas(64) std::atomic<size_t> popped_{0};
 
 	slab* producer_get_slab()
 	{
@@ -111,6 +129,7 @@ private:
 			if (recycle_head_.compare_exchange_weak(r, next,
 				std::memory_order_acquire, std::memory_order_relaxed))
 			{
+				recycle_count_.fetch_sub(1, std::memory_order_relaxed);
 				r->reset_for_reuse();
 				return r;
 			}
@@ -120,12 +139,20 @@ private:
 
 	void consumer_recycle_slab(slab* s)
 	{
+		// Cap the recycle stack so freed slabs don't accumulate after a peak
+		if (recycle_count_.load(std::memory_order_relaxed) >= max_recycled_slabs)
+		{
+			delete s;
+			return;
+		}
+
 		// lock-free push to recycle stack
 		slab* old_head = recycle_head_.load(std::memory_order_relaxed);
 		do {
 			s->next_slab.store(old_head, std::memory_order_relaxed);
 		} while (!recycle_head_.compare_exchange_weak(old_head, s,
 			std::memory_order_release, std::memory_order_relaxed));
+		recycle_count_.fetch_add(1, std::memory_order_relaxed);
 	}
 
 	void ensure_initialized_producer()
@@ -150,6 +177,7 @@ public:
 			delete head_;
 			head_ = next;
 		}
+
 		// Clean up recycle stack
 		slab* r = recycle_head_.load(std::memory_order_relaxed);
 		while (r)
@@ -181,9 +209,9 @@ public:
 			tail_ = new_slab;
 		}
 		else
-		{
 			tail_->push_producer(std::move(value));
-		}
+
+		pushed_.store(++pushed_local_, std::memory_order_relaxed);
 	}
 
 	// Producer: get reference to last pushed element (for pending tracking)
@@ -199,6 +227,7 @@ public:
 			return;
 
 		head_->pop_consumer();
+		popped_.store(++popped_local_, std::memory_order_relaxed);
 
 		// If current slab exhausted, try to advance
 		if (head_->empty_consumer())
@@ -267,6 +296,23 @@ public:
 				break;
 			}
 		}
+		// clear() only runs with the producer stopped (reset/seek restart),
+		// so resetting the producer-side counter here is safe.
+		pushed_local_ = 0;
+		popped_local_ = 0;
+		pushed_.store(0, std::memory_order_relaxed);
+		popped_.store(0, std::memory_order_relaxed);
+	}
+
+	// Approximate element count. The two counters are published with relaxed
+	// stores, so the loads may be mutually stale; clamp because a reader can
+	// observe popped_ ahead of pushed_. The producer sees an exact-or-over
+	// estimate, the consumer exact-or-under - both safe for throttling.
+	[[nodiscard]] size_t approximate_size() const
+	{
+		size_t p = pushed_.load(std::memory_order_relaxed);
+		size_t c = popped_.load(std::memory_order_relaxed);
+		return p > c ? p - c : 0;
 	}
 
 	// Consumer iterator for traversal
@@ -370,35 +416,89 @@ struct simple_player
 		// Only accessed by parser thread - no synchronization needed
 		struct pending_entry
 		{
-			uint32_t track_id;
 			buffered_note* note_ptr;
+			uint32_t track_id;
 		};
 
 		// Per-track_id LIFO stacks of pending notes per key.
-		// O(1) push and find_and_remove via hash map instead of O(n) linear scan.
+		// Flat open-addressing hash table (linear probing, power-of-two size):
+		// a lookup is one probe into a contiguous array instead of
+		// unordered_map's bucket->node pointer chase, and emptied stacks keep
+		// their slot and capacity, so steady-state playback doesn't allocate.
 		// Parser-private: only accessed by parser thread
 		struct pending_list
 		{
-			// track_id -> LIFO stack of note pointers awaiting note_off
-			std::unordered_map<uint32_t, std::vector<buffered_note*>> stacks;
+			// track_id is (track_index << 4) | channel and never reaches ~0u
+			static constexpr uint32_t empty_id = ~0u;
+
+			struct slot
+			{
+				uint32_t track_id = empty_id;
+				std::vector<buffered_note*> stack; // LIFO of notes awaiting note_off
+			};
+
+			std::vector<slot> slots; // power-of-two size
+			size_t used = 0;         // occupied slots (including emptied stacks)
+
+			static size_t hash(uint32_t id)
+			{
+				// Fibonacci hash: track_ids are dense sequential ints
+				return static_cast<size_t>((id * 0x9E3779B97F4A7C15ull) >> 32);
+			}
+
+			// Returns the slot holding track_id, or the empty slot where it
+			// belongs. Load factor stays below 3/4, so the probe terminates.
+			slot* find_slot(uint32_t track_id)
+			{
+				const size_t mask = slots.size() - 1;
+				size_t i = hash(track_id) & mask;
+				while (slots[i].track_id != track_id && slots[i].track_id != empty_id)
+					i = (i + 1) & mask;
+				return &slots[i];
+			}
+
+			void grow()
+			{
+				std::vector<slot> old(slots.empty() ? 16 : slots.size() * 2);
+				old.swap(slots);
+				for (auto& s : old)
+					if (s.track_id != empty_id)
+						*find_slot(s.track_id) = std::move(s);
+			}
 
 			void push(uint32_t track_id, buffered_note* ptr)
 			{
-				stacks[track_id].push_back(ptr);
+				if (used * 4 >= slots.size() * 3)
+					grow();
+
+				slot* s = find_slot(track_id);
+				if (s->track_id == empty_id)
+				{
+					s->track_id = track_id;
+					++used;
+				}
+				s->stack.push_back(ptr);
 			}
 
-			// O(1) average: hash lookup then back-pop (LIFO per track_id)
 			buffered_note* find_and_remove(uint32_t track_id)
 			{
-				auto it = stacks.find(track_id);
-				if (it == stacks.end() || it->second.empty())
+				if (slots.empty())
 					return nullptr;
-				buffered_note* result = it->second.back();
-				it->second.pop_back();
+
+				slot* s = find_slot(track_id);
+				if (s->track_id == empty_id || s->stack.empty())
+					return nullptr;
+
+				buffered_note* result = s->stack.back();
+				s->stack.pop_back();
 				return result;
 			}
 
-			void clear() { stacks.clear(); }
+			void clear()
+			{
+				slots.clear();
+				used = 0;
+			}
 		};
 
 		// Per-key SPSC queues for falling notes visualization
@@ -475,7 +575,7 @@ struct simple_player
 					auto& front = queue.front();
 					// Only cull if note has ended and end is before cutoff
 					// Atomic load for end_time_us
-					uint64_t end_time = front.end_time_us.load(std::memory_order_acquire);
+					uint64_t end_time = front.end_time_us.load(std::memory_order_relaxed);
 					if (end_time != ~0ULL && static_cast<int64_t>(end_time) < cutoff_time_us)
 						queue.pop();
 					else
@@ -505,7 +605,6 @@ struct simple_player
 
 	struct send_event
 	{
-		uint64_t tick;
 		uint64_t time_us;    // target send time in microseconds from start
 		uint32_t short_msg;  // prepared MIDI short message (0 = invalid/empty)
 	};
@@ -601,7 +700,7 @@ struct simple_player
 
 	struct playback_state
 	{
-		tick_type current_tick;
+		// tick_type current_tick;
 		uint64_t current_time_us;
 		std::chrono::steady_clock::time_point start_time;
 		uint64_t start_offset_us;
@@ -620,20 +719,27 @@ struct simple_player
 		std::atomic<uint64_t> seek_target_us{0};
 		std::atomic<bool> seek_resume_paused{false};
 
-		// Lookahead buffer for pre-parsed MIDI messages (unbounded SPSC - never stalls parser)
+		// Lookahead buffer for pre-parsed MIDI messages (SPSC; parser throttles
+		// when it gets too far ahead in time or holds too many pending events).
 		buffered_queue_spsc<send_event> send_buffer;
 		std::atomic<bool> seeking_ff{false};        // parser is fast-forwarding (sender drains immediately)
 		std::atomic<bool> parser_done{false};       // parser finished all events
 		std::atomic<uint64_t> parsed_up_to_us{0};   // how far ahead the parser has reached (in us)
 		std::atomic<uint64_t> sender_position_us{0}; // current sender playback position (in us)
+		std::atomic<bool> memory_failure{false};
 
 		// Lookahead limits: parser throttles when too far ahead
-		static constexpr uint64_t max_lookahead_us = 7500000;  // 5 seconds max lookahead
+		static constexpr uint64_t max_lookahead_us = 5000000;  // 5 seconds max lookahead
 		static constexpr uint64_t min_lookahead_us = 2500000;  // 2.5 seconds min before resuming parse
+
+		// Event-count throttle: caps send_buffer at dense tick clusters where
+		// the time-based throttle alone won't fire (millions of events packed
+		// into a single tick or sub-millisecond span). 1M events * 24B ~= 24MB
+		// ceiling for the lookahead buffer regardless of MIDI density.
+		static constexpr size_t max_pending_events = 1u << 26;
 
 		void reset()
 		{
-			current_tick = 0;
 			current_time_us = 0;
 			start_offset_us = 0;
 			active_tracks = 0;
@@ -648,6 +754,7 @@ struct simple_player
 			parser_done = false;
 			parsed_up_to_us = 0;
 			sender_position_us = 0;
+			memory_failure = false;
 			track_states.clear();
 			send_buffer.clear();
 			visuals.reset();
@@ -699,14 +806,16 @@ struct simple_player
 
 	// Get device names as vector of strings for UI
 	std::vector<std::string> get_device_names() const
-	{	
+	{
 		std::vector<std::string> names;
 		names.reserve(devices.size());
 
 		for (const auto& device : devices)
 		{
 			std::wstring wname = device.szPname;
-			names.emplace_back(wname.begin(), wname.end());
+			std::string name(wname.size(), '\0');
+			std::transform(wname.begin(), wname.end(), name.begin(), [](wchar_t c) { return static_cast<char>(c); });
+			names.push_back(std::move(name));
 		}
 
 		return names;
@@ -761,9 +870,9 @@ struct simple_player
 		{
 			if (devices[i].szPname != device_name)
 				continue;
-			
+
 			set_device(i);
-			
+
 			return true;
 		}
 
@@ -775,22 +884,36 @@ struct simple_player
 
 	void simple_run(std::wstring filename, double start_fraction = 0.0)
 	{
-		auto res = open(filename);
-		info.open_complete = true;
+		memory_failure_reported.store(false, std::memory_order_release);
+		cancel_requested.store(false, std::memory_order_release);
 
-		if (!res)
+		try
 		{
-			throw_alert_error("Playback failed");
-			mmap.reset();
+			auto res = open(filename);
+			info.open_complete = true;
+
+			if (cancel_requested.load(std::memory_order_acquire))
+				return;
+
+			if (!res)
+			{
+				throw_alert_error("Playback failed");
+				mmap.reset();
 			return;
 		}
 
-		start_fraction = std::clamp(start_fraction, 0.0, 1.0);
+			start_fraction = std::clamp(start_fraction, 0.0, 1.0);
 		playback_thread(static_cast<uint64_t>(start_fraction * info.total_duration_us));
 
 		// Release the mapping so the caller can delete or replace the file.
 		// info.tracks' pointers into it stay dead until the next open().
 		mmap.reset();
+		}
+		catch (const std::bad_alloc&)
+		{
+			info.open_complete = true;
+			handle_memory_failure(true);
+		}
 	}
 
 	const playback_state& get_state() const
@@ -875,6 +998,7 @@ struct simple_player
 	// Stop playback completely
 	void stop()
 	{
+		cancel_requested.store(true, std::memory_order_release);
 		state.stop_requested.store(true, std::memory_order_release);
 
 		// If paused, unpause so threads can exit
@@ -891,6 +1015,8 @@ struct simple_player
 	{
 		return state.playing.load(std::memory_order_acquire);
 	}
+
+	const std::wstring& get_filename() const { return current_filename; }
 
 	// Current playback position in microseconds, wall-clock-smooth (same timing
 	// the falling-notes visualization uses). Returns the pause point while
@@ -911,6 +1037,7 @@ struct simple_player
 
 	bool open(std::wstring filename)
 	{
+		current_filename = filename;
 		// prerequisite: this is a midi file with valid header;
 		mmap = std::make_unique<bbb_mmap>(filename.c_str());
 		info = midi_info{};
@@ -934,11 +1061,14 @@ struct simple_player
 		}
 
 		info.ppq = (begin[12] << 8) | (begin[13]);
-		
+
 		auto ptr = begin + 14;
 
 		while (ptr < end)
 		{
+			if (cancel_requested.load(std::memory_order_acquire))
+				return false;
+
 			if(!read_through_one_track(ptr, end))
 				return false;
 
@@ -1011,6 +1141,8 @@ struct simple_player
 
 		state.active_tracks = info.tracks.size();
 
+		uint32_t cap_check_counter = 0;
+
 		while (!event_queue.empty() && !state.stop_requested)
 		{
 			// get the tick for this batch
@@ -1041,7 +1173,8 @@ struct simple_player
 
 			if (!fast_forwarding)
 			{
-				// Throttle: wait if we're too far ahead of the sender, or if paused
+				// Throttle: wait if we're too far ahead in time, have too many
+				// pending events buffered, or are paused.
 				while (!state.stop_requested)
 				{
 					// Wait while paused (sleep longer to avoid busy-wait)
@@ -1053,8 +1186,10 @@ struct simple_player
 
 					uint64_t sender_pos = state.sender_position_us.load(std::memory_order_acquire);
 					uint64_t lookahead = (batch_time_us > sender_pos) ? (batch_time_us - sender_pos) : 0;
+					size_t pending = state.send_buffer.approximate_size();
 
-					if (lookahead < playback_state::max_lookahead_us)
+					if (lookahead < playback_state::max_lookahead_us &&
+						pending < playback_state::max_pending_events)
 						break;
 
 					// Too far ahead - sleep until sender catches up closer
@@ -1075,7 +1210,7 @@ struct simple_player
 					break;
 
 				auto ref = event_queue.top();
-				// pop deferred: see replace_top/pop at bottom of loop body
+				// pop/replace_top deferred until the end of this track's run
 
 				auto& track = state.track_states[ref.track_index];
 
@@ -1090,132 +1225,171 @@ struct simple_player
 					continue;
 				}
 
-				// process the event
-				uint8_t command = get_value_and_increment(track.position, track.end);
-				uint8_t data1 = 0;
-				uint8_t data2 = 0;
-
-				if (command < 0x80)
+				// Process a run of events from this track. Black MIDIs store
+				// chords as consecutive zero-delta events within one track, so
+				// while the next delta is zero stay on this track and skip the
+				// heap entirely.
+				bool reschedule = false;
+				for (;;)
 				{
-					// running status
-					data1 = command;
-					command = track.rsb;
-				}
-				else
-				{
-					if (command < 0xF0)
-						track.rsb = command;
+					// process the event
+					uint8_t command = get_value_and_increment(track.position, track.end);
+					uint8_t data1 = 0;
+					uint8_t data2 = 0;
 
-					if (command < 0xF0 || command == 0xFF)
-						data1 = get_value_and_increment(track.position, track.end);
+					if (command < 0x80)
+					{
+						// running status
+						data1 = command;
+						command = track.rsb;
+					}
 					else
-						data1 = 0xFF;
-				}
-
-				if (command < 0x80)
-				{
-					track.done = true;
-					--state.active_tracks;
-					event_queue.pop();
-					continue;
-				}
-
-				uint32_t msg_to_send = 0;
-
-				switch (command >> 4)
-				{
-					case 0x8: // note off
 					{
-						data2 = get_value_and_increment(track.position, track.end);
+						if (command < 0xF0)
+							track.rsb = command;
 
-						if (!fast_forwarding)
-						{
-							msg_to_send = make_smsg(command, data1, data2);
-							uint8_t channel = command & 0x0F;
-							state.visuals.push_note_off(data1, batch_time_us, ref.track_index, channel);
-						}
-						break;
+						if (command < 0xF0 || command == 0xFF)
+							data1 = get_value_and_increment(track.position, track.end);
+						else
+							data1 = 0xFF;
 					}
-					case 0x9: // note on
-					{
-						data2 = get_value_and_increment(track.position, track.end);
 
-						if (!fast_forwarding)
-						{
-							msg_to_send = make_smsg(command, data1, data2);
-							uint8_t channel = command & 0x0F;
-
-							if (data2 > 0)
-								state.visuals.push_note_on(data1, batch_time_us, ref.track_index, channel, data2);
-							else
-								state.visuals.push_note_off(data1, batch_time_us, ref.track_index, channel);
-						}
-						break;
-					}
-					case 0xA: // aftertouch (transient - skip during fast-forward)
-					{
-						data2 = get_value_and_increment(track.position, track.end);
-						if (!fast_forwarding)
-							msg_to_send = make_smsg(command, data1, data2);
-						break;
-					}
-					case 0xB: // control change
-					case 0xE: // pitch bend
-					{
-						data2 = get_value_and_increment(track.position, track.end);
-						msg_to_send = make_smsg(command, data1, data2);
-						break;
-					}
-					case 0xC: // program change
-					case 0xD: // channel pressure
-					{
-						msg_to_send = make_smsg(command, data1);
-						break;
-					}
-					case 0xF: // meta/sysex
-					{
-						uint8_t type = data1;
-						bool end_of_track = (type == 0x2F && command == 0xFF);
-
-						if (command == 0xFF)
-							track.rsb = 0; // reset RSB on meta events
-
-						if (end_of_track)
-						{
-							track.done = true;
-							--state.active_tracks;
-							event_queue.pop();
-							continue;
-						}
-
-						// skip meta/sysex data (tempo already handled during initial parsing)
-						auto length = get_vlv(track.position, track.end);
-						track.position += length;
-						break;
-					}
-				}
-
-				// Push message to lookahead buffer (unbounded - never stalls)
-				if (msg_to_send != 0)
-					state.send_buffer.push({batch_tick, batch_time_us, msg_to_send});
-
-				// Re-schedule track or remove from heap.
-				// replace_top = one sift-down vs pop+push = O(log n) instead of O(2 log n).
-				if (track.position < track.end && !track.done)
-				{
-					auto delta = get_vlv(track.position, track.end);
-					track.next_event_tick = batch_tick + delta;
-					event_queue.replace_top({track.next_event_tick, ref.track_index});
-				}
-				else
-				{
-					if (!track.done)
+					if (command < 0x80)
 					{
 						track.done = true;
 						--state.active_tracks;
+						break;
 					}
-					event_queue.pop();
+
+					uint32_t msg_to_send = 0;
+
+					switch (command >> 4)
+					{
+						case 0x8: // note off
+						{
+							data2 = get_value_and_increment(track.position, track.end);
+
+							if (!fast_forwarding)
+							{
+								msg_to_send = make_smsg(command, data1, data2);
+								uint8_t channel = command & 0x0F;
+								state.visuals.push_note_off(data1, batch_time_us, ref.track_index, channel);
+							}
+							break;
+						}
+						case 0x9: // note on
+						{
+							data2 = get_value_and_increment(track.position, track.end);
+
+							if (!fast_forwarding)
+							{
+								msg_to_send = make_smsg(command, data1, data2);
+								uint8_t channel = command & 0x0F;
+
+								if (data2 > 0)
+									state.visuals.push_note_on(data1, batch_time_us, ref.track_index, channel, data2);
+								else
+									state.visuals.push_note_off(data1, batch_time_us, ref.track_index, channel);
+							}
+							break;
+						}
+						case 0xA: // aftertouch (transient - skip during fast-forward)
+						{
+							data2 = get_value_and_increment(track.position, track.end);
+							if (!fast_forwarding)
+								msg_to_send = make_smsg(command, data1, data2);
+							break;
+						}
+						case 0xB: // control change
+						case 0xE: // pitch bend
+						{
+							data2 = get_value_and_increment(track.position, track.end);
+							msg_to_send = make_smsg(command, data1, data2);
+							break;
+						}
+						case 0xC: // program change
+						case 0xD: // channel pressure
+						{
+							msg_to_send = make_smsg(command, data1);
+							break;
+						}
+						case 0xF: // meta/sysex
+						{
+							uint8_t type = data1;
+							bool end_of_track = (type == 0x2F && command == 0xFF);
+
+							if (command == 0xFF)
+								track.rsb = 0; // reset RSB on meta events
+
+							if (end_of_track)
+							{
+								track.done = true;
+								--state.active_tracks;
+								break;
+							}
+
+							// skip meta/sysex data (tempo already handled during initial parsing)
+							auto length = get_vlv(track.position, track.end);
+							track.position += length;
+							break;
+						}
+					}
+
+					if (track.done) // end of track / RSB error above
+						break;
+
+					// Push message to lookahead buffer.
+					if (msg_to_send != 0)
+					{
+						state.send_buffer.push({batch_time_us, msg_to_send});
+
+						// Per-batch (outer) throttle only fires between unique
+						// ticks, so a single dense tick could otherwise push
+						// millions of events before the next check. Enforce the
+						// size cap here too, sampled every 1024 pushes: checking
+						// the consumer-written pop counter on every push would
+						// reintroduce the cross-core traffic the split queue
+						// counters removed, and against a 2^26 cap an overshoot
+						// of up to 1023 events is noise.
+						if ((++cap_check_counter & 1023u) == 0)
+						{
+							while (!fast_forwarding && !state.stop_requested &&
+								state.send_buffer.approximate_size() >= playback_state::max_pending_events)
+							{
+								if (state.paused.load(std::memory_order_acquire))
+									std::this_thread::sleep_for(std::chrono::microseconds(100));
+								else
+									std::this_thread::sleep_for(std::chrono::microseconds(10));
+							}
+						}
+					}
+
+					if (track.position >= track.end)
+					{
+						track.done = true;
+						--state.active_tracks;
+						break;
+					}
+
+					auto delta = get_vlv(track.position, track.end);
+					if (delta != 0)
+					{
+						track.next_event_tick = batch_tick + delta;
+						reschedule = true;
+						break;
+					}
+
+					// delta == 0: this track's next event is at the same tick
+					if (state.stop_requested)
+						break;
 				}
+
+				// Re-schedule track or remove from heap.
+				// replace_top = one sift-down vs pop+push = O(log n) instead of O(2 log n).
+				if (reschedule)
+					event_queue.replace_top({track.next_event_tick, ref.track_index});
+				else
+					event_queue.pop();
 			}
 		}
 
@@ -1226,11 +1400,23 @@ struct simple_player
 	// During seek fast-forward (seeking_ff == true), drains buffer immediately
 	SIMPLE_PLAYER_FORCE_NO_INLINE void sender_thread_func()
 	{
+		// Cached clock reading: dense same-tick bursts send thousands of
+		// already-due events back to back; for those the clock isn't
+		// re-queried and the position isn't re-published.
+		constexpr int64_t clock_unknown = std::numeric_limits<int64_t>::min();
+		int64_t cached_elapsed_us = clock_unknown;
+		uint64_t last_published_us = ~0ULL;
+
 		while (!state.stop_requested)
 		{
 			// Fast-forward mode: drain buffer immediately, no timing
 			if (state.seeking_ff.load(std::memory_order_acquire))
 			{
+				// Parser resets start_time/start_offset_us when FF completes,
+				// so any cached clock reading is stale.
+				cached_elapsed_us = clock_unknown;
+				last_published_us = ~0ULL;
+
 				if (!state.send_buffer.empty())
 				{
 					auto& ev = state.send_buffer.front();
@@ -1257,9 +1443,9 @@ struct simple_player
 				if (state.stop_requested)
 					break;
 
-				// Resume: recalculate timing based on where we paused
-				// start_offset_us was updated by resume(), start_time was reset
-				// so we just continue - next event will be timed relative to new start
+				// Resume: resume() updated start_offset_us and reset start_time,
+				// so the cached clock reading is stale.
+				cached_elapsed_us = clock_unknown;
 			}
 
 			if (state.stop_requested)
@@ -1277,33 +1463,42 @@ struct simple_player
 			}
 
 			auto& ev = state.send_buffer.front();
-			uint64_t target_us = ev.time_us - state.start_offset_us;
 
 			// update current position for UI and parser throttling
-			state.current_time_us = ev.time_us;
-			state.current_tick = ev.tick;
-			state.sender_position_us.store(ev.time_us, std::memory_order_release);
-
-			// wait until it's time to send this event
-			auto elapsed = std::chrono::steady_clock::now() - state.start_time;
-			auto elapsed_us = std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count();
-
-			if (static_cast<int64_t>(target_us) > elapsed_us)
+			// (only when it changes - events in a burst share one timestamp)
+			if (ev.time_us != last_published_us)
 			{
-				auto wait_us = target_us - elapsed_us;
-				if (wait_us > 1000)
-				{
-					// sleep for most of the wait time
-					std::this_thread::sleep_for(std::chrono::microseconds(wait_us - 50));
-				}
+				last_published_us = ev.time_us;
+				state.current_time_us = ev.time_us;
+				state.sender_position_us.store(ev.time_us, std::memory_order_release);
+			}
 
-				// spin-wait for final precision
-				while (!state.stop_requested)
+			uint64_t target_us = ev.time_us - state.start_offset_us;
+
+			// wait until it's time to send this event; if the cached clock
+			// already passed the target, send immediately without re-querying
+			if (static_cast<int64_t>(target_us) > cached_elapsed_us)
+			{
+				auto elapsed = std::chrono::steady_clock::now() - state.start_time;
+				cached_elapsed_us = std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count();
+
+				if (static_cast<int64_t>(target_us) > cached_elapsed_us)
 				{
-					elapsed = std::chrono::steady_clock::now() - state.start_time;
-					elapsed_us = std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count();
-					if (elapsed_us >= static_cast<int64_t>(target_us))
-						break;
+					auto wait_us = target_us - cached_elapsed_us;
+					if (wait_us > 1000)
+					{
+						// sleep for most of the wait time
+						std::this_thread::sleep_for(std::chrono::microseconds(wait_us - 50));
+					}
+
+					// spin-wait for final precision
+					while (!state.stop_requested)
+					{
+						elapsed = std::chrono::steady_clock::now() - state.start_time;
+						cached_elapsed_us = std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count();
+						if (cached_elapsed_us >= static_cast<int64_t>(target_us))
+							break;
+					}
 				}
 			}
 
@@ -1317,53 +1512,95 @@ struct simple_player
 
 	void playback_thread(uint64_t initial_skip_to_us = 0)
 	{
-		state.reset();
-		state.start_time = std::chrono::steady_clock::now();
-		state.playing.store(true, std::memory_order_release);
-
-		// Start paused by default so user can select synth first
-		state.paused.store(true, std::memory_order_release);
-		state.pause_position_us.store(0, std::memory_order_release);
-
-		uint64_t skip_to_us = initial_skip_to_us;
-		bool pause_after_seek = initial_skip_to_us > 0;
-
-		for (;;)
+		try
 		{
-			// reset per-iteration state
-			state.stop_requested.store(false, std::memory_order_relaxed);
-			state.seeking_ff.store(false, std::memory_order_relaxed);
-			state.parser_done.store(false, std::memory_order_relaxed);
-			state.parsed_up_to_us.store(0, std::memory_order_relaxed);
-			state.sender_position_us.store(0, std::memory_order_relaxed);
-			state.send_buffer.clear();
-			state.visuals.reset();
-			state.track_states.clear();
+			state.reset();
+			state.start_time = std::chrono::steady_clock::now();
+			state.playing.store(true, std::memory_order_release);
 
-			// Launch parser and sender threads
-			std::thread parser_thread([this, skip_to_us, pause_after_seek]() {
-				parser_thread_func(skip_to_us, pause_after_seek);
-			});
-			std::thread sender_thread([this]() { sender_thread_func(); });
+			// Start paused by default so user can select synth first
+			state.paused.store(true, std::memory_order_release);
+			state.pause_position_us.store(0, std::memory_order_release);
 
-			parser_thread.join();
-			sender_thread.join();
+			uint64_t skip_to_us = initial_skip_to_us;
+			bool pause_after_seek = initial_skip_to_us > 0;
 
-			// Check if this was a seek (threads stopped due to seek_requested)
-			if (state.seek_requested.load(std::memory_order_acquire))
+			for (;;)
 			{
-				skip_to_us = state.seek_target_us.load(std::memory_order_relaxed);
-				pause_after_seek = state.seek_resume_paused.load(std::memory_order_relaxed);
+				// reset per-iteration state
+				state.stop_requested.store(false, std::memory_order_relaxed);
+				state.seeking_ff.store(false, std::memory_order_relaxed);
+				state.parser_done.store(false, std::memory_order_relaxed);
+				state.parsed_up_to_us.store(0, std::memory_order_relaxed);
+				state.sender_position_us.store(0, std::memory_order_relaxed);
+				state.memory_failure.store(false, std::memory_order_relaxed);
+				state.send_buffer.clear();
+				state.visuals.reset();
+				state.track_states.clear();
 
-				state.seek_requested.store(false, std::memory_order_relaxed);
-				state.paused.store(false, std::memory_order_relaxed);
+				// Launch parser and sender threads
+				std::thread parser_thread;
+				std::thread sender_thread;
 
-				all_notes_off();
-				continue;
+				try
+				{
+					parser_thread = std::thread([this, skip_to_us, pause_after_seek]() {
+						try
+						{
+							parser_thread_func(skip_to_us, pause_after_seek);
+						}
+						catch (const std::bad_alloc&)
+						{
+							handle_memory_failure();
+						}
+					});
+					sender_thread = std::thread([this]() { sender_thread_func(); });
+				}
+				catch (...)
+				{
+					state.stop_requested.store(true, std::memory_order_release);
+					state.parser_done.store(true, std::memory_order_release);
+
+					if (parser_thread.joinable())
+						parser_thread.join();
+					if (sender_thread.joinable())
+						sender_thread.join();
+
+					throw;
+				}
+
+				parser_thread.join();
+				sender_thread.join();
+
+				if (state.memory_failure.load(std::memory_order_acquire))
+				{
+					report_memory_failure_once();
+					break;
+				}
+
+				// Check if this was a seek (threads stopped due to seek_requested)
+				if (state.seek_requested.load(std::memory_order_acquire))
+				{
+					skip_to_us = state.seek_target_us.load(std::memory_order_relaxed);
+					pause_after_seek = state.seek_resume_paused.load(std::memory_order_relaxed);
+
+					state.seek_requested.store(false, std::memory_order_relaxed);
+					if (pause_after_seek)
+						state.pause_position_us.store(skip_to_us, std::memory_order_release);
+
+					state.paused.store(pause_after_seek, std::memory_order_relaxed);
+
+					all_notes_off();
+					continue;
+				}
+
+				// Normal exit
+				break;
 			}
-
-			// Normal exit
-			break;
+		}
+		catch (const std::bad_alloc&)
+		{
+			handle_memory_failure(true);
 		}
 
 		all_notes_off();
@@ -1383,8 +1620,37 @@ struct simple_player
 		std::vector<color> colors;
 		//std::unordered_map<uint32_t, uint32_t> track_colors;
 
-		bool enable_simulated_lag = true;
+		// Scratch buffers for batched note rendering (reused each frame)
+		struct note_vert  { float x, y; };
+		struct note_color { uint8_t r, g, b, a; };
 
+		struct note_span
+		{
+			float begin_y;
+			float end_y;
+			uint32_t track_n;
+			uint32_t color;
+			bool touches_keyboard;
+		};
+
+		struct interval
+		{
+			float begin_y;
+			float end_y;
+			uint32_t track;
+		};
+
+		std::vector<note_vert>  note_verts;
+		std::vector<note_color> note_colors;
+		std::vector<note_vert>  outline_verts;
+		std::vector<note_color> outline_colors;
+		std::vector<note_span>  key_note_spans;
+		std::vector<interval>   covered_intervals;
+
+		bool enable_simulated_lag = true;
+		uint8_t remove_overlaps = 0;
+
+		static constexpr uint8_t MAX_OVERLAPS_REMOVAL_VERSION = 1;
 		static constexpr float DEFAULT_WIDTH = 400, DEFAULT_HEIGHT = 250;
 		float width = DEFAULT_WIDTH, height = DEFAULT_HEIGHT;
 		float last_keyboard_height = 0;
@@ -1397,7 +1663,7 @@ struct simple_player
 				return (Key & 1);
 		}
 
-		constexpr static int white_keys_count() 
+		constexpr static int white_keys_count()
 		{
 			int count = 0;
 			for (uint8_t key = 0; key < 128; key++)
@@ -1473,7 +1739,112 @@ struct simple_player
 		}
 	};
 
-	SIMPLE_PLAYER_FORCE_NO_INLINE void draw(const draw_data& data)
+	template <float SCALE>
+	static uint8_t scale(uint8_t value)
+	{
+		// 16-bit fractional part is more than enough for uint8_t → uint8_t scaling
+		constexpr uint32_t MAGIC = static_cast<uint32_t>(SCALE * (1u << 16) + 0.5f);
+
+		uint32_t temp = static_cast<uint32_t>(value) * MAGIC;
+		return static_cast<uint8_t>(temp >> 16);
+	}
+
+	SIMPLE_PLAYER_FORCE_NO_INLINE void overlaps_removal_v1(
+		std::vector<draw_data::note_span>& note_spans)
+	{
+		if (note_spans.empty())
+			return;
+
+		// Backward redundancy filter, in place. Walk right→left; within each
+		// begin_y block, keep an entry iff its end_y exceeds the running max of
+		// later kept end_ys in that block. Zero-height entries are always kept
+		// and do not contribute to run_max. Survivors are written toward the
+		// tail of the vector, then compacted to the front.
+		const std::size_t size	= note_spans.size();
+		std::size_t	write	= size;
+		float		run_max = -std::numeric_limits<float>::infinity();
+		float		prev_a	= std::numeric_limits<float>::infinity();
+
+		for (std::size_t k = size; k-- > 0; )
+		{
+			if (note_spans[k].begin_y != prev_a)
+			{
+				run_max = -std::numeric_limits<float>::infinity();
+				prev_a = note_spans[k].begin_y;
+			}
+
+			const bool zero_height = (note_spans[k].begin_y == note_spans[k].end_y);
+			const bool extends = (note_spans[k].end_y > run_max);
+
+			if (!zero_height && extends)
+			{
+				run_max = note_spans[k].end_y;
+				--write;
+				note_spans[write] = note_spans[k];
+			}
+			// else: covered by a later kept stripe in this block → drop
+		}
+
+		const std::size_t kept = size - write;
+		if (write > 0)
+			std::move(note_spans.begin() + write, note_spans.end(), note_spans.begin());
+		note_spans.resize(kept);
+	}
+
+	SIMPLE_PLAYER_FORCE_NO_INLINE void overlaps_removal_v0(
+		draw_data& data,
+		const auto& emit_span)
+	{
+		data.covered_intervals.clear();
+		data.covered_intervals.reserve(data.key_note_spans.size());
+
+		auto add_covered_interval = [&](float begin_y, float end_y)
+		{
+			if (begin_y >= end_y)
+				return;
+
+			auto insert_it = data.covered_intervals.begin();
+			while (insert_it != data.covered_intervals.end() && insert_it->end_y < begin_y)
+				++insert_it;
+
+			float merged_begin = begin_y;
+			float merged_end = end_y;
+			while (insert_it != data.covered_intervals.end() && insert_it->begin_y <= merged_end)
+			{
+				merged_begin = std::min(merged_begin, insert_it->begin_y);
+				merged_end = std::max(merged_end, insert_it->end_y);
+				insert_it = data.covered_intervals.erase(insert_it);
+			}
+
+			data.covered_intervals.insert(insert_it, {merged_begin, merged_end});
+		};
+
+		for (auto it = data.key_note_spans.rbegin(); it != data.key_note_spans.rend(); ++it)
+		{
+			float cursor = it->begin_y;
+			for (const auto& covered : data.covered_intervals)
+			{
+				if (covered.end_y <= cursor)
+					continue;
+				if (covered.begin_y >= it->end_y)
+					break;
+
+				if (covered.begin_y > cursor)
+					emit_span(cursor, std::min(covered.begin_y, it->end_y), it->color);
+
+				cursor = std::max(cursor, covered.end_y);
+				if (cursor >= it->end_y)
+					break;
+			}
+
+			if (cursor < it->end_y)
+				emit_span(cursor, it->end_y, it->color);
+
+			add_covered_interval(it->begin_y, it->end_y);
+		}
+	}
+
+	SIMPLE_PLAYER_FORCE_NO_INLINE void draw(draw_data& data)
 	{
 		constexpr int total_white = draw_data::white_keys_count();
 
@@ -1495,15 +1866,35 @@ struct simple_player
 		memset(keyboard_colors, 0xFF, sizeof(draw_data::color) * total_white);
 		memset(keyboard_colors + total_white, 0x00, sizeof(draw_data::color) * (128 - total_white));
 
+		GLsizei white_fill_verts = 0;
+		GLsizei white_outline_verts = 0;
+
+		try
 		{
 			// lock against visuals.reset() which may be called by playback_thread on seek/restart.
 			std::lock_guard<std::mutex> visuals_lock(visuals.access_mutex);
 
 			visuals.cull_expired(int64_t(current_us) - data.scroll_window_us);
 
-			for (uint8_t index = 0; index < 128; ++index)
+			size_t queued_notes = 0;
+			for (const auto& queue : visuals.falling_notes)
+				queued_notes += queue.approximate_size();
+
+			const size_t fill_vert_capacity = queued_notes * 4;
+			const size_t outline_vert_capacity = queued_notes * 8;
+			if (data.note_verts.capacity() < fill_vert_capacity)
+				data.note_verts.reserve(fill_vert_capacity);
+			if (data.note_colors.capacity() < fill_vert_capacity)
+				data.note_colors.reserve(fill_vert_capacity);
+			if (data.outline_verts.capacity() < outline_vert_capacity)
+				data.outline_verts.reserve(outline_vert_capacity);
+			if (data.outline_colors.capacity() < outline_vert_capacity)
+				data.outline_colors.reserve(outline_vert_capacity);
+
+			auto batch_notes_for_index = [&](int index)
 			{
 				uint8_t key = data.key_n[index];
+				data.key_note_spans.clear();
 
 				for (auto it = visuals.falling_notes[key].begin();
 					it != visuals.falling_notes[key].end(); ++it)
@@ -1522,67 +1913,184 @@ struct simple_player
 					if (end_time != ~0ULL)
 						end_y = float(end_offset) / float(data.scroll_window_us);
 
-					if (end_y < -0.01f || begin_y > 1.01f)
+					if (begin_y > 1.01f)
+						break; // Queue is ordered by start_time_us, so later notes are even further above view.
+
+					if (end_y < -0.01f)
 						continue;
 
-					auto color_value = rotate(0xFF7F008F, note.track_id);
+					data.key_note_spans.push_back({
+						std::clamp(begin_y, 0.f, 1.f),
+						std::clamp(end_y, 0.f, 1.f),
+						note.track_id,
+						rotate(0xFF7F008F, note.track_id),
+						begin_y <= 0 && end_y >= 0
+					});
+				}
 
-					if (begin_y <= 0 && end_y >= 0)
-					{
-						keyboard_colors[index] = draw_data::color{
-							.r = uint8_t(color_value >> 24),
-							.g = uint8_t(color_value >> 16),
-							.b = uint8_t(color_value >> 8),
-						};
-					}
+				if (data.key_note_spans.empty())
+					return;
 
-					begin_y = std::clamp(begin_y, 0.f, 1.f);
-					end_y = std::clamp(end_y, 0.f, 1.f);
+				for (auto it = data.key_note_spans.rbegin(); it != data.key_note_spans.rend(); ++it)
+				{
+					if (!it->touches_keyboard)
+						continue;
 
+					keyboard_colors[index] = {
+						uint8_t(it->color >> 24),
+						uint8_t(it->color >> 16),
+						uint8_t(it->color >> 8),
+					};
+					break;
+				}
+
+				const float lx = data.keyboard[index].tl.x;
+				const float rx = data.keyboard[index].tr.x;
+
+				auto emit_span = [&](float begin_y, float end_y, uint32_t color_value)
+				{
 					begin_y = data.keyboard->tr.y + data.height * begin_y;
 					end_y = data.keyboard->tr.y + data.height * end_y;
 
-					//begin_y = (data.keyboard->tr.y + draw_data::HEIGHT) * (1 - begin_y) + (begin_y)*data.keyboard->tr.y;
-					//end_y = (data.keyboard->tr.y + draw_data::HEIGHT) * (1 - end_y) + (end_y)*data.keyboard->tr.y;
+					const draw_data::note_color note_color{
+						uint8_t(color_value >> 24),
+						uint8_t(color_value >> 16),
+						uint8_t(color_value >> 8),
+						0xFF
+					};
 
-					__glcolor(color_value | 0xFF);
+					const draw_data::note_color note_color_shady{
+						scale<0.5f>(note_color.r),
+						scale<0.5f>(note_color.g),
+						scale<0.5f>(note_color.b),
+						0xFF
+					};
 
-					glBegin(GL_QUADS);
-					glVertex2f(data.keyboard[index].tl.x, begin_y);
-					glVertex2f(data.keyboard[index].tl.x, end_y);
-					glVertex2f(data.keyboard[index].tr.x, end_y);
-					glVertex2f(data.keyboard[index].tr.x, begin_y);
-					glEnd();
+					const draw_data::note_color note_border_col{
+						scale<0.25f>(note_color.r),
+						scale<0.25f>(note_color.g),
+						scale<0.25f>(note_color.b),
+						0xFF
+					};
 
-					__glcolor(mul255_div_by_factor(color_value, 2) | 0xFF);
-					glBegin(GL_LINE_LOOP);
-					glVertex2f(data.keyboard[index].tl.x, begin_y);
-					glVertex2f(data.keyboard[index].tl.x, end_y);
-					glVertex2f(data.keyboard[index].tr.x, end_y);
-					glVertex2f(data.keyboard[index].tr.x, begin_y);
-					glEnd();
+					data.note_verts.push_back({lx, begin_y});
+					data.note_verts.push_back({lx, end_y});
+					data.note_verts.push_back({rx, end_y});
+					data.note_verts.push_back({rx, begin_y});
+
+					data.note_colors.push_back(note_color);
+					data.note_colors.push_back(note_color);
+					data.note_colors.push_back(note_color_shady);
+					data.note_colors.push_back(note_color_shady);
+
+					data.outline_verts.push_back({lx, begin_y}); data.outline_verts.push_back({lx, end_y});
+					data.outline_verts.push_back({lx, end_y});   data.outline_verts.push_back({rx, end_y});
+					data.outline_verts.push_back({rx, end_y});   data.outline_verts.push_back({rx, begin_y});
+					data.outline_verts.push_back({rx, begin_y}); data.outline_verts.push_back({lx, begin_y});
+
+					for (int e = 0; e < 8; ++e)
+						data.outline_colors.push_back(note_border_col);
+				};
+
+				if (data.remove_overlaps <= draw_data::MAX_OVERLAPS_REMOVAL_VERSION)
+				{
+					if (data.remove_overlaps == 0)
+					{
+						overlaps_removal_v0(data, emit_span);
+						return;
+					}
+					else if (data.remove_overlaps == 1)
+					{
+						overlaps_removal_v1(data.key_note_spans);
+						// [[fallthrough]];
+					}
 				}
-			}
+
+				for (const auto& span : data.key_note_spans)
+					emit_span(span.begin_y, span.end_y, span.color);
+			};
+
+			// White key notes first (drawn behind), record split point, then black key notes on top
+			for (int index = 0; index < total_white; ++index)
+				batch_notes_for_index(index);
+
+			white_fill_verts    = static_cast<GLsizei>(data.note_verts.size());
+			white_outline_verts = static_cast<GLsizei>(data.outline_verts.size());
+			for (int index = total_white; index < 128; ++index)
+				batch_notes_for_index(index);
 		}
-		
+		catch (const std::bad_alloc&)
+		{
+			handle_memory_failure(true);
+			return;
+		}
+
+		// Draw order: white fills, white outlines, black fills, black outlines.
+		// Matches original per-note ordering so black notes fully overdraw white note outlines.
+		glEnableClientState(GL_VERTEX_ARRAY);
+		glEnableClientState(GL_COLOR_ARRAY);
+
+		if (!data.note_verts.empty())
+		{
+			const GLsizei total_fill    = static_cast<GLsizei>(data.note_verts.size());
+			const GLsizei total_outline = static_cast<GLsizei>(data.outline_verts.size());
+
+			glVertexPointer(2, GL_FLOAT, 0, data.note_verts.data());
+			glColorPointer(4, GL_UNSIGNED_BYTE, 0, data.note_colors.data());
+			glDrawArrays(GL_QUADS, 0, white_fill_verts);                           // white fills
+
+			glVertexPointer(2, GL_FLOAT, 0, data.outline_verts.data());
+			glColorPointer(4, GL_UNSIGNED_BYTE, 0, data.outline_colors.data());
+			glDrawArrays(GL_LINES, 0, white_outline_verts);                        // white outlines
+
+			glVertexPointer(2, GL_FLOAT, 0, data.note_verts.data());
+			glColorPointer(4, GL_UNSIGNED_BYTE, 0, data.note_colors.data());
+			glDrawArrays(GL_QUADS, white_fill_verts, total_fill - white_fill_verts);    // black fills
+
+			glVertexPointer(2, GL_FLOAT, 0, data.outline_verts.data());
+			glColorPointer(4, GL_UNSIGNED_BYTE, 0, data.outline_colors.data());
+			glDrawArrays(GL_LINES, white_outline_verts, total_outline - white_outline_verts); // black outlines
+
+			data.note_verts.clear();
+			data.note_colors.clear();
+			data.outline_verts.clear();
+			data.outline_colors.clear();
+		}
+
+		glDisableClientState(GL_COLOR_ARRAY);
+		glDisableClientState(GL_VERTEX_ARRAY);
+
 		glBegin(GL_QUADS);
 		for (uint8_t i = 0; i < 128; ++i)
 		{
 			const auto& key = data.keyboard[i];
 			auto color = keyboard_colors[i];
-			
+			uint8_t glare = 0;
+
 			if (color.r == 0 && color.g == 0 && color.b == 0)
 			{
 				if (i < total_white)
+				{
 					color = {1, 1, 1};
+					glare = 0xAF;
+				}
 				else
+				{
 					color = {0, 0, 0};
+					glare = 48;
+				}
 			}
 
-			glColor3ub(color.r, color.g, color.b);
+			glColor3ub(scale<0.9f>(color.r) + glare, scale<0.9f>(color.g) + glare, scale<0.9f>(color.b) + glare);
 			glVertex2f(key.tl.x, key.tl.y);
+
+			glColor3ub(color.r, color.g, color.b);
 			glVertex2f(key.tr.x, key.tr.y);
+
+			glColor3ub(scale<0.9f>(color.r) + glare, scale<0.9f>(color.g) + glare, scale<0.9f>(color.b) + glare);
 			glVertex2f(key.br.x, key.br.y);
+
+			glColor3ub(color.r, color.g, color.b);
 			glVertex2f(key.bl.x, key.bl.y);
 		}
 		glEnd();
@@ -1633,28 +2141,26 @@ struct simple_player
 	}
 
 private:
-
-	static uint32_t mul255_div_by_factor(uint32_t rgba, uint32_t divisor)
+	void handle_memory_failure(bool report_now = false)
 	{
-		// Works well when divisor is small constant: 2,3,4,5,6,8,10,...
-		// divisor must be > 0
+		state.memory_failure.store(true, std::memory_order_release);
+		state.stop_requested.store(true, std::memory_order_release);
+		state.seek_requested.store(false, std::memory_order_release);
+		state.seeking_ff.store(false, std::memory_order_release);
+		state.parser_done.store(true, std::memory_order_release);
+		state.paused.store(false, std::memory_order_release);
+		info.open_complete = true;
 
-		constexpr uint32_t MAGIC_R = (1u << 24) / 255u + 1;  // ~ 0x01010101 when using 1<<24
+		if (report_now)
+			report_memory_failure_once();
+	}
 
-		// 1. unpack
-		uint32_t rb = rgba & 0x00FF00FFu;          // R and B in low 8 bits each
-		uint32_t ga = (rgba >> 8) & 0x00FF00FFu;   // G and A
+	void report_memory_failure_once()
+	{
+		if (memory_failure_reported.exchange(true, std::memory_order_acq_rel))
+			return;
 
-		// 2. multiply + add rounding bias
-		rb = ((rb * MAGIC_R) >> 24) / divisor;
-		ga = ((ga * MAGIC_R) >> 24) / divisor;
-
-		// 3. saturate (optional but strongly recommended)
-		rb += ((rb >> 8) & 1) * 0x00FF00FFu;   // cheap saturate to 255
-		ga += ((ga >> 8) & 1) * 0x00FF00FFu;
-
-		// 4. repack
-		return (ga << 8) | rb;
+		throw_alert_error("Not enough memory to play this MIDI. Playback was stopped.");
 	}
 
 	static uint32_t rotate(uint32_t color, uint32_t shift)
@@ -1879,7 +2385,7 @@ private:
 			return false;
 
 		if (track_expected_size != cur - raw_track_data_begin)
-			warnings->report({static_cast<ptrdiff_t>(track_expected_size), cur - raw_track_data_begin}, "Track size mismatch");
+			(*warnings) << log_event{log_event_type::track_size_mismatch, (uint64_t)track_expected_size, (uint64_t)(cur - raw_track_data_begin)};
 
 		info.ticks_length = std::max(current_tick, info.ticks_length);
 
@@ -1979,7 +2485,8 @@ private:
 			if (midiOutOpen(&hout_copy, device, 0, 0, 0) != MMSYSERR_NOERROR)
 			{
 				std::wstring name = devices[device].szPname;
-				auto readable_name = std::string(name.begin(), name.end());
+				std::string readable_name(name.size(), '\0');
+				std::transform(name.begin(), name.end(), readable_name.begin(), [](wchar_t c) { return static_cast<char>(c); });
 				throw_alert_error("Unable to open MIDI out '" + readable_name + "'!");
 				hout = nullptr;
 			}
@@ -2023,6 +2530,7 @@ private:
 
 	std::shared_ptr<logger_base> warnings;
 
+	std::wstring current_filename;
 	std::unique_ptr<bbb_mmap> mmap;
 
 	midi_info info;
@@ -2032,6 +2540,8 @@ private:
 	size_t current_device = ~0ULL;
 	std::vector<MIDIOUTCAPSW> devices;
 	inline static std::atomic<HMIDIOUT> hout;
+	std::atomic<bool> memory_failure_reported{false};
+	std::atomic<bool> cancel_requested{false};
 
 	void(WINAPI* short_msg)(uint32_t msg) = nullptr;
 	bool(WINAPI* kdmapi_status)() = nullptr;
@@ -2070,6 +2580,7 @@ struct player_viewer : public handleable_ui_part
 
 		data->move(dx, dy);
 	}
+
 	void safe_change_position(float NewX, float NewY) override
 	{
 		std::lock_guard<std::recursive_mutex> locker(lock);
@@ -2079,6 +2590,7 @@ struct player_viewer : public handleable_ui_part
 
 		safe_move(NewX, NewY);
 	}
+
 	void safe_change_position_argumented(std::uint8_t Arg, float NewX, float NewY) override
 	{
 		std::lock_guard<std::recursive_mutex> locker(lock);
@@ -2092,6 +2604,7 @@ struct player_viewer : public handleable_ui_part
 				) * data->height;
 		safe_change_position(NewX + CW, NewY + CH);
 	}
+
 	void rescale_and_reposition(float new_xpos, float new_ypos, float new_width, float new_height)
 	{
 		std::lock_guard<std::recursive_mutex> locker(lock);
@@ -2104,14 +2617,17 @@ struct player_viewer : public handleable_ui_part
 		data->reinit(new_width, new_height, data->last_keyboard_height * width_factor_change, data->last_keyboard_height * width_factor_change * black_relative_height, 0.f);
 		data->move(new_xpos - 0.5f * data->width, new_ypos);
 	}
+
 	void keyboard_handler(char) override
 	{
 		return;
 	}
+
 	void safe_string_replace(std::string) override
 	{
 		return;
 	}
+
 	[[nodiscard]] bool mouse_handler(float, float, char, char) override
 	{
 		return false;

@@ -9,12 +9,13 @@ struct midi_processor_visualiser : handleable_ui_part
 {
 	std::pair<
 		midi_collection_threaded_merger::proc_data_ptr,
-		midi_collection_threaded_merger::message_buffer_ptr> SMRP;
+		midi_collection_threaded_merger::message_buffer_ptr> processor_readeable_data;
 
 	float x_pos, y_pos;
 	bool processing, finished, hovered;
 
 	std::unique_ptr<single_text_line> stl_log, stl_warn, stl_err, stl_info;
+	log_event log_event, warning_event, error_event, info_event;
 
 	midi_processor_visualiser(float xpos, float ypos, single_text_line_settings* stls)
 	{
@@ -25,16 +26,16 @@ struct midi_processor_visualiser : handleable_ui_part
 		auto base_rgba = stls->rgba_color;
 		stls->rgba_color = 0xFFFFFFFF;
 		stls->set_new_pos(xpos, ypos - 20);
-		this->stl_log.reset(stls->create_one("_"));
+		this->stl_log.reset(stls->create_one(" "));
 		stls->rgba_color = 0xFFFF00FF;
 		stls->set_new_pos(xpos, ypos - 30);
-		this->stl_warn.reset(stls->create_one("_"));
+		this->stl_warn.reset(stls->create_one(" "));
 		stls->rgba_color = 0xFF3F00FF;
 		stls->set_new_pos(xpos, ypos - 40);
-		this->stl_err.reset(stls->create_one("_"));
+		this->stl_err.reset(stls->create_one(" "));
 		stls->rgba_color = 0xFFFFFFFF;
 		stls->set_new_pos(xpos, ypos + 40);
-		this->stl_info.reset(stls->create_one("_"));
+		this->stl_info.reset(stls->create_one(" "));
 		stls->rgba_color = base_rgba;
 	}
 
@@ -81,42 +82,50 @@ struct midi_processor_visualiser : handleable_ui_part
 
 	void set_smrp(std::pair<
 		midi_collection_threaded_merger::proc_data_ptr,
-		midi_collection_threaded_merger::message_buffer_ptr>& smrp)
+		midi_collection_threaded_merger::message_buffer_ptr> data)
 	{
 		std::lock_guard locker(lock);
-		SMRP = smrp;
+		processor_readeable_data = std::move(data);
 	}
-
 
 	void update_info()
 	{
-		if (!SMRP.first || !SMRP.second)
+		if (!processor_readeable_data.first || !processor_readeable_data.second)
 			return;
 
 		std::lock_guard locker(lock);
-		auto& logger_ptr = SMRP.second;
+		auto& logger_ptr = processor_readeable_data.second;
 
-		auto last_logger_line = logger_ptr->log->get_last();
-		if (last_logger_line != stl_log->current_text)
-			stl_log->safe_string_replace(last_logger_line);
+		auto last_log = logger_ptr->log->get_last_event();
+		if (last_log != this->log_event)
+		{
+			this->log_event = last_log;
+			stl_log->safe_string_replace(logger_ptr->log->get_last());
+		}
 
-		auto last_warning_line = logger_ptr->warning->get_last();
-		if (last_warning_line != stl_warn->current_text)
-			stl_warn->safe_string_replace(last_warning_line);
+		auto last_warning = logger_ptr->warning->get_last_event();
+		if (last_warning != this->warning_event)
+		{
+			this->warning_event = last_warning;
+			stl_warn->safe_string_replace(logger_ptr->warning->get_last());
+		}
 
-		auto last_error_line = logger_ptr->error->get_last();
-		if (last_error_line != stl_err->current_text)
-			stl_err->safe_string_replace(last_error_line);
+		auto last_error = logger_ptr->error->get_last_event();
+		if (last_error != this->error_event)
+		{
+			this->error_event = last_error;
+			stl_err->safe_string_replace(logger_ptr->error->get_last());
+		}
 
-		if (processing != SMRP.second->processing)
-			processing = SMRP.second->processing;
-		if (finished != SMRP.second->finished)
-			finished = SMRP.second->finished;
-		auto t = std::to_string((SMRP.second->last_input_position * 100.) / (SMRP.first->settings.details.initial_filesize)).substr(0, 5) + "%";
+		if (processing != processor_readeable_data.second->processing)
+			processing = processor_readeable_data.second->processing;
+		if (finished != processor_readeable_data.second->finished)
+			finished = processor_readeable_data.second->finished;
+		auto t = std::to_string((processor_readeable_data.second->last_input_position * 100.) / (processor_readeable_data.first->settings.details.initial_filesize)).substr(0, 5) + "%";
 
 		if (hovered && processing)
 		{
-			t = SMRP.first->appearance_filename.substr(0, 30) + " " + t;
+			t = processor_readeable_data.first->appearance_filename.substr(0, 30) + " " + t;
 			stl_info->safe_color_change(0x9FCFFFFF);
 		}
 		else
@@ -131,15 +140,16 @@ struct midi_processor_visualiser : handleable_ui_part
 	void draw() override
 	{
 		std::lock_guard locker(lock);
-		if (!SMRP.first || !SMRP.second)
+
+		if (!processor_readeable_data.first || !processor_readeable_data.second)
 		{
-			if (stl_err->current_text != "SMRP is NULL!")
-				stl_err->safe_string_replace("SMRP is NULL!");
+			if (stl_err->current_text != "No source")
+				stl_err->safe_string_replace("No source");
 		}
 		else
 		{
-			if (stl_err->current_text == "SMRP is NULL!")
-				stl_err->safe_string_replace("_");
+			if (stl_err->current_text == "No source")
+				stl_err->safe_string_replace(" ");
 			update_info();
 		}
 

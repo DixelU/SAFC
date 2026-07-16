@@ -9,6 +9,7 @@
 #include "../btree/btree_map.h"
 #include "../integers.h"
 
+#include <boost/container/deque.hpp>
 #include <boost/container/flat_map.hpp>
 
 #define MTrk 1297379947
@@ -54,20 +55,20 @@ struct single_midi_info_collector
 
 	struct note_on_off_counter
 	{
-		std::int64_t note_on;
-		std::int64_t note_off;
+		std::uint64_t note_on;
+		std::uint64_t note_off;
 
 		note_on_off_counter() :
 			note_on(0), note_off(0)
 		{}
 
-		note_on_off_counter(std::int64_t Base) :
+		note_on_off_counter(std::uint64_t base) :
 			note_on_off_counter()
 		{
-			if (Base > 0)
-				note_on += Base;
+			if (base > 0)
+				note_on += base;
 			else
-				note_off -= Base;
+				note_off -= base;
 		}
 
 		note_on_off_counter(std::int64_t NOn, std::int64_t NOff) :
@@ -81,7 +82,7 @@ struct single_midi_info_collector
 
 		note_on_off_counter inline operator +(std::int64_t offset)
 		{
-			if (offset > 0)
+			if (offset >= 0)
 				note_on += offset;
 			else
 				note_off -= offset;
@@ -131,6 +132,7 @@ struct single_midi_info_collector
 	using time_graph = boost::container::flat_map<std::int64_t, long_time>;
 	using der_polyphony_graph = btree::btree_map<std::int64_t, note_on_off_counter>;
 	using polyphony_graph = btree::btree_map<std::int64_t, std::int64_t>;
+	using notes_per_second_graph = btree::btree_map<std::int64_t, std::int64_t>;
 
 	bool processing, finished;
 
@@ -141,6 +143,7 @@ struct single_midi_info_collector
 	time_graph internal_time_map;
 	tempo_graph tempo_map;
 	polyphony_graph polyphony;
+	notes_per_second_graph notes_per_second;
 
 	std::vector<track_data> tracks;
 	std::uint16_t ppq;
@@ -169,6 +172,12 @@ struct single_midi_info_collector
 		tempo_map[0] = tempo_event(0x7, 0xA1, 0x20);
 		poly_differences[-1] = note_on_off_counter();
 
+		for (int i = 0; i < 12 && file_input.good(); i++)
+			static_cast<void>(file_input.get());
+
+		ppq = ((std::uint16_t)file_input.get()) << 8;
+		ppq |= ((std::uint16_t)file_input.get());
+
 		while (file_input.good())
 		{
 			std::array<std::uint64_t, 4096> polyphony;
@@ -196,6 +205,8 @@ struct single_midi_info_collector
 				current_tick += vlv;
 				if (last_tick < current_tick)
 					last_tick = current_tick;
+
+				auto& current_poly_diff = poly_differences[current_tick];
 
 				std::uint8_t event_type = file_input.get();
 				if (event_type == 0xFF)
@@ -235,7 +246,6 @@ struct single_midi_info_collector
 				{
 					rsb_byte = event_type;
 					int change = (event_type & 0x10) ? 1 : -1;
-					auto it = poly_differences.find(current_tick);
 					auto key = file_input.get();
 					auto volume = file_input.get();
 
@@ -252,10 +262,7 @@ struct single_midi_info_collector
 					else 
 						polyphony[index] += 1;
 
-					if (it == poly_differences.end())
-						poly_differences[current_tick] = change;
-					else
-						it->second += change;
+					current_poly_diff += change;
 				}
 				else if ((event_type >= 0xA0 && event_type <= 0xBF) ||
 					(event_type >= 0xE0 && event_type <= 0xEF))
@@ -292,7 +299,6 @@ struct single_midi_info_collector
 					if (event_type >= 0x80 && event_type <= 0x9F)
 					{
 						int change = (event_type & 0x10) ? 1 : -1;
-						auto it = poly_differences.find(current_tick);
 						auto volume = file_input.get();
 
 						if (!volume && change == 1)
@@ -308,13 +314,9 @@ struct single_midi_info_collector
 						else
 							polyphony[index] += 1;
 
-						if (it == poly_differences.end())
-							poly_differences[current_tick] = change;
-						else
-							it->second += change;
+						current_poly_diff += change;
 					}
-					else if ((event_type >= 0xA0 && event_type <= 0xBF) ||
-						(event_type >= 0xE0 && event_type <= 0xEF))
+					else if ((event_type >= 0xA0 && event_type <= 0xBF) || (event_type >= 0xE0 && event_type <= 0xEF))
 					{
 						file_input.get();
 					}
@@ -335,7 +337,7 @@ struct single_midi_info_collector
 		poly_differences[last_tick + 1] = 0;
 
 		std::int64_t current_poly = 0;
-		for (auto & cur_pair : poly_differences)
+		for (const auto & cur_pair : poly_differences)
 			polyphony[cur_pair.first] = (current_poly += cur_pair.second);
 
 		long_time time;
@@ -353,6 +355,48 @@ struct single_midi_info_collector
 			previous_tick = tick;
 			previous_tempo = tempo_data.get_raw();
 		}
+
+		using uint128_t = dixelu::long_uint<0>;
+		auto get_time_numerator_at_tick = [&](std::int64_t tick)
+		{
+			auto tempo_it = tempo_map.upper_bound(tick);
+			if (tempo_it != tempo_map.begin())
+				--tempo_it;
+
+			const auto time_it = internal_time_map.find(tempo_it->first);
+			uint128_t result = time_it->second.numerator;
+
+			if (tick > tempo_it->first)
+				result += uint128_t{ static_cast<std::uint64_t>(tick - tempo_it->first) } * tempo_it->second.get_raw();
+
+			return result;
+		};
+
+		using custom_block_size = boost::container::deque_options<boost::container::block_bytes<(1u << 16)>>::type;
+		boost::container::deque<std::pair<uint128_t, std::int64_t>, void, custom_block_size> recent_note_hits;
+
+		const uint128_t one_second = time.denominator;
+		std::int64_t rolling_note_hits = 0;
+
+		for (const auto& [tick, poly_diff] : poly_differences)
+		{
+			const auto current_time = get_time_numerator_at_tick(tick);
+
+			recent_note_hits.emplace_back(current_time, poly_diff.note_on);
+			rolling_note_hits += poly_diff.note_on;
+
+			while (!recent_note_hits.empty() && (current_time - recent_note_hits.front().first) > one_second)
+			{
+				rolling_note_hits -= recent_note_hits.front().second;
+				recent_note_hits.pop_front();
+			}
+
+			notes_per_second[tick] = rolling_note_hits;
+		}
+
+		const auto tail_tick = static_cast<std::int64_t>(last_tick) + 1;
+		if (notes_per_second.rbegin()->first < tail_tick)
+			notes_per_second[tail_tick] = notes_per_second.rbegin()->second;
 
 		finished = true;
 		processing = false;

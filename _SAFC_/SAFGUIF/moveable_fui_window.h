@@ -242,19 +242,21 @@ struct moveable_fui_window : public moveable_window
 		bool in_header = false;
 
 		// close button
-		if (in_header |= point_in_poly(close_button_x, close_button_y, mx, my))
+		if (in_header |= static_cast<bool>(point_in_poly(close_button_x, close_button_y, mx, my)))
 		{
 			if (button_btn && state == 1)
 			{
 				drawable = false;
 				cursor_follow_mode = false;
+				if (on_close)
+					on_close();
 				return true;
 			}
 			else if (!button_btn)
 				hovered_close_button = true;
 		}
 		// window header
-		else if (in_header |= point_in_poly(header_geometry_x, header_geometry_y, mx, my))
+		else if (in_header |= static_cast<bool>(point_in_poly(header_geometry_x, header_geometry_y, mx, my)))
 		{
 			if (button_btn == -1)
 			{

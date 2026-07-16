@@ -1,7 +1,7 @@
 #pragma once
 
-#ifndef SAF_SMRP2
-#define SAF_SMRP2
+#ifndef SAF_SMPR2
+#define SAF_SMPR2
 
 #include <string>
 #include <vector>
@@ -26,47 +26,95 @@
 
 #include "../function_wrapper.h"
 
+enum class log_event_type : uint8_t
+{
+	none,
+	empty_buffer,
+	preparing_buffer,
+	sorting_buffer,
+	copying_buffer,
+	tracks_processed,
+	processing_failed,
+	sorting_failed,
+	off_of_non_on_note,
+	incorrect_note_ref,
+	unexpected_zero_rsb,
+	unknown_event_type,
+	unexpected_end_of_buffer,
+	track_size_mismatch,
+};
+
+struct log_event
+{
+	log_event_type type = log_event_type::none;
+	uint64_t param1 = 0;
+	uint64_t param2 = 0;
+
+	bool operator==(const log_event& rhs) const = default;
+
+	static std::string to_display_string(const log_event& e)
+	{
+		switch (e.type)
+		{
+		case log_event_type::empty_buffer:
+			return "Empty buffer";
+		case log_event_type::preparing_buffer:
+			return "Preparing buffer (size: " + std::to_string(e.param1) + ")";
+		case log_event_type::sorting_buffer:
+			return "Sorting buffer (elements: " + std::to_string(e.param1) + ")";
+		case log_event_type::copying_buffer:
+			return "Copying buffer (elements: " + std::to_string(e.param1) + ")";
+		case log_event_type::tracks_processed:
+			return std::to_string(e.param1) + " tracks processed. (" + std::to_string(e.param2) + ") new.";
+		case log_event_type::processing_failed:
+			return "Something went wrong during processing";
+		case log_event_type::sorting_failed:
+			return "Something went wrong during sorting";
+		case log_event_type::off_of_non_on_note:
+			return std::to_string(e.param1) + ": OFF of nonON Note: " + std::to_string(e.param2);
+		case log_event_type::incorrect_note_ref:
+			return std::to_string(e.param1) + ": Incorrect index of note reference " + std::to_string(e.param2);
+		case log_event_type::unexpected_zero_rsb:
+			return std::to_string(e.param1) + ": Unexpected 0 RSB";
+		case log_event_type::unknown_event_type:
+			return std::to_string(e.param1) + ": Unknown event type " + std::to_string(e.param2);
+		case log_event_type::unexpected_end_of_buffer:
+			return "B*" + std::to_string(e.param1) + ": unexpected end of buffer";
+		case log_event_type::track_size_mismatch:
+			return "Track size mismatch (expected " + std::to_string(e.param1) + ", got " + std::to_string(e.param2) + ")";
+		default:
+			return "";
+		}
+	}
+};
+
 struct logger_base
 {
 	virtual ~logger_base() = default;
-	virtual void operator<<(std::string&& message) {};
-	virtual std::string get_last() const { return ""; };
-
-	virtual void report(std::vector<std::ptrdiff_t> data, std::string&& message)
-	{
-		std::string accumulator = "{";
-
-		for (size_t i = 0; i < data.size(); ++i)
-		{
-			accumulator += std::to_string(data[i]);
-			if (i + 1 < data.size())
-				accumulator += ", ";
-		}
-		accumulator += "}";
-
-		operator<<(std::move(accumulator) + ": " + std::move(message));
-	};
+	virtual void operator<<(log_event event) {}
+	virtual log_event get_last_event() const { return {}; }
+	std::string get_last() const { return log_event::to_display_string(get_last_event()); }
 };
 
 struct logger :
 	public logger_base
 {
 protected:
-	std::vector<std::string> messages;
+	std::vector<log_event> messages;
 	mutable std::mutex mtx;
 public:
 	~logger() override {}
-	void operator<<(std::string&& message) override
+	void operator<<(log_event event) override
 	{
 		std::lock_guard locker(mtx);
-		messages.push_back(std::move(message));
+		messages.push_back(event);
 	}
-	std::string get_last() const override
+	log_event get_last_event() const override
 	{
 		std::lock_guard locker(mtx);
-		return (messages.size()) ? messages.back() : "";
+		return messages.empty() ? log_event{} : messages.back();
 	}
-	std::vector<std::string> get_all() const
+	std::vector<log_event> get_all() const
 	{
 		std::lock_guard locker(mtx);
 		return messages;
@@ -77,19 +125,18 @@ struct singleline_logger :
 	public logger
 {
 protected:
-	std::string message;
-	mutable std::mutex mtx;
+	log_event current_event{};
 public:
 	~singleline_logger() override {}
-	void operator<<(std::string&& message) override
+	void operator<<(log_event event) override
 	{
 		std::lock_guard locker(mtx);
-		this->message = std::move(message);
+		current_event = event;
 	}
-	std::string get_last() const override
+	log_event get_last_event() const override
 	{
 		std::lock_guard locker(mtx);
-		return message;
+		return current_event;
 	}
 };
 
@@ -100,11 +147,11 @@ public:
 	std::string color;
 	printing_logger(std::string color = "37") : color(std::move(color)) {}
 	~printing_logger() override {}
-	void operator<<(std::string&& message) override
+	void operator<<(log_event event) override
 	{
 		std::lock_guard locker(mtx);
-		this->message = std::move(message);
-		std::osyncstream(std::cout) << "\x1b[0;" + color + "m " << this->message << "\x1b[0m" << std::endl;
+		current_event = event;
+		std::osyncstream(std::cout) << "\x1b[0;" + color + "m " << log_event::to_display_string(event) << "\x1b[0m" << std::endl;
 	}
 };
 
@@ -116,21 +163,24 @@ public:
 	nonrepeating_logger(std::string color = "37")
 		:printing_logger(color)
 	{}
-	void operator<<(std::string&& message) override
+	void operator<<(log_event event) override
 	{
-		if (message == "flush")
-			return used_messages.clear();
-
-		auto pos = message.find_last_of('}');
-		if (pos == std::string::npos)
-			pos = 0;
-
-		auto [it, success] = used_messages.insert(message.substr(pos));
-		if (success)
-			printing_logger::operator<<(std::move(message));
+		{
+			std::lock_guard locker(mtx);
+			auto [it, success] = used_events.insert(static_cast<uint8_t>(event.type));
+			if (!success)
+				return;
+			current_event = event;
+		}
+		std::osyncstream(std::cout) << "\x1b[0;" + color + "m " << log_event::to_display_string(event) << "\x1b[0m" << std::endl;
+	}
+	void flush_dedup()
+	{
+		std::lock_guard locker(mtx);
+		used_events.clear();
 	}
 private:
-	std::unordered_set<std::string> used_messages;
+	std::unordered_set<uint8_t> used_events;
 };
 
 struct single_midi_processor_2
@@ -367,7 +417,7 @@ struct single_midi_processor_2
 
 	FORCEDINLINE static void ostream_write(std::vector<base_type>& vec, std::ostream& out)
 	{
-		out.write(((char*)vec.data()), vec.size());;
+		out.write(((char*)vec.data()), vec.size());
 	}
 
 	FORCEDINLINE static uint8_t push_vlv(uint32_t value, std::vector<base_type>& vec)
@@ -493,9 +543,7 @@ struct single_midi_processor_2
 		template<typename _head, typename... _tail>
 		static size_t __total_size(const _head& head, const _tail&... tail)
 		{
-			return
-				size_of_contained_data(head) +
-				__total_size(tail...);
+			return size_of_contained_data(head) + __total_size(tail...);
 		}
 
 		template<typename _head, typename... _tail>
@@ -541,8 +589,8 @@ struct single_midi_processor_2
 			case 3: { copy_back_traits::copy_back(vec, get_value<uint16_t>(begin, 0), get_value<uint8_t>(begin, 2)); break; }
 			case 4: { copy_back_traits::copy_back(vec, get_value<uint32_t>(begin, 0)); break; }
 			case 5: { copy_back_traits::copy_back(vec, get_value<uint32_t>(begin, 0), get_value<uint8_t>(begin, 4)); break; }
-			case 6: { copy_back_traits::copy_back(vec, get_value<uint32_t>(begin, 0), get_value<uint16_t>(begin, 2)); break; }
-			case 7: { copy_back_traits::copy_back(vec, get_value<uint32_t>(begin, 0), get_value<uint16_t>(begin, 2), get_value<uint8_t>(begin, 6)); break; }
+			case 6: { copy_back_traits::copy_back(vec, get_value<uint32_t>(begin, 0), get_value<uint16_t>(begin, 4)); break; }
+			case 7: { copy_back_traits::copy_back(vec, get_value<uint32_t>(begin, 0), get_value<uint16_t>(begin, 4), get_value<uint8_t>(begin, 6)); break; }
 			case 8: { copy_back_traits::copy_back(vec, get_value<uint64_t>(begin, 0)); break; }
 
 			//case 9: { copy_back_traits::copy_back(vec, get_value<uint64_t>(begin, 0), get_value<uint8_t>(begin, 0 + 8)); break; }
@@ -550,8 +598,8 @@ struct single_midi_processor_2
 			//case 11: { copy_back_traits::copy_back(vec, get_value<uint64_t>(begin, 0), get_value<uint16_t>(begin, 0 + 8), get_value<uint8_t>(begin, 2 + 8)); break; }
 			//case 12: { copy_back_traits::copy_back(vec, get_value<uint64_t>(begin, 0), get_value<uint32_t>(begin, 0 + 8)); break; }
 			//case 13: { copy_back_traits::copy_back(vec, get_value<uint64_t>(begin, 0), get_value<uint32_t>(begin, 0 + 8), get_value<uint8_t>(begin, 4 + 8)); break; }
-			//case 14: { copy_back_traits::copy_back(vec, get_value<uint64_t>(begin, 0), get_value<uint32_t>(begin, 0 + 8), get_value<uint16_t>(begin, 2 + 8)); break; }
-			//case 15: { copy_back_traits::copy_back(vec, get_value<uint64_t>(begin, 0), get_value<uint32_t>(begin, 0 + 8), get_value<uint16_t>(begin, 2 + 8), get_value<uint8_t>(begin, 6 + 8)); break; }
+			//case 14: { copy_back_traits::copy_back(vec, get_value<uint64_t>(begin, 0), get_value<uint32_t>(begin, 0 + 8), get_value<uint16_t>(begin, 4 + 8)); break; }
+			//case 15: { copy_back_traits::copy_back(vec, get_value<uint64_t>(begin, 0), get_value<uint32_t>(begin, 0 + 8), get_value<uint16_t>(begin, 4 + 8), get_value<uint8_t>(begin, 6 + 8)); break; }
 			//case 16: { copy_back_traits::copy_back(vec, get_value<uint64_t>(begin, 0), get_value<uint64_t>(begin, 0 + 8)); break; }
 			default:
 			{
@@ -581,7 +629,7 @@ struct single_midi_processor_2
 	template<typename T>
 	FORCEDINLINE static bool is_valid_index(std::vector<base_type>& vec, size_t index)
 	{
-		return vec.size() <= index + sizeof(T);
+		return index + sizeof(T) <= vec.size();
 	}
 
 	struct data_buffers
@@ -683,7 +731,7 @@ struct single_midi_processor_2
 			if (command < 0x80)
 			{
 				is_good = false;
-				(*buffers.error) << (std::to_string(file_input.tellg()) + ": Unexpected 0 RSB");
+				(*buffers.error) << log_event{log_event_type::unexpected_zero_rsb, (uint64_t)(std::streamoff)file_input.tellg()};
 				break;
 			}
 
@@ -717,15 +765,14 @@ struct single_midi_processor_2
 					else
 					{
 						polyphony_error = true;
-						(*buffers.warning) << (std::to_string(file_input.tellg()) +
-							": Incorrect index of note reference " + std::to_string(other_note_reference));
+						(*buffers.warning) << log_event{log_event_type::incorrect_note_ref, (uint64_t)(std::streamoff)file_input.tellg(), (uint64_t)other_note_reference};
 					}
 				}
 				else
 				{
 					polyphony_error = true;
 					++noteoff_misses;
-					(*buffers.warning) << (std::to_string(file_input.tellg()) + ": OFF of nonON Note: " + std::to_string(noteoff_misses));
+					(*buffers.warning) << log_event{log_event_type::off_of_non_on_note, (uint64_t)(std::streamoff)file_input.tellg(), (uint64_t)noteoff_misses};
 				}
 
 				if (polyphony_error) [[unlikely]]
@@ -810,7 +857,7 @@ struct single_midi_processor_2
 				break;
 			}
 			default: {
-				(*buffers.error) << (std::to_string(file_input.tellg()) + ": Unknown event type " + std::to_string(command));
+				(*buffers.error) << log_event{log_event_type::unknown_event_type, (uint64_t)(std::streamoff)file_input.tellg(), (uint64_t)command};
 				break;
 			}
 			}
@@ -880,6 +927,9 @@ struct single_midi_processor_2
 
 	FORCEDINLINE static tick_type convert_ppq(tick_type value, ppq_type from, ppq_type to)
 	{
+		if (from == to)
+			return value;
+
 		constexpr auto radix = 1ull << 32;
 		auto hi = value >> 32;
 		auto lo = value & (~0u);
@@ -910,7 +960,7 @@ struct single_midi_processor_2
 		auto size = data_buffer.size();
 
 		if (size == 0) [[unlikely]]
-			return ((*buffers.log) << "Empty buffer"), false;
+			return ((*buffers.log) << log_event{log_event_type::empty_buffer}), false;
 
 		std::size_t i = 0;
 
@@ -920,7 +970,7 @@ struct single_midi_processor_2
 
 			if (i + 8 >= size) [[unlikely]]
 			{
-				(*buffers.error) << ("B*" + std::to_string(i) + ": unexpected end of buffer");
+				(*buffers.error) << log_event{log_event_type::unexpected_end_of_buffer, (uint64_t)i};
 				break;
 			}
 
@@ -959,7 +1009,7 @@ struct single_midi_processor_2
 	{
 		auto db_current = data_buffer.begin();
 
-#pragma pack (push, 1)
+#pragma pack (push, 4)
 		struct data
 		{
 			tick_type tick;
@@ -976,12 +1026,12 @@ struct single_midi_processor_2
 		auto size = data_buffer.size();
 
 		if (size == 0) // [[unlikely]]
-			return ((*buffers.log) << "Empty buffer (sort)"), false;
+			return ((*buffers.log) << log_event{log_event_type::empty_buffer}), false;
 		else
-			(*buffers.log) << "Prepairing buffer (size: " + std::to_string(size) + ")";
+			(*buffers.log) << log_event{log_event_type::preparing_buffer, size};
 
 		std::vector<data> data_pointers;
-		data_pointers.reserve(2500000);
+		data_pointers.reserve(data_buffer.size() / expected_size(base_type(0x80)));
 
 		tick_type i = 0;
 
@@ -991,7 +1041,7 @@ struct single_midi_processor_2
 
 			if (i + 8 >= size) // [[unlikely]]
 			{
-				(*buffers.error) << ("B*" + std::to_string(i) + ": unexpected end of buffer");
+				(*buffers.error) << log_event{log_event_type::unexpected_end_of_buffer, (uint64_t)i};
 				break;
 			}
 
@@ -1006,11 +1056,11 @@ struct single_midi_processor_2
 			i += di;
 		}
 
-		(*buffers.log) << "Sorting buffer (elements: " + std::to_string(data_pointers.size()) + ")";
+		(*buffers.log) << log_event{log_event_type::sorting_buffer, data_pointers.size()};
 
 		std::sort(data_pointers.begin(), data_pointers.end());
 
-		(*buffers.log) << "Copying buffer (elements: " + std::to_string(data_pointers.size()) + ")";
+		(*buffers.log) << log_event{log_event_type::copying_buffer, data_pointers.size()};
 
 		std::vector<base_type> sorted_data_buffer;
 		sorted_data_buffer.reserve(data_buffer.size());
@@ -1033,7 +1083,7 @@ struct single_midi_processor_2
 	{
 		std::multimap<base_type, event_transforming_filter> filters;
 
-		const event_transforming_filter selection_filter = [&selection_data = settings.selection_data]
+		const event_transforming_filter selection_filter = [&selection_data = settings.selection_data, &filter = settings.filter]
 		(const data_iterator& begin, const data_iterator& end, const data_iterator& cur, single_track_data& std_ref) -> bool
 		{
 			auto& tick = get_value<tick_type>(cur, tick_position);
@@ -1055,6 +1105,9 @@ struct single_midi_processor_2
 			case 0x90:
 			case 0x80:
 			{
+				if (!filter.pass_notes) [[unlikely]]
+					break;
+
 				bool is_note_on = channelless_type & 0x10;
 
 				auto& reference_event_pair = get_value<tick_type>(cur, event_param3);
@@ -1095,6 +1148,9 @@ struct single_midi_processor_2
 					case 0xA0:
 					case 0xB0:
 					{
+						if (!filter.pass_other)
+							break;
+
 						const auto& param1 = get_value<base_type>(cur, event_param1);
 						const auto& param2 = get_value<base_type>(cur, event_param2);
 						const std::uint16_t key = (type << 8) | (param1);
@@ -1103,8 +1159,15 @@ struct single_midi_processor_2
 						break;
 					}
 					case 0xC0:
+					{
+						if (filter.piano_only) [[likely]]
+							break;
+					}
 					case 0xD0:
 					{
+						if (!filter.pass_other)
+							break;
+
 						const auto& param = get_value<base_type>(cur, event_param1);
 						const std::uint16_t key = type;
 						auto& data = std_ref.selection_data.channel_events_at_selection_front[key];
@@ -1114,6 +1177,9 @@ struct single_midi_processor_2
 					}
 					case 0xE0:
 					{
+						if (!filter.pass_pitch)
+							break;
+
 						const auto& param1 = get_value<base_type>(cur, event_param1);
 						const auto& param2 = get_value<base_type>(cur, event_param2);
 						const std::uint16_t key = type;
@@ -1135,6 +1201,9 @@ struct single_midi_processor_2
 						{
 						case 0x51:
 						{
+							if (!filter.pass_tempo)
+								break;
+
 							constexpr auto base_position = get_meta_param_index(1, 0);
 							const auto& tempo_byte1 = get_value<base_type>(cur, base_position + 0);
 							const auto& tempo_byte2 = get_value<base_type>(cur, base_position + 1);
@@ -1145,20 +1214,24 @@ struct single_midi_processor_2
 						}
 						[[unlikely]] case 0x0A:
 						{
+							if (!filter.pass_other)
+								break;
+
 							constexpr auto base_position = get_meta_param_index(1, 0);
 
 							const auto& size = get_value<base_type>(cur, base_position);
 							if (size != 0x8 && size != 0xB) [[unlikely]]
 								break;
 
-							const auto& signature = get_value<base_type>(cur, base_position + 0);
+							const auto& signature = get_value<base_type>(cur, base_position + 1);
 							if (signature) [[unlikely]]
 								break;
+
 							std_ref.selection_data.frontal_color_event.is_empty = false;
 							std_ref.selection_data.frontal_color_event.size = size;
 							std_ref.selection_data.frontal_color_event.data[0] = signature;
 							for(size_t i = 1; i < size; ++i)
-								std_ref.selection_data.frontal_color_event.data[i] = get_value<base_type>(cur, event_param3 + i);
+								std_ref.selection_data.frontal_color_event.data[i] = get_value<base_type>(cur, base_position + i);
 							break;
 						}
 						default:
@@ -1168,11 +1241,13 @@ struct single_midi_processor_2
 					}
 					}
 				}
+
 				tick = disable_tick;
 			}
 
-			return false;
 			}
+
+			return false;
 		};
 
 		const event_transforming_filter program_transform = [filtering = settings.filter]
@@ -1316,8 +1391,11 @@ struct single_midi_processor_2
 			{
 				case 0xF0:
 				case 0xF7:
+				{
 					if (!filtering.pass_sysex)
 						tick = disable_tick;
+					break;
+				}
 				case 0xFF:
 				default: 
 					if (!filtering.pass_other)
@@ -1762,7 +1840,7 @@ struct single_midi_processor_2
 
 			if (i + 8 >= size) [[unlikely]]
 			{
-				(*buffers.error) << ("B*" + std::to_string(i) + ": unexpected end of buffer");
+				(*buffers.error) << log_event{log_event_type::unexpected_end_of_buffer, (uint64_t)i};
 				break;
 			}
 			
@@ -1803,7 +1881,7 @@ struct single_midi_processor_2
 							settings_obj::processing_details::dummy_event[1],
 							settings_obj::processing_details::dummy_event[2],
 							settings_obj::processing_details::dummy_event[3]);
-						rsb = settings_obj::processing_details::dummy_event[0];
+						rsb = 0;
 
 						delta -= current_delta;
 					}
@@ -1925,7 +2003,7 @@ struct single_midi_processor_2
 					process_buffer(track_buffers.data_buffer, filter_iters, track_processing_data, loggers);
 
 				if (!successful_processing)
-					(*loggers.error) << "Something went wrong during processing";
+					(*loggers.error) << log_event{log_event_type::processing_failed};
 				else
 					post_processing(track_buffers.data_buffer, track_processing_data, data);
 			}
@@ -1935,7 +2013,7 @@ struct single_midi_processor_2
 				bool successful_processing =
 					sort_buffer(track_buffers.data_buffer, track_processing_data, loggers);
 				if (!successful_processing)
-					(*loggers.error) << "Something went wrong during sorting";
+					(*loggers.error) << log_event{log_event_type::sorting_failed};
 			}
 
 			size_t current_count;
@@ -1968,7 +2046,7 @@ struct single_midi_processor_2
 			}
 
 			loggers.last_input_position = file_input.tellg();
-			(*loggers.log) << (std::to_string(track_counter) + " tracks processed. (" + std::to_string(current_count) + ") new.");
+			(*loggers.log) << log_event{log_event_type::tracks_processed, (uint64_t)track_counter, (uint64_t)current_count};
 		}
 
 		file_input.close();
@@ -1984,4 +2062,4 @@ struct single_midi_processor_2
 	}
 };
 
-#endif // SAF_SMRP2
+#endif // SAF_SMPR2

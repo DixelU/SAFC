@@ -2,6 +2,7 @@
 #ifndef SAFGUIF_TEXTBOX
 #define SAFGUIF_TEXTBOX
 
+#include <algorithm>
 #include <memory>
 
 #include "header_utils.h"
@@ -23,7 +24,8 @@ struct text_box : handleable_ui_part
 	single_text_line_settings& stls;
 
 	std::uint8_t border_width;
-	std::uint32_t rgba_border, rgba_background, symbols_per_line;
+	std::uint32_t rgba_border, rgba_background;
+	float available_text_width = 0.f;
 
 	~text_box() override
 	{
@@ -67,68 +69,123 @@ struct text_box : handleable_ui_part
 	{
 		std::lock_guard locker(lock);
 
+		lines.clear();
+
 		std::vector<std::vector<std::string>> split_text;
-		std::vector<std::string> paragraph;
-		std::string line;
+		std::vector<std::string> paragraph_words;
+		std::string word;
 
 		stls.set_new_pos(x_pos, y_pos + 0.5f * height + 0.5f * vertical_offset);
+
 		for (int i = 0; i < (int)text.size(); i++)
 		{
 			if (text[i] == ' ')
 			{
-				paragraph.push_back(line);
-				line.clear();
+				paragraph_words.push_back(word);
+				word.clear();
 			}
 			else if (text[i] == '\n')
 			{
-				paragraph.push_back(line);
-				line.clear();
-				split_text.push_back(paragraph);
-				paragraph.clear();
+				paragraph_words.push_back(word);
+				word.clear();
+				split_text.push_back(paragraph_words);
+				paragraph_words.clear();
 			}
-			else line.push_back(text[i]);
+			else
+			{
+				word.push_back(text[i]);
+			}
 			if (i == (int)text.size() - 1)
 			{
-				paragraph.push_back(line);
-				split_text.push_back(paragraph);
-				line.clear();
-				paragraph.clear();
+				paragraph_words.push_back(word);
+				split_text.push_back(paragraph_words);
+				word.clear();
+				paragraph_words.clear();
 			}
 		}
 
-		for (int i = 0; i < (int)split_text.size(); i++)
+		const float max_line_width = std::max(available_text_width, 0.f);
+		auto measure_line_width = [&](const std::string& candidate) -> float
 		{
-			auto& para = split_text[i];
-			auto& lines_ref = paragraph;
-			for (int q = 0; q < (int)para.size(); q++)
+			if (candidate.empty())
+				return 0.f;
+			std::unique_ptr<single_text_line> temp_line(stls.create_one(candidate));
+			return temp_line->calculated_width;
+		};
+		auto max_chunk_length = [&](const std::string& source) -> size_t
+		{
+			if (source.empty())
+				return 0;
+			size_t low = 1;
+			size_t high = source.size();
+			size_t best = 0;
+
+			while (low <= high)
 			{
-				if ((para[q].size() + 1 + line.size()) < symbols_per_line)
+				size_t mid = (low + high) / 2;
+				float width = measure_line_width(std::string(source.data(), mid));
+				if (width <= max_line_width)
 				{
-					if (line.size()) line = (line + " " + para[q]);
-					else line = para[q];
+					best = mid;
+					low = mid + 1;
 				}
 				else
 				{
-					if (line.size()) lines_ref.push_back(line);
-					line = para[q];
-				}
-				while (line.size() >= symbols_per_line)
-				{
-					paragraph.emplace_back(line.substr(0, symbols_per_line));
-					line = line.erase(0, symbols_per_line);
+					if (mid == 0)
+						break;
+					high = mid - 1;
 				}
 			}
-			paragraph.push_back(line);
-			line.clear();
+
+			return best ? best : 1;
+		};
+
+		std::vector<std::string> formatted_lines;
+		std::string current_line;
+
+		for (const auto& para : split_text)
+		{
+			for (const auto& para_word : para)
+			{
+				std::string candidate = current_line;
+				if (!candidate.empty())
+					candidate.push_back(' ');
+				candidate += para_word;
+
+				if (measure_line_width(candidate) <= max_line_width)
+				{
+					current_line = std::move(candidate);
+					continue;
+				}
+
+				if (!current_line.empty())
+				{
+					formatted_lines.push_back(current_line);
+					current_line.clear();
+				}
+
+				current_line = para_word;
+				while (!current_line.empty() && measure_line_width(current_line) > max_line_width)
+				{
+					size_t chunk_len = max_chunk_length(current_line);
+					formatted_lines.emplace_back(current_line.substr(0, chunk_len));
+					current_line.erase(0, chunk_len);
+					while (!current_line.empty() && current_line.front() == ' ')
+						current_line.erase(0, 1);
+				}
+			}
+
+			formatted_lines.push_back(current_line);
+			current_line.clear();
 		}
 
-		for (int i = 0; i < (int)paragraph.size(); i++)
+		for (const auto& formatted_line : formatted_lines)
 		{
 			stls.move(0, 0 - vertical_offset);
 			if (v_overflow == VerticalOverflow::cut && stls.cy_pos < y_pos - height)
 				break;
 
-			auto& new_line = lines.emplace_back(stls.create_one(paragraph[i]));
+			auto& new_line = lines.emplace_back(stls.create_one(formatted_line));
 
 			if (text_align == _Align::right)
 				new_line->safe_change_position_argumented(GLOBAL_RIGHT, ((x_pos) + (0.5f * width) - stls.x_unit_size), lines.back()->cy_pos);
@@ -136,7 +193,10 @@ struct text_box : handleable_ui_part
 				new_line->safe_change_position_argumented(GLOBAL_LEFT, ((x_pos) - (0.5f * width) + stls.x_unit_size), lines.back()->cy_pos);
 		}
 
-		calculated_text_height = (lines.front()->cy_pos - lines.back()->cy_pos) + lines.front()->calculated_height;
+		if (!lines.empty())
+			calculated_text_height = (lines.front()->cy_pos - lines.back()->cy_pos) + lines.front()->calculated_height;
+		else
+			calculated_text_height = 0.f;
 
 		if (v_overflow == VerticalOverflow::recalibrate)
 		{
@@ -178,7 +238,7 @@ struct text_box : handleable_ui_part
 	void recalculate_available_space_for_text()
 	{
 		std::lock_guard locker(lock);
-		symbols_per_line = std::floor((width + stls.x_unit_size * 2) / (stls.x_unit_size * 2 + stls.space_width));
+		available_text_width = std::max(width + (stls.x_unit_size * 2.f), 0.f);
 	}
 
 	void safe_move(float dx, float dy) override

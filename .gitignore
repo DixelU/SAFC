@@ -354,3 +354,7 @@ SAFC*.7z
 cmake-build-*
 .idea/
 build/*
+*.APS
+*.aps
+_SAFC_\_SAFC_.APS
+.claude/settings.local.json

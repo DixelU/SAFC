@@ -2,6 +2,7 @@
 #ifndef SAFGUIF_MW
 #define SAFGUIF_MW
 
+#include <functional>
 #include <map>
 #include <memory>
 #include <ranges>
@@ -55,6 +56,7 @@ struct moveable_window : handleable_ui_part
 	bool cursor_follow_mode;
 	bool map_was_changed;
 	float pc_cur_x, pc_cur_y;
+	std::function<void()> on_close;
 
 	~moveable_window() override
 	{
@@ -109,6 +111,8 @@ struct moveable_window : handleable_ui_part
 			{
 				drawable = false;
 				cursor_follow_mode = false;
+				if (on_close)
+					on_close();
 				return true;
 			}
 			else if (!button_btn)

@@ -282,6 +282,7 @@
       <AdditionalOptions>/Zc:lambda %(AdditionalOptions)</AdditionalOptions>
       <AssemblerOutput>All</AssemblerOutput>
       <CallingConvention>FastCall</CallingConvention>
+      <FloatingPointExceptions>false</FloatingPointExceptions>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -325,6 +326,7 @@
     <ClInclude Include="SAFC_InnerModules\include_all.h" />
     <ClInclude Include="SAFC_InnerModules\single_midi_info_collector.h" />
     <ClInclude Include="SAFC_InnerModules\single_midi_processor_2.h" />
+    <ClInclude Include="SAFC_InnerModules\single_midi_processor_lean.h" />
     <ClInclude Include="SAFGUIF\button.h" />
     <ClInclude Include="SAFGUIF\button_settings.h" />
     <ClInclude Include="SAFGUIF\charmap.h" />

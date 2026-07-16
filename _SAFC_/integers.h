@@ -35,6 +35,7 @@
 #include <algorithm>
 #include <cinttypes>
 #include <string>
+#include <cstdio>
 
 #include <stdint.h>
 #ifdef _MSC_VER
@@ -381,15 +382,18 @@ namespace dixelu
 		__DIXELU_CONDITIONAL_CPP14_SPECIFIERS
 			self_type& operator-=(const self_type& rhs)
 		{
-			constexpr const self_type one(1);
-			return ((*this) += ((~rhs) + one));
+			const auto lo_prev = lo;
+			lo -= rhs.lo;
+			if (lo > lo_prev) // borrow
+				hi -= down_type(1);
+			hi -= rhs.hi;
+			return *this;
 		}
 
 		__DIXELU_CONDITIONAL_CPP14_SPECIFIERS
 			self_type& operator-=(self_type&& rhs)
 		{
-			constexpr const self_type one(1);
-			return ((*this) += (rhs.self_inverse() + one));
+			return (*this -= static_cast<const self_type&>(rhs));
 		}
 
 		__DIXELU_CONDITIONAL_CPP14_SPECIFIERS
@@ -409,6 +413,40 @@ namespace dixelu
 		}
 
 		__DIXELU_CONDITIONAL_CPP14_SPECIFIERS
+			self_type& operator++()
+		{
+			++lo;
+			if (lo == down_type(0))
+				++hi;
+			return *this;
+		}
+
+		__DIXELU_CONDITIONAL_CPP14_SPECIFIERS
+			self_type operator++(int)
+		{
+			self_type tmp(*this);
+			++(*this);
+			return tmp;
+		}
+
+		__DIXELU_CONDITIONAL_CPP14_SPECIFIERS
+			self_type& operator--()
+		{
+			if (lo == down_type(0))
+				--hi;
+			--lo;
+			return *this;
+		}
+
+		__DIXELU_CONDITIONAL_CPP14_SPECIFIERS
+			self_type operator--(int)
+		{
+			self_type tmp(*this);
+			--(*this);
+			return tmp;
+		}
+
+		__DIXELU_CONDITIONAL_CPP14_SPECIFIERS
 			explicit operator size_type() const
 		{
 			return operator[](0);
@@ -417,7 +455,80 @@ namespace dixelu
 		__DIXELU_CONDITIONAL_CPP14_SPECIFIERS
 			explicit operator bool() const
 		{
-			return ((bool)lo | (bool)hi);
+			return ((bool)lo || (bool)hi);
+		}
+
+		__DIXELU_CONDITIONAL_CPP14_SPECIFIERS
+			self_type& __experimental_shift_bits_left(size_type shift)
+		{
+			if (shift < base_bits)
+			{
+				const auto shifted_part_length = base_bits - shift;
+				const auto shift_cut_mask = (~0ULL << shifted_part_length);
+
+				size_type mask_buffer = 0;
+				for (size_type i = 0; i < size; ++i)
+				{
+					auto& current_value = operator[](i);
+					mask_buffer = (current_value & shift_cut_mask) >> shifted_part_length;
+					current_value = (current_value << shift) | mask_buffer;
+				}
+
+				return *this;
+			}
+			else
+			{
+				auto rough_shift_length_in_bytes = shift / base_bits;
+				auto accurate_shift = shift - rough_shift_length_in_bytes * base_bits;
+
+				for (std::ptrdiff_t i = size - 1; i >= rough_shift_length_in_bytes; --i)
+				{
+					auto& this_el = operator[](i);
+					auto& prev_el = operator[](i - rough_shift_length_in_bytes);
+					this_el = prev_el;
+				}
+				for (std::ptrdiff_t i = rough_shift_length_in_bytes - 1; i >= 0; --i)
+					operator[](i) = 0;
+
+				return __experimental_shift_bits_left(accurate_shift);
+			}
+		}
+
+		__DIXELU_CONDITIONAL_CPP14_SPECIFIERS
+			self_type& __experimental_shift_bits_right(size_type shift)
+		{
+			if (shift < base_bits)
+			{
+				const auto shifted_part_length = base_bits - shift;
+				const auto shift_cut_mask = (~0ULL >> shifted_part_length);
+
+				size_type mask_buffer = 0;
+				for (std::ptrdiff_t i = size - 1; i >= 0; --i)
+				{
+					auto& current_value = operator[](i);
+					auto shifted_value_copy = (current_value >> shift) | mask_buffer;
+					mask_buffer = (current_value & shift_cut_mask) << shifted_part_length;
+					current_value = shifted_value_copy;
+				}
+
+				return *this;
+			}
+			else
+			{
+				auto rough_shift_length_in_bytes = shift / base_bits;
+				auto accurate_shift = shift - rough_shift_length_in_bytes * base_bits;
+
+				for (std::ptrdiff_t i = 0; i < size - rough_shift_length_in_bytes; ++i)
+				{
+					auto& this_el = operator[](i);
+					auto& next_el = operator[](i + rough_shift_length_in_bytes);
+					this_el = next_el;
+				}
+				for (std::ptrdiff_t i = size - rough_shift_length_in_bytes; i < size; ++i)
+					operator[](i) = 0;
+
+				return __experimental_shift_bits_right(accurate_shift);
+			}
 		}
 
 		///* https://github.com/glitchub/arith64/blob/master/arith64.c *///
@@ -502,7 +613,36 @@ namespace dixelu
 		__DIXELU_CONDITIONAL_CPP14_SPECIFIERS
 			self_type operator*(const self_type& rhs) const
 		{
-			return __direct_karatsuba_mul<deg>(*this, rhs).lo;
+			// Schoolbook (comba) multiply, truncated to the low `size` limbs.
+			// For these small limb counts (<= a few dozen) this beats the
+			// recursive Karatsuba path, which pays for temporaries/conversions
+			// that dwarf the actual multiply. Karatsuba helpers are kept below
+			// for reference but are no longer on the hot path.
+			self_type res;
+			for (size_type i = 0; i < size; ++i)
+			{
+				const base_type ai = (*this)[i];
+				if (!ai)
+					continue;
+				base_type carry = 0;
+				for (size_type j = 0; i + j < size; ++j)
+				{
+					base_type prod_hi = 0;
+					const base_type prod_lo = details::multiply64to128(ai, rhs[j], prod_hi);
+
+					// res[i + j] += prod_lo + carry, capturing the carry-out.
+					// The full sum ai*rhs[j] + res[i+j] + carry always fits in
+					// 128 bits, so prod_hi + c1 + c2 cannot overflow base_type.
+					const base_type t = prod_lo + carry;
+					const base_type c1 = (t < prod_lo);
+					base_type& dst = res[i + j];
+					const base_type r = t + dst;
+					const base_type c2 = (r < t);
+					dst = r;
+					carry = prod_hi + c1 + c2;
+				}
+			}
+			return res;
 		}
 
 		__DIXELU_CONDITIONAL_CPP14_SPECIFIERS
@@ -510,6 +650,27 @@ namespace dixelu
 		{
 			return (*this = (*this * rhs));
 		}
+
+		/*template<std::uint64_t __deg>
+		__DIXELU_CONDITIONAL_CPP14_SPECIFIERS
+			static long_uint<__deg> __downtype_mul_long(const long_uint<__deg>& lhs, const long_uint<__deg>& rhs)
+		{
+			long_uint<__deg> carry(1);
+			long_uint<__deg> result;
+			long_uint<__deg> rolling_rhs = rhs;
+			long_uint<__deg> diminishing_lhs = lhs;
+			while (diminishing_lhs)
+			{
+				if (diminishing_lhs & carry)
+				{
+					result += rolling_rhs;
+					diminishing_lhs &= ~(carry);
+				}
+				rolling_rhs <<= 1;
+				carry <<= 1;
+			}
+			return result;
+		}*/
 
 		__DIXELU_CONDITIONAL_CPP14_SPECIFIERS
 		static long_uint<0>
@@ -676,18 +837,46 @@ namespace dixelu
 			size_type iter_count = b.__leading_zeros() - a.__leading_zeros() + 1;
 			self_type rem = a >> iter_count;
 			a <<= bits - iter_count;
-			self_type wrap = 0;
 			while (iter_count-- > 0)
 			{
-				rem = ((rem << 1) | (a >> (bits - 1)));
-				a = ((a << 1) | (wrap & one));
-				wrap = (b > rem) ? self_type() : (~self_type()); // warning! hot spot?
-				rem -= (b & wrap);
+				rem = (rem << 1) | (a >> (bits - 1));
+				a <<= 1;
+				if (rem >= b)
+				{
+					rem -= b;
+					a |= one;
+				}
 			}
 
 			if (assign_rem)
 				rem_out = rem;
-			return (a << 1) | (wrap & one);
+			return a;
+		}
+
+		// Divide by a single base-limb divisor. O(size) limb steps using a
+		// 128/64 division per limb, instead of the O(bits) bit-serial loop in
+		// __divmod -- which is the dominant cost of base-10 conversion, where
+		// the divisor (10^19) is always a single limb.
+		__DIXELU_CONDITIONAL_CPP14_SPECIFIERS
+			static self_type __divmod_small(self_type lhs, base_type d, base_type& rem)
+		{
+#if defined(__SIZEOF_INT128__) && !defined(__wasm__)
+			self_type q;
+			base_type r = 0;
+			for (std::ptrdiff_t i = (std::ptrdiff_t)size - 1; i >= 0; --i)
+			{
+				const __uint128_t cur = ((__uint128_t)r << base_bits) | lhs[i];
+				q[i] = (base_type)(cur / d);
+				r = (base_type)(cur % d);
+			}
+			rem = r;
+			return q;
+#else
+			self_type r;
+			self_type q = __divmod(lhs, self_type(d), r);
+			rem = r[0];
+			return q;
+#endif
 		}
 
 		__DIXELU_CONDITIONAL_CPP14_SPECIFIERS
@@ -725,34 +914,33 @@ namespace dixelu
 			return (self_type() - res);
 		}
 
-		// dumb
 		inline static std::string to_string(self_type value)
 		{
-			constexpr size_type radix_size = 19;
-			std::string res_array[bits / (radix_size * 3 /*log2 of 10 ~=~ 3*/) + 1]; // SSO?
-			std::string res;
-			const self_type conversion_radix(10000000000000000000ull); // max
-			//self_type conversion_radix(10000000000ull); // sso optimal
-			const self_type zero;
-			self_type rem;
-			size_type idx = 0;
-			while (value != zero)
-			{
-				value = __divmod(value, conversion_radix, rem);
-				res_array[idx] = std::to_string(rem[0]);
-				idx++;
-			}
-			if (!idx)
+			if (!(bool)value)
 				return "0";
-			bool first_run = true;
-			while (idx-- > 0)
+
+			constexpr size_type radix_digits = 19;
+			constexpr base_type radix = 10000000000000000000ull; // 10^19, one limb
+
+			// Upper bound on decimal digits: bits / log2(10) < bits / 3.
+			char buf[bits / 3 + 2];
+			size_type pos = sizeof(buf); // fill from the end
+
+			base_type rem = 0;
+			while ((bool)value)
 			{
-				res += ((!first_run && res_array[idx].size() < radix_size) ?
-					(std::string(radix_size - res_array[idx].size(), '0')) : "") +
-					res_array[idx];
-				first_run = false;
+				value = __divmod_small(value, radix, rem);
+				const bool last_chunk = !(bool)value;
+				for (size_type k = 0; k < radix_digits; ++k)
+				{
+					buf[--pos] = static_cast<char>('0' + (rem % 10));
+					rem /= 10;
+					if (last_chunk && !rem) // trim leading zeros only on the top chunk
+						break;
+				}
 			}
-			return res;
+
+			return std::string(buf + pos, buf + sizeof(buf));
 		}
 
 		template<std::uint64_t __deg, bool frontal_0x = true>
@@ -781,11 +969,13 @@ namespace dixelu
 		inline static resolved_return_type<(__deg == 0), std::string>
 			to_hex_string(const long_uint<__deg>& value, const bool leading_zeros_flag = false)
 		{
-			std::stringstream ss;
+			char buf[33];
+			int len;
 			if (leading_zeros_flag || value.hi)
-				ss << std::setfill('0') << std::setw(16) << std::hex << value.hi;
-			ss << std::setfill('0') << std::setw(16) << std::hex << value.lo;
-			auto result = ss.str();
+				len = std::snprintf(buf, sizeof(buf), "%016" PRIx64 "%016" PRIx64, value.hi, value.lo);
+			else
+				len = std::snprintf(buf, sizeof(buf), "%016" PRIx64, value.lo);
+			std::string result(buf, len);
 
 			if (!leading_zeros_flag && result.size() > 1 && result.front() == '0')
 			{
@@ -820,16 +1010,31 @@ namespace dixelu
 		inline static self_type __from_decimal_char_string(const char* str, size_type str_size)
 		{
 			self_type value;
-			self_type radix = 10;
+			constexpr size_type chunk_size = 19;
+			constexpr base_type chunk_radix = 10000000000000000000ULL; // 10^19
 
-			while (str_size)
+			while (str_size >= chunk_size)
 			{
-				auto ull_value = *str - '0';
-				value *= radix;
-				value += self_type(ull_value);
+				base_type chunk = 0;
+				for (size_type i = 0; i < chunk_size; ++i)
+					chunk = chunk * 10 + static_cast<base_type>(str[i] - '0');
+				value *= self_type(chunk_radix);
+				value += self_type(chunk);
+				str += chunk_size;
+				str_size -= chunk_size;
+			}
 
-				++str;
-				--str_size;
+			if (str_size)
+			{
+				base_type chunk = 0;
+				base_type radix = 1;
+				for (size_type i = 0; i < str_size; ++i)
+				{
+					chunk = chunk * 10 + static_cast<base_type>(str[i] - '0');
+					radix *= 10;
+				}
+				value *= self_type(radix);
+				value += self_type(chunk);
 			}
 
 			return value;
