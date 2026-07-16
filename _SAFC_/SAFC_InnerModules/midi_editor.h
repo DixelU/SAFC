@@ -2626,10 +2626,75 @@ public:
 			seg_tick_ = 0;
 			seg_us_ = 0;
 			cur_tempo_ = 500000; // 120 BPM until the first tempo event
+			seek_state_.clear();
+			seek_state_idx_ = 0;
+		}
+
+		void seek(std::uint64_t target_us) override
+		{
+			rewind();
+
+			// First tick whose time is at/after the target (ceiling). Positioning
+			// here means every event next() yields has time >= target_us, so the
+			// parser's fast-forward completes on the very first one — no note is
+			// ever pulled-and-skipped, even if the boundary tick holds millions.
+			tick_type cross_tick = tick_at_us(target_us);
+			if (us_at_tick_scan(cross_tick) < target_us)
+				++cross_tick;
+
+			on_idx_ = std::size_t(std::lower_bound(notes_.begin(), notes_.end(), cross_tick,
+				[](const piano_note& note, tick_type t) { return note.start_tick < t; })
+				- notes_.begin());
+
+			const std::size_t raw_target = std::size_t(std::lower_bound(
+				controls_.begin(), controls_.end(), cross_tick,
+				[](const control_ev& c, tick_type t) { return c.tick < t; })
+				- controls_.begin());
+			raw_idx_ = raw_target;
+
+			// Reconstruct channel state at the seek point: the last value of each
+			// distinct controller/program/pitch below the target, collapsed so the
+			// set is bounded (~channels × controllers), then emitted first by next()
+			// during fast-forward. Same final synth state as replaying them all,
+			// without touching the dense note prefix. Held notes are not re-struck.
+			std::unordered_map<std::uint32_t, control_ev> latest;
+			for (std::size_t i = 0; i < raw_target; ++i)
+			{
+				const std::uint32_t msg = controls_[i].short_msg;
+				const std::uint8_t status = std::uint8_t(msg & 0xFF);
+				const std::uint8_t d1 = std::uint8_t((msg >> 8) & 0xFF);
+				const std::uint8_t hi = status & 0xF0;
+				// Include the data byte for per-key/per-CC lanes (aftertouch, CC);
+				// program/pressure/pitch are one value per channel.
+				std::uint32_t id = std::uint32_t(status) << 8;
+				if (hi == 0xA0 || hi == 0xB0)
+					id |= d1;
+				latest[id] = controls_[i];
+			}
+
+			seek_state_.reserve(latest.size());
+			for (const auto& [id, ev] : latest)
+			{
+				generated_event ge;
+				ge.time_us = us_at_tick_scan(ev.tick);
+				ge.short_msg = ev.short_msg;
+				ge.k = generated_event::kind::control;
+				seek_state_.push_back(ge);
+			}
+			std::sort(seek_state_.begin(), seek_state_.end(),
+				[](const generated_event& a, const generated_event& b) { return a.time_us < b.time_us; });
 		}
 
 		bool next(generated_event& out) override
 		{
+			// Emit reconstructed channel state first (fast-forward drains it),
+			// then the merged stream, which seek() positioned at/after the target.
+			if (seek_state_idx_ < seek_state_.size())
+			{
+				out = seek_state_[seek_state_idx_++];
+				return true;
+			}
+
 			constexpr tick_type inf = ~tick_type(0);
 
 			const tick_type on_tick = on_idx_ < notes_.size() ? notes_[on_idx_].start_tick : inf;
@@ -2694,18 +2759,54 @@ public:
 			return std::uint32_t(status) | (std::uint32_t(d1) << 8) | (std::uint32_t(d2) << 16);
 		}
 
+		// Overflow-safe (delta_ticks * tempo) / ppqn. Forming the full product
+		// wraps uint64 once a single tempo span covers a large tick range (common:
+		// most files have one tempo, so the span is the whole file). Split into
+		// whole quarters + remainder so no intermediate exceeds the real duration.
+		static std::uint64_t ticks_to_us(std::uint64_t delta_ticks,
+			std::uint32_t tempo, std::uint16_t ppqn)
+		{
+			return (delta_ticks / ppqn) * tempo + (delta_ticks % ppqn) * tempo / ppqn;
+		}
+
+		// Inverse, equally overflow-safe: (delta_us * ppqn) / tempo.
+		static tick_type us_to_ticks(std::uint64_t delta_us,
+			std::uint32_t tempo, std::uint16_t ppqn)
+		{
+			return (delta_us / tempo) * ppqn + (delta_us % tempo) * ppqn / tempo;
+		}
+
 		// Monotonic tick->us walker; ticks arrive non-decreasing across next() calls.
 		std::uint64_t advance_us_to(tick_type tick)
 		{
 			while (tempo_idx_ < tempo_.size() && tempo_[tempo_idx_].first <= tick)
 			{
 				const auto& [change_tick, tempo] = tempo_[tempo_idx_];
-				seg_us_ += std::uint64_t(change_tick - seg_tick_) * cur_tempo_ / ppqn_;
+				seg_us_ += ticks_to_us(change_tick - seg_tick_, cur_tempo_, ppqn_);
 				seg_tick_ = change_tick;
 				cur_tempo_ = tempo;
 				++tempo_idx_;
 			}
-			return seg_us_ + std::uint64_t(tick - seg_tick_) * cur_tempo_ / ppqn_;
+			return seg_us_ + ticks_to_us(tick - seg_tick_, cur_tempo_, ppqn_);
+		}
+
+		// Inverse of the tempo walk: the tick whose time is target_us. Used by
+		// seek() to convert the parser's target time back into a note cursor.
+		tick_type tick_at_us(std::uint64_t target_us) const
+		{
+			std::uint64_t us = 0;
+			tick_type last = 0;
+			std::uint32_t tempo = 500000;
+			for (const auto& [tick, tempo_value] : tempo_)
+			{
+				const std::uint64_t seg = ticks_to_us(tick - last, tempo, ppqn_);
+				if (us + seg >= target_us)
+					break;
+				us += seg;
+				last = tick;
+				tempo = tempo_value;
+			}
+			return last + us_to_ticks(target_us - us, tempo, ppqn_);
 		}
 
 		// One-shot scan for total duration (independent of the streaming walker).
@@ -2718,11 +2819,11 @@ public:
 			{
 				if (tick >= target)
 					break;
-				us += std::uint64_t(tick - last) * tempo / ppqn_;
+				us += ticks_to_us(tick - last, tempo, ppqn_);
 				last = tick;
 				tempo = tempo_value;
 			}
-			us += std::uint64_t(target - last) * tempo / ppqn_;
+			us += ticks_to_us(target - last, tempo, ppqn_);
 			return us;
 		}
 
@@ -2736,6 +2837,10 @@ public:
 		std::size_t on_idx_ = 0;
 		std::size_t raw_idx_ = 0;
 		std::priority_queue<off_entry> off_heap_;
+
+		// Reconstructed channel state emitted first after a seek (bounded set)
+		std::vector<generated_event> seek_state_;
+		std::size_t seek_state_idx_ = 0;
 
 		// Monotonic tick->us walker state
 		std::size_t tempo_idx_ = 0;

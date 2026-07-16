@@ -168,6 +168,9 @@
     <ClInclude Include="SAFCGUIF_Local\midi_editor_viewer.h">
       <Filter>Файлы заголовков\SAFGUIF\Specific</Filter>
     </ClInclude>
+    <ClInclude Include="SAFC_InnerModules\playback_event_source.h">
+      <Filter>Файлы заголовков\MIDI Processing</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="_SAFC_.cpp">

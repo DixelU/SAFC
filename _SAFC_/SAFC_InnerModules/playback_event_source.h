@@ -44,6 +44,13 @@ struct playback_event_source
 	// track cursors from the track starts.
 	virtual void rewind() = 0;
 
+	// Fast-forward to target_us: after this call, next() yields events at/after
+	// the target, having first streamed only the controller/program state below
+	// it (held notes are not re-struck, matching the file parser dropping
+	// note-ons during fast-forward). The default walks from the start — override
+	// to skip the note prefix, which is essential in dense regions. Implies rewind().
+	virtual void seek(std::uint64_t target_us) { (void)target_us; rewind(); }
+
 	// Pull the next event in non-decreasing time order. Returns false when the
 	// source is exhausted; 'out' is only valid when the call returns true.
 	virtual bool next(generated_event& out) = 0;

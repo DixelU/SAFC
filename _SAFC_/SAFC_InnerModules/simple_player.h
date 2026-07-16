@@ -1050,6 +1050,14 @@ struct simple_player
 		return state.playing.load(std::memory_order_acquire);
 	}
 
+	// True while the parser is fast-forwarding to a seek target. A caller that
+	// unpauses after starting playback must wait for this to clear, else it can
+	// resume() before the seek's own re-pause and lose the race (stuck paused).
+	bool is_fast_forwarding() const
+	{
+		return state.seeking_ff.load(std::memory_order_acquire);
+	}
+
 	const std::wstring& get_filename() const { return current_filename; }
 
 	// Current playback position in microseconds, wall-clock-smooth (same timing
@@ -1195,14 +1203,17 @@ struct simple_player
 				state.sender_position_us.store(skip_to_us, std::memory_order_release);
 				state.parsed_up_to_us.store(skip_to_us, std::memory_order_release);
 
-				// Signal sender to transition from immediate drain to timed playback
-				state.seeking_ff.store(false, std::memory_order_release);
-
+				// Re-pause (if requested) BEFORE clearing seeking_ff, so a waiter
+				// that resumes on !is_fast_forwarding() already observes paused ==
+				// true and its resume() wins instead of racing the re-pause.
 				if (pause_after_seek)
 				{
 					state.pause_position_us.store(skip_to_us, std::memory_order_release);
 					state.paused.store(true, std::memory_order_release);
 				}
+
+				// Signal sender to transition from immediate drain to timed playback
+				state.seeking_ff.store(false, std::memory_order_release);
 			}
 
 			if (!fast_forwarding)
@@ -1440,9 +1451,14 @@ struct simple_player
 	{
 		bool fast_forwarding = (skip_to_us > 0);
 		if (fast_forwarding)
+		{
 			state.seeking_ff.store(true, std::memory_order_release);
-
-		src->rewind();
+			// Jump the source to the target (skips the note prefix) rather than
+			// walking every event up to it — critical in dense regions.
+			src->seek(skip_to_us);
+		}
+		else
+			src->rewind();
 
 		uint32_t cap_check_counter = 0;
 		generated_event ev;
@@ -1463,14 +1479,17 @@ struct simple_player
 				state.sender_position_us.store(skip_to_us, std::memory_order_release);
 				state.parsed_up_to_us.store(skip_to_us, std::memory_order_release);
 
-				// Signal sender to transition from immediate drain to timed playback
-				state.seeking_ff.store(false, std::memory_order_release);
-
+				// Re-pause (if requested) BEFORE clearing seeking_ff, so a waiter
+				// that resumes on !is_fast_forwarding() already observes paused ==
+				// true and its resume() wins instead of racing the re-pause.
 				if (pause_after_seek)
 				{
 					state.pause_position_us.store(skip_to_us, std::memory_order_release);
 					state.paused.store(true, std::memory_order_release);
 				}
+
+				// Signal sender to transition from immediate drain to timed playback
+				state.seeking_ff.store(false, std::memory_order_release);
 			}
 
 			if (!fast_forwarding)
@@ -1661,6 +1680,10 @@ struct simple_player
 		{
 			state.reset();
 			state.start_time = std::chrono::steady_clock::now();
+
+			// Publish fast-forward BEFORE playing, so a waiter that observes
+			// is_playing() never sees the brief pre-fast-forward window as "done".
+			state.seeking_ff.store(initial_skip_to_us > 0, std::memory_order_release);
 			state.playing.store(true, std::memory_order_release);
 
 			// Start paused by default so user can select synth first
@@ -1674,7 +1697,9 @@ struct simple_player
 			{
 				// reset per-iteration state
 				state.stop_requested.store(false, std::memory_order_relaxed);
-				state.seeking_ff.store(false, std::memory_order_relaxed);
+				// A seek (skip_to_us > 0) fast-forwards; keep seeking_ff set from
+				// here through completion so the pre-fast-forward window stays closed.
+				state.seeking_ff.store(skip_to_us > 0, std::memory_order_relaxed);
 				state.parser_done.store(false, std::memory_order_relaxed);
 				state.parsed_up_to_us.store(0, std::memory_order_relaxed);
 				state.sender_position_us.store(0, std::memory_order_relaxed);

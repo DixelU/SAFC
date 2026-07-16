@@ -116,7 +116,7 @@
   </PropertyGroup>
   <PropertyGroup Label="Vcpkg" Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <VcpkgUseStatic>true</VcpkgUseStatic>
-    <VcpkgConfiguration>Debug</VcpkgConfiguration>
+    <VcpkgConfiguration>Release</VcpkgConfiguration>
   </PropertyGroup>
   <PropertyGroup Label="Vcpkg" Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <VcpkgUseStatic>true</VcpkgUseStatic>
@@ -325,6 +325,7 @@
     <ClInclude Include="SAFC_InnerModules\fast_midi_checker.h" />
     <ClInclude Include="SAFC_InnerModules\midi_collection_threaded_merger.h" />
     <ClInclude Include="SAFC_InnerModules\midi_editor.h" />
+    <ClInclude Include="SAFC_InnerModules\playback_event_source.h" />
     <ClInclude Include="SAFC_InnerModules\simple_player.h" />
     <ClInclude Include="SAFC_InnerModules\polyline_converter.h" />
     <ClInclude Include="SAFC_InnerModules\include_all.h" />

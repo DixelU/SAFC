@@ -2916,35 +2916,8 @@ void on_editor_redo()
 }
 
 // The global player is shared with the SIMPLAYER window; the editor's playback
-// cursor is only meaningful while the player is running the editor's snapshot
+// cursor is only meaningful while the player is streaming the editor's notes
 std::atomic<bool> editor_playback_active = false;
-
-std::wstring editor_playback_snapshot_path()
-{
-	static std::atomic_uint64_t snapshot_counter = 0;
-	wchar_t tmp[MAX_PATH]{};
-	GetTempPathW(MAX_PATH, tmp);
-
-	// First use: sweep snapshots left behind by crashed sessions. A file another
-	// live instance is currently playing is still mapped, so its delete just fails.
-	static std::once_flag sweep_once;
-	std::call_once(sweep_once, [&tmp]()
-	{
-		const auto pattern = std::wstring(tmp) + L"safc_editor_preview_*.mid";
-		WIN32_FIND_DATAW found{};
-		const auto handle = FindFirstFileW(pattern.c_str(), &found);
-		if (handle == INVALID_HANDLE_VALUE)
-			return;
-		do
-			DeleteFileW((std::wstring(tmp) + found.cFileName).c_str());
-		while (FindNextFileW(handle, &found));
-		FindClose(handle);
-	});
-
-	return std::wstring(tmp) + L"safc_editor_preview_" +
-		std::to_wstring(GetCurrentProcessId()) + L"_" +
-		std::to_wstring(++snapshot_counter) + L".mid";
-}
 
 void on_editor_play_from(bool from_view_start)
 {
@@ -2992,13 +2965,17 @@ void on_editor_play_from(bool from_view_start)
 			play_btn->safe_string_replace("Play");
 	});
 
-	// Playback starts paused (player convention); unpause once it is up
+	// Playback starts paused (player convention); unpause once it is up AND done
+	// fast-forwarding — resuming mid-seek would race the seek's own re-pause and
+	// leave playback stuck paused (worst in dense regions where FF takes longer).
 	worker_singleton<struct editor_playback_unpause>::instance().push([play_btn]()
 	{
-		for (int i = 0; i < 500 && !player->is_playing(); ++i)
+		auto ready = []() { return player->is_playing() && !player->is_fast_forwarding(); };
+
+		for (int i = 0; i < 1000 && !ready(); ++i)
 			std::this_thread::sleep_for(std::chrono::milliseconds(10));
 
-		if (player->is_playing())
+		if (ready())
 		{
 			player->resume();
 			if (play_btn)

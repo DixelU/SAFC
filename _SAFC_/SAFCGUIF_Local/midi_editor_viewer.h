@@ -1334,7 +1334,21 @@ struct midi_editor_viewer : public handleable_ui_part
 		// ---- Wheel ----
 		if (state == -1 && (button == 2 || button == 3))
 		{
-			const bool zoom_in = (button == 2);
+			const bool zoom_in = (button == 2); 
+			const auto modifiers = glutGetModifiers(); // valid: inside the mouse callback
+
+			if ((modifiers & GLUT_ACTIVE_SHIFT) && (in_roll || in_notes_area))
+			{
+				uint8_t delta = zoom_in ? 1 : 255;
+
+				if (key_low == 0 && !zoom_in)
+					delta = 0;
+				else if (key_high == 127 && zoom_in)
+					delta = 0;
+
+				editor->set_view_keys(key_low + delta, key_high + delta);
+				return true;
+			}
 
 			if (in_keyboard || (in_roll && !in_notes_area))
 			{
