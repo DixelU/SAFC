@@ -3642,15 +3642,15 @@ void init()
 		global_window_handler->enable_window("MIDI_EDITOR");
 	}, 150, 105, 75, 12, 1, 0xFFFFFFAF, 0x0F0F0FFF, 0xFFFFFFFF, 0x000000FF, 0xFFFFFFFF, nullptr, "Open MIDI Piano Roll Editor");
 
-	(*window)["GLOBAL_PPQN_Butt"] = new button("Global PPQN", system_white, on_global_ppqn, 150, 87.5, 75, 12, 1, 0xFF3F00AF, 0xFFFFFFFF, 0xFF3F00AF, 0xFFFFFFFF, 0xF7F7F7FF, nullptr, " ");
-	(*window)["GLOBAL_OFFSET_Butt"] = new button("Global offset", system_white, on_global_offset, 150, 75, 75, 12, 1, 0xFF7F00AF, 0xFFFFFFFF, 0xFF7F00FF, 0xFFFFFFFF, 0xF7F7F7FF, nullptr, " ");
-	(*window)["GLOBAL_TEMPO_Butt"] = new button("Global tempo", system_white, on_global_tempo, 150, 62.5, 75, 12, 1, 0xFFAF00AF, 0xFFFFFFFF, 0xFFAF00AF, 0xFFFFFFFF, 0xF7F7F7FF, nullptr, " ");
+	(*window)["GLOBAL_PPQN_Butt"] = new button("Global PPQN", system_white, on_global_ppqn, 150, 82.5, 75, 12, 1, 0xFF3F00AF, 0xFFFFFFFF, 0xFF3F00AF, 0xFFFFFFFF, 0xF7F7F7FF, nullptr, " ");
+	(*window)["GLOBAL_OFFSET_Butt"] = new button("Global offset", system_white, on_global_offset, 150, 70, 75, 12, 1, 0xFF7F00AF, 0xFFFFFFFF, 0xFF7F00FF, 0xFFFFFFFF, 0xF7F7F7FF, nullptr, " ");
+	(*window)["GLOBAL_TEMPO_Butt"] = new button("Global tempo", system_white, on_global_tempo, 150, 57.5, 75, 12, 1, 0xFFAF00AF, 0xFFFFFFFF, 0xFFAF00AF, 0xFFFFFFFF, 0xF7F7F7FF, nullptr, " ");
 
-	(*window)["DELETE_ALL_VM"] = new button("Remove vol. maps", system_white, on_rem_vol_maps, 150, 37.5, 75, 12, 1,
+	(*window)["DELETE_ALL_VM"] = new button("Remove vol. maps", system_white, on_rem_vol_maps, 150, 32.5, 75, 12, 1,
 		0x7F7F7FAF, 0xFFFFFFFF, 0x7F7F7FAF, 0xFFFFFFFF, 0xF7F7F7FF, nullptr, " ");//0xFF007FAF
-	(*window)["DELETE_ALL_CAT"] = new button("Remove C&Ts", system_white, on_rem_cats, 150, 25, 75, 12, 1,
+	(*window)["DELETE_ALL_CAT"] = new button("Remove C&Ts", system_white, on_rem_cats, 150, 20, 75, 12, 1,
 		0x7F7F7FAF, 0xFFFFFFFF, 0x7F7F7FAF, 0xFFFFFFFF, 0xF7F7F7FF, nullptr, " ");
-	(*window)["DELETE_ALL_MODULES"] = new button("Remove modules", system_white, on_rem_all_modules, 150, 12.5, 75, 12, 1,
+	(*window)["DELETE_ALL_MODULES"] = new button("Remove modules", system_white, on_rem_all_modules, 150, 7.5, 75, 12, 1,
 		0x7F7F7FAF, 0xFFFFFFFF, 0x7F7F7FAF, 0xFFFFFFFF, 0xF7F7F7FF, nullptr, " ");
 
 	(*window)["APP_SETTINGS"] = new button("Settings...", system_white, settings::on_settings, 150, -140, 75, 12, 1,
