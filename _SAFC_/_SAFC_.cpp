@@ -2972,23 +2972,22 @@ void on_editor_play_from(bool from_view_start)
 			seek_fraction = std::clamp(editor->get_seconds_at_tick(start_tick) / total_seconds, 0.0, 1.0);
 	}
 
-	// simple_run blocks until playback ends, keep it off the UI thread
+	// run_from_external blocks until playback ends, keep it off the UI thread
 	worker_singleton<struct editor_playback>::instance().push([play_btn, seek_fraction]()
 	{
-		// Play the current in-memory state (unsaved edits included),
-		// not the file on disk
-		auto snapshot = editor_playback_snapshot_path();
-		if (!editor->export_current(snapshot))
+		// Stream the current in-memory state (unsaved edits included) straight
+		// into the player — no .mid written to disk, no re-parse.
+		auto source = editor->make_playback_source();
+		if (!source)
 		{
-			throw_alert_error("Failed to prepare playback snapshot");
+			throw_alert_error("Failed to prepare playback");
 			return;
 		}
 
 		player->restore_device_by_name(saved_midi_device_name);
 		editor_playback_active = true;
-		player->simple_run(snapshot, seek_fraction);
+		player->run_from_external(source.get(), seek_fraction);
 		editor_playback_active = false;
-		DeleteFileW(snapshot.c_str()); // simple_run released its mapping
 		if (play_btn)
 			play_btn->safe_string_replace("Play");
 	});

@@ -21,6 +21,7 @@
 
 #include "single_midi_processor_2.h"
 #include "single_midi_info_collector.h"
+#include "playback_event_source.h"
 
 #define SIMPLE_PLAYER_FORCE_NO_INLINE
 // __declspec(noinline)
@@ -916,6 +917,39 @@ struct simple_player
 		}
 	}
 
+	// Play events from an external source (e.g. the MIDI editor's live in-memory
+	// notes) instead of a file on disk. Mirrors simple_run: blocks until playback
+	// ends. The caller owns 'src' and must keep it alive for the whole call.
+	void run_from_external(playback_event_source* src, double start_fraction = 0.0)
+	{
+		if (!src)
+			return;
+
+		memory_failure_reported.store(false, std::memory_order_release);
+		cancel_requested.store(false, std::memory_order_release);
+
+		try
+		{
+			// The external parser converts ticks to time itself, so info only
+			// needs the total duration for seek-fraction mapping and the UI bar.
+			info = midi_info{};
+			info.total_duration_us = src->total_duration_us();
+			info.open_complete = true;
+
+			start_fraction = std::clamp(start_fraction, 0.0, 1.0);
+
+			external_source = src;
+			playback_thread(static_cast<uint64_t>(start_fraction * info.total_duration_us));
+			external_source = nullptr;
+		}
+		catch (const std::bad_alloc&)
+		{
+			external_source = nullptr;
+			info.open_complete = true;
+			handle_memory_failure(true);
+		}
+	}
+
 	const playback_state& get_state() const
 	{
 		return state;
@@ -1396,6 +1430,117 @@ struct simple_player
 		state.parser_done.store(true, std::memory_order_release);
 	}
 
+	// Parser variant that pulls from an external event source instead of the
+	// mmap'd file. Shares the sender thread, timing, throttle, visuals, pause
+	// and seek machinery with the file path — only event production differs.
+	// skip_to_us > 0: fast-forward to that time, emitting controller/program
+	// state (not notes) so the synth is correct at the seek point.
+	SIMPLE_PLAYER_FORCE_NO_INLINE void parser_from_source_thread_func(
+		playback_event_source* src, uint64_t skip_to_us = 0, bool pause_after_seek = false)
+	{
+		bool fast_forwarding = (skip_to_us > 0);
+		if (fast_forwarding)
+			state.seeking_ff.store(true, std::memory_order_release);
+
+		src->rewind();
+
+		uint32_t cap_check_counter = 0;
+		generated_event ev;
+
+		while (!state.stop_requested && src->next(ev))
+		{
+			uint64_t batch_time_us = ev.time_us;
+
+			// Check if fast-forward is complete
+			if (fast_forwarding && batch_time_us >= skip_to_us)
+			{
+				fast_forwarding = false;
+
+				// Set timing so the sender starts from the seek position
+				state.start_offset_us = skip_to_us;
+				state.start_time = std::chrono::steady_clock::now();
+				state.current_time_us = skip_to_us;
+				state.sender_position_us.store(skip_to_us, std::memory_order_release);
+				state.parsed_up_to_us.store(skip_to_us, std::memory_order_release);
+
+				// Signal sender to transition from immediate drain to timed playback
+				state.seeking_ff.store(false, std::memory_order_release);
+
+				if (pause_after_seek)
+				{
+					state.pause_position_us.store(skip_to_us, std::memory_order_release);
+					state.paused.store(true, std::memory_order_release);
+				}
+			}
+
+			if (!fast_forwarding)
+			{
+				// Throttle: wait if too far ahead in time, too many pending events
+				// buffered, or paused. Identical policy to the file parser.
+				while (!state.stop_requested)
+				{
+					if (state.paused.load(std::memory_order_acquire))
+					{
+						std::this_thread::sleep_for(std::chrono::milliseconds(10));
+						continue;
+					}
+
+					uint64_t sender_pos = state.sender_position_us.load(std::memory_order_acquire);
+					uint64_t lookahead = (batch_time_us > sender_pos) ? (batch_time_us - sender_pos) : 0;
+					size_t pending = state.send_buffer.approximate_size();
+
+					if (lookahead < playback_state::max_lookahead_us &&
+						pending < playback_state::max_pending_events)
+						break;
+
+					std::this_thread::sleep_for(std::chrono::milliseconds(1));
+				}
+
+				if (state.stop_requested)
+					break;
+
+				state.parsed_up_to_us.store(batch_time_us, std::memory_order_release);
+			}
+
+			const bool is_note = (ev.k == generated_event::kind::note_on ||
+				ev.k == generated_event::kind::note_off);
+
+			// During fast-forward, drop notes but keep controller/program state so
+			// the synth sounds correct at the seek target (matches the file parser).
+			if (fast_forwarding && is_note)
+				continue;
+
+			// Falling-notes visuals (only in timed playback, matching the file path)
+			if (!fast_forwarding)
+			{
+				if (ev.k == generated_event::kind::note_on)
+					state.visuals.push_note_on(ev.key, batch_time_us, ev.track_index, ev.channel, ev.velocity);
+				else if (ev.k == generated_event::kind::note_off)
+					state.visuals.push_note_off(ev.key, batch_time_us, ev.track_index, ev.channel);
+			}
+
+			if (ev.short_msg != 0)
+			{
+				state.send_buffer.push({batch_time_us, ev.short_msg});
+
+				// Same intra-batch size cap as the file parser (sampled every 1024).
+				if ((++cap_check_counter & 1023u) == 0)
+				{
+					while (!fast_forwarding && !state.stop_requested &&
+						state.send_buffer.approximate_size() >= playback_state::max_pending_events)
+					{
+						if (state.paused.load(std::memory_order_acquire))
+							std::this_thread::sleep_for(std::chrono::microseconds(100));
+						else
+							std::this_thread::sleep_for(std::chrono::microseconds(10));
+					}
+				}
+			}
+		}
+
+		state.parser_done.store(true, std::memory_order_release);
+	}
+
 	// Sender thread: sends pre-parsed events with precise timing
 	// During seek fast-forward (seeking_ff == true), drains buffer immediately
 	SIMPLE_PLAYER_FORCE_NO_INLINE void sender_thread_func()
@@ -1547,7 +1692,10 @@ struct simple_player
 					parser_thread = std::thread([this, skip_to_us, pause_after_seek]() {
 						try
 						{
-							parser_thread_func(skip_to_us, pause_after_seek);
+							if (external_source)
+								parser_from_source_thread_func(external_source, skip_to_us, pause_after_seek);
+							else
+								parser_thread_func(skip_to_us, pause_after_seek);
 						}
 						catch (const std::bad_alloc&)
 						{
@@ -2536,6 +2684,10 @@ private:
 	midi_info info;
 	playback_state state;
 	mutable tempo_cache tcache;
+
+	// Non-null only during run_from_external: playback_thread routes the parser
+	// through this source instead of the mmap'd file. Owned by the caller.
+	playback_event_source* external_source = nullptr;
 
 	size_t current_device = ~0ULL;
 	std::vector<MIDIOUTCAPSW> devices;

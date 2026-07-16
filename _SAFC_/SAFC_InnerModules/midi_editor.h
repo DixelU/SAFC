@@ -16,10 +16,12 @@
 #include <fstream>
 #include <cstring>
 #include <set>
+#include <queue>
 
 #include "../bbb_ffio.h"
 #include "single_midi_processor_2.h"
 #include "single_midi_info_collector.h"
+#include "playback_event_source.h"
 
 /**
  * MIDI Piano Roll Editor
@@ -2558,6 +2560,239 @@ public:
 
 	const std::map<std::uint8_t, track_info>& get_tracks() const { return tracks; }
 	const std::wstring& get_filename() const { return filename; }
+
+	// ========================================================================
+	// Live Playback Source (stream editor state into simple_player without
+	// dumping to disk — see playback_event_source.h)
+	// ========================================================================
+
+	/**
+	 * Time-ordered event source over a *snapshot* of the editor's notes, raw
+	 * controller events and tempo map, taken under editor_mutex so playback is
+	 * isolated from later edits. Produces the same stream a saved file would
+	 * (note-on/off pairs + controller/program/pitch events), merged lazily:
+	 * O(polyphony) extra state, no full second copy of the event list.
+	 */
+	struct editor_event_source : playback_event_source
+	{
+		// A channel-voice controller/program/pitch event, ready to send.
+		struct control_ev
+		{
+			tick_type tick;
+			std::uint32_t short_msg;
+		};
+
+		// Pending note-off, awaiting its turn in the end_tick-ordered min-heap.
+		struct off_entry
+		{
+			tick_type end_tick;
+			std::uint8_t key;
+			std::uint8_t channel;
+			std::uint16_t track_index;
+			// std::priority_queue is a max-heap; invert so top() is the earliest end.
+			bool operator<(const off_entry& o) const { return end_tick > o.end_tick; }
+		};
+
+		editor_event_source(std::vector<piano_note>&& notes,
+			std::vector<control_ev>&& controls,
+			std::vector<std::pair<tick_type, std::uint32_t>>&& tempo,
+			std::uint16_t ppqn)
+			: notes_(std::move(notes)), controls_(std::move(controls)),
+			tempo_(std::move(tempo)), ppqn_(ppqn ? ppqn : 480), total_us_(0)
+		{
+			std::sort(notes_.begin(), notes_.end());
+			std::stable_sort(controls_.begin(), controls_.end(),
+				[](const control_ev& a, const control_ev& b) { return a.tick < b.tick; });
+
+			// Total duration: latest note end or controller tick, in microseconds
+			tick_type max_tick = 0;
+			for (const auto& note : notes_)
+				max_tick = std::max(max_tick, note.end_tick);
+			if (!controls_.empty())
+				max_tick = std::max(max_tick, controls_.back().tick);
+			total_us_ = us_at_tick_scan(max_tick);
+
+			rewind();
+		}
+
+		std::uint64_t total_duration_us() const override { return total_us_; }
+
+		void rewind() override
+		{
+			on_idx_ = 0;
+			raw_idx_ = 0;
+			off_heap_ = {};
+			tempo_idx_ = 0;
+			seg_tick_ = 0;
+			seg_us_ = 0;
+			cur_tempo_ = 500000; // 120 BPM until the first tempo event
+		}
+
+		bool next(generated_event& out) override
+		{
+			constexpr tick_type inf = ~tick_type(0);
+
+			const tick_type on_tick = on_idx_ < notes_.size() ? notes_[on_idx_].start_tick : inf;
+			const tick_type off_tick = off_heap_.empty() ? inf : off_heap_.top().end_tick;
+			const tick_type raw_tick = raw_idx_ < controls_.size() ? controls_[raw_idx_].tick : inf;
+
+			if (on_tick == inf && off_tick == inf && raw_tick == inf)
+				return false;
+
+			// Tie-break at equal ticks: note-off, then controller, then note-on
+			// (matches write_midi_from_notes ordering so playback == the saved file).
+			tick_type tick;
+			enum { pick_off, pick_raw, pick_on } which;
+			if (off_tick <= raw_tick && off_tick <= on_tick) { which = pick_off; tick = off_tick; }
+			else if (raw_tick <= on_tick)                    { which = pick_raw; tick = raw_tick; }
+			else                                             { which = pick_on;  tick = on_tick; }
+
+			const std::uint64_t time_us = advance_us_to(tick);
+
+			if (which == pick_off)
+			{
+				const auto entry = off_heap_.top();
+				off_heap_.pop();
+				out.time_us = time_us;
+				out.short_msg = smsg(0x80 | (entry.channel & 0x0F), entry.key, 0x40);
+				out.k = generated_event::kind::note_off;
+				out.key = entry.key;
+				out.velocity = 0;
+				out.channel = entry.channel;
+				out.track_index = entry.track_index;
+			}
+			else if (which == pick_raw)
+			{
+				out.time_us = time_us;
+				out.short_msg = controls_[raw_idx_].short_msg;
+				out.k = generated_event::kind::control;
+				out.key = out.velocity = out.channel = 0;
+				out.track_index = 0;
+				++raw_idx_;
+			}
+			else // pick_on
+			{
+				const auto& note = notes_[on_idx_];
+				const std::uint8_t vel = std::max<std::uint8_t>(note.velocity, 1);
+				out.time_us = time_us;
+				out.short_msg = smsg(0x90 | (note.channel & 0x0F), note.key, vel);
+				out.k = generated_event::kind::note_on;
+				out.key = note.key;
+				out.velocity = vel;
+				out.channel = note.channel;
+				out.track_index = note.track_index;
+				off_heap_.push({note.end_tick, note.key, note.channel, note.track_index});
+				++on_idx_;
+			}
+
+			return true;
+		}
+
+	private:
+		static std::uint32_t smsg(std::uint8_t status, std::uint8_t d1, std::uint8_t d2 = 0)
+		{
+			return std::uint32_t(status) | (std::uint32_t(d1) << 8) | (std::uint32_t(d2) << 16);
+		}
+
+		// Monotonic tick->us walker; ticks arrive non-decreasing across next() calls.
+		std::uint64_t advance_us_to(tick_type tick)
+		{
+			while (tempo_idx_ < tempo_.size() && tempo_[tempo_idx_].first <= tick)
+			{
+				const auto& [change_tick, tempo] = tempo_[tempo_idx_];
+				seg_us_ += std::uint64_t(change_tick - seg_tick_) * cur_tempo_ / ppqn_;
+				seg_tick_ = change_tick;
+				cur_tempo_ = tempo;
+				++tempo_idx_;
+			}
+			return seg_us_ + std::uint64_t(tick - seg_tick_) * cur_tempo_ / ppqn_;
+		}
+
+		// One-shot scan for total duration (independent of the streaming walker).
+		std::uint64_t us_at_tick_scan(tick_type target) const
+		{
+			std::uint64_t us = 0;
+			tick_type last = 0;
+			std::uint32_t tempo = 500000;
+			for (const auto& [tick, tempo_value] : tempo_)
+			{
+				if (tick >= target)
+					break;
+				us += std::uint64_t(tick - last) * tempo / ppqn_;
+				last = tick;
+				tempo = tempo_value;
+			}
+			us += std::uint64_t(target - last) * tempo / ppqn_;
+			return us;
+		}
+
+		std::vector<piano_note> notes_;    // sorted by start_tick
+		std::vector<control_ev> controls_; // sorted by tick
+		std::vector<std::pair<tick_type, std::uint32_t>> tempo_; // (tick, us/qn), sorted
+		std::uint16_t ppqn_;
+		std::uint64_t total_us_;
+
+		// Iteration state (reset by rewind)
+		std::size_t on_idx_ = 0;
+		std::size_t raw_idx_ = 0;
+		std::priority_queue<off_entry> off_heap_;
+
+		// Monotonic tick->us walker state
+		std::size_t tempo_idx_ = 0;
+		tick_type seg_tick_ = 0;
+		std::uint64_t seg_us_ = 0;
+		std::uint32_t cur_tempo_ = 500000;
+	};
+
+	/**
+	 * Build a live playback source over a snapshot of the current notes, tempo
+	 * map and channel controllers. simple_player::run_from_external streams it
+	 * directly — nothing is written to disk. The snapshot is copied under lock,
+	 * so later edits do not disturb an in-flight playback.
+	 */
+	std::unique_ptr<playback_event_source> make_playback_source() const
+	{
+		std::lock_guard<std::recursive_mutex> lock(editor_mutex);
+
+		std::vector<piano_note> notes_copy = notes;
+
+		std::vector<editor_event_source::control_ev> controls;
+		for (const auto& [track, events] : raw_track_events)
+		{
+			for (const auto& ev : events)
+			{
+				if (ev.bytes.empty())
+					continue;
+
+				const std::uint8_t status = ev.bytes[0];
+				if (status >= 0xF0) // meta/sysex: not a sendable short message
+					continue;
+
+				const std::uint8_t hi = status & 0xF0;
+				std::uint32_t msg = status;
+				if (hi == 0xC0 || hi == 0xD0) // program change / channel pressure: 2 bytes
+				{
+					if (ev.bytes.size() >= 2)
+						msg |= std::uint32_t(ev.bytes[1]) << 8;
+					else
+						continue;
+				}
+				else // CC / pitch bend / aftertouch: 3 bytes
+				{
+					if (ev.bytes.size() >= 3)
+						msg |= (std::uint32_t(ev.bytes[1]) << 8) | (std::uint32_t(ev.bytes[2]) << 16);
+					else
+						continue;
+				}
+				controls.push_back({ev.tick, msg});
+			}
+		}
+
+		auto tempo_copy = tempo_events;
+
+		return std::make_unique<editor_event_source>(
+			std::move(notes_copy), std::move(controls), std::move(tempo_copy), ppqn);
+	}
 };
 
 #endif // SAFC_MIDI_EDITOR
