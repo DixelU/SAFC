@@ -10,6 +10,7 @@
 #include <set>
 #include <tuple>
 #include <cmath>
+#include <format>
 
 /**
  * Piano roll viewer for midi_editor
@@ -1050,8 +1051,13 @@ struct midi_editor_viewer : public handleable_ui_part
 		{
 			case lane_mode::pitch_bend:
 			{
-				const int bend = int(lane_value_to_control(value)) - 0x2000;
-				return "Pitch " + std::string(bend > 0 ? "+" : "") + std::to_string(bend);
+				// Raw 14-bit bend -> musical size. Depends on the channel's
+				// pitch-bend range (RPN 00,00), so the ±2 default reads very
+				// differently from this file's ±12.
+				const int offset = int(lane_value_to_control(value)) - 0x2000; // -8192..+8191
+				const double range = editor->get_pitch_bend_range_semitones(effective_draw_channel());
+				const double semitones = double(offset) / 8192.0 * range;
+				return std::format("Pitch {:+.0f} c ({:+.2f} st)", semitones * 100.0, semitones);
 			}
 			case lane_mode::pan:
 			{

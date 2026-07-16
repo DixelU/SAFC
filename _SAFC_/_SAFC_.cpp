@@ -4096,6 +4096,55 @@ void gl_display()
 
 	glRotatef(dumb_rotation_angle, 0, 0, 1);
 
+	// MIDI editor playback timer, shown in the editor status bar. Updated here
+	// (same thread as draw) and only when the shown value changes, so it does
+	// not rebuild the text every frame.
+	if (global_window_handler && player)
+	{
+		static std::string last_timer_text;
+		static bool timer_was_active = false;
+
+		const bool timer_active =
+			editor_playback_active.load(std::memory_order_acquire) && player->is_playing();
+
+		auto pad2 = [](long long v) { auto s = std::to_string(v); return s.size() < 2 ? "0" + s : s; };
+		auto mmss_tenths = [&](double secs)
+		{
+			if (secs < 0.0) secs = 0.0;
+			const long long t = static_cast<long long>(secs * 10.0 + 0.5);
+			return std::to_string(t / 600) + ":" + pad2((t / 10) % 60) + "." + std::to_string(t % 10);
+		};
+		auto mmss = [&](double secs)
+		{
+			if (secs < 0.0) secs = 0.0;
+			const long long s = static_cast<long long>(secs + 0.5);
+			return std::to_string(s / 60) + ":" + pad2(s % 60);
+		};
+
+		if (timer_active)
+		{
+			const double cur = double(player->get_position_us()) / 1000000.0;
+			const double total = double(player->get_info().total_duration_us) / 1000000.0;
+			std::string text = mmss_tenths(cur) + " / " + mmss(total);
+			if (text != last_timer_text)
+			{
+				if (auto* tb = _WH_t<text_box>("MIDI_EDITOR", "TEXT"))
+					tb->safe_string_replace(text);
+				last_timer_text = std::move(text);
+			}
+			timer_was_active = true;
+		}
+		else if (timer_was_active)
+		{
+			// One-shot revert when playback ends
+			const double total = double(player->get_info().total_duration_us) / 1000000.0;
+			if (auto* tb = _WH_t<text_box>("MIDI_EDITOR", "TEXT"))
+				tb->safe_string_replace("Stopped  (" + mmss(total) + " total)");
+			last_timer_text.clear();
+			timer_was_active = false;
+		}
+	}
+
 	if (global_window_handler)
 		global_window_handler->draw();
 	if (drag_over)

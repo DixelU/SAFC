@@ -2240,6 +2240,61 @@ public:
 		return get_track_primary_channel(active_track);
 	}
 
+	/**
+	 * Pitch-bend sensitivity for a channel, in semitones, read from the file's
+	 * RPN 00,00 -> Data Entry (CC6 = whole semitones, optional CC38 = cents).
+	 * Needed to convert a raw 14-bit bend into musical semitones/cents, since the
+	 * same wheel value means different pitch under a different range. Defaults to
+	 * the GM default of 2.0 when the file never sets it; if the range is set more
+	 * than once, the latest (highest-tick) value wins. RPN selection is tracked
+	 * per track, matching how selection + data entry are authored together.
+	 */
+	double get_pitch_bend_range_semitones(std::uint8_t channel) const
+	{
+		std::lock_guard<std::recursive_mutex> lock(editor_mutex);
+		channel &= 0x0F;
+
+		double range = 2.0;
+		tick_type best_tick = 0;
+		bool found = false;
+
+		for (const auto& [track, events] : raw_track_events)
+		{
+			std::uint8_t sel_msb = 0x7F, sel_lsb = 0x7F, data_msb = 0, data_lsb = 0;
+			bool is_nrpn = false;
+			for (const auto& ev : events)
+			{
+				if (ev.bytes.size() < 3 || (ev.bytes[0] & 0xF0) != 0xB0 ||
+					(ev.bytes[0] & 0x0F) != channel)
+					continue;
+
+				const std::uint8_t cc = ev.bytes[1], val = ev.bytes[2];
+				switch (cc)
+				{
+					case 0x65: sel_msb = val; is_nrpn = false; break; // RPN MSB
+					case 0x64: sel_lsb = val; is_nrpn = false; break; // RPN LSB
+					case 0x63: sel_msb = val; is_nrpn = true;  break; // NRPN MSB
+					case 0x62: sel_lsb = val; is_nrpn = true;  break; // NRPN LSB
+					case 0x06: case 0x26: // Data Entry MSB / LSB
+						if (!is_nrpn && sel_msb == 0 && sel_lsb == 0) // RPN 00,00 = pitch-bend range
+						{
+							if (cc == 0x06) data_msb = val;
+							else            data_lsb = val;
+							if (!found || ev.tick >= best_tick)
+							{
+								best_tick = ev.tick;
+								range = double(data_msb) + double(data_lsb) / 100.0;
+								found = true;
+							}
+						}
+						break;
+					default: break;
+				}
+			}
+		}
+		return range;
+	}
+
 	void clear_selection()
 	{
 		std::lock_guard<std::recursive_mutex> lock(editor_mutex);
@@ -2652,19 +2707,81 @@ public:
 				- controls_.begin());
 			raw_idx_ = raw_target;
 
-			// Reconstruct channel state at the seek point: the last value of each
-			// distinct controller/program/pitch below the target, collapsed so the
-			// set is bounded (~channels × controllers), then emitted first by next()
-			// during fast-forward. Same final synth state as replaying them all,
-			// without touching the dense note prefix. Held notes are not re-struck.
+			// Reconstruct channel state at the seek point, emitted first by next()
+			// during fast-forward. Same final synth state as replaying every event
+			// below the target, without touching the dense note prefix; held notes
+			// are not re-struck.
+			//
+			// Absolute controllers (volume, pan, pitch bend, program, pressure,
+			// aftertouch) collapse to their last value per channel/lane. RPN/NRPN
+			// is different: Data Entry (CC6/38) has no meaning on its own — it acts
+			// on the parameter currently selected by CC101/100 (RPN) or CC99/98
+			// (NRPN). Latching those CC numbers independently and re-sorting by time
+			// scrambles the select->data-entry order, so e.g. this file's ±12
+			// semitone pitch-bend range (RPN 00,00 + CC6=12) never gets established
+			// and every bend plays at the default ±2. Instead we track the selected
+			// parameter as we scan, remember the last Data Entry written to *each*
+			// parameter, and re-emit a correctly ordered block per parameter.
+			auto is_rpn_cc = [](std::uint8_t cc)
+			{
+				return cc == 0x06 || cc == 0x26 || cc == 0x60 || cc == 0x61 ||
+					cc == 0x62 || cc == 0x63 || cc == 0x64 || cc == 0x65;
+			};
+
+			struct rpn_param
+			{
+				std::uint8_t msb = 0, lsb = 0, data_msb = 0, data_lsb = 0;
+				bool is_nrpn = false, has_msb = false, has_lsb = false;
+				tick_type tick = 0;
+			};
+			struct chan_rpn
+			{
+				std::uint8_t sel_msb = 0x7F, sel_lsb = 0x7F; // RPN null until selected
+				bool is_nrpn = false, had_selection = false;
+				tick_type sel_tick = 0;
+				std::unordered_map<std::uint32_t, rpn_param> params; // is_nrpn<<16 | msb<<8 | lsb
+			};
+			chan_rpn rpn[16];
+
 			std::unordered_map<std::uint32_t, control_ev> latest;
 			for (std::size_t i = 0; i < raw_target; ++i)
 			{
 				const std::uint32_t msg = controls_[i].short_msg;
 				const std::uint8_t status = std::uint8_t(msg & 0xFF);
 				const std::uint8_t d1 = std::uint8_t((msg >> 8) & 0xFF);
+				const std::uint8_t d2 = std::uint8_t((msg >> 16) & 0xFF);
 				const std::uint8_t hi = status & 0xF0;
-				// Include the data byte for per-key/per-CC lanes (aftertouch, CC);
+				const std::uint8_t ch = status & 0x0F;
+
+				if (hi == 0xB0 && is_rpn_cc(d1))
+				{
+					chan_rpn& cs = rpn[ch];
+					switch (d1)
+					{
+						case 0x65: cs.sel_msb = d2; cs.is_nrpn = false; cs.had_selection = true; cs.sel_tick = controls_[i].tick; break; // RPN MSB
+						case 0x64: cs.sel_lsb = d2; cs.is_nrpn = false; cs.had_selection = true; cs.sel_tick = controls_[i].tick; break; // RPN LSB
+						case 0x63: cs.sel_msb = d2; cs.is_nrpn = true;  cs.had_selection = true; cs.sel_tick = controls_[i].tick; break; // NRPN MSB
+						case 0x62: cs.sel_lsb = d2; cs.is_nrpn = true;  cs.had_selection = true; cs.sel_tick = controls_[i].tick; break; // NRPN LSB
+						case 0x06: case 0x26: // Data Entry MSB / LSB -> current parameter
+						{
+							const std::uint32_t key = (std::uint32_t(cs.is_nrpn ? 1 : 0) << 16) |
+								(std::uint32_t(cs.sel_msb) << 8) | cs.sel_lsb;
+							rpn_param& p = cs.params[key];
+							p.msb = cs.sel_msb; p.lsb = cs.sel_lsb; p.is_nrpn = cs.is_nrpn;
+							p.tick = controls_[i].tick;
+							if (d1 == 0x06) { p.data_msb = d2; p.has_msb = true; }
+							else            { p.data_lsb = d2; p.has_lsb = true; }
+							break;
+						}
+						// Data Increment/Decrement (0x60/0x61) are relative to the
+						// synth's internal value and can't be reconstructed; skipped.
+						default: break;
+					}
+					continue;
+				}
+
+				// Absolute controller/program/pitch/pressure: last value per lane.
+				// Include the data byte for per-key/per-CC lanes (poly aftertouch, CC);
 				// program/pressure/pitch are one value per channel.
 				std::uint32_t id = std::uint32_t(status) << 8;
 				if (hi == 0xA0 || hi == 0xB0)
@@ -2672,7 +2789,7 @@ public:
 				latest[id] = controls_[i];
 			}
 
-			seek_state_.reserve(latest.size());
+			seek_state_.reserve(latest.size() + 64);
 			for (const auto& [id, ev] : latest)
 			{
 				generated_event ge;
@@ -2681,7 +2798,38 @@ public:
 				ge.k = generated_event::kind::control;
 				seek_state_.push_back(ge);
 			}
-			std::sort(seek_state_.begin(), seek_state_.end(),
+
+			// Correctly ordered RPN/NRPN block per channel: select the parameter,
+			// then its Data Entry. Finally restore whichever parameter the channel
+			// had selected at the seek point, so any Data Entry that arrives after
+			// the seek acts on the right parameter. stable_sort keeps this order for
+			// events sharing a tick (select before data entry).
+			auto push_cc = [&](std::uint8_t ch, std::uint8_t cc, std::uint8_t val, tick_type tick)
+			{
+				generated_event ge;
+				ge.time_us = us_at_tick_scan(tick);
+				ge.short_msg = smsg(0xB0 | (ch & 0x0F), cc, val);
+				ge.k = generated_event::kind::control;
+				seek_state_.push_back(ge);
+			};
+			for (std::uint8_t ch = 0; ch < 16; ++ch)
+			{
+				chan_rpn& cs = rpn[ch];
+				for (const auto& [key, p] : cs.params)
+				{
+					if (p.is_nrpn) { push_cc(ch, 0x63, p.msb, p.tick); push_cc(ch, 0x62, p.lsb, p.tick); }
+					else           { push_cc(ch, 0x65, p.msb, p.tick); push_cc(ch, 0x64, p.lsb, p.tick); }
+					if (p.has_msb) push_cc(ch, 0x06, p.data_msb, p.tick);
+					if (p.has_lsb) push_cc(ch, 0x26, p.data_lsb, p.tick);
+				}
+				if (cs.had_selection)
+				{
+					if (cs.is_nrpn) { push_cc(ch, 0x63, cs.sel_msb, cs.sel_tick); push_cc(ch, 0x62, cs.sel_lsb, cs.sel_tick); }
+					else            { push_cc(ch, 0x65, cs.sel_msb, cs.sel_tick); push_cc(ch, 0x64, cs.sel_lsb, cs.sel_tick); }
+				}
+			}
+
+			std::stable_sort(seek_state_.begin(), seek_state_.end(),
 				[](const generated_event& a, const generated_event& b) { return a.time_us < b.time_us; });
 		}
 
