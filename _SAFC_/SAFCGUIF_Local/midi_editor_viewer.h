@@ -41,7 +41,8 @@
  *                          a linear ramp; note velocity applies to the selection
  *                          when one is active
  * Keys: Del deletes the selection; Ctrl+Z/Y undo/redo; Ctrl+C/V/B copy, paste,
- * duplicate; Ctrl+A selects the active track; Ctrl+D deselects; Alt+V hides or
+ * duplicate; Ctrl+A selects the active track; Ctrl+D deselects; Alt+U/Y/W/O
+ * open Chopper/Flip/Claw/LFO. Alt+V hides or
  * shows the ghost (inactive-track) notes — while hidden, right-click no longer
  * switches to a ghost note's track.
  */
@@ -92,6 +93,10 @@ struct midi_editor_viewer : public handleable_ui_part
 	std::function<void()> on_status_restore;
 	// Fired when a click picks up a note's state or the draw channel changes
 	std::function<void()> on_draw_state_changed;
+	std::function<void()> on_open_chopper;
+	std::function<void()> on_open_flip;
+	std::function<void()> on_open_claw;
+	std::function<void()> on_open_lfo;
 	// Note audition: (key, velocity, channel, on/off)
 	std::function<void(std::uint8_t, std::uint8_t, std::uint8_t, bool)> note_audition;
 	// Current playback position in seconds, negative when not playing;
@@ -929,13 +934,22 @@ struct midi_editor_viewer : public handleable_ui_part
 
 		const auto modifiers = glutGetModifiers();
 
-		// Alt+letter arrives as the plain character with the Alt modifier
-		if ((modifiers & GLUT_ACTIVE_ALT) && (ch == 'v' || ch == 'V'))
+		// Alt+letter arrives as the plain character with the Alt modifier.
+		if (modifiers & GLUT_ACTIVE_ALT)
 		{
-			const auto message = toggle_ghost_notes();
-			if (on_status)
-				on_status(message);
-			return;
+			switch (ch)
+			{
+				case 'v': case 'V':
+				{
+					const auto message = toggle_ghost_notes();
+					if (on_status) on_status(message);
+					return;
+				}
+				case 'u': case 'U': if (on_open_chopper) on_open_chopper(); return;
+				case 'y': case 'Y': if (on_open_flip) on_open_flip(); return;
+				case 'w': case 'W': if (on_open_claw) on_open_claw(); return;
+				case 'o': case 'O': if (on_open_lfo) on_open_lfo(); return;
+			}
 		}
 
 		if (std::uint8_t(ch) >= 27)

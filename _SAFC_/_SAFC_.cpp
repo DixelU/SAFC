@@ -2919,6 +2919,59 @@ void on_editor_redo()
 // cursor is only meaningful while the player is streaming the editor's notes
 std::atomic<bool> editor_playback_active = false;
 
+void update_editor_playback_status()
+{
+	if (!global_window_handler || !player)
+		return;
+
+	static std::string last_timer_text;
+	static bool timer_was_active = false;
+
+	const bool timer_active =
+		editor_playback_active.load(std::memory_order_acquire) && player->is_playing();
+
+	auto pad2 = [](long long value)
+	{
+		auto text = std::to_string(value);
+		return text.size() < 2 ? "0" + text : text;
+	};
+	auto mmss_tenths = [&](double seconds)
+	{
+		seconds = std::max(0.0, seconds);
+		const long long tenths = static_cast<long long>(seconds * 10.0 + 0.5);
+		return std::to_string(tenths / 600) + ":" +
+			pad2((tenths / 10) % 60) + "." + std::to_string(tenths % 10);
+	};
+	auto mmss = [&](double seconds)
+	{
+		seconds = std::max(0.0, seconds);
+		const long long whole_seconds = static_cast<long long>(seconds + 0.5);
+		return std::to_string(whole_seconds / 60) + ":" + pad2(whole_seconds % 60);
+	};
+
+	if (timer_active)
+	{
+		const double current = double(player->get_position_us()) / 1000000.0;
+		const double total = double(player->get_info().total_duration_us) / 1000000.0;
+		std::string text = mmss_tenths(current) + " / " + mmss(total);
+		if (text != last_timer_text)
+		{
+			if (auto* status = _WH_t<text_box>("MIDI_EDITOR", "TEXT"))
+				status->safe_string_replace(text);
+			last_timer_text = std::move(text);
+		}
+		timer_was_active = true;
+	}
+	else if (timer_was_active)
+	{
+		const double total = double(player->get_info().total_duration_us) / 1000000.0;
+		if (auto* status = _WH_t<text_box>("MIDI_EDITOR", "TEXT"))
+			status->safe_string_replace("Stopped  (" + mmss(total) + " total)");
+		last_timer_text.clear();
+		timer_was_active = false;
+	}
+}
+
 void on_editor_play_from(bool from_view_start)
 {
 	if (!editor || !editor->is_file_loaded() || !player)
@@ -3124,6 +3177,190 @@ void on_editor_lane_mode(midi_editor_viewer::lane_mode mode)
 		btn->border_width = 2;
 }
 
+void close_editor_tool(const char* id)
+{
+	if (editor)
+		editor->cancel_tool_preview();
+	global_window_handler->disable_window(id);
+}
+
+void open_editor_tool(const char* id)
+{
+	if (!editor || !editor->is_file_loaded())
+	{
+		throw_alert_warning("Load a MIDI file before using score tools");
+		return;
+	}
+	editor->cancel_tool_preview();
+	global_window_handler->enable_window(id);
+}
+
+void preview_editor_chopper();
+void preview_editor_flip();
+void preview_editor_claw();
+void preview_editor_lfo();
+
+void on_editor_open_chopper() { open_editor_tool("MIDI_CHOPPER"); preview_editor_chopper(); }
+void on_editor_open_flip() { open_editor_tool("MIDI_FLIP"); preview_editor_flip(); }
+void on_editor_open_claw() { open_editor_tool("MIDI_CLAW"); preview_editor_claw(); }
+
+midi_editor::lfo_shape editor_lfo_shape = midi_editor::lfo_shape::sine;
+
+void update_editor_lfo_shape_button()
+{
+	auto btn = _WH_t<button>("MIDI_LFO", "SHAPE");
+	if (!btn)
+		return;
+	const char* label = editor_lfo_shape == midi_editor::lfo_shape::triangle
+		? "Triangle" : editor_lfo_shape == midi_editor::lfo_shape::square ? "Square" : "Sine";
+	btn->safe_string_replace(std::string("Shape: ") + label);
+}
+
+void on_editor_lfo_shape_cycle()
+{
+	editor_lfo_shape = static_cast<midi_editor::lfo_shape>(
+		(static_cast<unsigned>(editor_lfo_shape) + 1) % 3);
+	update_editor_lfo_shape_button();
+	preview_editor_lfo();
+}
+
+double editor_tool_value(const char* window, const char* id, double fallback)
+{
+	auto control = _WH_t<wheel_variable_changer>(window, id);
+	if (!control)
+		return fallback;
+	try
+	{
+		control->checkup_inputs();
+		return control->variable;
+	}
+	catch (...)
+	{
+		return fallback;
+	}
+}
+
+bool editor_tool_checked(const char* window, const char* id)
+{
+	auto control = _WH_t<checkbox>(window, id);
+	return control && control->state;
+}
+
+void preview_editor_chopper()
+{
+	if (!editor || !editor->is_file_loaded()) return;
+	editor->chop_tool(
+		unsigned(std::lround(editor_tool_value("MIDI_CHOPPER", "DIVISIONS", 4))),
+		editor_tool_value("MIDI_CHOPPER", "TIME", 1.0),
+		editor_tool_value("MIDI_CHOPPER", "GAP", 0.0),
+		editor_tool_checked("MIDI_CHOPPER", "ABSOLUTE"), true);
+}
+
+void on_editor_apply_chopper()
+{
+	preview_editor_chopper();
+	const auto count = editor->selection_count();
+	editor->accept_tool_preview();
+	close_editor_tool("MIDI_CHOPPER");
+	editor_flash_status("Chopper: " + std::to_string(count) + " notes");
+}
+
+void preview_editor_flip()
+{
+	if (!editor || !editor->is_file_loaded()) return;
+	editor->flip_tool(editor_tool_checked("MIDI_FLIP", "HORIZONTAL"),
+		editor_tool_checked("MIDI_FLIP", "PRESERVE"),
+		editor_tool_checked("MIDI_FLIP", "VERTICAL"), true);
+}
+
+void on_editor_apply_flip()
+{
+	preview_editor_flip();
+	editor->accept_tool_preview();
+	close_editor_tool("MIDI_FLIP");
+	editor_flash_status("Score flipped");
+}
+
+void preview_editor_claw()
+{
+	if (!editor || !editor->is_file_loaded()) return;
+	editor->claw_tool(
+		editor_tool_value("MIDI_CLAW", "PERIOD", 1.0),
+		unsigned(std::lround(editor_tool_value("MIDI_CLAW", "TRASH", 4))),
+		editor_tool_value("MIDI_CLAW", "DISTORTION", 0.5),
+		editor_tool_checked("MIDI_CLAW", "REMOVE_SHORT"),
+		editor_tool_checked("MIDI_CLAW", "STRETCH"), true);
+}
+
+void on_editor_apply_claw()
+{
+	preview_editor_claw();
+	const auto count = editor->selection_count();
+	editor->accept_tool_preview();
+	close_editor_tool("MIDI_CLAW");
+	editor_flash_status("Claw: " + std::to_string(count) + " notes");
+}
+
+void on_editor_open_lfo()
+{
+	if (!editor || !editor->is_file_loaded())
+	{
+		open_editor_tool("MIDI_LFO");
+		return;
+	}
+	auto view = _WH_t<midi_editor_viewer>("MIDI_EDITOR", "VIEW");
+	const bool pitch = view && view->current_lane_mode == midi_editor_viewer::lane_mode::pitch_bend;
+	if (auto center = _WH_t<wheel_variable_changer>("MIDI_LFO", "CENTER"))
+	{
+		center->variable = pitch ? 8192.0 : 64.0;
+		center->var_if->update_input_string(std::to_string(center->variable));
+	}
+	if (auto range = _WH_t<wheel_variable_changer>("MIDI_LFO", "RANGE"))
+	{
+		range->variable = pitch ? 8191.0 : 63.0;
+		range->var_if->update_input_string(std::to_string(range->variable));
+	}
+	open_editor_tool("MIDI_LFO");
+	preview_editor_lfo();
+}
+
+void preview_editor_lfo()
+{
+	auto view = _WH_t<midi_editor_viewer>("MIDI_EDITOR", "VIEW");
+	if (!view || !editor || !editor->is_file_loaded())
+		return;
+	const double center = editor_tool_value("MIDI_LFO", "CENTER", 64.0);
+	const double range = editor_tool_value("MIDI_LFO", "RANGE", 63.0);
+	const double cycles = editor_tool_value("MIDI_LFO", "CYCLES", 1.0);
+	const double phase = editor_tool_value("MIDI_LFO", "PHASE", 0.0) / 360.0;
+	if (view->current_lane_mode == midi_editor_viewer::lane_mode::note_velocity)
+		editor->lfo_velocity_tool(center, range, cycles, phase, editor_lfo_shape, true);
+	else
+	{
+		midi_editor::tick_type begin = editor->get_view_start_tick();
+		midi_editor::tick_type end = begin + editor->get_view_duration_ticks();
+		std::uint8_t low = 0, high = 0;
+		if (!editor->get_selection_bounds(begin, end, low, high))
+			end = begin + editor->get_view_duration_ticks();
+		midi_editor::control_lane lane = midi_editor::control_lane::channel_volume;
+		if (view->current_lane_mode == midi_editor_viewer::lane_mode::pitch_bend)
+			lane = midi_editor::control_lane::pitch_bend;
+		else if (view->current_lane_mode == midi_editor_viewer::lane_mode::pan)
+			lane = midi_editor::control_lane::pan;
+		editor->lfo_control_tool(lane, view->effective_draw_channel(), begin, end,
+			std::max<midi_editor::tick_type>(1, view->snap_ticks(editor->get_ppqn())),
+			center, range, cycles, phase, editor_lfo_shape, true);
+	}
+}
+
+void on_editor_apply_lfo()
+{
+	preview_editor_lfo();
+	editor->accept_tool_preview();
+	close_editor_tool("MIDI_LFO");
+	editor_flash_status("LFO applied");
+}
+
 bool simplayer_maximised = false;
 
 struct simplayer_saved_state {
@@ -3164,6 +3401,7 @@ struct midieditor_saved_state {
 	float max_x, max_y;
 	float lane_x, lane_y;
 	float lane_mode_x[4], lane_mode_y[4];
+	float tool_x[4], tool_y[4];
 	float view_x, view_y, view_width, view_height;
 	std::string previous_main_window_id;
 } saved_midieditor_state;
@@ -3198,6 +3436,10 @@ void apply_midieditor_maximised_layout()
 		(button*)(*window)["LANE_PAN"],
 		(button*)(*window)["LANE_CCVOL"]
 	};
+	button* tool_btns[] = {
+		(button*)(*window)["TOOL_CHOP"], (button*)(*window)["TOOL_FLIP"],
+		(button*)(*window)["TOOL_CLAW"], (button*)(*window)["TOOL_LFO"]
+	};
 
 	// move window so top-left aligns with viewport top-left
 	float dx = (-half_w) - window->x_window_pos;
@@ -3216,9 +3458,13 @@ void apply_midieditor_maximised_layout()
 	float row_y = half_h - 10;
 	load_file_btn->safe_change_position(button_x, row_y);
 	save_file_btn->safe_change_position(button_x, row_y -= 15);
+	tool_btns[0]->safe_change_position(button_x - 20, row_y -= 15);
+	tool_btns[1]->safe_change_position(button_x + 20, row_y);
+	tool_btns[2]->safe_change_position(button_x - 20, row_y -= 13);
+	tool_btns[3]->safe_change_position(button_x + 20, row_y);
 
 	// Playback, maximise, velocity lane
-	play_btn->safe_change_position(button_x, row_y -= 20);
+	play_btn->safe_change_position(button_x, row_y -= 18);
 	play_from_btn->safe_change_position(button_x, row_y -= 15);
 	max_btn->safe_change_position(button_x, row_y -= 15);
 	lane_btn->safe_change_position(button_x, row_y -= 15);
@@ -3291,6 +3537,10 @@ void switch_midieditor_maximise()
 		(button*)(*window)["LANE_PAN"],
 		(button*)(*window)["LANE_CCVOL"]
 	};
+	button* tool_btns[] = {
+		(button*)(*window)["TOOL_CHOP"], (button*)(*window)["TOOL_FLIP"],
+		(button*)(*window)["TOOL_CLAW"], (button*)(*window)["TOOL_LFO"]
+	};
 
 	if (!midieditor_maximised)
 	{
@@ -3340,6 +3590,8 @@ void switch_midieditor_maximise()
 		{
 			state.lane_mode_x[i] = lane_mode_btns[i]->x_pos;
 			state.lane_mode_y[i] = lane_mode_btns[i]->y_pos;
+			state.tool_x[i] = tool_btns[i]->x_pos;
+			state.tool_y[i] = tool_btns[i]->y_pos;
 		}
 		state.view_x = editor_view->xpos;
 		state.view_y = editor_view->ypos;
@@ -3390,7 +3642,10 @@ void switch_midieditor_maximise()
 		max_btn->safe_change_position(state.max_x, state.max_y);
 		lane_btn->safe_change_position(state.lane_x, state.lane_y);
 		for (int i = 0; i < 4; ++i)
+		{
 			lane_mode_btns[i]->safe_change_position(state.lane_mode_x[i], state.lane_mode_y[i]);
+			tool_btns[i]->safe_change_position(state.tool_x[i], state.tool_y[i]);
+		}
 
 		editor_view->xpos = state.view_x;
 		editor_view->ypos = state.view_y;
@@ -3881,6 +4136,10 @@ void init()
 	editor_view->on_status = editor_flash_status;
 	editor_view->on_status_restore = update_editor_status_text;
 	editor_view->on_draw_state_changed = update_channel_indicator;
+	editor_view->on_open_chopper = on_editor_open_chopper;
+	editor_view->on_open_flip = on_editor_open_flip;
+	editor_view->on_open_claw = on_editor_open_claw;
+	editor_view->on_open_lfo = on_editor_open_lfo;
 	editor_view->note_audition = [](std::uint8_t key, std::uint8_t velocity, std::uint8_t channel, bool on)
 	{
 		if (!player)
@@ -3904,6 +4163,10 @@ void init()
 	// File operation buttons (right side, aligned with MAIN window pattern)
 	(*window)["LOAD_FILE"] = new button("Load MIDI", system_black, on_editor_load_file, 150, 167.5, 75, 12, 1, 0xFFFFFFAF, 0x0F0F0FFF, 0xFFFFFFFF, 0x000000FF, 0xFFFFFFFF, nullptr, "Load MIDI file for editing");
 	(*window)["SAVE_FILE"] = new button("Save MIDI", system_black, on_editor_save_file, 150, 155, 75, 12, 1, 0xFFFFFFAF, 0x0F0F0FFF, 0xFFFFFFFF, 0x000000FF, 0xFFFFFFFF, nullptr, "Save edited MIDI file");
+	(*window)["TOOL_CHOP"] = new button("Chop", system_white, on_editor_open_chopper, 130, 137.5, 36, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr, "Chopper (Alt+U)");
+	(*window)["TOOL_FLIP"] = new button("Flip", system_white, on_editor_open_flip, 170, 137.5, 36, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr, "Flip score (Alt+Y)");
+	(*window)["TOOL_CLAW"] = new button("Claw", system_white, on_editor_open_claw, 130, 125, 36, 10, 1, 0x7F3FFF3F, 0x7F3FFFFF, 0xFFFFFFFF, 0x7F3FFFFF, 0xFFFFFFFF, nullptr, "Claw machine (Alt+W)");
+	(*window)["TOOL_LFO"] = new button("LFO", system_white, on_editor_open_lfo, 170, 125, 36, 10, 1, 0xFFAF003F, 0xFFAF00FF, 0xFFFFFFFF, 0xFFAF00FF, 0xFFFFFFFF, nullptr, "LFO tool (Alt+O)");
 
 	// Channel selector: which channel newly drawn notes land on. Clicking a
 	// note picks its channel up too; a bright border marks the current one.
@@ -3974,6 +4237,94 @@ void init()
 	(*global_window_handler)["MIDI_EDITOR"] = window;
 	update_channel_indicator();
 	update_editor_track_list();
+
+	// Score tools use dedicated modal-style settings windows. Wheel the right
+	// half of a value control or type directly; the lower field is its step.
+	window = new moveable_fui_window("Chopper (Alt+U)", system_white,
+		-125, 115 + moveable_window::window_header_size, 250, 230 + moveable_window::window_header_size,
+		100, 1.25f, 50, 50, 5, BACKGROUND_OPQ, HEADER, BORDER);
+	window->on_close = []() { close_editor_tool("MIDI_CHOPPER"); };
+	(*window)["INFO"] = new text_box("Slice selected notes (or the active track)", legacy_white,
+		0, 88, 12, 210, 10, 0xFFFFFF1A, 0, 0, _Align(center | top), text_box::VerticalOverflow::cut);
+	(*window)["DIVISIONS"] = new wheel_variable_changer([](double) { preview_editor_chopper(); }, -55, 48, 4, 1,
+		system_white, "Slices/beat", "Step", wheel_variable_changer::Type::addictable);
+	(*window)["TIME"] = new wheel_variable_changer([](double) { preview_editor_chopper(); }, 55, 48, 1, .25,
+		system_white, "Time mult.", "Step", wheel_variable_changer::Type::addictable);
+	(*window)["GAP"] = new wheel_variable_changer([](double) { preview_editor_chopper(); }, -55, -18, 0, 5,
+		system_white, "Gap %", "Step", wheel_variable_changer::Type::addictable);
+	(*window)["ABSOLUTE"] = new checkbox(35, -15, 11, 0xFFFFFFFF, 0x202020FF, 0x00AF7FFF,
+		1, false, &system_white, _Align::right, "Absolute pattern (align slices to score grid)",
+		[](bool) { preview_editor_chopper(); });
+	(*window)["ABS_LABEL"] = new text_box("Absolute pattern", legacy_white, 75, -10, 12, 70, 10,
+		0, 0, 0, _Align(center | top), text_box::VerticalOverflow::cut);
+	(*window)["APPLY"] = new button("Accept", system_white, on_editor_apply_chopper, -42, -88, 70, 12, 1,
+		0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr, "Apply as one undoable edit");
+	(*window)["CANCEL"] = new button("Cancel", system_white, []() { close_editor_tool("MIDI_CHOPPER"); },
+		42, -88, 70, 12, 1, 0x5F5F5FAF, 0xFFFFFFFF, 0x5F5F5FAF, 0xFFFFFFFF, 0xF7F7F7FF, nullptr, "Close without editing");
+	(*global_window_handler)["MIDI_CHOPPER"] = window;
+
+	window = new moveable_fui_window("Flip score (Alt+Y)", system_white,
+		-105, 80 + moveable_window::window_header_size, 210, 160 + moveable_window::window_header_size,
+		100, 1.25f, 50, 50, 5, BACKGROUND_OPQ, HEADER, BORDER);
+	window->on_close = []() { close_editor_tool("MIDI_FLIP"); };
+	(*window)["HORIZONTAL"] = new checkbox(-75, 40, 11, 0xFFFFFFFF, 0x202020FF, 0x00AF7FFF, 1, true,
+		&system_white, _Align::right, "Flip horizontally (time)", [](bool) { preview_editor_flip(); });
+	(*window)["H_LABEL"] = new text_box("Horizontal", legacy_white, -25, 45, 12, 80, 10, 0, 0, 0, _Align(center | top), text_box::VerticalOverflow::cut);
+	(*window)["PRESERVE"] = new checkbox(-75, 10, 11, 0xFFFFFFFF, 0x202020FF, 0x00AF7FFF, 1, false,
+		&system_white, _Align::right, "Preserve note start times while reversing their order", [](bool) { preview_editor_flip(); });
+	(*window)["P_LABEL"] = new text_box("Preserve starts", legacy_white, -15, 15, 12, 100, 10, 0, 0, 0, _Align(center | top), text_box::VerticalOverflow::cut);
+	(*window)["VERTICAL"] = new checkbox(-75, -20, 11, 0xFFFFFFFF, 0x202020FF, 0x00AF7FFF, 1, false,
+		&system_white, _Align::right, "Flip vertically (pitch)", [](bool) { preview_editor_flip(); });
+	(*window)["V_LABEL"] = new text_box("Vertical", legacy_white, -25, -15, 12, 80, 10, 0, 0, 0, _Align(center | top), text_box::VerticalOverflow::cut);
+	(*window)["APPLY"] = new button("Accept", system_white, on_editor_apply_flip, -38, -58, 62, 12, 1,
+		0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr, "Apply as one undoable edit");
+	(*window)["CANCEL"] = new button("Cancel", system_white, []() { close_editor_tool("MIDI_FLIP"); }, 38, -58, 62, 12, 1,
+		0x5F5F5FAF, 0xFFFFFFFF, 0x5F5F5FAF, 0xFFFFFFFF, 0xF7F7F7FF, nullptr, "Close without editing");
+	(*global_window_handler)["MIDI_FLIP"] = window;
+
+	window = new moveable_fui_window("Claw machine (Alt+W)", system_white,
+		-140, 125 + moveable_window::window_header_size, 280, 250 + moveable_window::window_header_size,
+		100, 1.25f, 50, 50, 5, BACKGROUND_OPQ, HEADER, BORDER);
+	window->on_close = []() { close_editor_tool("MIDI_CLAW"); };
+	(*window)["PERIOD"] = new wheel_variable_changer([](double) { preview_editor_claw(); }, -65, 70, 1, .25,
+		system_white, "Period beats", "Step", wheel_variable_changer::Type::addictable);
+	(*window)["TRASH"] = new wheel_variable_changer([](double) { preview_editor_claw(); }, 65, 70, 4, 1,
+		system_white, "Trash every", "Step", wheel_variable_changer::Type::addictable);
+	(*window)["DISTORTION"] = new wheel_variable_changer([](double) { preview_editor_claw(); }, -65, 5, .5, .05,
+		system_white, "Distortion", "Step", wheel_variable_changer::Type::addictable);
+	(*window)["REMOVE_SHORT"] = new checkbox(35, 20, 11, 0xFFFFFFFF, 0x202020FF, 0x00AF7FFF, 1, true,
+		&system_white, _Align::right, "Remove notes shorter than 1/64 beat", [](bool) { preview_editor_claw(); });
+	(*window)["RS_LABEL"] = new text_box("Remove short", legacy_white, 85, 25, 12, 85, 10, 0, 0, 0, _Align(center | top), text_box::VerticalOverflow::cut);
+	(*window)["STRETCH"] = new checkbox(35, -15, 11, 0xFFFFFFFF, 0x202020FF, 0x00AF7FFF, 1, false,
+		&system_white, _Align::right, "Stretch output back to the original selection length", [](bool) { preview_editor_claw(); });
+	(*window)["ST_LABEL"] = new text_box("Stretch to fit", legacy_white, 85, -10, 12, 85, 10, 0, 0, 0, _Align(center | top), text_box::VerticalOverflow::cut);
+	(*window)["APPLY"] = new button("Accept", system_white, on_editor_apply_claw, -42, -98, 70, 12, 1,
+		0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr, "Apply as one undoable edit");
+	(*window)["CANCEL"] = new button("Cancel", system_white, []() { close_editor_tool("MIDI_CLAW"); }, 42, -98, 70, 12, 1,
+		0x5F5F5FAF, 0xFFFFFFFF, 0x5F5F5FAF, 0xFFFFFFFF, 0xF7F7F7FF, nullptr, "Close without editing");
+	(*global_window_handler)["MIDI_CLAW"] = window;
+
+	window = new moveable_fui_window("LFO (Alt+O)", system_white,
+		-150, 140 + moveable_window::window_header_size, 300, 280 + moveable_window::window_header_size,
+		100, 1.25f, 50, 50, 5, BACKGROUND_OPQ, HEADER, BORDER);
+	window->on_close = []() { close_editor_tool("MIDI_LFO"); };
+	(*window)["INFO"] = new text_box("Targets the selected bottom lane and visible/selected time", legacy_white,
+		0, 112, 12, 260, 10, 0xFFFFFF1A, 0, 0, _Align(center | top), text_box::VerticalOverflow::cut);
+	(*window)["CENTER"] = new wheel_variable_changer([](double) { preview_editor_lfo(); }, -70, 65, 64, 1,
+		system_white, "Value", "Step", wheel_variable_changer::Type::addictable);
+	(*window)["RANGE"] = new wheel_variable_changer([](double) { preview_editor_lfo(); }, 70, 65, 63, 1,
+		system_white, "Range", "Step", wheel_variable_changer::Type::addictable);
+	(*window)["CYCLES"] = new wheel_variable_changer([](double) { preview_editor_lfo(); }, -70, 0, 1, .25,
+		system_white, "Cycles", "Step", wheel_variable_changer::Type::addictable);
+	(*window)["PHASE"] = new wheel_variable_changer([](double) { preview_editor_lfo(); }, 70, 0, 0, 15,
+		system_white, "Phase deg", "Step", wheel_variable_changer::Type::addictable);
+	(*window)["SHAPE"] = new button("Shape: Sine", system_white, on_editor_lfo_shape_cycle, 0, -55, 110, 12, 1,
+		0x7F3FFF3F, 0x7F3FFFFF, 0xFFFFFFFF, 0x7F3FFFFF, 0xFFFFFFFF, nullptr, "Cycle sine / triangle / square");
+	(*window)["APPLY"] = new button("Accept", system_white, on_editor_apply_lfo, -42, -108, 70, 12, 1,
+		0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr, "Write LFO values as one undoable edit");
+	(*window)["CANCEL"] = new button("Cancel", system_white, []() { close_editor_tool("MIDI_LFO"); }, 42, -108, 70, 12, 1,
+		0x5F5F5FAF, 0xFFFFFFFF, 0x5F5F5FAF, 0xFFFFFFFF, 0xF7F7F7FF, nullptr, "Close without editing");
+	(*global_window_handler)["MIDI_LFO"] = window;
 
 	window = new moveable_fui_window("Feedback/Support? O.o", system_white, -100, 100 + moveable_window::window_header_size, 200, 200 + moveable_window::window_header_size, 100, 1.25f, 50, 50, 5, BACKGROUND_OPQ, HEADER, BORDER);
 	(*window)["EDITBOX"] = new edit_box(" ", &system_white, 0, 0, 150, 150, 10, 0, ~0U ^ 0b11100000, 1);
@@ -4096,55 +4447,6 @@ void gl_display()
 
 	glRotatef(dumb_rotation_angle, 0, 0, 1);
 
-	// MIDI editor playback timer, shown in the editor status bar. Updated here
-	// (same thread as draw) and only when the shown value changes, so it does
-	// not rebuild the text every frame.
-	if (global_window_handler && player)
-	{
-		static std::string last_timer_text;
-		static bool timer_was_active = false;
-
-		const bool timer_active =
-			editor_playback_active.load(std::memory_order_acquire) && player->is_playing();
-
-		auto pad2 = [](long long v) { auto s = std::to_string(v); return s.size() < 2 ? "0" + s : s; };
-		auto mmss_tenths = [&](double secs)
-		{
-			if (secs < 0.0) secs = 0.0;
-			const long long t = static_cast<long long>(secs * 10.0 + 0.5);
-			return std::to_string(t / 600) + ":" + pad2((t / 10) % 60) + "." + std::to_string(t % 10);
-		};
-		auto mmss = [&](double secs)
-		{
-			if (secs < 0.0) secs = 0.0;
-			const long long s = static_cast<long long>(secs + 0.5);
-			return std::to_string(s / 60) + ":" + pad2(s % 60);
-		};
-
-		if (timer_active)
-		{
-			const double cur = double(player->get_position_us()) / 1000000.0;
-			const double total = double(player->get_info().total_duration_us) / 1000000.0;
-			std::string text = mmss_tenths(cur) + " / " + mmss(total);
-			if (text != last_timer_text)
-			{
-				if (auto* tb = _WH_t<text_box>("MIDI_EDITOR", "TEXT"))
-					tb->safe_string_replace(text);
-				last_timer_text = std::move(text);
-			}
-			timer_was_active = true;
-		}
-		else if (timer_was_active)
-		{
-			// One-shot revert when playback ends
-			const double total = double(player->get_info().total_duration_us) / 1000000.0;
-			if (auto* tb = _WH_t<text_box>("MIDI_EDITOR", "TEXT"))
-				tb->safe_string_replace("Stopped  (" + mmss(total) + " total)");
-			last_timer_text.clear();
-			timer_was_active = false;
-		}
-	}
-
 	if (global_window_handler)
 		global_window_handler->draw();
 	if (drag_over)
@@ -4173,6 +4475,7 @@ void gl_close()
 void on_timer(int v)
 {
 	glutTimerFunc(15, on_timer, 0);
+	update_editor_playback_status();
 	if (animation_is_active)
 	{
 		gl_display();

@@ -165,6 +165,28 @@ editor.undo();
 editor.redo();
 ```
 
+### Score tools
+
+The editor includes four undoable, selection-aware score tools. When there is
+no note selection they operate on the active track.
+
+- **Chopper (Alt+U)** splits notes using a beat subdivision, time multiplier,
+  optional gap, and relative or absolute grid alignment.
+- **Flip (Alt+Y)** mirrors notes horizontally and/or vertically, with an option
+  to preserve note lengths while reversing start positions.
+- **Claw machine (Alt+W)** slices and removes periodic regions, warps their
+  timing, optionally removes very short results, and can stretch the result
+  back to its original duration.
+- **LFO (Alt+O)** writes sine, triangle, or square modulation to the selected
+  bottom lane. Note velocity is applied to target notes; pitch bend, pan CC10,
+  and channel-volume CC7 are written as MIDI events over the selected or visible
+  time range.
+
+Each shortcut opens a settings window with editable values, wheel increments,
+checkboxes, Accept, and Cancel. Settings update a reversible live preview in the
+piano roll. Accept turns that preview into one undo-history entry; Cancel restores
+the notes, controller events, selection, and dirty state from before the dialog.
+
 ### Integration with Processor
 
 ```cpp
