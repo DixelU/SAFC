@@ -3822,8 +3822,8 @@ void init()
 	auto angle_input = new input_field(std::to_string(dumb_rotation_angle), -87.5 + moveable_window::window_header_size, 55 - moveable_window::window_header_size, 10, 30, system_white, nullptr, 0x007FFFFF, &system_white, "Rotation angle", 6, _Align::center, _Align::left, input_field::Type::FP_Any);
 	angle_input->disable(); // hide // legacy
 	(*window)["AS_ROT_ANGLE"] = angle_input;
-	(*window)["AS_FONT_SIZE"] = new wheel_variable_changer(settings::apply_fs_wheel, -37.5, -82.5, lfont_symbols_info::font_size, 1, system_white, "Font size", "Delta", wheel_variable_changer::Type::addictable);
-	(*window)["AS_FONT_P"] = new wheel_variable_changer(settings::apply_rel_wheel, -37.5, -22.5, font_height_to_width, 0.01, system_white, "Font rel.", "Delta", wheel_variable_changer::Type::addictable);
+	(*window)["AS_FONT_SIZE"] = new wheel_variable_changer(settings::apply_fs_wheel, -37.5, -82.5, lfont_symbols_info::font_size, 1, system_white, "Font size", "Delta", wheel_variable_changer::Type::addition);
+	(*window)["AS_FONT_P"] = new wheel_variable_changer(settings::apply_rel_wheel, -37.5, -22.5, font_height_to_width, 0.01, system_white, "Font rel.", "Delta", wheel_variable_changer::Type::addition);
 	(*window)["AS_FONT_NAME"] = new input_field(default_font_name, 52.5 - moveable_window::window_header_size, 55 - moveable_window::window_header_size, 10, 100, legacy_white, &default_font_name, 0x007FFFFF, &system_white, "Font name", 32, _Align::center, _Align::left, input_field::Type::text);
 
 	(*window)["BOOL_REM_TRCKS"] = new checkbox(-97.5 + moveable_window::window_header_size, 95 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, &system_white, _Align::left, "Remove empty tracks");
