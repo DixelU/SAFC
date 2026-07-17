@@ -12,19 +12,19 @@
 
 constexpr int base_internal_range = 200;
 
-float internal_range = base_internal_range, mouse_x_position = 0.f, mouse_y_position = 0.f;
+inline float internal_range = base_internal_range, mouse_x_position = 0.f, mouse_y_position = 0.f;
 
-const char* window_title = "SAFC\0";
-std::wstring default_reg_path = L"Software\\SAFC\\";
+inline const char* window_title = "SAFC\0";
+inline std::wstring default_reg_path = L"Software\\SAFC\\";
 
-std::string default_font_name = "Arial";
-std::wstring saved_midi_device_name = L"";
-bool is_fonted = true;
+inline std::string default_font_name = "Arial";
+inline std::wstring saved_midi_device_name = L"";
+inline bool is_fonted = true;
 
 //#define ROT_ANGLE 0.7
 #define TRY_CATCH(code,msg) try{code}catch(...){std::cout<<msg<<std::endl;}
 
-float dumb_rotation_angle = 0.f;
+inline float dumb_rotation_angle = 0.f;
 //#define RANGE 200
 constexpr int window_base_width = 720;
 constexpr int window_base_height = 720;
@@ -68,35 +68,35 @@ inline void __glcolor(std::uint32_t uINT)
 template<typename T>
 inline void discard(T) {}
 
-float wind_x = window_base_width, wind_y = window_base_height;
+inline float wind_x = window_base_width, wind_y = window_base_height;
 
-bool animation_is_active = false,
+inline bool animation_is_active = false,
 	 firstboot = true,
 	 drag_over = false,
 	 april_fool = false,
 	 shift_held = false,
 	 month_beginning = false;
 
-std::uint32_t timer_v = 0;
-std::int16_t years_old = -1;
+inline std::uint32_t timer_v = 0;
+inline std::int16_t years_old = -1;
 
 
-HWND hWnd;
-HDC hDc;
-auto hand_cursor = ::LoadCursor(NULL, IDC_HAND), all_direct_cursor = ::LoadCursor(NULL, IDC_CROSS), nwse_cursor = ::LoadCursor(NULL, IDC_SIZENWSE);
+inline HWND hWnd;
+inline HDC hDc;
+inline auto hand_cursor = ::LoadCursor(NULL, IDC_HAND), all_direct_cursor = ::LoadCursor(NULL, IDC_CROSS), nwse_cursor = ::LoadCursor(NULL, IDC_SIZENWSE);
 //const float singlepixwidth = (float)RANGE / WINDXSIZE;
 
-bool check_autoupdates = true;
+inline bool check_autoupdates = true;
 
 struct simple_player;
 struct midi_editor;
-std::shared_ptr<simple_player> player;
-std::shared_ptr<midi_editor> editor;
+inline std::shared_ptr<simple_player> player;
+inline std::shared_ptr<midi_editor> editor;
 
 void absolute_to_actual_coords(int ix, int iy, float& x, float& y);
 void inline rotate_view(float& x, float& y);
 
-int collect_time_data()
+inline int collect_time_data()
 {
 	SYSTEMTIME t;
 	GetLocalTime(&t);

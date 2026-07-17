@@ -7,8 +7,8 @@
 
 #include "header_utils.h"
 
-std::unordered_map<char, std::string> legacy_draw_map;
-void init_legacy_draw_map()
+inline std::unordered_map<char, std::string> legacy_draw_map;
+inline void init_legacy_draw_map()
 {
 	legacy_draw_map.clear();
 

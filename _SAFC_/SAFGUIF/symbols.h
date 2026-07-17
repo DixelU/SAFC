@@ -169,23 +169,23 @@ public:
 	}
 };
 
-float font_height_to_width = 2.5;
+inline float font_height_to_width = 2.5;
 namespace lfont_symbols_info
 {
 
-bool is_init = false;
-GLuint current_font = 0;
-HFONT selected_font = nullptr;
-std::int32_t font_size = 15;
+inline bool is_init = false;
+inline GLuint current_font = 0;
+inline HFONT selected_font = nullptr;
+inline std::int32_t font_size = 15;
 
-std::int32_t previous_font_size = font_size;
-float previous_font_height_to_width = font_height_to_width;
-std::string previous_font_name;
+inline std::int32_t previous_font_size = font_size;
+inline float previous_font_height_to_width = font_height_to_width;
+inline std::string previous_font_name;
 
 struct font_symb_infos_list_destructor { ~font_symb_infos_list_destructor() { glDeleteLists(current_font, 256); } };
-font_symb_infos_list_destructor __font_destructor{};
+inline font_symb_infos_list_destructor __font_destructor{};
 
-void initialise_font(const std::string& font_name, bool force = false)
+inline void initialise_font(const std::string& font_name, bool force = false)
 {
 	if (!force && font_name == previous_font_name && previous_font_size == font_size &&
 		(std::abs)(previous_font_height_to_width - font_height_to_width) < std::numeric_limits<float>::epsilon())

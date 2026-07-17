@@ -317,10 +317,13 @@
     <ClInclude Include="SAFCGUIF_Local\drag_n_drop_handler.h" />
     <ClInclude Include="SAFCGUIF_Local\graphing.h" />
     <ClInclude Include="SAFCGUIF_Local\midi_editor_viewer.h" />
+	<ClInclude Include="SAFCGUIF_Local\midi_editor_tools_ui.h" />
+	<ClInclude Include="SAFCGUIF_Local\simple_player_viewer.h" />
     <ClInclude Include="SAFCGUIF_Local\volume_graph.h" />
     <ClInclude Include="SAFCGUIF_Local\SAFGUIF_L.h" />
     <ClInclude Include="SAFCGUIF_Local\midi_processor_visualiser.h" />
     <ClInclude Include="SAFC_InnerModules\bool_settings.h" />
+    <ClInclude Include="SAFC_InnerModules\buffered_queue_spsc.h" />
     <ClInclude Include="SAFC_InnerModules\cut_and_transpose.h" />
     <ClInclude Include="SAFC_InnerModules\fast_midi_checker.h" />
     <ClInclude Include="SAFC_InnerModules\midi_collection_threaded_merger.h" />
@@ -358,6 +361,8 @@
     <ClInclude Include="WinRegWrappers.h" />
   </ItemGroup>
   <ItemGroup>
+	<ClCompile Include="SAFCGUIF_Local\midi_editor_tools_ui.cpp" />
+	<ClCompile Include="SAFC_InnerModules\midi_editor_tools.cpp" />
     <ClCompile Include="_SAFC_.cpp" />
   </ItemGroup>
   <ItemGroup>

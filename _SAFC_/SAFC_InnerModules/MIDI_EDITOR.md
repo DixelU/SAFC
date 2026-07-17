@@ -6,6 +6,22 @@ A memory-efficient MIDI piano roll editor that reads directly from memory-mapped
 
 ## Architecture
 
+### Source layout
+
+- `midi_editor.h` contains the editor model and public interface.
+- `midi_editor_tools.cpp` contains Chopper, Flip, Claw, LFO, and reversible
+  preview implementation.
+- `midi_editor_viewer.h` contains piano-roll drawing and interaction.
+- `midi_editor_tools_ui.h/.cpp` contains score-tool callbacks and settings
+  window construction.
+- `simple_player_viewer.h` contains player visualization; playback remains in
+  `simple_player.h`, while its reusable SPSC queue lives in
+  `buffered_queue_spsc.h`.
+
+File I/O and live playback-source generation remain in `midi_editor.h` for now.
+They share private parser/editor representation and should move after a
+deliberate private implementation boundary is introduced.
+
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                        midi_editor.h                            │
