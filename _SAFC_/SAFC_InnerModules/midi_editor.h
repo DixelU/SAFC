@@ -2956,6 +2956,10 @@ public:
 			cur_tempo_ = 500000; // 120 BPM until the first tempo event
 			seek_state_.clear();
 			seek_state_idx_ = 0;
+			seek_held_notes_.clear();
+			seek_held_idx_ = 0;
+			seek_anchor_pending_ = false;
+			seek_target_us_ = 0;
 		}
 
 		void seek(std::uint64_t target_us) override
@@ -2973,6 +2977,16 @@ public:
 			on_idx_ = std::size_t(std::lower_bound(notes_.begin(), notes_.end(), cross_tick,
 				[](const piano_note& note, tick_type t) { return note.start_tick < t; })
 				- notes_.begin());
+
+			// Notes crossing the boundary must be re-struck. Without this, a view
+			// beginning inside a long chord can be silent until the next note-on (or
+			// forever). Only active polyphony is copied into this side buffer.
+			for (std::size_t i = 0; i < on_idx_; ++i)
+				if (notes_[i].end_tick > cross_tick)
+					seek_held_notes_.push_back(notes_[i]);
+			seek_held_idx_ = 0;
+			seek_target_us_ = target_us;
+			seek_anchor_pending_ = true;
 
 			const std::size_t raw_target = std::size_t(std::lower_bound(
 				controls_.begin(), controls_.end(), cross_tick,
@@ -3104,6 +3118,14 @@ public:
 
 			std::stable_sort(seek_state_.begin(), seek_state_.end(),
 				[](const generated_event& a, const generated_event& b) { return a.time_us < b.time_us; });
+
+			// These are a reconstructed snapshot, not historical playback events.
+			// Keeping their original pre-seek times lets the parser cross the seek
+			// boundary while some are still buffered; the timed sender then computes
+			// old_time - seek_offset as uint64_t and waits almost forever. Preserve
+			// the established ordering, but apply the whole snapshot at the boundary.
+			for (auto& event : seek_state_)
+				event.time_us = target_us;
 		}
 
 		bool next(generated_event& out) override
@@ -3113,6 +3135,32 @@ public:
 			if (seek_state_idx_ < seek_state_.size())
 			{
 				out = seek_state_[seek_state_idx_++];
+				return true;
+			}
+
+			// Always provide an event at the requested time. It closes fast-forward
+			// cleanly when the view starts after the last real event; short_msg == 0
+			// makes it a timing marker only.
+			if (seek_anchor_pending_)
+			{
+				seek_anchor_pending_ = false;
+				out = generated_event{};
+				out.time_us = seek_target_us_;
+				return true;
+			}
+
+			if (seek_held_idx_ < seek_held_notes_.size())
+			{
+				const auto& note = seek_held_notes_[seek_held_idx_++];
+				const std::uint8_t vel = std::max<std::uint8_t>(note.velocity, 1);
+				out.time_us = seek_target_us_;
+				out.short_msg = smsg(0x90 | (note.channel & 0x0F), note.key, vel);
+				out.k = generated_event::kind::note_on;
+				out.key = note.key;
+				out.velocity = vel;
+				out.channel = note.channel;
+				out.track_index = note.track_index;
+				off_heap_.push({note.end_tick, note.key, note.channel, note.track_index});
 				return true;
 			}
 
@@ -3262,6 +3310,10 @@ public:
 		// Reconstructed channel state emitted first after a seek (bounded set)
 		std::vector<generated_event> seek_state_;
 		std::size_t seek_state_idx_ = 0;
+		std::vector<piano_note> seek_held_notes_;
+		std::size_t seek_held_idx_ = 0;
+		std::uint64_t seek_target_us_ = 0;
+		bool seek_anchor_pending_ = false;
 
 		// Monotonic tick->us walker state
 		std::size_t tempo_idx_ = 0;

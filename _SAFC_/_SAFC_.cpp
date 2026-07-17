@@ -2584,7 +2584,11 @@ void on_open_player()
 
 		worker_singleton<struct player_watcher>::instance().push(player_watch_func);
 
-		player->restore_device_by_name(saved_midi_device_name);
+		if (!player->ensure_output(saved_midi_device_name))
+		{
+			throw_alert_error("No MIDI output device is available for playback");
+			return;
+		}
 		player->simple_run(g_data[id].filename);
 	});
 }
@@ -2619,7 +2623,12 @@ void on_device_select(int device_id)
 {
 	worker_singleton<struct midi_out_selct>::instance().push([device_id]()
 	{
-		player->set_device(device_id);
+		if (!player->set_device(device_id))
+		{
+			if (player->is_playing())
+				throw_alert_warning("Stop playback before changing the MIDI output device");
+			return;
+		}
 
 		auto device_list = _WH_t<selectable_properted_list>("SIMPLAYER", "DEVICE_LIST");
 
@@ -2660,7 +2669,11 @@ void on_player_pause_toggle()
 		worker_singleton<struct player_watcher>::instance().push(player_watch_func);
 		worker_singleton<struct player_thread>::instance().push([filename]()
 		{
-			player->restore_device_by_name(saved_midi_device_name);
+			if (!player->ensure_output(saved_midi_device_name))
+			{
+				throw_alert_error("No MIDI output device is available for playback");
+				return;
+			}
 			player->simple_run(filename);
 		});
 		return;
@@ -2920,6 +2933,7 @@ void on_editor_redo()
 // The global player is shared with the SIMPLAYER window; the editor's playback
 // cursor is only meaningful while the player is streaming the editor's notes
 std::atomic<bool> editor_playback_active = false;
+std::atomic<bool> editor_playback_requested = false;
 
 void update_editor_playback_status()
 {
@@ -2990,6 +3004,14 @@ void on_editor_play_from(bool from_view_start)
 		return;
 	}
 
+	// Close the window between the UI click and the worker publishing
+	// state.playing. Without this, rapid clicks queue another full playback that
+	// starts unexpectedly after the first one finishes.
+	bool expected = false;
+	if (!editor_playback_requested.compare_exchange_strong(
+		expected, true, std::memory_order_acq_rel))
+		return;
+
 	double seek_fraction = 0.0;
 	if (from_view_start)
 	{
@@ -3003,6 +3025,14 @@ void on_editor_play_from(bool from_view_start)
 	// run_from_external blocks until playback ends, keep it off the UI thread
 	worker_singleton<struct editor_playback>::instance().push([play_btn, seek_fraction]()
 	{
+		struct request_guard
+		{
+			~request_guard()
+			{
+				editor_playback_requested.store(false, std::memory_order_release);
+			}
+		} guard;
+
 		// Stream the current in-memory state (unsaved edits included) straight
 		// into the player — no .mid written to disk, no re-parse.
 		auto source = editor->make_playback_source();
@@ -3012,31 +3042,22 @@ void on_editor_play_from(bool from_view_start)
 			return;
 		}
 
-		player->restore_device_by_name(saved_midi_device_name);
+		if (!player->ensure_output(saved_midi_device_name))
+		{
+			throw_alert_error("No MIDI output device is available for playback");
+			return;
+		}
 		editor_playback_active = true;
-		player->run_from_external(source.get(), seek_fraction);
+		if (play_btn)
+			play_btn->safe_string_replace("Stop");
+		// Editor playback has already prepared its output, so start immediately.
+		// This avoids the separate polling/unpause worker and its timeout races.
+		player->run_from_external(source.get(), seek_fraction, false);
 		editor_playback_active = false;
 		if (play_btn)
 			play_btn->safe_string_replace("Play");
 	});
 
-	// Playback starts paused (player convention); unpause once it is up AND done
-	// fast-forwarding — resuming mid-seek would race the seek's own re-pause and
-	// leave playback stuck paused (worst in dense regions where FF takes longer).
-	worker_singleton<struct editor_playback_unpause>::instance().push([play_btn]()
-	{
-		auto ready = []() { return player->is_playing() && !player->is_fast_forwarding(); };
-
-		for (int i = 0; i < 1000 && !ready(); ++i)
-			std::this_thread::sleep_for(std::chrono::milliseconds(10));
-
-		if (ready())
-		{
-			player->resume();
-			if (play_btn)
-				play_btn->safe_string_replace("Stop");
-		}
-	});
 }
 
 void on_editor_play()
@@ -3974,9 +3995,8 @@ void init()
 	{
 		if (!player)
 			return;
-		if (on && !player->has_output())
-			if (!player->restore_device_by_name(saved_midi_device_name))
-				player->set_device(player->get_current_device());
+		if (on && !player->ensure_output(saved_midi_device_name))
+			return;
 		player->preview_note(channel, key, velocity, on);
 	};
 	editor_view->playback_seconds = []() -> double

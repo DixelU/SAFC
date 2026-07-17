@@ -491,10 +491,18 @@ struct simple_player
 	}
 
 	// Change the current device
-	void set_device(size_t device_index)
+	bool set_device(size_t device_index)
 	{
-		if (device_index >= devices.size() || (device_index == current_device && short_msg))
-			return;
+		// Device teardown/open and playback both mutate the output sink. Refuse a
+		// device switch while a run owns the player instead of racing its sender.
+		std::unique_lock<std::mutex> run_lock(playback_run_mutex, std::try_to_lock);
+		if (!run_lock.owns_lock())
+			return false;
+
+		if (device_index >= devices.size())
+			return false;
+		if (device_index == current_device && has_output())
+			return true;
 
 		// Close current device if open
 		close_midi_out();
@@ -506,12 +514,14 @@ struct simple_player
 		// Call callback if set
 		if (on_device_changed)
 			on_device_changed(device_index);
+
+		return has_output();
 	}
 
 	// Whether a MIDI out sink is ready for immediate messages
 	bool has_output() const
 	{
-		return short_msg != nullptr;
+		return hout.load(std::memory_order_acquire) != nullptr && short_msg != nullptr;
 	}
 
 	// Send an immediate note on/off outside of playback (piano roll audition)
@@ -534,12 +544,22 @@ struct simple_player
 			if (devices[i].szPname != device_name)
 				continue;
 
-			set_device(i);
-
-			return true;
+			return set_device(i);
 		}
 
 		return false;
+	}
+
+	// Make playback usable even when the persisted device name is empty or no
+	// longer exists. update_devices() selects index 0 but intentionally does not
+	// open it, so callers must fall back to opening that current device.
+	bool ensure_output(const std::wstring& preferred_device_name)
+	{
+		if (has_output())
+			return true;
+		if (restore_device_by_name(preferred_device_name))
+			return true;
+		return set_device(current_device);
 	}
 
 	// Callback for when device changes (for UI updates)
@@ -547,6 +567,10 @@ struct simple_player
 
 	void simple_run(std::wstring filename, double start_fraction = 0.0)
 	{
+		std::unique_lock<std::mutex> run_lock(playback_run_mutex, std::try_to_lock);
+		if (!run_lock.owns_lock())
+			return;
+
 		memory_failure_reported.store(false, std::memory_order_release);
 		cancel_requested.store(false, std::memory_order_release);
 
@@ -582,9 +606,14 @@ struct simple_player
 	// Play events from an external source (e.g. the MIDI editor's live in-memory
 	// notes) instead of a file on disk. Mirrors simple_run: blocks until playback
 	// ends. The caller owns 'src' and must keep it alive for the whole call.
-	void run_from_external(playback_event_source* src, double start_fraction = 0.0)
+	void run_from_external(playback_event_source* src, double start_fraction = 0.0,
+		bool start_paused = true)
 	{
 		if (!src)
+			return;
+
+		std::unique_lock<std::mutex> run_lock(playback_run_mutex, std::try_to_lock);
+		if (!run_lock.owns_lock())
 			return;
 
 		memory_failure_reported.store(false, std::memory_order_release);
@@ -601,7 +630,8 @@ struct simple_player
 			start_fraction = std::clamp(start_fraction, 0.0, 1.0);
 
 			external_source = src;
-			playback_thread(static_cast<uint64_t>(start_fraction * info.total_duration_us));
+			playback_thread(static_cast<uint64_t>(start_fraction * info.total_duration_us),
+				start_paused);
 			external_source = nullptr;
 		}
 		catch (const std::bad_alloc&)
@@ -1336,7 +1366,7 @@ struct simple_player
 		}
 	}
 
-	void playback_thread(uint64_t initial_skip_to_us = 0)
+	void playback_thread(uint64_t initial_skip_to_us = 0, bool start_paused = true)
 	{
 		try
 		{
@@ -1348,12 +1378,13 @@ struct simple_player
 			state.seeking_ff.store(initial_skip_to_us > 0, std::memory_order_release);
 			state.playing.store(true, std::memory_order_release);
 
-			// Start paused by default so user can select synth first
-			state.paused.store(true, std::memory_order_release);
+			// The normal player starts paused so a synth can be selected. Editor
+			// playback prepares its output first and requests immediate playback.
+			state.paused.store(start_paused, std::memory_order_release);
 			state.pause_position_us.store(0, std::memory_order_release);
 
 			uint64_t skip_to_us = initial_skip_to_us;
-			bool pause_after_seek = initial_skip_to_us > 0;
+			bool pause_after_seek = initial_skip_to_us > 0 && start_paused;
 
 			for (;;)
 			{
@@ -1976,6 +2007,12 @@ struct simple_player
 	}
 
 private:
+	// A simple_player owns one state object, parser buffer and output sink. The
+	// editor and SIMPLAYER use different workers, so is_playing() alone cannot
+	// close the scheduling window before a worker starts. This mutex makes a
+	// second run fail closed instead of corrupting the shared state.
+	std::mutex playback_run_mutex;
+
 	void handle_memory_failure(bool report_now = false)
 	{
 		state.memory_failure.store(true, std::memory_order_release);

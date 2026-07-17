@@ -253,6 +253,7 @@ void initialize_midi_editor_tool_windows(
 	tool_status_callback = std::move(status_callback);
 	tool_warning_callback = std::move(warning_callback);
 	moveable_window* window = nullptr;
+	text_box* text = nullptr;
 	const unsigned BACKGROUND_OPQ = background_color;
 	const unsigned HEADER = header_color;
 	const unsigned BORDER = border_color;
@@ -260,79 +261,88 @@ void initialize_midi_editor_tool_windows(
 	// Score tools use dedicated modal-style settings windows. Wheel the right
 	// half of a value control or type directly; the lower field is its step or factor.
 	window = new moveable_fui_window("Chopper (Alt+U)", system_white,
-		-125, 115 + moveable_window::window_header_size, 250, 230 + moveable_window::window_header_size,
+		-125, 115 + moveable_window::window_header_size, 250, 195 + moveable_window::window_header_size,
 		100, 1.25f, 50, 50, 5, BACKGROUND_OPQ, HEADER, BORDER);
 	window->on_close = []() { close_editor_tool("MIDI_CHOPPER"); };
+
 	(*window)["INFO"] = new text_box("Slice selected notes (or the active track)", system_white,
-		0, 88, 12, 210, 10, 0xFFFFFF1A, 0, 0, _Align(center | top), text_box::VerticalOverflow::cut);
+		0, 88, 12, 210, 10, 0xFFFFFF1A, 0, 0, _Align::center, text_box::VerticalOverflow::cut);
+
 	(*window)["DIVISIONS"] = new wheel_variable_changer([](double) { preview_editor_chopper(); }, -55, 48, 4, 2,
 		system_white, "Slices/beat", "Factor", wheel_variable_changer::Type::exponent);
 	(*window)["TIME"] = new wheel_variable_changer([](double) { preview_editor_chopper(); }, 55, 48, 1, 2,
 		system_white, "Time mult.", "Factor", wheel_variable_changer::Type::exponent);
 	(*window)["GAP"] = new wheel_variable_changer([](double) { preview_editor_chopper(); }, -55, -18, 0, 5,
 		system_white, "Gap %", "Step", wheel_variable_changer::Type::addition);
-	(*window)["ABSOLUTE"] = new checkbox(35, -15, 11, 0xFFFFFFFF, 0x202020FF, 0x00AF7FFF,
-		1, false, &system_white, _Align::right, "Absolute pattern (align slices to score grid)",
-		[](bool) { preview_editor_chopper(); });
-	center_checkbox_tip((checkbox*)(*window)["ABSOLUTE"]);
-	(*window)["ABS_LABEL"] = new text_box("Absolute pattern", system_white, 75, -10, 12, 70, 10,
-		0, 0, 0, _Align(center | top), text_box::VerticalOverflow::cut);
-	(*window)["APPLY"] = new button("Accept", system_white, on_editor_apply_chopper, -42, -88, 70, 12, 1,
+
+	(*window)["ABSOLUTE"] = new checkbox(15, -15, 11, 0xFFFFFFFF, 0x202020FF, 0x00AF7FFF,
+		1, false, &system_white, _Align::right, " ", [](bool) { preview_editor_chopper(); });
+	(*window)["ABS_LABEL"] = new text_box("Absolute pattern", system_white, 75, -17.5, 15, 100, 10,
+		0, 0, 0, _Align::left, text_box::VerticalOverflow::display);
+
+	(*window)["APPLY"] = new button("Accept", system_white, on_editor_apply_chopper, -42, -60, 70, 12, 1,
 		0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr, "Apply as one undoable edit");
 	(*window)["CANCEL"] = new button("Cancel", system_white, []() { close_editor_tool("MIDI_CHOPPER"); },
-		42, -88, 70, 12, 1, 0x5F5F5FAF, 0xFFFFFFFF, 0x5F5F5FAF, 0xFFFFFFFF, 0xF7F7F7FF, nullptr, "Close without editing");
+		42, -60, 70, 12, 1, 0x5F5F5FAF, 0xFFFFFFFF, 0x5F5F5FAF, 0xFFFFFFFF, 0xF7F7F7FF, nullptr, "Close without editing");
+
 	(*global_window_handler)["MIDI_CHOPPER"] = window;
 
 	window = new moveable_fui_window("Flip score (Alt+Y)", system_white,
-		-105, 80 + moveable_window::window_header_size, 210, 160 + moveable_window::window_header_size,
-		100, 1.25f, 50, 50, 5, BACKGROUND_OPQ, HEADER, BORDER);
+		-90, 25 + moveable_window::window_header_size, 180, 70 + moveable_window::window_header_size,
+		100, 1.25f, 20, 20, 1.25f, BACKGROUND_OPQ, HEADER, BORDER);
 	window->on_close = []() { close_editor_tool("MIDI_FLIP"); };
-	(*window)["HORIZONTAL"] = new checkbox(-75, 40, 11, 0xFFFFFFFF, 0x202020FF, 0x00AF7FFF, 1, true,
-		&system_white, _Align::right, "Flip horizontally (time)", [](bool) { preview_editor_flip(); });
-	center_checkbox_tip((checkbox*)(*window)["HORIZONTAL"]);
-	(*window)["H_LABEL"] = new text_box("Horizontal", system_white, -25, 45, 12, 80, 10, 0, 0, 0, _Align(center | top), text_box::VerticalOverflow::cut);
-	(*window)["PRESERVE"] = new checkbox(-75, 10, 11, 0xFFFFFFFF, 0x202020FF, 0x00AF7FFF, 1, false,
-		&system_white, _Align::right, "Preserve note start times while reversing their order", [](bool) { preview_editor_flip(); });
-	center_checkbox_tip((checkbox*)(*window)["PRESERVE"]);
-	(*window)["P_LABEL"] = new text_box("Preserve starts", system_white, -15, 15, 12, 100, 10, 0, 0, 0, _Align(center | top), text_box::VerticalOverflow::cut);
-	(*window)["VERTICAL"] = new checkbox(-75, -20, 11, 0xFFFFFFFF, 0x202020FF, 0x00AF7FFF, 1, false,
-		&system_white, _Align::right, "Flip vertically (pitch)", [](bool) { preview_editor_flip(); });
-	center_checkbox_tip((checkbox*)(*window)["VERTICAL"]);
-	(*window)["V_LABEL"] = new text_box("Vertical", system_white, -25, -15, 12, 80, 10, 0, 0, 0, _Align(center | top), text_box::VerticalOverflow::cut);
-	(*window)["APPLY"] = new button("Accept", system_white, on_editor_apply_flip, -38, -58, 62, 12, 1,
+
+	(*window)["HORIZONTAL"] = new checkbox(-75, 10, 11, 0xFFFFFFFF, 0x202020FF, 0x00AF7FFF, 1, true,
+		&system_white, _Align::right, " ", [](bool) { preview_editor_flip(); });
+	(*window)["H_LABEL"] = new text_box("Horizontal", system_white, -15, 7.5, 15, 100, 10, 0, 0, 0, _Align::left, text_box::VerticalOverflow::cut);
+
+	(*window)["PRESERVE"] = new checkbox(+75, 0, 11, 0xFFFFFFFF, 0x202020FF, 0x00AF7FFF, 1, false,
+		&system_white, _Align::right, " ", [](bool) { preview_editor_flip(); });
+	(*window)["P_LABEL"] = new text_box("Preserve starts", system_white, +15, -2.5, 15, 100, 10, 0, 0, 0, _Align::right, text_box::VerticalOverflow::cut);
+
+	(*window)["VERTICAL"] = new checkbox(-75, -10, 11, 0xFFFFFFFF, 0x202020FF, 0x00AF7FFF, 1, false,
+		&system_white, _Align::right, " ", [](bool) { preview_editor_flip(); });
+	(*window)["V_LABEL"] = new text_box("Vertical", system_white, -15, -12.5, 15, 100, 10, 0, 0, 0, _Align::left, text_box::VerticalOverflow::cut);
+
+	(*window)["APPLY"] = new button("Accept", system_white, on_editor_apply_flip, -38, -30, 62, 12, 1,
 		0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr, "Apply as one undoable edit");
-	(*window)["CANCEL"] = new button("Cancel", system_white, []() { close_editor_tool("MIDI_FLIP"); }, 38, -58, 62, 12, 1,
+	(*window)["CANCEL"] = new button("Cancel", system_white, []() { close_editor_tool("MIDI_FLIP"); }, 38, -30, 62, 12, 1,
 		0x5F5F5FAF, 0xFFFFFFFF, 0x5F5F5FAF, 0xFFFFFFFF, 0xF7F7F7FF, nullptr, "Close without editing");
+
 	(*global_window_handler)["MIDI_FLIP"] = window;
 
 	window = new moveable_fui_window("Claw machine (Alt+W)", system_white,
-		-140, 125 + moveable_window::window_header_size, 280, 250 + moveable_window::window_header_size,
-		100, 1.25f, 50, 50, 5, BACKGROUND_OPQ, HEADER, BORDER);
+		-125, 105 + moveable_window::window_header_size, 250, 160 + moveable_window::window_header_size,
+		130, 1.25f, 25, 25, 1.25f, BACKGROUND_OPQ, HEADER, BORDER);
 	window->on_close = []() { close_editor_tool("MIDI_CLAW"); };
+
 	(*window)["PERIOD"] = new wheel_variable_changer([](double) { preview_editor_claw(); }, -65, 70, 1, 2,
 		system_white, "Period beats", "Factor", wheel_variable_changer::Type::exponent);
 	(*window)["TRASH"] = new wheel_variable_changer([](double) { preview_editor_claw(); }, 65, 70, 4, 1,
 		system_white, "Trash every", "Step", wheel_variable_changer::Type::addition);
 	(*window)["DISTORTION"] = new wheel_variable_changer([](double) { preview_editor_claw(); }, -65, 5, .5, .05,
 		system_white, "Distortion", "Step", wheel_variable_changer::Type::addition);
-	(*window)["REMOVE_SHORT"] = new checkbox(35, 20, 11, 0xFFFFFFFF, 0x202020FF, 0x00AF7FFF, 1, true,
-		&system_white, _Align::right, "Remove notes shorter than 1/64 beat", [](bool) { preview_editor_claw(); });
-	center_checkbox_tip((checkbox*)(*window)["REMOVE_SHORT"]);
-	(*window)["RS_LABEL"] = new text_box("Remove short", system_white, 85, 25, 12, 85, 10, 0, 0, 0, _Align(center | top), text_box::VerticalOverflow::cut);
-	(*window)["STRETCH"] = new checkbox(35, -15, 11, 0xFFFFFFFF, 0x202020FF, 0x00AF7FFF, 1, false,
-		&system_white, _Align::right, "Stretch output back to the original selection length", [](bool) { preview_editor_claw(); });
-	center_checkbox_tip((checkbox*)(*window)["STRETCH"]);
-	(*window)["ST_LABEL"] = new text_box("Stretch to fit", system_white, 85, -10, 12, 85, 10, 0, 0, 0, _Align(center | top), text_box::VerticalOverflow::cut);
-	(*window)["APPLY"] = new button("Accept", system_white, on_editor_apply_claw, -42, -98, 70, 12, 1,
+
+	(*window)["REMOVE_SHORT"] = new checkbox(25, 20, 11, 0xFFFFFFFF, 0x202020FF, 0x00AF7FFF, 1, true,
+		&system_white, _Align::right, " ", [](bool) { preview_editor_claw(); });
+	(*window)["RS_LABEL"] = new text_box("Remove short", system_white, 85, 17.5, 15, 100, 10, 0, 0, 0, _Align::left, text_box::VerticalOverflow::display);
+
+	(*window)["STRETCH"] = new checkbox(25, 5, 11, 0xFFFFFFFF, 0x202020FF, 0x00AF7FFF, 1, false,
+		&system_white, _Align::right, " ", [](bool) { preview_editor_claw(); });
+	(*window)["ST_LABEL"] = new text_box("Stretch to fit", system_white, 85, 2.5, 15, 100, 10, 0, 0, 0, _Align::left, text_box::VerticalOverflow::display);
+
+	(*window)["APPLY"] = new button("Accept", system_white, on_editor_apply_claw, -42, -35, 70, 12, 1,
 		0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr, "Apply as one undoable edit");
-	(*window)["CANCEL"] = new button("Cancel", system_white, []() { close_editor_tool("MIDI_CLAW"); }, 42, -98, 70, 12, 1,
+	(*window)["CANCEL"] = new button("Cancel", system_white, []() { close_editor_tool("MIDI_CLAW"); }, 42, -35, 70, 12, 1,
 		0x5F5F5FAF, 0xFFFFFFFF, 0x5F5F5FAF, 0xFFFFFFFF, 0xF7F7F7FF, nullptr, "Close without editing");
+
 	(*global_window_handler)["MIDI_CLAW"] = window;
 
 	window = new moveable_fui_window("LFO (Alt+O)", system_white,
-		-150, 140 + moveable_window::window_header_size, 300, 280 + moveable_window::window_header_size,
+		-150, 140 + moveable_window::window_header_size, 300, 215 + moveable_window::window_header_size,
 		100, 1.25f, 50, 50, 5, BACKGROUND_OPQ, HEADER, BORDER);
 	window->on_close = []() { close_editor_tool("MIDI_LFO"); };
+
 	(*window)["INFO"] = new text_box("Targets the selected bottom lane and visible/selected time", system_white,
 		0, 112, 12, 260, 10, 0xFFFFFF1A, 0, 0, _Align(center | top), text_box::VerticalOverflow::cut);
 	(*window)["CENTER"] = new wheel_variable_changer([](double) { preview_editor_lfo(); }, -70, 65, 64, 1,
@@ -343,14 +353,21 @@ void initialize_midi_editor_tool_windows(
 		system_white, "Cycles", "Factor", wheel_variable_changer::Type::exponent);
 	(*window)["PHASE"] = new wheel_variable_changer([](double) { preview_editor_lfo(); }, 70, 0, 0, 15,
 		system_white, "Phase deg", "Step", wheel_variable_changer::Type::addition);
-	(*window)["SHAPE"] = new button("Shape: Sine", system_white, on_editor_lfo_shape_cycle, 0, -55, 110, 12, 1,
+
+	(*window)["SHAPE"] = new button("Shape: Sine", system_white, on_editor_lfo_shape_cycle, 0, -40, 110, 12, 1,
 		0x7F3FFF3F, 0x7F3FFFFF, 0xFFFFFFFF, 0x7F3FFFFF, 0xFFFFFFFF, nullptr, "Cycle sine / triangle / square");
-	(*window)["APPLY"] = new button("Accept", system_white, on_editor_apply_lfo, -42, -108, 70, 12, 1,
+	(*window)["APPLY"] = new button("Accept", system_white, on_editor_apply_lfo, -42, -60, 70, 12, 1,
 		0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr, "Write LFO values as one undoable edit");
-	(*window)["CANCEL"] = new button("Cancel", system_white, []() { close_editor_tool("MIDI_LFO"); }, 42, -108, 70, 12, 1,
+	(*window)["CANCEL"] = new button("Cancel", system_white, []() { close_editor_tool("MIDI_LFO"); }, 42, -60, 70, 12, 1,
 		0x5F5F5FAF, 0xFFFFFFFF, 0x5F5F5FAF, 0xFFFFFFFF, 0xF7F7F7FF, nullptr, "Close without editing");
 
 	(*global_window_handler)["MIDI_LFO"] = window;
+
+
+	global_window_handler->enable_window("MIDI_LFO");
+	global_window_handler->enable_window("MIDI_CLAW");
+	global_window_handler->enable_window("MIDI_FLIP");
+	global_window_handler->enable_window("MIDI_CHOPPER");
 }
 
 #undef _WH_t
