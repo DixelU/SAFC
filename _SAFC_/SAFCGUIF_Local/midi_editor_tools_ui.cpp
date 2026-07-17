@@ -363,11 +363,10 @@ void initialize_midi_editor_tool_windows(
 
 	(*global_window_handler)["MIDI_LFO"] = window;
 
-
-	global_window_handler->enable_window("MIDI_LFO");
-	global_window_handler->enable_window("MIDI_CLAW");
-	global_window_handler->enable_window("MIDI_FLIP");
-	global_window_handler->enable_window("MIDI_CHOPPER");
+	//global_window_handler->enable_window("MIDI_LFO");
+	//global_window_handler->enable_window("MIDI_CLAW");
+	//global_window_handler->enable_window("MIDI_FLIP");
+	//global_window_handler->enable_window("MIDI_CHOPPER");
 }
 
 #undef _WH_t
