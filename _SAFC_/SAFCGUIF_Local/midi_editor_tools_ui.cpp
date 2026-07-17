@@ -208,6 +208,11 @@ void preview_editor_lfo()
 	auto view = _WH_t<midi_editor_viewer>("MIDI_EDITOR", "VIEW");
 	if (!view || !editor || !editor->is_file_loaded())
 		return;
+	if (view->current_lane_mode == midi_editor_viewer::lane_mode::tempo)
+	{
+		midi_tool_warning("LFO does not target the tempo lane");
+		return;
+	}
 	const double center = editor_tool_value("MIDI_LFO", "CENTER", 64.0);
 	const double range = editor_tool_value("MIDI_LFO", "RANGE", 63.0);
 	const double cycles = editor_tool_value("MIDI_LFO", "CYCLES", 1.0);

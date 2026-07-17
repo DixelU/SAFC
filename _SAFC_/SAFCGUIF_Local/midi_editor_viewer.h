@@ -82,8 +82,12 @@ struct midi_editor_viewer : public handleable_ui_part
 	// Velocity lane under the roll
 	bool velocity_lane_visible = true;
 	float velocity_lane_height = 55.f;
-	enum class lane_mode : std::uint8_t { note_velocity, pitch_bend, pan, channel_volume };
+	enum class lane_mode : std::uint8_t { note_velocity, pitch_bend, pan, channel_volume, tempo };
 	lane_mode current_lane_mode = lane_mode::note_velocity;
+	static constexpr double midi_min_bpm = 60000000.0 / 16777215.0;
+	static constexpr double midi_max_bpm = 60000000.0;
+	double tempo_log_low = std::log10(midi_min_bpm);
+	double tempo_log_high = std::log10(midi_max_bpm);
 
 	// Called after a right-click switches the active track
 	std::function<void()> on_track_changed;
@@ -97,6 +101,8 @@ struct midi_editor_viewer : public handleable_ui_part
 	std::function<void()> on_open_flip;
 	std::function<void()> on_open_claw;
 	std::function<void()> on_open_lfo;
+	std::function<void()> on_save;
+	std::function<void()> on_play_from_view;
 	// Note audition: (key, velocity, channel, on/off)
 	std::function<void(std::uint8_t, std::uint8_t, std::uint8_t, bool)> note_audition;
 	// Current playback position in seconds, negative when not playing;
@@ -215,6 +221,7 @@ struct midi_editor_viewer : public handleable_ui_part
 			case lane_mode::pitch_bend: return "Pitch";
 			case lane_mode::pan: return "Pan";
 			case lane_mode::channel_volume: return "CC Vol";
+			case lane_mode::tempo: return "Tempo";
 			default: return "Vel";
 		}
 	}
@@ -841,6 +848,23 @@ struct midi_editor_viewer : public handleable_ui_part
 				glVertex2f(x, l.lane_bottom + 1.f + h);
 			}
 		}
+		else if (current_lane_mode == lane_mode::tempo)
+		{
+			const auto points = editor->get_tempo_points(view_start, view_start + view_duration);
+			for (const auto& [tick, bpm] : points)
+			{
+				const float x = l.notes_x + float(tick - view_start) / float(view_duration) * l.notes_w;
+				if (x < l.notes_x || x > l.notes_x + l.notes_w - 1.f)
+					continue;
+				const auto value = tempo_lane_value(bpm);
+				const float h = 2.f + usable_h * value / 127.f;
+				glColor3ub(0xFF, 0xAF, 0x20);
+				glVertex2f(x, l.lane_bottom + 1.f);
+				glVertex2f(x + 3.f, l.lane_bottom + 1.f);
+				glVertex2f(x + 3.f, l.lane_bottom + 1.f + h);
+				glVertex2f(x, l.lane_bottom + 1.f + h);
+			}
+		}
 		else
 		{
 			const auto points = editor->get_channel_control_points(active_track,
@@ -926,6 +950,12 @@ struct midi_editor_viewer : public handleable_ui_part
 		if (!editor || !editor->is_file_loaded())
 			return;
 
+		if (ch == ' ' && on_play_from_view)
+		{
+			on_play_from_view();
+			return;
+		}
+
 		if (std::uint8_t(ch) == 127) // Del: delete selected notes
 		{
 			editor->delete_selected_notes();
@@ -960,6 +990,9 @@ struct midi_editor_viewer : public handleable_ui_part
 
 		switch (ch)
 		{
+			case 19: // Ctrl+S
+				if (on_save) on_save();
+				break;
 			case 26: // Ctrl+Z (+Shift = redo)
 				if (modifiers & GLUT_ACTIVE_SHIFT)
 					editor->redo();
@@ -1032,6 +1065,19 @@ struct midi_editor_viewer : public handleable_ui_part
 		return std::uint8_t(std::clamp(int(rel * 127.f + 0.5f), min_value, 127));
 	}
 
+	double tempo_from_lane_value(std::uint8_t value) const
+	{
+		const double position = double(value) / 127.0;
+		return std::pow(10.0, tempo_log_low + position * (tempo_log_high - tempo_log_low));
+	}
+
+	std::uint8_t tempo_lane_value(double bpm) const
+	{
+		const double position = (std::log10(std::clamp(bpm, midi_min_bpm, midi_max_bpm)) - tempo_log_low) /
+			std::max(tempo_log_high - tempo_log_low, 1e-9);
+		return std::uint8_t(std::clamp<int>(int(position * 127.0 + 0.5), 0, 127));
+	}
+
 	midi_editor::control_lane editor_control_lane() const
 	{
 		switch (current_lane_mode)
@@ -1083,6 +1129,8 @@ struct midi_editor_viewer : public handleable_ui_part
 			case lane_mode::channel_volume:
 				return "CC Vol " + std::to_string(value) +
 					" (" + std::to_string(int(value) * 100 / 127) + "%)";
+			case lane_mode::tempo:
+				return std::format("Tempo {:.6g} BPM", tempo_from_lane_value(value));
 			default:
 				return "Vel " + std::to_string(value) +
 					" (" + std::to_string(int(value) * 100 / 127) + "%)";
@@ -1094,6 +1142,11 @@ struct midi_editor_viewer : public handleable_ui_part
 		editor->set_channel_control_point(editor->get_active_track(),
 			effective_draw_channel(), editor_control_lane(), tick,
 			lane_value_to_control(value));
+	}
+
+	void set_tempo_lane_point(tick_type tick, std::uint8_t value)
+	{
+		editor->set_tempo_point(tick, tempo_from_lane_value(value));
 	}
 
 	void lane_apply_control_flat(tick_type t0, tick_type t1, std::uint8_t value)
@@ -1132,6 +1185,42 @@ struct midi_editor_viewer : public handleable_ui_part
 		}
 		editor->set_channel_control_points(editor->get_active_track(),
 			effective_draw_channel(), editor_control_lane(), std::move(points));
+	}
+
+	void lane_apply_tempo_flat(tick_type t0, tick_type t1, std::uint8_t value)
+	{
+		if (t0 > t1)
+			std::swap(t0, t1);
+		std::vector<std::pair<tick_type, double>> points;
+		const auto step = std::max<tick_type>(1, snap_ticks(editor->get_ppqn()));
+		for (auto tick = (t0 / step) * step; tick <= t1; tick += step)
+		{
+			points.push_back({tick, tempo_from_lane_value(value)});
+			if (t1 - tick < step)
+				break;
+		}
+		editor->set_tempo_points(std::move(points));
+	}
+
+	void lane_apply_tempo_ramp(tick_type tick_a, std::uint8_t value_a,
+		tick_type tick_b, std::uint8_t value_b)
+	{
+		auto t0 = tick_a, t1 = tick_b;
+		if (t0 > t1)
+			std::swap(t0, t1);
+		std::vector<std::pair<tick_type, double>> points;
+		const auto step = std::max<tick_type>(1, snap_ticks(editor->get_ppqn()));
+		for (auto tick = (t0 / step) * step; tick <= t1; tick += step)
+		{
+			float f = tick_b == tick_a ? 0.f : float(sgtick_type(tick) - sgtick_type(tick_a)) /
+				float(sgtick_type(tick_b) - sgtick_type(tick_a));
+			const int value = int(value_a + (float(value_b) - float(value_a)) *
+				std::clamp(f, 0.f, 1.f) + 0.5f);
+			points.push_back({tick, tempo_from_lane_value(std::uint8_t(std::clamp(value, 0, 127)))});
+			if (t1 - tick < step)
+				break;
+		}
+		editor->set_tempo_points(std::move(points));
 	}
 
 	void record_velocity_change(const piano_note& ident, std::uint8_t new_vel)
@@ -1299,6 +1388,8 @@ struct midi_editor_viewer : public handleable_ui_part
 			{
 				if (current_lane_mode == lane_mode::note_velocity)
 					lane_apply_flat(lane_last_tick, cur_tick, cur_vel, selected);
+				else if (current_lane_mode == lane_mode::tempo)
+					lane_apply_tempo_flat(lane_last_tick, cur_tick, cur_vel);
 				else
 					lane_apply_control_flat(lane_last_tick, cur_tick, cur_vel);
 				lane_last_tick = cur_tick;
@@ -1322,6 +1413,8 @@ struct midi_editor_viewer : public handleable_ui_part
 					lane_apply_ramp(lane_anchor_tick, lane_anchor_vel, cur_tick, cur_vel, selected);
 					commit_lane_gesture();
 				}
+				else if (current_lane_mode == lane_mode::tempo)
+					lane_apply_tempo_ramp(lane_anchor_tick, lane_anchor_vel, cur_tick, cur_vel);
 				else
 				{
 					lane_apply_control_ramp(lane_anchor_tick, lane_anchor_vel, cur_tick, cur_vel);
@@ -1356,6 +1449,40 @@ struct midi_editor_viewer : public handleable_ui_part
 		{
 			const bool zoom_in = (button == 2); 
 			const auto modifiers = glutGetModifiers(); // valid: inside the mouse callback
+
+			if (current_lane_mode == lane_mode::tempo && in_lane &&
+				(modifiers & (GLUT_ACTIVE_CTRL | GLUT_ACTIVE_SHIFT)))
+			{
+				const double full_low = std::log10(midi_min_bpm);
+				const double full_high = std::log10(midi_max_bpm);
+				if ((modifiers & GLUT_ACTIVE_CTRL) && (modifiers & GLUT_ACTIVE_SHIFT))
+				{
+					tempo_log_low = full_low;
+					tempo_log_high = full_high;
+				}
+				else if (modifiers & GLUT_ACTIVE_CTRL)
+				{
+					const double span = tempo_log_high - tempo_log_low;
+					const double anchor = double(lane_velocity_at(my, l)) / 127.0;
+					const double anchor_log = tempo_log_low + anchor * span;
+					const double new_span = std::clamp(span * (zoom_in ? 0.75 : 1.0 / 0.75),
+						0.002, full_high - full_low);
+					tempo_log_low = std::clamp(anchor_log - anchor * new_span,
+						full_low, full_high - new_span);
+					tempo_log_high = tempo_log_low + new_span;
+				}
+				else
+				{
+					const double span = tempo_log_high - tempo_log_low;
+					const double delta = span * (zoom_in ? 0.1 : -0.1);
+					tempo_log_low = std::clamp(tempo_log_low + delta, full_low, full_high - span);
+					tempo_log_high = tempo_log_low + span;
+				}
+				if (on_status)
+					on_status(std::format("Tempo range {:.4g} - {:.4g} BPM", std::pow(10.0, tempo_log_low),
+						std::pow(10.0, tempo_log_high)));
+				return true;
+			}
 
 			if ((modifiers & GLUT_ACTIVE_SHIFT) && (in_roll || in_notes_area))
 			{
@@ -1424,6 +1551,8 @@ struct midi_editor_viewer : public handleable_ui_part
 				if (current_lane_mode == lane_mode::note_velocity)
 					lane_apply_flat(cur_tick > tol ? cur_tick - tol : 0, cur_tick + tol,
 						cur_vel, editor->get_selected_ids());
+				else if (current_lane_mode == lane_mode::tempo)
+					lane_apply_tempo_flat(cur_tick, cur_tick, cur_vel);
 				else
 					lane_apply_control_flat(cur_tick, cur_tick, cur_vel);
 			}

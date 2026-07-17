@@ -826,6 +826,64 @@ private:
 	};
 	std::map<std::uint8_t, std::vector<raw_event>> raw_track_events;
 
+	struct tempo_change_op : edit_operation
+	{
+		tick_type tick;
+		std::uint32_t tempo_us;
+		std::vector<std::pair<std::uint8_t, raw_event>> previous;
+
+		tempo_change_op(tick_type tk, std::uint32_t us) : tick(tk), tempo_us(us) {}
+
+		void execute(midi_editor& editor) override
+		{
+			previous = editor.remove_tempo_events_at(tick);
+			editor.raw_track_events[0].push_back({tick, editor.make_tempo_event_bytes(tempo_us)});
+			editor.sort_raw_track(0);
+			editor.rebuild_tempo_events();
+			editor.mark_dirty_keep_order();
+		}
+
+		void undo(midi_editor& editor) override
+		{
+			editor.remove_tempo_events_at(tick);
+			for (const auto& [track, event] : previous)
+			{
+				editor.raw_track_events[track].push_back(event);
+				editor.sort_raw_track(track);
+			}
+			editor.rebuild_tempo_events();
+			editor.mark_dirty_keep_order();
+		}
+
+		std::string description() const override { return "Edit Tempo Map"; }
+	};
+
+	struct tempo_batch_op : edit_operation
+	{
+		std::vector<tempo_change_op> changes;
+
+		explicit tempo_batch_op(std::vector<std::pair<tick_type, std::uint32_t>> points)
+		{
+			changes.reserve(points.size());
+			for (const auto& [tick, tempo_us] : points)
+				changes.emplace_back(tick, tempo_us);
+		}
+
+		void execute(midi_editor& editor) override
+		{
+			for (auto& change : changes)
+				change.execute(editor);
+		}
+
+		void undo(midi_editor& editor) override
+		{
+			for (auto it = changes.rbegin(); it != changes.rend(); ++it)
+				it->undo(editor);
+		}
+
+		std::string description() const override { return "Edit Tempo Map"; }
+	};
+
 	struct raw_control_change_op : edit_operation
 	{
 		std::uint8_t track;
@@ -2027,6 +2085,49 @@ private:
 			lane == control_lane::pitch_bend ? 0x3FFF : 127);
 	}
 
+	static bool is_tempo_event(const raw_event& event)
+	{
+		return event.bytes.size() >= 6 && event.bytes[0] == 0xFF &&
+			event.bytes[1] == 0x51 && event.bytes[2] == 0x03;
+	}
+
+	static std::vector<base_type> make_tempo_event_bytes(std::uint32_t tempo_us)
+	{
+		tempo_us = std::clamp<std::uint32_t>(tempo_us, 1, 0xFFFFFF);
+		return {0xFF, 0x51, 0x03, base_type(tempo_us >> 16),
+			base_type(tempo_us >> 8), base_type(tempo_us)};
+	}
+
+	std::vector<std::pair<std::uint8_t, raw_event>> remove_tempo_events_at(tick_type tick)
+	{
+		std::vector<std::pair<std::uint8_t, raw_event>> removed;
+		for (auto& [track, events] : raw_track_events)
+		{
+			events.erase(std::remove_if(events.begin(), events.end(), [&](const raw_event& event)
+			{
+				if (event.tick != tick || !is_tempo_event(event))
+					return false;
+				removed.push_back({track, event});
+				return true;
+			}), events.end());
+		}
+		return removed;
+	}
+
+	void rebuild_tempo_events()
+	{
+		tempo_events.clear();
+		for (const auto& [_, events] : raw_track_events)
+			for (const auto& event : events)
+				if (is_tempo_event(event))
+				{
+					const auto us = (std::uint32_t(event.bytes[3]) << 16) |
+						(std::uint32_t(event.bytes[4]) << 8) | event.bytes[5];
+					tempo_events.push_back({event.tick, us});
+				}
+		std::stable_sort(tempo_events.begin(), tempo_events.end());
+	}
+
 	static std::uint8_t control_cc_number(control_lane lane)
 	{
 		return lane == control_lane::pan ? 10 : 7;
@@ -2346,6 +2447,47 @@ public:
 
 		auto op = std::make_unique<raw_control_change_batch_op>(track, lane,
 			std::uint8_t(channel & 0x0F), std::move(points));
+		op->execute(*this);
+		push_undo(std::move(op));
+	}
+
+	std::vector<std::pair<tick_type, double>> get_tempo_points(
+		tick_type start, tick_type end) const
+	{
+		std::lock_guard<std::recursive_mutex> lock(editor_mutex);
+		std::vector<std::pair<tick_type, double>> result;
+		for (const auto& [tick, tempo_us] : tempo_events)
+			if (tick >= start && tick < end && tempo_us)
+				result.push_back({tick, 60000000.0 / double(tempo_us)});
+		return result;
+	}
+
+	void set_tempo_point(tick_type tick, double bpm)
+	{
+		std::lock_guard<std::recursive_mutex> lock(editor_mutex);
+		bpm = std::clamp(bpm, 60000000.0 / 16777215.0, 60000000.0);
+		const auto tempo_us = std::uint32_t(std::lround(60000000.0 / bpm));
+		auto op = std::make_unique<tempo_change_op>(tick, tempo_us);
+		op->execute(*this);
+		push_undo(std::move(op));
+	}
+
+	void set_tempo_points(std::vector<std::pair<tick_type, double>> points)
+	{
+		std::lock_guard<std::recursive_mutex> lock(editor_mutex);
+		if (points.empty())
+			return;
+		std::sort(points.begin(), points.end());
+		points.erase(std::unique(points.begin(), points.end(),
+			[](const auto& a, const auto& b) { return a.first == b.first; }), points.end());
+		std::vector<std::pair<tick_type, std::uint32_t>> encoded;
+		encoded.reserve(points.size());
+		for (const auto& [tick, bpm_value] : points)
+		{
+			const double bpm = std::clamp(bpm_value, 60000000.0 / 16777215.0, 60000000.0);
+			encoded.push_back({tick, std::uint32_t(std::lround(60000000.0 / bpm))});
+		}
+		auto op = std::make_unique<tempo_batch_op>(std::move(encoded));
 		op->execute(*this);
 		push_undo(std::move(op));
 	}

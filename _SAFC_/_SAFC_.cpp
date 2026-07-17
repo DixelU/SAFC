@@ -3159,7 +3159,7 @@ void on_editor_lane_mode(midi_editor_viewer::lane_mode mode)
 		return;
 
 	editor_view->set_lane_mode(mode);
-	const char* ids[] = {"LANE_VEL", "LANE_PITCH", "LANE_PAN", "LANE_CCVOL"};
+	const char* ids[] = {"LANE_VEL", "LANE_PITCH", "LANE_PAN", "LANE_CCVOL", "LANE_TEMPO"};
 	for (auto id : ids)
 	{
 		auto btn = _WH_t<button>("MIDI_EDITOR", id);
@@ -3174,6 +3174,8 @@ void on_editor_lane_mode(midi_editor_viewer::lane_mode mode)
 		active_id = "LANE_PAN";
 	else if (mode == midi_editor_viewer::lane_mode::channel_volume)
 		active_id = "LANE_CCVOL";
+	else if (mode == midi_editor_viewer::lane_mode::tempo)
+		active_id = "LANE_TEMPO";
 
 	if (auto btn = _WH_t<button>("MIDI_EDITOR", active_id))
 		btn->border_width = 2;
@@ -3218,7 +3220,7 @@ struct midieditor_saved_state {
 	float back_x, back_y;
 	float max_x, max_y;
 	float lane_x, lane_y;
-	float lane_mode_x[4], lane_mode_y[4];
+	float lane_mode_x[5], lane_mode_y[5];
 	float tool_x[4], tool_y[4];
 	float view_x, view_y, view_width, view_height;
 	std::string previous_main_window_id;
@@ -3252,7 +3254,8 @@ void apply_midieditor_maximised_layout()
 		(button*)(*window)["LANE_VEL"],
 		(button*)(*window)["LANE_PITCH"],
 		(button*)(*window)["LANE_PAN"],
-		(button*)(*window)["LANE_CCVOL"]
+		(button*)(*window)["LANE_CCVOL"],
+		(button*)(*window)["LANE_TEMPO"]
 	};
 	button* tool_btns[] = {
 		(button*)(*window)["TOOL_CHOP"], (button*)(*window)["TOOL_FLIP"],
@@ -3288,7 +3291,7 @@ void apply_midieditor_maximised_layout()
 	lane_btn->safe_change_position(button_x, row_y -= 15);
 
 	float lane_mode_x = -half_w + 18.f;
-	for (int i = 0; i < 4; ++i)
+	for (int i = 0; i < 5; ++i)
 		lane_mode_btns[i]->safe_change_position(lane_mode_x + i * 38.f, half_h - 39.f);
 
 	// Channel selector row along the top, over the viewer
@@ -3353,7 +3356,8 @@ void switch_midieditor_maximise()
 		(button*)(*window)["LANE_VEL"],
 		(button*)(*window)["LANE_PITCH"],
 		(button*)(*window)["LANE_PAN"],
-		(button*)(*window)["LANE_CCVOL"]
+		(button*)(*window)["LANE_CCVOL"],
+		(button*)(*window)["LANE_TEMPO"]
 	};
 	button* tool_btns[] = {
 		(button*)(*window)["TOOL_CHOP"], (button*)(*window)["TOOL_FLIP"],
@@ -3404,10 +3408,13 @@ void switch_midieditor_maximise()
 		state.max_y = max_btn->y_pos;
 		state.lane_x = lane_btn->x_pos;
 		state.lane_y = lane_btn->y_pos;
-		for (int i = 0; i < 4; ++i)
+		for (int i = 0; i < 5; ++i)
 		{
 			state.lane_mode_x[i] = lane_mode_btns[i]->x_pos;
 			state.lane_mode_y[i] = lane_mode_btns[i]->y_pos;
+		}
+		for (int i = 0; i < 4; ++i)
+		{
 			state.tool_x[i] = tool_btns[i]->x_pos;
 			state.tool_y[i] = tool_btns[i]->y_pos;
 		}
@@ -3459,9 +3466,12 @@ void switch_midieditor_maximise()
 		back_btn->safe_change_position(state.back_x, state.back_y);
 		max_btn->safe_change_position(state.max_x, state.max_y);
 		lane_btn->safe_change_position(state.lane_x, state.lane_y);
-		for (int i = 0; i < 4; ++i)
+		for (int i = 0; i < 5; ++i)
 		{
 			lane_mode_btns[i]->safe_change_position(state.lane_mode_x[i], state.lane_mode_y[i]);
+		}
+		for (int i = 0; i < 4; ++i)
+		{
 			tool_btns[i]->safe_change_position(state.tool_x[i], state.tool_y[i]);
 		}
 
@@ -3958,6 +3968,8 @@ void init()
 	editor_view->on_open_flip = on_editor_open_flip;
 	editor_view->on_open_claw = on_editor_open_claw;
 	editor_view->on_open_lfo = on_editor_open_lfo;
+	editor_view->on_save = on_editor_save_file;
+	editor_view->on_play_from_view = on_editor_play_from_view;
 	editor_view->note_audition = [](std::uint8_t key, std::uint8_t velocity, std::uint8_t channel, bool on)
 	{
 		if (!player)
@@ -4017,6 +4029,7 @@ void init()
 	(*window)["LANE_PITCH"] = new button("Pitch", system_white, []() { on_editor_lane_mode(midi_editor_viewer::lane_mode::pitch_bend); }, -145, 126.5, 30, 10, 1, 0x7F3FFF3F, 0xFFFFFFFF, 0xFFFFFFFF, 0x7F3FFFFF, 0xFFFFFFFF, nullptr, "Edit channel pitch bend");
 	(*window)["LANE_PAN"] = new button("Pan", system_white, []() { on_editor_lane_mode(midi_editor_viewer::lane_mode::pan); }, -110, 126.5, 30, 10, 1, 0xFFAF003F, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFAF00FF, 0xFFFFFFFF, nullptr, "Edit channel pan CC10");
 	(*window)["LANE_CCVOL"] = new button("CCVol", system_white, []() { on_editor_lane_mode(midi_editor_viewer::lane_mode::channel_volume); }, -75, 126.5, 30, 10, 1, 0x00AF7F3F, 0xFFFFFFFF, 0xFFFFFFFF, 0x00AF7FFF, 0xFFFFFFFF, nullptr, "Edit channel volume CC7");
+	(*window)["LANE_TEMPO"] = new button("Tempo", system_white, []() { on_editor_lane_mode(midi_editor_viewer::lane_mode::tempo); }, -40, 126.5, 30, 10, 1, 0xFFAF003F, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFAF00FF, 0xFFFFFFFF, nullptr, "Edit tempo map; Ctrl+wheel zooms, Shift+wheel pans, Ctrl+Shift+wheel resets range");
 
 	auto editor_track_list = new selectable_properted_list(
 		bs_list_black_small,

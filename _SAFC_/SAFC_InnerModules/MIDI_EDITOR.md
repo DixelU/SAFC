@@ -203,6 +203,12 @@ checkboxes, Accept, and Cancel. Settings update a reversible live preview in the
 piano roll. Accept turns that preview into one undo-history entry; Cancel restores
 the notes, controller events, selection, and dirty state from before the dialog.
 
+The bottom lane also edits the global tempo map. Tempo uses a logarithmic vertical
+scale spanning the complete MIDI Set Tempo range (about 3.576 to 60,000,000 BPM).
+Ctrl+wheel zooms the BPM scale around the cursor, Shift+wheel pans it, and
+Ctrl+Shift+wheel restores the full range. Space toggles playback from the visible
+start tick; Ctrl+S opens the edited-MIDI save workflow.
+
 ### Integration with Processor
 
 ```cpp
@@ -286,9 +292,8 @@ bool load_file(const std::wstring& filepath) {
 ### Current Limitations
 
 1. **No multi-track editing**: All notes are in a flat list
-2. **No tempo track editing**: Tempo changes are read-only
-3. **No sysex support**: System exclusive events are skipped
-4. **No running status optimization**: Save always writes full events
+2. **No sysex support**: System exclusive events are skipped
+3. **No running status optimization**: Save always writes full events
 
 ### Potential Enhancements
 
