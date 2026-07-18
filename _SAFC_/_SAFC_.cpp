@@ -2415,6 +2415,11 @@ void restore_reg_settings()
 	catch (...) { std::cout << "Exception thrown while restoring AUTOUPDATECHECK from registry\n"; }
 	try
 	{
+		is_fonted = settings::regestry_access.GetDwordValue(L"FONTS_ENABLED_POST1P4");
+	}
+	catch (...) { std::cout << "Exception thrown while restoring FONTS_ENABLED from registry\n"; }
+	try
+	{
 		g_data.channels_split = settings::regestry_access.GetDwordValue(L"SPLIT_TRACKS");
 	}
 	catch (...) { std::cout << "Exception thrown while restoring SPLIT_TRACKS from registry\n"; }
@@ -3666,9 +3671,10 @@ void switch_maximise()
 	}
 }
 
-void init()
+void init(bool reinitialise_font = true)
 {
-	lfont_symbols_info::initialise_font(default_font_name, true);
+	if (reinitialise_font)
+		lfont_symbols_info::initialise_font(default_font_name, true);
 
 	g_data.detected_threads =
 		std::max(
@@ -4066,8 +4072,8 @@ void init()
 	(*window)["RENAME_TRACK"] = new button("Rename track", system_white, on_editor_rename_track, 150, -30, 75, 12, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr, "Rename active track");
 
 	// Track navigation (right-clicking a gray note also switches track)
-	(*window)["TRACK_NEXT"] = new button("Track +", system_white, on_editor_track_next, 150, -87.5, 75, 12, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr, "Next track (or right-click a gray note)");
-	(*window)["TRACK_PREV"] = new button("Track -", system_white, on_editor_track_prev, 150, -100, 75, 12, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr, "Previous track");
+	(*window)["TRACK_NEXT"] = new button("Next track", system_white, on_editor_track_next, 150, -87.5, 75, 12, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr, "Next track (or right-click a gray note)");
+	(*window)["TRACK_PREV"] = new button("Prev track", system_white, on_editor_track_prev, 150, -100, 75, 12, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr, "Previous track");
 
 	// Snap grid for note drawing (Del/Ctrl+C/Ctrl+V/Ctrl+B work via keyboard)
 	(*window)["SNAP"] = new button("Snap: 1/16", system_white, on_editor_snap_cycle, 150, -115, 75, 12, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr, "Cycle the drawing snap grid");
@@ -4136,7 +4142,7 @@ void gl_display()
 	{
 		firstboot = 0;
 
-		init();
+		init(false);
 		if (april_fool)
 		{
 			global_window_handler->throw_alert("Today is a special day! ( -w-)\nToday you'll have new background\n(-w- )", "1st of April!", special_signs::draw_wait, true, 0xFF00FFFF, 20);
@@ -4237,6 +4243,12 @@ void gl_close()
 
 	if (player)
 		player->stop();
+
+	lfont_symbols_info::destroy_font();
+	if (hWnd && hDc)
+		ReleaseDC(hWnd, hDc);
+	hDc = nullptr;
+	hWnd = nullptr;
 }
 
 void on_timer(int v)
@@ -4331,9 +4343,16 @@ void gl_drag(int x, int y)
 void gl_special_key(int Key, int x, int y)
 {
 	auto modif = glutGetModifiers();
-	// Ctrl also suppresses the synthesized arrow codes (1-4): they would be
-	// indistinguishable from Ctrl+A..Ctrl+D in keyboard_handler(char) otherwise
-	if (!(modif & (GLUT_ACTIVE_ALT | GLUT_ACTIVE_CTRL)))
+	// Modified arrows use dedicated non-ASCII values because the legacy plain
+	// arrow codes 1-4 collide with Ctrl+A..Ctrl+D.
+	if ((modif & GLUT_ACTIVE_CTRL) && !(modif & GLUT_ACTIVE_ALT))
+	{
+		if (Key == GLUT_KEY_DOWN && global_window_handler)
+			global_window_handler->keyboard_handler(keyboard_key::ctrl_arrow_down);
+		else if (Key == GLUT_KEY_UP && global_window_handler)
+			global_window_handler->keyboard_handler(keyboard_key::ctrl_arrow_up);
+	}
+	else if (!(modif & GLUT_ACTIVE_ALT))
 	{
 		switch (Key)
 		{
@@ -4384,6 +4403,9 @@ struct safc_gui_runtime :
 {
 	virtual void operator()(int argc, char** argv) override
 	{
+		restore_reg_settings();
+		initialise_system_text_styles(is_fonted);
+
 		_wremove(L"_s");
 		_wremove(L"_f");
 		_wremove(L"_g");
@@ -4411,6 +4433,7 @@ struct safc_gui_runtime :
 
 		hWnd = FindWindowA(NULL, window_title);
 		hDc = GetDC(hWnd);
+		lfont_symbols_info::initialise_font(default_font_name, true);
 
 		glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);//_MINUS_SRC_ALPHA
 		glEnable(GL_BLEND);
@@ -4488,6 +4511,8 @@ struct safc_cli_runtime:
 
 	virtual void operator()(int argc, char** argv) override
 	{
+		restore_reg_settings();
+
 		ShowWindow(GetConsoleWindow(), SW_SHOW);
 		g_data.detected_threads =
 			std::max(
@@ -4699,8 +4724,6 @@ int main(int argc, char** argv)
 	std::ios_base::sync_with_stdio(false); //why not
 
 	std::shared_ptr<safc_runtime> runtime;
-
-	restore_reg_settings();
 
 	if (argc > 1)
 		runtime = std::make_shared<safc_cli_runtime>();

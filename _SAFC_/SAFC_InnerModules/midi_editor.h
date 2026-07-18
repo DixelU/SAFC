@@ -445,6 +445,43 @@ struct midi_editor
 		std::string description() const override { return "Change Velocity"; }
 	};
 
+	/** Functor for assigning a MIDI channel to a set of notes. */
+	struct channel_change_op : edit_operation
+	{
+		std::vector<std::uint32_t> ids;
+		std::uint8_t new_channel;
+		std::vector<std::pair<std::uint32_t, std::uint8_t>> changes; // id, old channel
+
+		channel_change_op(std::vector<std::uint32_t>&& target_ids, std::uint8_t channel)
+			: ids(std::move(target_ids)), new_channel(channel & 0x0F)
+		{
+		}
+
+		void execute(midi_editor& editor) override
+		{
+			changes.clear();
+			const std::set<std::uint32_t> id_set(ids.begin(), ids.end());
+			for (auto& note : editor.notes)
+			{
+				if (!id_set.count(note.id))
+					continue;
+				changes.emplace_back(note.id, note.channel);
+				note.channel = new_channel;
+			}
+			editor.mark_dirty_keep_order();
+		}
+
+		void undo(midi_editor& editor) override
+		{
+			for (auto& [id, old_channel] : changes)
+				if (auto* note = editor.find_note_by_id(id))
+					note->channel = old_channel;
+			editor.mark_dirty_keep_order();
+		}
+
+		std::string description() const override { return "Change Channel"; }
+	};
+
 	/**
 	 * Functor for adjusting note velocity by a relative amount
 	 */
@@ -1888,6 +1925,25 @@ public:
 		push_undo(std::move(op));
 	}
 
+	/** Assign the selected notes to one MIDI channel. Returns the changed count. */
+	std::size_t change_channel_selected(std::uint8_t channel)
+	{
+		std::lock_guard<std::recursive_mutex> lock(editor_mutex);
+		channel &= 0x0F;
+		std::vector<std::uint32_t> ids;
+		for (const auto& note : notes)
+			if (selected_notes.count(note.id) && note.channel != channel)
+				ids.push_back(note.id);
+		if (ids.empty())
+			return 0;
+
+		const auto count = ids.size();
+		auto op = std::make_unique<channel_change_op>(std::move(ids), channel);
+		op->execute(*this);
+		push_undo(std::move(op));
+		return count;
+	}
+
 	void quantize_selected(tick_type grid_resolution)
 	{
 		std::lock_guard<std::recursive_mutex> lock(editor_mutex);
@@ -2250,6 +2306,29 @@ public:
 				note.key < key_begin || note.key > key_end)
 				continue;
 
+			if (mode == select_mode::remove)
+				selected_notes.erase(note.id);
+			else
+				selected_notes.insert(note.id);
+		}
+		return selected_notes.size();
+	}
+
+	/** Select notes on a channel, optionally limited to one track. */
+	std::size_t select_channel(std::uint8_t channel,
+		std::uint8_t track_filter = all_tracks,
+		select_mode mode = select_mode::replace)
+	{
+		std::lock_guard<std::recursive_mutex> lock(editor_mutex);
+		if (mode == select_mode::replace)
+			selected_notes.clear();
+		channel &= 0x0F;
+
+		for (const auto& note : notes)
+		{
+			if (note.channel != channel ||
+				(track_filter != all_tracks && note.track_index != track_filter))
+				continue;
 			if (mode == select_mode::remove)
 				selected_notes.erase(note.id);
 			else

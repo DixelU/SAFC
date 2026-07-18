@@ -41,8 +41,9 @@
  *                          a linear ramp; note velocity applies to the selection
  *                          when one is active
  * Keys: Del deletes the selection; Ctrl+Z/Y undo/redo; Ctrl+C/V/B copy, paste,
- * duplicate; Ctrl+A selects the active track; Ctrl+D deselects; Alt+U/Y/W/O
- * open Chopper/Flip/Claw/LFO. Alt+V hides or
+ * duplicate; Ctrl+A selects the active track; Ctrl+D deselects; Shift+C selects
+ * the current channel; Alt+C assigns it; Ctrl+Up/Down transposes by an octave;
+ * Alt+U/Y/W/O open Chopper/Flip/Claw/LFO. Alt+V hides or
  * shows the ghost (inactive-track) notes — while hidden, right-click no longer
  * switches to a ghost note's track.
  */
@@ -935,93 +936,122 @@ struct midi_editor_viewer : public handleable_ui_part
 		return;
 	}
 
-	/**
-	 * Editor shortcuts. Reaches this widget only while the editor window is on
-	 * top (windows_handler forwards keys to the top window alone), and runs
-	 * synchronously inside the glut keyboard callback, so glutGetModifiers()
-	 * is valid here. Ctrl+letter arrives as an ASCII control code
-	 * (Ctrl+A = 1 ... Ctrl+Z = 26); arrow keys are re-sent through this same
-	 * path as codes 1-4, hence the explicit Ctrl-modifier check.
-	 */
-	void keyboard_handler(char ch) override
+	enum class shortcut_action : std::uint8_t
 	{
-		std::lock_guard<std::recursive_mutex> locker(lock);
+		play, delete_selection, save, undo, redo, copy, paste, duplicate,
+		select_track, deselect, select_channel, assign_channel,
+		octave_down, octave_up, ghost_notes, chopper, flip, claw, lfo
+	};
 
-		if (!editor || !editor->is_file_loaded())
-			return;
+	struct shortcut_binding
+	{
+		std::uint8_t key;
+		int modifiers;
+		shortcut_action action;
+	};
+	static constexpr int any_modifiers = -1;
 
-		if (ch == ' ' && on_play_from_view)
+	// Add a binding here; dispatch and modifier/control-code normalization are shared.
+	static constexpr shortcut_binding shortcuts[] =
+	{
+		{' ', any_modifiers, shortcut_action::play},
+		{127, any_modifiers, shortcut_action::delete_selection},
+		{'s', GLUT_ACTIVE_CTRL, shortcut_action::save},
+		{'z', GLUT_ACTIVE_CTRL, shortcut_action::undo},
+		{'z', GLUT_ACTIVE_CTRL | GLUT_ACTIVE_SHIFT, shortcut_action::redo},
+		{'y', GLUT_ACTIVE_CTRL, shortcut_action::redo},
+		{'c', GLUT_ACTIVE_CTRL, shortcut_action::copy},
+		{'v', GLUT_ACTIVE_CTRL, shortcut_action::paste},
+		{'b', GLUT_ACTIVE_CTRL, shortcut_action::duplicate},
+		{'a', GLUT_ACTIVE_CTRL, shortcut_action::select_track},
+		{'d', GLUT_ACTIVE_CTRL, shortcut_action::deselect},
+		{'c', GLUT_ACTIVE_SHIFT, shortcut_action::select_channel},
+		{'c', GLUT_ACTIVE_ALT, shortcut_action::assign_channel},
+		{std::uint8_t(keyboard_key::ctrl_arrow_down), GLUT_ACTIVE_CTRL, shortcut_action::octave_down},
+		{std::uint8_t(keyboard_key::ctrl_arrow_up), GLUT_ACTIVE_CTRL, shortcut_action::octave_up},
+		{'v', GLUT_ACTIVE_ALT, shortcut_action::ghost_notes},
+		{'u', GLUT_ACTIVE_ALT, shortcut_action::chopper},
+		{'y', GLUT_ACTIVE_ALT, shortcut_action::flip},
+		{'w', GLUT_ACTIVE_ALT, shortcut_action::claw},
+		{'o', GLUT_ACTIVE_ALT, shortcut_action::lfo},
+	};
+
+	static std::uint8_t normalized_shortcut_key(char ch, int modifiers)
+	{
+		auto key = std::uint8_t(ch);
+		if ((modifiers & GLUT_ACTIVE_CTRL) && key >= 1 && key <= 26)
+			return std::uint8_t('a' + key - 1);
+		if (key >= 'A' && key <= 'Z')
+			return std::uint8_t(key - 'A' + 'a');
+		return key;
+	}
+
+	void run_shortcut(shortcut_action action)
+	{
+		switch (action)
 		{
-			on_play_from_view();
-			return;
-		}
-
-		if (std::uint8_t(ch) == 127) // Del: delete selected notes
-		{
-			editor->delete_selected_notes();
-			return;
-		}
-
-		const auto modifiers = glutGetModifiers();
-
-		// Alt+letter arrives as the plain character with the Alt modifier.
-		if (modifiers & GLUT_ACTIVE_ALT)
-		{
-			switch (ch)
-			{
-				case 'v': case 'V':
-				{
-					const auto message = toggle_ghost_notes();
-					if (on_status) on_status(message);
-					return;
-				}
-				case 'u': case 'U': if (on_open_chopper) on_open_chopper(); return;
-				case 'y': case 'Y': if (on_open_flip) on_open_flip(); return;
-				case 'w': case 'W': if (on_open_claw) on_open_claw(); return;
-				case 'o': case 'O': if (on_open_lfo) on_open_lfo(); return;
-			}
-		}
-
-		if (std::uint8_t(ch) >= 27)
-			return;
-
-		if (!(modifiers & GLUT_ACTIVE_CTRL))
-			return;
-
-		switch (ch)
-		{
-			case 19: // Ctrl+S
-				if (on_save) on_save();
-				break;
-			case 26: // Ctrl+Z (+Shift = redo)
-				if (modifiers & GLUT_ACTIVE_SHIFT)
-					editor->redo();
-				else
-					editor->undo();
-				break;
-			case 25: // Ctrl+Y
-				editor->redo();
-				break;
-			case 3: // Ctrl+C
+			case shortcut_action::play: if (on_play_from_view) on_play_from_view(); break;
+			case shortcut_action::delete_selection: editor->delete_selected_notes(); break;
+			case shortcut_action::save: if (on_save) on_save(); break;
+			case shortcut_action::undo: editor->undo(); break;
+			case shortcut_action::redo: editor->redo(); break;
+			case shortcut_action::copy:
 				if (auto count = editor->copy_selected_notes(); count && on_status)
 					on_status("Copied " + std::to_string(count) + " notes");
 				break;
-			case 22: // Ctrl+V
+			case shortcut_action::paste:
 				if (auto count = editor->paste_clipboard(); count && on_status)
 					on_status("Pasted " + std::to_string(count) + " notes into " +
 						editor->get_track_label(editor->get_active_track()));
 				break;
-			case 2: // Ctrl+B: duplicate selection right after itself
-				editor->duplicate_selected();
-				break;
-			case 1: // Ctrl+A: select every note of the active track
+			case shortcut_action::duplicate: editor->duplicate_selected(); break;
+			case shortcut_action::select_track:
 				if (auto count = editor->select_rect(0, editor->get_total_ticks() + 1,
 					0, 127, editor->get_active_track()); on_status)
 					on_status("Selected " + std::to_string(count) + " notes");
 				break;
-			case 4: // Ctrl+D: deselect
-				editor->clear_selection();
+			case shortcut_action::deselect: editor->clear_selection(); break;
+			case shortcut_action::select_channel:
+				if (auto count = editor->select_channel(effective_draw_channel(),
+					editor->get_active_track()); on_status)
+					on_status("Selected " + std::to_string(count) + " notes on channel " +
+						std::to_string(effective_draw_channel() + 1));
 				break;
+			case shortcut_action::assign_channel:
+				if (auto count = editor->change_channel_selected(effective_draw_channel()); on_status)
+					on_status("Set " + std::to_string(count) + " notes to channel " +
+						std::to_string(effective_draw_channel() + 1));
+				break;
+			case shortcut_action::octave_down: editor->move_selected_notes(0, -12); break;
+			case shortcut_action::octave_up: editor->move_selected_notes(0, 12); break;
+			case shortcut_action::ghost_notes:
+				if (on_status) on_status(toggle_ghost_notes());
+				break;
+			case shortcut_action::chopper: if (on_open_chopper) on_open_chopper(); break;
+			case shortcut_action::flip: if (on_open_flip) on_open_flip(); break;
+			case shortcut_action::claw: if (on_open_claw) on_open_claw(); break;
+			case shortcut_action::lfo: if (on_open_lfo) on_open_lfo(); break;
+		}
+	}
+
+	/** Dispatch editor shortcuts while this window is the topmost one. */
+	void keyboard_handler(char ch) override
+	{
+		std::lock_guard<std::recursive_mutex> locker(lock);
+		if (!editor || !editor->is_file_loaded())
+			return;
+
+		const auto modifiers = glutGetModifiers() &
+			(GLUT_ACTIVE_CTRL | GLUT_ACTIVE_SHIFT | GLUT_ACTIVE_ALT);
+		const auto key = normalized_shortcut_key(ch, modifiers);
+		for (const auto& binding : shortcuts)
+		{
+			if (binding.key == key &&
+				(binding.modifiers == any_modifiers || binding.modifiers == modifiers))
+			{
+				run_shortcut(binding.action);
+				return;
+			}
 		}
 	}
 
