@@ -48,6 +48,9 @@
 #include "SAFGUIF/SAFGUIF.h"
 #include "SAFC_InnerModules/include_all.h"
 #include "SAFCGUIF_Local/SAFGUIF_L.h"
+#include "SAFCGUIF_Local/simple_player_viewer.h"
+#include "SAFCGUIF_Local/midi_editor_viewer.h"
+#include "SAFCGUIF_Local/midi_editor_tools_ui.h"
 
 #include "SAFC_InnerModules/single_midi_processor_2.h"
 #include "SAFC_InnerModules/bool_settings.h"
@@ -100,7 +103,7 @@ version_t get_executable_version()
 	////////////////////////////////////
 	UINT                uiVerLen = 0;
 	VS_FIXEDFILEINFO* pFixedInfo = 0;     // pointer to fixed file info structure
-	// get the fixed file info (language-independent) 
+	// get the fixed file info (language-independent)
 	if (VerQueryValue(&data[0], TEXT("\\"), (void**)&pFixedInfo, (UINT*)&uiVerLen) == 0)
 		return { 0,0,0,0 };
 	return
@@ -108,11 +111,11 @@ version_t get_executable_version()
 		HIWORD(pFixedInfo->dwProductVersionMS),
 		LOWORD(pFixedInfo->dwProductVersionMS),
 		HIWORD(pFixedInfo->dwProductVersionLS),
-		LOWORD(pFixedInfo->dwProductVersionLS) 
+		LOWORD(pFixedInfo->dwProductVersionLS)
 	};
 }
 
-std::wstring extract_directory(const std::wstring& path) 
+std::wstring extract_directory(const std::wstring& path)
 {
 	constexpr wchar_t delim = (L"\\")[0];
 	auto last_delim_pos = path.find_last_of(delim);
@@ -129,7 +132,7 @@ static int copy_data(struct archive* ar, struct archive* aw)
 	size_t size;
 	la_int64_t offset;
 
-	for (;;) 
+	for (;;)
 	{
 		r = archive_read_data_block(ar, &buff, &size, &offset);
 		if (r == ARCHIVE_EOF)
@@ -137,7 +140,7 @@ static int copy_data(struct archive* ar, struct archive* aw)
 		if (r < ARCHIVE_OK)
 			return (r);
 		r = archive_write_data_block(aw, buff, size, offset);
-		if (r < ARCHIVE_OK) 
+		if (r < ARCHIVE_OK)
 		{
 			fprintf(stderr, "%s\n", archive_error_string(aw));
 			return (r);
@@ -588,9 +591,9 @@ void safc_version_check()
 	});
 }
 
-size_t get_available_memory() 
+size_t get_available_memory()
 {
-	static std::mutex mutex; 
+	static std::mutex mutex;
 	std::lock_guard<std::mutex> locker(mutex);
 
 	size_t ret = 0;
@@ -600,7 +603,7 @@ size_t get_available_memory()
 
 	static HINSTANCE hIL = LoadLibrary(L"kernel32.dll");
 	GMSEx = (BOOL(__stdcall*)(LPMEMORYSTATUSEX))GetProcAddress(hIL, "GlobalMemoryStatusEx");
-	if (GMSEx) 
+	if (GMSEx)
 	{
 		MEMORYSTATUSEX m{};
 		m.dwLength = sizeof(m);
@@ -609,7 +612,7 @@ size_t get_available_memory()
 			ret = (int)(m.ullAvailPhys >> 20);
 		}
 	}
-	else 
+	else
 	{
 		MEMORYSTATUS m{};
 		m.dwLength = sizeof(m);
@@ -662,7 +665,7 @@ struct file_settings
 
 	single_midi_info_collector::time_graph time_map;
 
-	file_settings(const std::wstring& filename): 
+	file_settings(const std::wstring& filename):
 		filename(filename),
 		file_name_postfix("_.mid"),
 		w_file_name_postfix(L"_.mid")
@@ -684,23 +687,23 @@ struct file_settings
 		filesize = checker.filesize;
 	}
 
-	inline void switch_bool_setting(std::uint32_t smp_bool_setting) 
+	inline void switch_bool_setting(std::uint32_t smp_bool_setting)
 	{
 		bool_settings ^= smp_bool_setting;
 	}
 
-	inline void set_bool_setting(std::uint32_t smp_bool_setting, bool new_state) 
+	inline void set_bool_setting(std::uint32_t smp_bool_setting, bool new_state)
 	{
 		if (bool_settings & smp_bool_setting && new_state)
 			return;
-		
+
 		if (!(bool_settings & smp_bool_setting) && !new_state)
 			return;
 
 		switch_bool_setting(smp_bool_setting);
 	}
 
-	std::shared_ptr<single_midi_processor_2::processing_data> build_smrp_processing_data() 
+	std::shared_ptr<single_midi_processor_2::processing_data> build_smrp_processing_data()
 	{
 		auto smrp_data = std::make_shared<single_midi_processor_2::processing_data>();
 		auto& settings = smrp_data->settings;
@@ -735,7 +738,7 @@ struct file_settings
 		settings.legacy.ignore_meta_rsb = allow_legacy_rsb_meta_interaction;
 		settings.legacy.rsb_compression = rsb_compression;
 		settings.filter.pass_sysex = allow_sysex;
-		inplace_merge_enabled = 
+		inplace_merge_enabled =
 			settings.details.inplace_mergable = inplace_merge_enabled && !rsb_compression;
 		settings.details.group_id = group_id;
 		settings.details.initial_filesize = filesize;
@@ -762,7 +765,7 @@ struct file_settings
 	}
 };
 
-struct sfd_rsp 
+struct sfd_rsp
 {
 	std::int32_t id;
 	std::int64_t filesize;
@@ -918,7 +921,7 @@ struct safc_data
 safc_data g_data;
 std::shared_ptr<midi_collection_threaded_merger> global_mctm;
 
-void throw_alert_error(std::string&& AlertText) 
+void throw_alert_error(std::string&& AlertText)
 {
 	std::cerr << AlertText << std::endl;
 
@@ -977,9 +980,9 @@ std::vector<std::wstring> multiple_open_file_dialog(const wchar_t* Title)
 		}
 		return InpLinks;
 	}
-	else 
+	else
 	{
-		switch (CommDlgExtendedError()) 
+		switch (CommDlgExtendedError())
 		{
 		case CDERR_DIALOGFAILURE:		 throw_alert_error("CDERR_DIALOGFAILURE\n");   break;
 		case CDERR_FINDRESFAILURE:		 throw_alert_error("CDERR_FINDRESFAILURE\n");  break;
@@ -1018,7 +1021,7 @@ std::wstring save_open_file_dialog(const wchar_t* Title)
 	ofn.nMaxFileTitle = 0;
 	ofn.lpstrInitialDir = NULL;
 	if (GetSaveFileName(&ofn)) return std::wstring(filename);
-	else 
+	else
 	{
 		switch (CommDlgExtendedError())
 		{
@@ -1182,7 +1185,7 @@ namespace props_and_sets
 
 	void initialize_collecting()
 	{
-		if (current_id < 0 && current_id >= g_data.files.size()) 
+		if (current_id < 0 && current_id >= g_data.files.size())
 		{
 			throw_alert_error("How you have managed to select the midi beyond the list? O.o\n" + std::to_string(current_id));
 			return;
@@ -1620,7 +1623,7 @@ namespace props_and_sets
 		if (current_string.size())
 		{
 			string_value = std::stoi(current_string);
-			if (string_value) 
+			if (string_value)
 			{
 				g_data[current_id].new_ppqn = string_value;
 				g_data[current_id].ppqn_manually_set = true;
@@ -1853,7 +1856,7 @@ namespace props_and_sets
 				tool_ptr->plc_bb->map.clear();
 				tool_ptr->plc_bb->map[127] = 127;
 
-				for (int i = 0; i < 128; i++) 
+				for (int i = 0; i < 128; i++)
 					tool_ptr->plc_bb->insert(i, std::ceil(std::pow(i / 127., degree) * 127.));
 			}
 			else
@@ -1893,7 +1896,7 @@ namespace props_and_sets
 				throw_alert_error("If you see this message, some error might have happen, since PLC_bb is null");
 		}
 
-		void on_set_mode_change() 
+		void on_set_mode_change()
 		{
 			auto window = (*global_window_handler)["VM"];
 			auto tool_ptr = ((volume_graph*)(*window)["VM_PLC"]);
@@ -2076,7 +2079,7 @@ namespace settings
 	void on_settings()
 	{
 		global_window_handler->enable_window("APP_SETTINGS");//g_data.detected_threads
-		
+
 		auto app_settings_window = (*global_window_handler)["APP_SETTINGS"];
 		((input_field*)(*app_settings_window)["AS_BCKGID"])->update_input_string(std::to_string(background_id));
 		((input_field*)(*app_settings_window)["AS_ROT_ANGLE"])->update_input_string(std::to_string(dumb_rotation_angle));
@@ -2092,9 +2095,9 @@ namespace settings
 
 		((checkbox*)((*app_settings_window)["SPLIT_TRACKS"]))->state = g_data.channels_split;
 		((checkbox*)((*app_settings_window)["RSB_COMPRESS"]))->state = g_data.rsb_compression;
-		((checkbox*)((*app_settings_window)["COLLAPSE_MIDI"]))->state = g_data.collapse_midi; 
+		((checkbox*)((*app_settings_window)["COLLAPSE_MIDI"]))->state = g_data.collapse_midi;
 		((checkbox*)((*app_settings_window)["APPLY_OFFSET_AFTER"]))->state = g_data.apply_offset_after;
-		
+
 		((checkbox*)((*app_settings_window)["INPLACE_MERGE"]))->state = g_data.inplace_merge_flag;
 		((checkbox*)((*app_settings_window)["AUTOUPDATECHECK"]))->state = check_autoupdates;
 	}
@@ -2316,7 +2319,7 @@ void on_start()
 			(*merge_preview_container)["RM"] =
 				std::make_unique<bool_and_number_checker<decltype(global_mctm->regular_merge_complete), decltype(global_mctm->regular_track_count)>>
 					(100.f, 0.f, &system_white, &(global_mctm->regular_merge_complete), &(global_mctm->regular_track_count));
-			
+
 			worker_singleton<struct merge_ri_stage_cleanup>::instance().push([safc_data_pointer, merge_preview_container]()
 			{
 				while (!global_mctm->is_ri_merge_complete())
@@ -2328,7 +2331,7 @@ void on_start()
 				merge_preview_container->delete_ui_element_by_name("RM");
 				merge_preview_container->safe_change_position_argumented(0, 0, 0);
 
-				(*merge_preview_container)["FM"] = 
+				(*merge_preview_container)["FM"] =
 					std::make_unique<bool_and_number_checker<decltype(global_mctm->complete), int>>
 						(0.f, 0.f, &system_white, &(global_mctm->complete), nullptr);
 			});
@@ -2410,6 +2413,11 @@ void restore_reg_settings()
 		check_autoupdates = settings::regestry_access.GetDwordValue(L"AUTOUPDATECHECK");
 	}
 	catch (...) { std::cout << "Exception thrown while restoring AUTOUPDATECHECK from registry\n"; }
+	try
+	{
+		is_fonted = settings::regestry_access.GetDwordValue(L"FONTS_ENABLED_POST1P4");
+	}
+	catch (...) { std::cout << "Exception thrown while restoring FONTS_ENABLED from registry\n"; }
 	try
 	{
 		g_data.channels_split = settings::regestry_access.GetDwordValue(L"SPLIT_TRACKS");
@@ -2526,10 +2534,10 @@ void player_watch_func()
 		auto parts_of_second = state.current_time_us % 1000000;
 
 		auto position = float(state.current_time_us) / player->get_info().total_duration_us;
-		
+
 		auto str = std::format("{:0>2}:{:0>2}:{:0>2}", seconds / 60, seconds % 60, parts_of_second / 10000);
 		textbox->safe_string_replace(str);
-		
+
 		if (!seek_to_slider->dragging)
 			seek_to_slider->set_value(position, false);
 
@@ -2581,7 +2589,11 @@ void on_open_player()
 
 		worker_singleton<struct player_watcher>::instance().push(player_watch_func);
 
-		player->restore_device_by_name(saved_midi_device_name);
+		if (!player->ensure_output(saved_midi_device_name))
+		{
+			throw_alert_error("No MIDI output device is available for playback");
+			return;
+		}
 		player->simple_run(g_data[id].filename);
 	});
 }
@@ -2616,7 +2628,12 @@ void on_device_select(int device_id)
 {
 	worker_singleton<struct midi_out_selct>::instance().push([device_id]()
 	{
-		player->set_device(device_id);
+		if (!player->set_device(device_id))
+		{
+			if (player->is_playing())
+				throw_alert_warning("Stop playback before changing the MIDI output device");
+			return;
+		}
 
 		auto device_list = _WH_t<selectable_properted_list>("SIMPLAYER", "DEVICE_LIST");
 
@@ -2657,7 +2674,11 @@ void on_player_pause_toggle()
 		worker_singleton<struct player_watcher>::instance().push(player_watch_func);
 		worker_singleton<struct player_thread>::instance().push([filename]()
 		{
-			player->restore_device_by_name(saved_midi_device_name);
+			if (!player->ensure_output(saved_midi_device_name))
+			{
+				throw_alert_error("No MIDI output device is available for playback");
+				return;
+			}
 			player->simple_run(filename);
 		});
 		return;
@@ -2697,7 +2718,7 @@ void on_view_length_change(float value)
 {
 	auto window = (*global_window_handler)["SIMPLAYER"];
 	auto player_view = (player_viewer*)(*window)["VIEW"];
-	
+
 	player_view->data->scroll_window_us = std::pow(2, value);
 }
 
@@ -2743,6 +2764,449 @@ void on_playback_seek_to(float value)
 	player->seek_to(value);
 }
 
+// ============================================================================
+// MIDI Editor Functions
+// ============================================================================
+
+std::uint32_t editor_channel_button_color(int track, int channel, bool hover = false);
+void editor_flash_status(const std::string& message);
+
+void update_channel_indicator()
+{
+	auto editor_view = _WH_t<midi_editor_viewer>("MIDI_EDITOR", "VIEW");
+	if (!editor_view)
+		return;
+
+	// Brackets mark the channel new notes will be drawn on
+	const int current = editor_view->effective_draw_channel();
+	const int active_track = editor && editor->is_file_loaded()
+		? editor->get_active_track()
+		: 0;
+	for (int channel = 0; channel < 16; ++channel)
+	{
+		auto chan_btn = _WH_t<button>("MIDI_EDITOR", ("CH" + std::to_string(channel)).c_str());
+		if (chan_btn)
+		{
+			chan_btn->safe_string_replace(std::to_string(channel + 1));
+			chan_btn->rgba_background = editor_channel_button_color(active_track, channel);
+			chan_btn->hovered_rgba_background = editor_channel_button_color(active_track, channel, true);
+			chan_btn->rgba_border = channel == current ? 0xFFFFFFFF : 0xFFFFFF7F;
+			chan_btn->hovered_rgba_border = channel == current ? 0xFFFFFFFF : 0xFFFFFFFF;
+			chan_btn->border_width = channel == current ? 2 : 1;
+		}
+	}
+}
+
+std::uint32_t editor_channel_button_color(int track, int channel, bool hover)
+{
+	std::uint8_t r, g, b;
+	midi_editor_viewer::hsv_to_rgb(
+		midi_editor_viewer::track_hue(std::uint8_t(track & 0xFF), std::uint8_t(channel & 0x0F)),
+		hover ? 0.70f : 0.85f,
+		hover ? 0.95f : 0.68f,
+		r, g, b);
+	return (std::uint32_t(r) << 24) | (std::uint32_t(g) << 16) |
+		(std::uint32_t(b) << 8) | 0xCF;
+}
+
+void update_editor_track_list()
+{
+	auto track_list = _WH_t<selectable_properted_list>("MIDI_EDITOR", "TRACK_LIST");
+	if (!track_list || !editor)
+		return;
+
+	track_list->selectors_text.clear();
+	track_list->selectors.clear();
+	track_list->selected_id.clear();
+	track_list->current_top_line_id = 0;
+
+	if (!editor->is_file_loaded())
+	{
+		track_list->safe_push_back_new_string("No MIDI loaded");
+		return;
+	}
+
+	const auto active_track = editor->get_active_track();
+	for (const auto& [track, info] : editor->get_tracks())
+	{
+		const auto label = editor->get_track_label(track);
+		track_list->safe_push_back_new_string(label);
+		if (track == active_track)
+			track_list->selected_id.push_back(track_list->selectors_text.size() - 1);
+	}
+}
+
+void update_editor_status_text()
+{
+	auto textbox = _WH_t<text_box>("MIDI_EDITOR", "TEXT");
+	if (!textbox || !editor)
+		return;
+
+	// The effective draw channel follows the active track unless overridden
+	update_channel_indicator();
+	update_editor_track_list();
+
+	if (!editor->is_file_loaded())
+	{
+		textbox->safe_string_replace("Load a MIDI file to begin editing");
+		return;
+	}
+
+	auto filename = editor->get_filename();
+	textbox->safe_string_replace(
+		std::format("{} | {} notes",
+			editor->get_track_label(editor->get_active_track()),
+			editor->get_note_count()));
+}
+
+void on_editor_load_file()
+{
+	worker_singleton<struct editor_load>::instance().push([]()
+	{
+		auto filenames = multiple_open_file_dialog(L"Select MIDI file to edit");
+		if (!filenames.empty() && !filenames[0].empty())
+		{
+			// Large files parse for a while; keep the status line moving
+			editor_flash_status("Loading...");
+			editor->on_load_progress = [](std::uint64_t done, std::uint64_t total)
+			{
+				if (total)
+					editor_flash_status("Loading... " +
+						std::to_string(done * 100 / total) + "%");
+			};
+
+			if (editor->load_file(filenames[0]))
+			{
+				// Update editor viewer; the editor fits the view to the file on load
+				auto editor_view = _WH_t<midi_editor_viewer>("MIDI_EDITOR", "VIEW");
+				if (editor_view)
+					editor_view->set_editor(editor.get());
+
+				update_editor_status_text();
+			}
+			else
+			{
+				throw_alert_error("Failed to load MIDI file");
+			}
+		}
+	});
+}
+
+void on_editor_save_file()
+{
+	if (!editor || !editor->is_file_loaded())
+	{
+		throw_alert_warning("No MIDI file loaded for editing");
+		return;
+	}
+
+	worker_singleton<struct editor_save>::instance().push([]()
+	{
+		auto save_path = save_open_file_dialog(L"Save edited MIDI as...");
+		if (!save_path.empty())
+		{
+			if (editor->save_file(save_path))
+			{
+				auto textbox = _WH_t<text_box>("MIDI_EDITOR", "TEXT");
+				if (textbox)
+					textbox->safe_string_replace("File saved successfully!");
+			}
+			else
+			{
+				throw_alert_error("Failed to save MIDI file");
+			}
+		}
+	});
+}
+
+void on_editor_undo()
+{
+	if (!editor || !editor->is_file_loaded())
+		return;
+
+	editor->undo();
+}
+
+void on_editor_redo()
+{
+	if (!editor || !editor->is_file_loaded())
+		return;
+
+	editor->redo();
+}
+
+// The global player is shared with the SIMPLAYER window; the editor's playback
+// cursor is only meaningful while the player is streaming the editor's notes
+std::atomic<bool> editor_playback_active = false;
+std::atomic<bool> editor_playback_requested = false;
+
+void update_editor_playback_status()
+{
+	if (!global_window_handler || !player)
+		return;
+
+	static std::string last_timer_text;
+	static bool timer_was_active = false;
+
+	const bool timer_active =
+		editor_playback_active.load(std::memory_order_acquire) && player->is_playing();
+
+	auto pad2 = [](long long value)
+	{
+		auto text = std::to_string(value);
+		return text.size() < 2 ? "0" + text : text;
+	};
+	auto mmss_tenths = [&](double seconds)
+	{
+		seconds = std::max(0.0, seconds);
+		const long long tenths = static_cast<long long>(seconds * 10.0 + 0.5);
+		return std::to_string(tenths / 600) + ":" +
+			pad2((tenths / 10) % 60) + "." + std::to_string(tenths % 10);
+	};
+	auto mmss = [&](double seconds)
+	{
+		seconds = std::max(0.0, seconds);
+		const long long whole_seconds = static_cast<long long>(seconds + 0.5);
+		return std::to_string(whole_seconds / 60) + ":" + pad2(whole_seconds % 60);
+	};
+
+	if (timer_active)
+	{
+		const double current = double(player->get_position_us()) / 1000000.0;
+		const double total = double(player->get_info().total_duration_us) / 1000000.0;
+		std::string text = mmss_tenths(current) + " / " + mmss(total);
+		if (text != last_timer_text)
+		{
+			if (auto* status = _WH_t<text_box>("MIDI_EDITOR", "TEXT"))
+				status->safe_string_replace(text);
+			last_timer_text = std::move(text);
+		}
+		timer_was_active = true;
+	}
+	else if (timer_was_active)
+	{
+		const double total = double(player->get_info().total_duration_us) / 1000000.0;
+		if (auto* status = _WH_t<text_box>("MIDI_EDITOR", "TEXT"))
+			status->safe_string_replace("Stopped  (" + mmss(total) + " total)");
+		last_timer_text.clear();
+		timer_was_active = false;
+	}
+}
+
+void on_editor_play_from(bool from_view_start)
+{
+	if (!editor || !editor->is_file_loaded() || !player)
+		return;
+
+	auto play_btn = _WH_t<button>("MIDI_EDITOR", "PLAY");
+
+	// Toggle: stop if already playing
+	if (player->is_playing())
+	{
+		player->stop();
+		if (play_btn)
+			play_btn->safe_string_replace("Play");
+		return;
+	}
+
+	// Close the window between the UI click and the worker publishing
+	// state.playing. Without this, rapid clicks queue another full playback that
+	// starts unexpectedly after the first one finishes.
+	bool expected = false;
+	if (!editor_playback_requested.compare_exchange_strong(
+		expected, true, std::memory_order_acq_rel))
+		return;
+
+	double seek_fraction = 0.0;
+	if (from_view_start)
+	{
+		auto editor_view = _WH_t<midi_editor_viewer>("MIDI_EDITOR", "VIEW");
+		const auto start_tick = editor_view ? editor->get_view_start_tick() : 0;
+		const auto total_seconds = editor->get_total_seconds();
+		if (total_seconds > 0.0)
+			seek_fraction = std::clamp(editor->get_seconds_at_tick(start_tick) / total_seconds, 0.0, 1.0);
+	}
+
+	// run_from_external blocks until playback ends, keep it off the UI thread
+	worker_singleton<struct editor_playback>::instance().push([play_btn, seek_fraction]()
+	{
+		struct request_guard
+		{
+			~request_guard()
+			{
+				editor_playback_requested.store(false, std::memory_order_release);
+			}
+		} guard;
+
+		// Stream the current in-memory state (unsaved edits included) straight
+		// into the player — no .mid written to disk, no re-parse.
+		auto source = editor->make_playback_source();
+		if (!source)
+		{
+			throw_alert_error("Failed to prepare playback");
+			return;
+		}
+
+		if (!player->ensure_output(saved_midi_device_name))
+		{
+			throw_alert_error("No MIDI output device is available for playback");
+			return;
+		}
+		editor_playback_active = true;
+		if (play_btn)
+			play_btn->safe_string_replace("Stop");
+		// Editor playback has already prepared its output, so start immediately.
+		// This avoids the separate polling/unpause worker and its timeout races.
+		player->run_from_external(source.get(), seek_fraction, false);
+		editor_playback_active = false;
+		if (play_btn)
+			play_btn->safe_string_replace("Play");
+	});
+
+}
+
+void on_editor_play()
+{
+	on_editor_play_from(false);
+}
+
+void on_editor_play_from_view()
+{
+	on_editor_play_from(true);
+}
+
+void on_editor_channel_select(int channel)
+{
+	auto editor_view = _WH_t<midi_editor_viewer>("MIDI_EDITOR", "VIEW");
+	if (!editor_view)
+		return;
+
+	editor_view->set_draw_channel(channel);
+	update_channel_indicator();
+}
+
+void on_editor_toggle_lane()
+{
+	auto editor_view = _WH_t<midi_editor_viewer>("MIDI_EDITOR", "VIEW");
+	auto lane_btn = _WH_t<button>("MIDI_EDITOR", "VEL_LANE");
+	if (!editor_view || !lane_btn)
+		return;
+
+	editor_view->toggle_velocity_lane();
+	lane_btn->safe_string_replace(editor_view->velocity_lane_visible ? "Hide Lane" : "Show Lane");
+}
+
+void editor_flash_status(const std::string& message)
+{
+	auto textbox = _WH_t<text_box>("MIDI_EDITOR", "TEXT");
+	if (textbox)
+		textbox->safe_string_replace(message);
+}
+
+void on_editor_snap_cycle()
+{
+	auto editor_view = _WH_t<midi_editor_viewer>("MIDI_EDITOR", "VIEW");
+	auto snap_btn = _WH_t<button>("MIDI_EDITOR", "SNAP");
+	if (!editor_view || !snap_btn)
+		return;
+
+	snap_btn->safe_string_replace(editor_view->cycle_snap());
+}
+
+void editor_switch_track(int direction)
+{
+	if (!editor || !editor->is_file_loaded())
+		return;
+
+	// Cycle only through tracks that actually contain notes
+	editor->set_active_track(editor->next_track_with_notes(direction));
+	update_editor_status_text();
+}
+
+void on_editor_track_next() { editor_switch_track(1); }
+void on_editor_track_prev() { editor_switch_track(-1); }
+
+void on_editor_track_list_select(int index)
+{
+	if (!editor || !editor->is_file_loaded() || index < 0)
+		return;
+
+	int cur = 0;
+	for (const auto& [track, _] : editor->get_tracks())
+	{
+		if (cur++ == index)
+		{
+			editor->set_active_track(track);
+			update_editor_status_text();
+			return;
+		}
+	}
+}
+
+void on_editor_rename_track()
+{
+	if (!editor || !editor->is_file_loaded())
+		return;
+
+	const auto track = editor->get_active_track();
+	std::string current_name;
+	auto tracks = editor->get_tracks();
+	auto it = tracks.find(track);
+	if (it != tracks.end())
+		current_name = it->second.name;
+
+	global_window_handler->throw_prompt(
+		"New name for " + editor->get_track_label(track),
+		"Rename track",
+		[track]()
+	{
+		auto prompt = (*global_window_handler)["PROMPT"];
+		auto field = (input_field*)(*prompt)["FLD"].get();
+		const auto new_name = field->current_string.empty() && field->stl
+			? field->stl->current_text
+			: field->current_string;
+		global_window_handler->disable_window("PROMPT");
+		if (!new_name.empty())
+		{
+			editor->set_track_name(track, new_name);
+			update_editor_status_text();
+		}
+	},
+		_Align::center,
+		input_field::Type::text,
+		current_name,
+		32);
+}
+
+void on_editor_lane_mode(midi_editor_viewer::lane_mode mode)
+{
+	auto editor_view = _WH_t<midi_editor_viewer>("MIDI_EDITOR", "VIEW");
+	if (!editor_view)
+		return;
+
+	editor_view->set_lane_mode(mode);
+	const char* ids[] = {"LANE_VEL", "LANE_PITCH", "LANE_PAN", "LANE_CCVOL", "LANE_TEMPO"};
+	for (auto id : ids)
+	{
+		auto btn = _WH_t<button>("MIDI_EDITOR", id);
+		if (btn)
+			btn->border_width = 1;
+	}
+
+	const char* active_id = "LANE_VEL";
+	if (mode == midi_editor_viewer::lane_mode::pitch_bend)
+		active_id = "LANE_PITCH";
+	else if (mode == midi_editor_viewer::lane_mode::pan)
+		active_id = "LANE_PAN";
+	else if (mode == midi_editor_viewer::lane_mode::channel_volume)
+		active_id = "LANE_CCVOL";
+	else if (mode == midi_editor_viewer::lane_mode::tempo)
+		active_id = "LANE_TEMPO";
+
+	if (auto btn = _WH_t<button>("MIDI_EDITOR", active_id))
+		btn->border_width = 2;
+}
+
 bool simplayer_maximised = false;
 
 struct simplayer_saved_state {
@@ -2759,6 +3223,298 @@ struct simplayer_saved_state {
 	float view_x, view_y, view_width, view_height;
 	std::string previous_main_window_id;
 } saved_simplayer_state;
+
+bool midieditor_maximised = false;
+
+struct midieditor_saved_state {
+	float window_x, window_y, window_width, window_height;
+	float text_x, text_y;
+	float load_file_x, load_file_y;
+	float save_file_x, save_file_y;
+	float chan_x[16], chan_y[16];
+	float zoom_in_x, zoom_in_y;
+	float zoom_out_x, zoom_out_y;
+	float play_x, play_y;
+	float play_from_x, play_from_y;
+	float track_list_x, track_list_y;
+	float track_next_x, track_next_y;
+	float track_prev_x, track_prev_y;
+	float rename_track_x, rename_track_y;
+	float snap_x, snap_y;
+	float undo_x, undo_y;
+	float redo_x, redo_y;
+	float back_x, back_y;
+	float max_x, max_y;
+	float lane_x, lane_y;
+	float lane_mode_x[5], lane_mode_y[5];
+	float tool_x[4], tool_y[4];
+	float view_x, view_y, view_width, view_height;
+	std::string previous_main_window_id;
+} saved_midieditor_state;
+
+void apply_midieditor_maximised_layout()
+{
+	float half_w = internal_range * (wind_x / window_base_width);
+	float half_h = internal_range * (wind_y / window_base_height);
+	float full_width = 2.0f * half_w;
+	float full_height = 2.0f * half_h + moveable_window::window_header_size;
+
+	auto window = (*global_window_handler)["MIDI_EDITOR"];
+	auto editor_view = (midi_editor_viewer*)(*window)["VIEW"];
+	auto text = (text_box*)(*window)["TEXT"];
+	auto load_file_btn = (button*)(*window)["LOAD_FILE"];
+	auto save_file_btn = (button*)(*window)["SAVE_FILE"];
+	auto play_btn = (button*)(*window)["PLAY"];
+	auto play_from_btn = (button*)(*window)["PLAY_FROM"];
+	auto track_list = (selectable_properted_list*)(*window)["TRACK_LIST"];
+	auto track_next_btn = (button*)(*window)["TRACK_NEXT"];
+	auto track_prev_btn = (button*)(*window)["TRACK_PREV"];
+	auto rename_track_btn = (button*)(*window)["RENAME_TRACK"];
+	auto snap_btn = (button*)(*window)["SNAP"];
+	auto undo_btn = (button*)(*window)["UNDO"];
+	auto redo_btn = (button*)(*window)["REDO"];
+	auto back_btn = (button*)(*window)["BACK_TO_MAIN"];
+	auto max_btn = (button*)(*window)["MAXIMISE"];
+	auto lane_btn = (button*)(*window)["VEL_LANE"];
+	button* lane_mode_btns[] = {
+		(button*)(*window)["LANE_VEL"],
+		(button*)(*window)["LANE_PITCH"],
+		(button*)(*window)["LANE_PAN"],
+		(button*)(*window)["LANE_CCVOL"],
+		(button*)(*window)["LANE_TEMPO"]
+	};
+	button* tool_btns[] = {
+		(button*)(*window)["TOOL_CHOP"], (button*)(*window)["TOOL_FLIP"],
+		(button*)(*window)["TOOL_CLAW"], (button*)(*window)["TOOL_LFO"]
+	};
+
+	// move window so top-left aligns with viewport top-left
+	float dx = (-half_w) - window->x_window_pos;
+	float dy = (half_h) - window->y_window_pos + moveable_window::window_header_size;
+	window->safe_move(dx, dy);
+
+	// Resize window frame
+	window->not_safe_resize(full_height, full_width);
+	auto fui = (moveable_fui_window*)window;
+	fui->safe_window_rename(window->window_name->current_text, false);
+
+	// Button column on the right
+	float button_x = half_w - 45;
+
+	// File operations
+	float row_y = half_h - 10;
+	load_file_btn->safe_change_position(button_x, row_y);
+	save_file_btn->safe_change_position(button_x, row_y -= 15);
+	tool_btns[0]->safe_change_position(button_x - 20, row_y -= 15);
+	tool_btns[1]->safe_change_position(button_x + 20, row_y);
+	tool_btns[2]->safe_change_position(button_x - 20, row_y -= 13);
+	tool_btns[3]->safe_change_position(button_x + 20, row_y);
+
+	// Playback, maximise, velocity lane
+	play_btn->safe_change_position(button_x, row_y -= 18);
+	play_from_btn->safe_change_position(button_x, row_y -= 15);
+	max_btn->safe_change_position(button_x, row_y -= 15);
+	lane_btn->safe_change_position(button_x, row_y -= 15);
+
+	float lane_mode_x = -half_w + 18.f;
+	for (int i = 0; i < 5; ++i)
+		lane_mode_btns[i]->safe_change_position(lane_mode_x + i * 38.f, half_h - 39.f);
+
+	// Channel selector row along the top, over the viewer
+	for (int channel = 0; channel < 16; ++channel)
+	{
+		auto chan_btn = (button*)(*window)["CH" + std::to_string(channel)];
+		if (chan_btn)
+			chan_btn->safe_change_position(-half_w + 10.f + 15.f * channel, half_h - 25.f);
+	}
+
+	track_list->safe_change_position(button_x, row_y -= 20);
+	rename_track_btn->safe_change_position(button_x, row_y - 72.f);
+
+	// Track / snap / edit operations (bottom cluster)
+	float bottom_y = -half_h + 110;
+	track_next_btn->safe_change_position(button_x, bottom_y);
+	track_prev_btn->safe_change_position(button_x, bottom_y -= 15);
+	snap_btn->safe_change_position(button_x, bottom_y -= 20);
+	undo_btn->safe_change_position(button_x, bottom_y -= 20);
+	redo_btn->safe_change_position(button_x, bottom_y -= 15);
+
+	// Back button
+	back_btn->safe_change_position(button_x, -half_h + 15);
+
+	// Resize editor viewer to fill the window area (minus button space and
+	// the status text + channel selector row at the top)
+	float view_margin = 95.f; // Space for the button column on the right
+	float view_width = full_width - view_margin;
+	float view_height = full_height - 82;
+	float view_center_x = -view_margin / 2.f;
+	float view_center_y = -18.5f;
+
+	editor_view->data.width = view_width;
+	editor_view->data.height = view_height;
+	editor_view->xpos = view_center_x;
+	editor_view->ypos = view_center_y;
+
+	// Status text above the viewer
+	text->safe_change_position(view_center_x, half_h - 10);
+}
+
+void switch_midieditor_maximise()
+{
+	auto window = (*global_window_handler)["MIDI_EDITOR"];
+	auto editor_view = (midi_editor_viewer*)(*window)["VIEW"];
+	auto text = (text_box*)(*window)["TEXT"];
+	auto load_file_btn = (button*)(*window)["LOAD_FILE"];
+	auto save_file_btn = (button*)(*window)["SAVE_FILE"];
+	auto play_btn = (button*)(*window)["PLAY"];
+	auto play_from_btn = (button*)(*window)["PLAY_FROM"];
+	auto track_list = (selectable_properted_list*)(*window)["TRACK_LIST"];
+	auto track_next_btn = (button*)(*window)["TRACK_NEXT"];
+	auto track_prev_btn = (button*)(*window)["TRACK_PREV"];
+	auto rename_track_btn = (button*)(*window)["RENAME_TRACK"];
+	auto snap_btn = (button*)(*window)["SNAP"];
+	auto undo_btn = (button*)(*window)["UNDO"];
+	auto redo_btn = (button*)(*window)["REDO"];
+	auto back_btn = (button*)(*window)["BACK_TO_MAIN"];
+	auto max_btn = (button*)(*window)["MAXIMISE"];
+	auto lane_btn = (button*)(*window)["VEL_LANE"];
+	button* lane_mode_btns[] = {
+		(button*)(*window)["LANE_VEL"],
+		(button*)(*window)["LANE_PITCH"],
+		(button*)(*window)["LANE_PAN"],
+		(button*)(*window)["LANE_CCVOL"],
+		(button*)(*window)["LANE_TEMPO"]
+	};
+	button* tool_btns[] = {
+		(button*)(*window)["TOOL_CHOP"], (button*)(*window)["TOOL_FLIP"],
+		(button*)(*window)["TOOL_CLAW"], (button*)(*window)["TOOL_LFO"]
+	};
+
+	if (!midieditor_maximised)
+	{
+		// Save current state
+		auto& state = saved_midieditor_state;
+		state.window_x = window->x_window_pos;
+		state.window_y = window->y_window_pos;
+		state.window_width = window->width;
+		state.window_height = window->height;
+		state.text_x = text->x_pos;
+		state.text_y = text->y_pos;
+		state.load_file_x = load_file_btn->x_pos;
+		state.load_file_y = load_file_btn->y_pos;
+		state.save_file_x = save_file_btn->x_pos;
+		state.save_file_y = save_file_btn->y_pos;
+		for (int channel = 0; channel < 16; ++channel)
+		{
+			auto chan_btn = (button*)(*window)["CH" + std::to_string(channel)];
+			state.chan_x[channel] = chan_btn->x_pos;
+			state.chan_y[channel] = chan_btn->y_pos;
+		}
+		state.play_x = play_btn->x_pos;
+		state.play_y = play_btn->y_pos;
+		state.play_from_x = play_from_btn->x_pos;
+		state.play_from_y = play_from_btn->y_pos;
+		state.track_list_x = track_list->header_cx_pos;
+		state.track_list_y = track_list->header_y_pos;
+		state.track_next_x = track_next_btn->x_pos;
+		state.track_next_y = track_next_btn->y_pos;
+		state.track_prev_x = track_prev_btn->x_pos;
+		state.track_prev_y = track_prev_btn->y_pos;
+		state.rename_track_x = rename_track_btn->x_pos;
+		state.rename_track_y = rename_track_btn->y_pos;
+		state.snap_x = snap_btn->x_pos;
+		state.snap_y = snap_btn->y_pos;
+		state.undo_x = undo_btn->x_pos;
+		state.undo_y = undo_btn->y_pos;
+		state.redo_x = redo_btn->x_pos;
+		state.redo_y = redo_btn->y_pos;
+		state.back_x = back_btn->x_pos;
+		state.back_y = back_btn->y_pos;
+		state.max_x = max_btn->x_pos;
+		state.max_y = max_btn->y_pos;
+		state.lane_x = lane_btn->x_pos;
+		state.lane_y = lane_btn->y_pos;
+		for (int i = 0; i < 5; ++i)
+		{
+			state.lane_mode_x[i] = lane_mode_btns[i]->x_pos;
+			state.lane_mode_y[i] = lane_mode_btns[i]->y_pos;
+		}
+		for (int i = 0; i < 4; ++i)
+		{
+			state.tool_x[i] = tool_btns[i]->x_pos;
+			state.tool_y[i] = tool_btns[i]->y_pos;
+		}
+		state.view_x = editor_view->xpos;
+		state.view_y = editor_view->ypos;
+		state.view_width = editor_view->data.width;
+		state.view_height = editor_view->data.height;
+		state.previous_main_window_id = global_window_handler->main_window_id;
+
+		apply_midieditor_maximised_layout();
+
+		// Make the editor the sole window
+		global_window_handler->main_window_id = "MIDI_EDITOR";
+		global_window_handler->disable_all_windows();
+
+		midieditor_maximised = true;
+		max_btn->safe_string_replace("Restore");
+	}
+	else
+	{
+		auto& state = saved_midieditor_state;
+
+		// move window back to original position
+		float dx = state.window_x - window->x_window_pos;
+		float dy = state.window_y - window->y_window_pos;
+		window->safe_move(dx, dy);
+		window->not_safe_resize(state.window_height, state.window_width);
+		auto fui = (moveable_fui_window*)window;
+		fui->safe_window_rename(window->window_name->current_text, false);
+
+		// Restore each child to saved position
+		text->safe_change_position(state.text_x, state.text_y);
+		load_file_btn->safe_change_position(state.load_file_x, state.load_file_y);
+		save_file_btn->safe_change_position(state.save_file_x, state.save_file_y);
+		for (int channel = 0; channel < 16; ++channel)
+		{
+			auto chan_btn = (button*)(*window)["CH" + std::to_string(channel)];
+			chan_btn->safe_change_position(state.chan_x[channel], state.chan_y[channel]);
+		}
+		play_btn->safe_change_position(state.play_x, state.play_y);
+		play_from_btn->safe_change_position(state.play_from_x, state.play_from_y);
+		track_list->safe_change_position(state.track_list_x, state.track_list_y);
+		track_next_btn->safe_change_position(state.track_next_x, state.track_next_y);
+		track_prev_btn->safe_change_position(state.track_prev_x, state.track_prev_y);
+		rename_track_btn->safe_change_position(state.rename_track_x, state.rename_track_y);
+		snap_btn->safe_change_position(state.snap_x, state.snap_y);
+		undo_btn->safe_change_position(state.undo_x, state.undo_y);
+		redo_btn->safe_change_position(state.redo_x, state.redo_y);
+		back_btn->safe_change_position(state.back_x, state.back_y);
+		max_btn->safe_change_position(state.max_x, state.max_y);
+		lane_btn->safe_change_position(state.lane_x, state.lane_y);
+		for (int i = 0; i < 5; ++i)
+		{
+			lane_mode_btns[i]->safe_change_position(state.lane_mode_x[i], state.lane_mode_y[i]);
+		}
+		for (int i = 0; i < 4; ++i)
+		{
+			tool_btns[i]->safe_change_position(state.tool_x[i], state.tool_y[i]);
+		}
+
+		editor_view->xpos = state.view_x;
+		editor_view->ypos = state.view_y;
+		editor_view->data.width = state.view_width;
+		editor_view->data.height = state.view_height;
+
+		// Restore window management
+		global_window_handler->main_window_id = state.previous_main_window_id;
+		global_window_handler->disable_all_windows();
+		global_window_handler->enable_window("MIDI_EDITOR");
+
+		midieditor_maximised = false;
+		max_btn->safe_string_replace("Maximise");
+	}
+}
 
 void apply_simplayer_maximised_layout()
 {
@@ -2915,9 +3671,10 @@ void switch_maximise()
 	}
 }
 
-void init()
+void init(bool reinitialise_font = true)
 {
-	lfont_symbols_info::initialise_font(default_font_name, true);
+	if (reinitialise_font)
+		lfont_symbols_info::initialise_font(default_font_name, true);
 
 	g_data.detected_threads =
 		std::max(
@@ -2940,7 +3697,7 @@ void init()
 	constexpr unsigned BACKGROUND_OPQ = 0x070E16DF;
 	constexpr unsigned BORDER = 0xFFFFFF7F;
 	constexpr unsigned HEADER = 0x285685CF;
-	
+
 	/*selectable_properted_list* SPL = new selectable_properted_list(bs_list_black_small, NULL, props_and_sets::open_file_properties, -50, 172, 300, 12, 65, 30);
 	moveable_window* window = new MoveableResizeableWindow(Mainwindow_name.str(), system_white, -200, 200, 400, 400, 0x3F3F3FAF, 0x7F7F7F7F, 0, [SPL](float dH, float dW, float NewHeight, float NewWidth) {
 		constexpr float TopMargin = 200 - 172;
@@ -2964,17 +3721,22 @@ void init()
 	(*window)["REM_Butt"] = new button("Remove selected", system_white, on_rem, 150, 155, 75, 12, 1, 0x3F0000AF, 0xFFFFFFFF, 0x3F0000FF, 0xFFFFFFFF, 0xF7F7F7FF, nullptr, " ");
 	(*window)["REM_ALL_Butt"] = new button("Remove all", system_white, on_rem_all, 150, 142.5, 75, 12, 1, 0xAF0000AF, 0xFFFFFFFF, 0xAF0000AF, 0xFFFFFFFF, 0xF7F7F7FF, &system_white, "May cause lag");
 
-	(*window)["OPEN_SIMPLAYER"] = new button("Open Player", system_black, on_open_player, 150, 117.5, 75, 12, 1, 0xFFFFFFAF, 0x0F0F0FFF, 0xFFFFFFFF, 0x000000FF, 0xFFFFFFFF, nullptr, " ");
+	(*window)["OPEN_SIMPLAYER"] = new button("Play MIDI", system_black, on_open_player, 150, 117.5, 75, 12, 1, 0xFFFFFFAF, 0x0F0F0FFF, 0xFFFFFFFF, 0x000000FF, 0xFFFFFFFF, nullptr, " ");
+	(*window)["OPEN_MIDI_EDITOR"] = new button("MIDI Editor", system_black, []() {
+		global_window_handler->main_window_id = "MIDI_EDITOR";
+		global_window_handler->disable_all_windows();
+		global_window_handler->enable_window("MIDI_EDITOR");
+	}, 150, 105, 75, 12, 1, 0xFFFFFFAF, 0x0F0F0FFF, 0xFFFFFFFF, 0x000000FF, 0xFFFFFFFF, nullptr, "Open MIDI Piano Roll Editor");
 
-	(*window)["GLOBAL_PPQN_Butt"] = new button("Global PPQN", system_white, on_global_ppqn, 150, 92.5, 75, 12, 1, 0xFF3F00AF, 0xFFFFFFFF, 0xFF3F00AF, 0xFFFFFFFF, 0xF7F7F7FF, nullptr, " ");
-	(*window)["GLOBAL_OFFSET_Butt"] = new button("Global offset", system_white, on_global_offset, 150, 80, 75, 12, 1, 0xFF7F00AF, 0xFFFFFFFF, 0xFF7F00FF, 0xFFFFFFFF, 0xF7F7F7FF, nullptr, " ");
-	(*window)["GLOBAL_TEMPO_Butt"] = new button("Global tempo", system_white, on_global_tempo, 150, 67.5, 75, 12, 1, 0xFFAF00AF, 0xFFFFFFFF, 0xFFAF00AF, 0xFFFFFFFF, 0xF7F7F7FF, nullptr, " ");
+	(*window)["GLOBAL_PPQN_Butt"] = new button("Global PPQN", system_white, on_global_ppqn, 150, 82.5, 75, 12, 1, 0xFF3F00AF, 0xFFFFFFFF, 0xFF3F00AF, 0xFFFFFFFF, 0xF7F7F7FF, nullptr, " ");
+	(*window)["GLOBAL_OFFSET_Butt"] = new button("Global offset", system_white, on_global_offset, 150, 70, 75, 12, 1, 0xFF7F00AF, 0xFFFFFFFF, 0xFF7F00FF, 0xFFFFFFFF, 0xF7F7F7FF, nullptr, " ");
+	(*window)["GLOBAL_TEMPO_Butt"] = new button("Global tempo", system_white, on_global_tempo, 150, 57.5, 75, 12, 1, 0xFFAF00AF, 0xFFFFFFFF, 0xFFAF00AF, 0xFFFFFFFF, 0xF7F7F7FF, nullptr, " ");
 
-	(*window)["DELETE_ALL_VM"] = new button("Remove vol. maps", system_white, on_rem_vol_maps, 150, 42.5, 75, 12, 1,
+	(*window)["DELETE_ALL_VM"] = new button("Remove vol. maps", system_white, on_rem_vol_maps, 150, 32.5, 75, 12, 1,
 		0x7F7F7FAF, 0xFFFFFFFF, 0x7F7F7FAF, 0xFFFFFFFF, 0xF7F7F7FF, nullptr, " ");//0xFF007FAF
-	(*window)["DELETE_ALL_CAT"] = new button("Remove C&Ts", system_white, on_rem_cats, 150, 30, 75, 12, 1,
+	(*window)["DELETE_ALL_CAT"] = new button("Remove C&Ts", system_white, on_rem_cats, 150, 20, 75, 12, 1,
 		0x7F7F7FAF, 0xFFFFFFFF, 0x7F7F7FAF, 0xFFFFFFFF, 0xF7F7F7FF, nullptr, " ");
-	(*window)["DELETE_ALL_MODULES"] = new button("Remove modules", system_white, on_rem_all_modules, 150, 17.5, 75, 12, 1,
+	(*window)["DELETE_ALL_MODULES"] = new button("Remove modules", system_white, on_rem_all_modules, 150, 7.5, 75, 12, 1,
 		0x7F7F7FAF, 0xFFFFFFFF, 0x7F7F7FAF, 0xFFFFFFFF, 0xF7F7F7FF, nullptr, " ");
 
 	(*window)["APP_SETTINGS"] = new button("Settings...", system_white, settings::on_settings, 150, -140, 75, 12, 1,
@@ -3097,8 +3859,8 @@ void init()
 	auto angle_input = new input_field(std::to_string(dumb_rotation_angle), -87.5 + moveable_window::window_header_size, 55 - moveable_window::window_header_size, 10, 30, system_white, nullptr, 0x007FFFFF, &system_white, "Rotation angle", 6, _Align::center, _Align::left, input_field::Type::FP_Any);
 	angle_input->disable(); // hide // legacy
 	(*window)["AS_ROT_ANGLE"] = angle_input;
-	(*window)["AS_FONT_SIZE"] = new wheel_variable_changer(settings::apply_fs_wheel, -37.5, -82.5, lfont_symbols_info::font_size, 1, system_white, "Font size", "Delta", wheel_variable_changer::Type::addictable);
-	(*window)["AS_FONT_P"] = new wheel_variable_changer(settings::apply_rel_wheel, -37.5, -22.5, font_height_to_width, 0.01, system_white, "Font rel.", "Delta", wheel_variable_changer::Type::addictable);
+	(*window)["AS_FONT_SIZE"] = new wheel_variable_changer(settings::apply_fs_wheel, -37.5, -82.5, lfont_symbols_info::font_size, 1, system_white, "Font size", "Delta", wheel_variable_changer::Type::addition);
+	(*window)["AS_FONT_P"] = new wheel_variable_changer(settings::apply_rel_wheel, -37.5, -22.5, font_height_to_width, 0.01, system_white, "Font rel.", "Delta", wheel_variable_changer::Type::addition);
 	(*window)["AS_FONT_NAME"] = new input_field(default_font_name, 52.5 - moveable_window::window_header_size, 55 - moveable_window::window_header_size, 10, 100, legacy_white, &default_font_name, 0x007FFFFF, &system_white, "Font name", 32, _Align::center, _Align::left, input_field::Type::text);
 
 	(*window)["BOOL_REM_TRCKS"] = new checkbox(-97.5 + moveable_window::window_header_size, 95 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F, 1, 1, &system_white, _Align::left, "Remove empty tracks");
@@ -3181,9 +3943,9 @@ void init()
 
 	auto player_view = new player_viewer(0, -20);
 	(*window)["VIEW_LEN_SLIDER"] = new slider(slider::Orientation::horizontal, -130, 180 - moveable_window::window_header_size, 65, 14, 21, log2f(player_view->data->scroll_window_us), on_view_length_change, 0x808080FF, 0xFFFFFFFF, 0xAACFFFFF, 0x007FFFFF, 0x808080FF, 10, 4);
-	(*window)["BUFFERING_SWITCH"] = new button( 
+	(*window)["BUFFERING_SWITCH"] = new button(
 		player_view->data->enable_simulated_lag ? "Simulate lag" : "Allow unbuffered",
-		system_white, 
+		system_white,
 		on_unbuffered_switch,
 		155, 180 - moveable_window::window_header_size, 80, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr);
 	(*window)["OVERLAP_SWITCH"] = new button(
@@ -3214,6 +3976,128 @@ void init()
 	(*window)["DEVICE_LIST"] = device_list_selector;
 
 	(*global_window_handler)["SIMPLAYER"] = window;
+
+	// ========================================================================
+	// MIDI Editor Window
+	// ========================================================================
+	window = new moveable_fui_window("MIDI Piano Roll Editor", system_white,
+		-200, 197.5f, 400, 397.5f, 300, 2.5f, 100, 100, 5, BACKGROUND_OPQ, HEADER, BORDER);
+
+	// Editor viewer (piano roll visualization) - main area, left of the button column
+	auto editor_view = new midi_editor_viewer(-45, -30, editor.get());
+	editor_view->data.width = 300;
+	editor_view->data.height = 300;
+	editor_view->on_track_changed = update_editor_status_text;
+	editor_view->on_status = editor_flash_status;
+	editor_view->on_status_restore = update_editor_status_text;
+	editor_view->on_draw_state_changed = update_channel_indicator;
+	editor_view->on_open_chopper = on_editor_open_chopper;
+	editor_view->on_open_flip = on_editor_open_flip;
+	editor_view->on_open_claw = on_editor_open_claw;
+	editor_view->on_open_lfo = on_editor_open_lfo;
+	editor_view->on_save = on_editor_save_file;
+	editor_view->on_play_from_view = on_editor_play_from_view;
+	editor_view->note_audition = [](std::uint8_t key, std::uint8_t velocity, std::uint8_t channel, bool on)
+	{
+		if (!player)
+			return;
+		if (on && !player->ensure_output(saved_midi_device_name))
+			return;
+		player->preview_note(channel, key, velocity, on);
+	};
+	editor_view->playback_seconds = []() -> double
+	{
+		if (!player || !editor_playback_active.load(std::memory_order_acquire) || !player->is_playing())
+			return -1.0;
+		return double(player->get_position_us()) / 1000000.0;
+	};
+	(*window)["VIEW"] = editor_view;
+
+	// Status text (single line above the viewer)
+	(*window)["TEXT"] = new text_box("Load a MIDI file to begin editing", legacy_white, -45, 165, 12, 200, 10, 0xFFFFFF1A, 0, 0, _Align(center | top), text_box::VerticalOverflow::cut);
+
+	// File operation buttons (right side, aligned with MAIN window pattern)
+	(*window)["LOAD_FILE"] = new button("Load MIDI", system_black, on_editor_load_file, 150, 167.5, 75, 12, 1, 0xFFFFFFAF, 0x0F0F0FFF, 0xFFFFFFFF, 0x000000FF, 0xFFFFFFFF, nullptr, "Load MIDI file for editing");
+	(*window)["SAVE_FILE"] = new button("Save MIDI", system_black, on_editor_save_file, 150, 155, 75, 12, 1, 0xFFFFFFAF, 0x0F0F0FFF, 0xFFFFFFFF, 0x000000FF, 0xFFFFFFFF, nullptr, "Save edited MIDI file");
+	(*window)["TOOL_CHOP"] = new button("Chop", system_white, on_editor_open_chopper, 130, 137.5, 36, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr, "Chopper (Alt+U)");
+	(*window)["TOOL_FLIP"] = new button("Flip", system_white, on_editor_open_flip, 170, 137.5, 36, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr, "Flip score (Alt+Y)");
+	(*window)["TOOL_CLAW"] = new button("Claw", system_white, on_editor_open_claw, 130, 125, 36, 10, 1, 0x7F3FFF3F, 0x7F3FFFFF, 0xFFFFFFFF, 0x7F3FFFFF, 0xFFFFFFFF, nullptr, "Claw machine (Alt+W)");
+	(*window)["TOOL_LFO"] = new button("LFO", system_white, on_editor_open_lfo, 170, 125, 36, 10, 1, 0xFFAF003F, 0xFFAF00FF, 0xFFFFFFFF, 0xFFAF00FF, 0xFFFFFFFF, nullptr, "LFO tool (Alt+O)");
+
+	// Channel selector: which channel newly drawn notes land on. Clicking a
+	// note picks its channel up too; a bright border marks the current one.
+	for (int channel = 0; channel < 16; ++channel)
+	{
+		const float chan_x = -190.f + 15.f * channel;
+		(*window)["CH" + std::to_string(channel)] = new button(
+			std::to_string(channel + 1), system_white,
+			[channel]() { on_editor_channel_select(channel); },
+			chan_x, 140, 14, 10, 1,
+			editor_channel_button_color(0, channel),
+			0xFFFFFF7F,
+			0xFFFFFFFF,
+			editor_channel_button_color(0, channel, true),
+			0xFFFFFFFF,
+			nullptr, "Channel for new notes");
+	}
+
+	// Playback button
+	(*window)["PLAY"] = new button("Play", system_black, on_editor_play, 150, 92.5, 75, 12, 1, 0xFFFFFFAF, 0x0F0F0FFF, 0xFFFFFFFF, 0x000000FF, 0xFFFFFFFF, nullptr, "Play / stop current MIDI");
+	(*window)["PLAY_FROM"] = new button("Play from view", system_white, on_editor_play_from_view, 150, 80, 75, 12, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr, "Play from the visible start tick");
+
+	// Maximise button
+	(*window)["MAXIMISE"] = new button("Maximise", system_white, switch_midieditor_maximise, 150, 67.5, 75, 12, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr, "Expand editor to full window");
+
+	// Velocity lane visibility
+	(*window)["VEL_LANE"] = new button("Hide Lane", system_white, on_editor_toggle_lane, 150, 55, 75, 12, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr, "Show/hide the bottom lane (drag its divider to resize)");
+
+	(*window)["LANE_VEL"] = new button("Vel", system_white, []() { on_editor_lane_mode(midi_editor_viewer::lane_mode::note_velocity); }, -180, 126.5, 30, 10, 2, 0x007FFF3F, 0xFFFFFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr, "Edit note velocity");
+	(*window)["LANE_PITCH"] = new button("Pitch", system_white, []() { on_editor_lane_mode(midi_editor_viewer::lane_mode::pitch_bend); }, -145, 126.5, 30, 10, 1, 0x7F3FFF3F, 0xFFFFFFFF, 0xFFFFFFFF, 0x7F3FFFFF, 0xFFFFFFFF, nullptr, "Edit channel pitch bend");
+	(*window)["LANE_PAN"] = new button("Pan", system_white, []() { on_editor_lane_mode(midi_editor_viewer::lane_mode::pan); }, -110, 126.5, 30, 10, 1, 0xFFAF003F, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFAF00FF, 0xFFFFFFFF, nullptr, "Edit channel pan CC10");
+	(*window)["LANE_CCVOL"] = new button("CCVol", system_white, []() { on_editor_lane_mode(midi_editor_viewer::lane_mode::channel_volume); }, -75, 126.5, 30, 10, 1, 0x00AF7F3F, 0xFFFFFFFF, 0xFFFFFFFF, 0x00AF7FFF, 0xFFFFFFFF, nullptr, "Edit channel volume CC7");
+	(*window)["LANE_TEMPO"] = new button("Tempo", system_white, []() { on_editor_lane_mode(midi_editor_viewer::lane_mode::tempo); }, -40, 126.5, 30, 10, 1, 0xFFAF003F, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFAF00FF, 0xFFFFFFFF, nullptr, "Edit tempo map; Ctrl+wheel zooms, Shift+wheel pans, Ctrl+Shift+wheel resets range");
+
+	auto editor_track_list = new selectable_properted_list(
+		bs_list_black_small,
+		on_editor_track_list_select,
+		nullptr,
+		150,
+		37.5,
+		75,
+		12,
+		18,
+		5);
+	editor_track_list->arrow_stick_height = 2.5;
+	(*window)["TRACK_LIST"] = editor_track_list;
+	(*window)["RENAME_TRACK"] = new button("Rename track", system_white, on_editor_rename_track, 150, -30, 75, 12, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr, "Rename active track");
+
+	// Track navigation (right-clicking a gray note also switches track)
+	(*window)["TRACK_NEXT"] = new button("Next track", system_white, on_editor_track_next, 150, -87.5, 75, 12, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr, "Next track (or right-click a gray note)");
+	(*window)["TRACK_PREV"] = new button("Prev track", system_white, on_editor_track_prev, 150, -100, 75, 12, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr, "Previous track");
+
+	// Snap grid for note drawing (Del/Ctrl+C/Ctrl+V/Ctrl+B work via keyboard)
+	(*window)["SNAP"] = new button("Snap: 1/16", system_white, on_editor_snap_cycle, 150, -115, 75, 12, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr, "Cycle the drawing snap grid");
+
+	// Edit operation buttons (bottom area)
+	(*window)["UNDO"] = new button("Undo", system_white, on_editor_undo, 150, -135, 75, 12, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr, "Undo last edit (Ctrl+Z)");
+	(*window)["REDO"] = new button("Redo", system_white, on_editor_redo, 150, -147.5, 75, 12, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr, "Redo undone edit (Ctrl+Y)");
+
+	// Back to main window button
+	(*window)["BACK_TO_MAIN"] = new button("Back", system_white, []() {
+		if (midieditor_maximised)
+			switch_midieditor_maximise();
+		global_window_handler->main_window_id = "MAIN";
+		global_window_handler->disable_all_windows();
+		global_window_handler->enable_window("MAIN");
+	}, 150, -182.5, 75, 12, 1, 0x5F5F5FAF, 0xFFFFFFFF, 0x5F5F5FAF, 0xFFFFFFFF, 0xF7F7F7FF, nullptr, "Return to main window");
+
+	(*global_window_handler)["MIDI_EDITOR"] = window;
+	update_channel_indicator();
+	update_editor_track_list();
+
+	initialize_midi_editor_tool_windows(editor_flash_status,
+		[](const std::string& message) { throw_alert_warning(std::string(message)); },
+		BACKGROUND_OPQ, HEADER, BORDER);
 
 	window = new moveable_fui_window("Feedback/Support? O.o", system_white, -100, 100 + moveable_window::window_header_size, 200, 200 + moveable_window::window_header_size, 100, 1.25f, 50, 50, 5, BACKGROUND_OPQ, HEADER, BORDER);
 	(*window)["EDITBOX"] = new edit_box(" ", &system_white, 0, 0, 150, 150, 10, 0, ~0U ^ 0b11100000, 1);
@@ -3258,7 +4142,7 @@ void gl_display()
 	{
 		firstboot = 0;
 
-		init();
+		init(false);
 		if (april_fool)
 		{
 			global_window_handler->throw_alert("Today is a special day! ( -w-)\nToday you'll have new background\n(-w- )", "1st of April!", special_signs::draw_wait, true, 0xFF00FFFF, 20);
@@ -3359,11 +4243,18 @@ void gl_close()
 
 	if (player)
 		player->stop();
+
+	lfont_symbols_info::destroy_font();
+	if (hWnd && hDc)
+		ReleaseDC(hWnd, hDc);
+	hDc = nullptr;
+	hWnd = nullptr;
 }
 
 void on_timer(int v)
 {
 	glutTimerFunc(15, on_timer, 0);
+	update_editor_playback_status();
 	if (animation_is_active)
 	{
 		gl_display();
@@ -3385,6 +4276,9 @@ void on_resize(int x, int y)
 
 		if (simplayer_maximised)
 			apply_simplayer_maximised_layout();
+
+		if (midieditor_maximised)
+			apply_midieditor_maximised_layout();
 	}
 }
 void inline rotate_view(float& x, float& y)
@@ -3449,7 +4343,16 @@ void gl_drag(int x, int y)
 void gl_special_key(int Key, int x, int y)
 {
 	auto modif = glutGetModifiers();
-	if (!(modif & GLUT_ACTIVE_ALT))
+	// Modified arrows use dedicated non-ASCII values because the legacy plain
+	// arrow codes 1-4 collide with Ctrl+A..Ctrl+D.
+	if ((modif & GLUT_ACTIVE_CTRL) && !(modif & GLUT_ACTIVE_ALT))
+	{
+		if (Key == GLUT_KEY_DOWN && global_window_handler)
+			global_window_handler->keyboard_handler(keyboard_key::ctrl_arrow_down);
+		else if (Key == GLUT_KEY_UP && global_window_handler)
+			global_window_handler->keyboard_handler(keyboard_key::ctrl_arrow_up);
+	}
+	else if (!(modif & GLUT_ACTIVE_ALT))
 	{
 		switch (Key)
 		{
@@ -3500,16 +4403,19 @@ struct safc_gui_runtime :
 {
 	virtual void operator()(int argc, char** argv) override
 	{
+		restore_reg_settings();
+		initialise_system_text_styles(is_fonted);
+
 		_wremove(L"_s");
 		_wremove(L"_f");
 		_wremove(L"_g");
 
-#ifdef _DEBUG 
+#ifdef _DEBUG
 		ShowWindow(GetConsoleWindow(), SW_SHOW);
-#else // _DEBUG 
+#else // _DEBUG
 		ShowWindow(GetConsoleWindow(), SW_HIDE);
 #endif
-		ShowWindow(GetConsoleWindow(), SW_SHOW);
+		// ShowWindow(GetConsoleWindow(), SW_SHOW);
 
 		SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS);
 		//srand(1);
@@ -3517,7 +4423,7 @@ struct safc_gui_runtime :
 		init_legacy_draw_map();
 		//cout << to_string((std::uint16_t)0) << endl;
 
-		srand(collect_time_data()); 
+		srand(collect_time_data());
 		__glutInitWithExit(&argc, argv, gl_exit);
 		//cout << argv[0] << endl;
 		glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGBA | GLUT_ALPHA | GLUT_MULTISAMPLE);
@@ -3527,6 +4433,7 @@ struct safc_gui_runtime :
 
 		hWnd = FindWindowA(NULL, window_title);
 		hDc = GetDC(hWnd);
+		lfont_symbols_info::initialise_font(default_font_name, true);
 
 		glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);//_MINUS_SRC_ALPHA
 		glEnable(GL_BLEND);
@@ -3541,8 +4448,8 @@ struct safc_gui_runtime :
 		//glEnable(GL_LINE_SMOOTH);//GL_POLYGON_SMOOTH
 		//glEnable(GL_POINT_SMOOTH);
 
-		//glShadeModel(GL_SMOOTH); 
-		//glEnable(GLUT_MULTISAMPLE); 
+		//glShadeModel(GL_SMOOTH);
+		//glEnable(GLUT_MULTISAMPLE);
 		//glutSetOption(GLUT_MULTISAMPLE, 8);
 
 		glHint(GL_LINE_SMOOTH_HINT, GL_FASTEST);//GL_FASTEST//GL_NICEST
@@ -3604,6 +4511,8 @@ struct safc_cli_runtime:
 
 	virtual void operator()(int argc, char** argv) override
 	{
+		restore_reg_settings();
+
 		ShowWindow(GetConsoleWindow(), SW_SHOW);
 		g_data.detected_threads =
 			std::max(
@@ -3696,7 +4605,7 @@ struct safc_cli_runtime:
 		for (auto& single_entry : files_array)
 		{
 			auto& object = single_entry->AsObject();
-			
+
 			auto ppq_override = object.find(L"ppq_override");
 			if (ppq_override != object.end())
 				g_data.files[index].new_ppqn = ppq_override->second->AsNumber();
@@ -3808,13 +4717,13 @@ int main(int argc, char** argv)
 	player = std::make_shared<simple_player>();
 	player->init();
 
+	editor = std::make_shared<midi_editor>();
+
 	g_version_tuple = get_executable_version();
 
 	std::ios_base::sync_with_stdio(false); //why not
 
 	std::shared_ptr<safc_runtime> runtime;
-
-	restore_reg_settings();
 
 	if (argc > 1)
 		runtime = std::make_shared<safc_cli_runtime>();

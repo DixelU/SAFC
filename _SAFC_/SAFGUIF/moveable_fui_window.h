@@ -294,7 +294,9 @@ struct moveable_fui_window : public moveable_window
 
 		if (in_header || point_in_poly(window_geometry_x, window_geometry_y, mx, my))
 		{
-			if (button_btn) return true;
+			// Swallow any click (middle button arrives as 0 with a state);
+			// only pure motion (0, 0) passes through by the children's verdict
+			if (button_btn || state) return true;
 			else return flag;
 		}
 		else

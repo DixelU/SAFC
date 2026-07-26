@@ -6,6 +6,14 @@
 
 #include "header_utils.h"
 
+// Values outside the ASCII range used to forward modified GLUT special keys
+// through the legacy keyboard_handler(char) interface.
+namespace keyboard_key
+{
+	inline constexpr char ctrl_arrow_down = static_cast<char>(0x80);
+	inline constexpr char ctrl_arrow_up = static_cast<char>(0x81);
+}
+
 struct handleable_ui_part
 {
 	std::recursive_mutex lock;
