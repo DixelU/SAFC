@@ -4420,7 +4420,6 @@ struct safc_gui_runtime :
 		SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS);
 		//srand(1);
 		//srand(clock());
-		init_legacy_draw_map();
 		//cout << to_string((std::uint16_t)0) << endl;
 
 		srand(collect_time_data());
