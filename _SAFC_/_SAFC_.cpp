@@ -4159,7 +4159,7 @@ void gl_display()
 		on_timer(0);
 	}
 
-	if (years_old >= 0 || settings::background_id == 100)
+	if (true)
 	{
 		glBegin(GL_QUADS);
 		glColor4f(1, 1, 1, (drag_over) ? 0.25f : 1);
