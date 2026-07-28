@@ -21,353 +21,16 @@
 
 #include "single_midi_processor_2.h"
 #include "single_midi_info_collector.h"
+#include "playback_event_source.h"
 
-#define SIMPLE_PLAYER_FORCE_NO_INLINE 
+#define SIMPLE_PLAYER_FORCE_NO_INLINE
+#include "buffered_queue_spsc.h"
 // __declspec(noinline)
 // __declspec(noinline)
 
 // lock-free SPSC slab-based queue
 // Producer (parser): push, back
 // Consumer (renderer): pop, front, empty, iteration
-template<typename T>
-struct buffered_queue_spsc
-{
-private:
-	static constexpr size_t slab_size = 1 << 15;
-
-	// Cap on cached empty slabs per queue. Above this, freed slabs are
-	// deleted rather than pushed to the recycle stack, so peak polyphony
-	// doesn't leave the recycle stack hoarding memory indefinitely.
-	static constexpr size_t max_recycled_slabs = 6;
-
-	struct slab
-	{
-		alignas(64) std::aligned_storage_t<sizeof(T), alignof(T)> data[slab_size];
-
-		T* begin;                      // consumer-owned, only consumer modifies
-		std::atomic<T*> end;           // producer writes, consumer reads
-		std::atomic<slab*> next_slab;  // producer writes, consumer reads
-
-		slab() :
-			begin(reinterpret_cast<T*>(data)),
-			end(reinterpret_cast<T*>(data)),
-			next_slab(nullptr)
-		{}
-
-		T* capacity_end() const { return reinterpret_cast<T*>(const_cast<slab*>(this)->data) + slab_size; }
-		T* data_begin() { return reinterpret_cast<T*>(data); }
-
-		[[nodiscard]] bool empty_consumer() const
-		{
-			return begin == end.load(std::memory_order_acquire);
-		}
-
-		T& front() { return *begin; }
-		const T& front() const { return *begin; }
-
-		void pop_consumer() { begin->~T(); ++begin; }
-
-		bool full_producer() const
-		{
-			return end.load(std::memory_order_relaxed) == capacity_end();
-		}
-
-		void push_producer(T&& v)
-		{
-			T* cur_end = end.load(std::memory_order_relaxed);
-			::new(cur_end) T(std::move(v));
-			end.store(cur_end + 1, std::memory_order_release);
-		}
-
-		T& back_producer()
-		{
-			return *(end.load(std::memory_order_relaxed) - 1);
-		}
-
-		void reset_for_reuse()
-		{
-			begin = data_begin();
-			end.store(data_begin(), std::memory_order_relaxed);
-			next_slab.store(nullptr, std::memory_order_relaxed);
-		}
-
-		void clear_consumer()
-		{
-			while (begin != end.load(std::memory_order_acquire))
-				pop_consumer();
-		}
-	};
-
-	// Producer-owned
-	alignas(64) slab* tail_ = nullptr;
-	size_t pushed_local_ = 0; // plain mirror of pushed_, avoids re-reading the atomic
-
-	// Consumer-owned
-	alignas(64) slab* head_ = nullptr;
-	size_t popped_local_ = 0; // plain mirror of popped_
-
-	// lock-free recycle stack: consumer pushes, producer pops
-	alignas(64) std::atomic<slab*> recycle_head_{nullptr};
-
-	// Bound on cached slabs in recycle stack (touched by both threads)
-	alignas(64) std::atomic<size_t> recycle_count_{0};
-
-	// Approximate element count for size-based throttling, split into
-	// monotonic per-side counters so neither thread does an atomic RMW
-	// on a shared cache line: each side bumps its local mirror and
-	// publishes it with a relaxed store to its own line.
-	alignas(64) std::atomic<size_t> pushed_{0};
-	alignas(64) std::atomic<size_t> popped_{0};
-
-	slab* producer_get_slab()
-	{
-		// Try recycle stack first (lock-free pop)
-		slab* r = recycle_head_.load(std::memory_order_acquire);
-		while (r)
-		{
-			slab* next = r->next_slab.load(std::memory_order_relaxed);
-			if (recycle_head_.compare_exchange_weak(r, next,
-				std::memory_order_acquire, std::memory_order_relaxed))
-			{
-				recycle_count_.fetch_sub(1, std::memory_order_relaxed);
-				r->reset_for_reuse();
-				return r;
-			}
-		}
-		return new slab();
-	}
-
-	void consumer_recycle_slab(slab* s)
-	{
-		// Cap the recycle stack so freed slabs don't accumulate after a peak
-		if (recycle_count_.load(std::memory_order_relaxed) >= max_recycled_slabs)
-		{
-			delete s;
-			return;
-		}
-
-		// lock-free push to recycle stack
-		slab* old_head = recycle_head_.load(std::memory_order_relaxed);
-		do {
-			s->next_slab.store(old_head, std::memory_order_relaxed);
-		} while (!recycle_head_.compare_exchange_weak(old_head, s,
-			std::memory_order_release, std::memory_order_relaxed));
-		recycle_count_.fetch_add(1, std::memory_order_relaxed);
-	}
-
-	void ensure_initialized_producer()
-	{
-		if (!tail_)
-		{
-			tail_ = producer_get_slab();
-			head_ = tail_;
-		}
-	}
-
-public:
-	buffered_queue_spsc() = default;
-
-	~buffered_queue_spsc()
-	{
-		// Clean up main chain
-		while (head_)
-		{
-			slab* next = head_->next_slab.load(std::memory_order_relaxed);
-			head_->clear_consumer();
-			delete head_;
-			head_ = next;
-		}
-
-		// Clean up recycle stack
-		slab* r = recycle_head_.load(std::memory_order_relaxed);
-		while (r)
-		{
-			slab* next = r->next_slab.load(std::memory_order_relaxed);
-			delete r;
-			r = next;
-		}
-	}
-
-	// Non-copyable, non-movable (due to internal pointers)
-	buffered_queue_spsc(const buffered_queue_spsc&) = delete;
-	buffered_queue_spsc& operator=(const buffered_queue_spsc&) = delete;
-
-	// Producer: push element
-	SIMPLE_PLAYER_FORCE_NO_INLINE void push(T&& value)
-	{
-		ensure_initialized_producer();
-
-		if (tail_->full_producer())
-		{
-			slab* new_slab = producer_get_slab();
-			if (!new_slab) [[unlikely]]
-				return;
-
-			new_slab->push_producer(std::move(value));
-			// Publish new slab - consumer will see it when following next_slab
-			tail_->next_slab.store(new_slab, std::memory_order_release);
-			tail_ = new_slab;
-		}
-		else
-			tail_->push_producer(std::move(value));
-
-		pushed_.store(++pushed_local_, std::memory_order_relaxed);
-	}
-
-	// Producer: get reference to last pushed element (for pending tracking)
-	[[nodiscard]] T& back()
-	{
-		return tail_->back_producer();
-	}
-
-	// Consumer: pop front element
-	SIMPLE_PLAYER_FORCE_NO_INLINE void pop()
-	{
-		if (!head_) [[unlikely]]
-			return;
-
-		head_->pop_consumer();
-		popped_.store(++popped_local_, std::memory_order_relaxed);
-
-		// If current slab exhausted, try to advance
-		if (head_->empty_consumer())
-		{
-			slab* next = head_->next_slab.load(std::memory_order_acquire);
-			if (next)
-			{
-				slab* old = head_;
-				head_ = next;
-				consumer_recycle_slab(old);
-			}
-			// else: keep empty slab as head (producer might add more)
-		}
-	}
-
-	// Consumer: check if empty
-	[[nodiscard]] bool empty() const
-	{
-		if (!head_)
-			return true;
-
-		if (!head_->empty_consumer())
-			return false;
-
-		// Current slab empty - check if there's a next one
-		return head_->next_slab.load(std::memory_order_acquire) == nullptr;
-	}
-
-	// Consumer: get front element
-	[[nodiscard]] T& front()
-	{
-		// Advance past empty slabs if needed
-		while (head_->empty_consumer())
-		{
-			slab* next = head_->next_slab.load(std::memory_order_acquire);
-			if (!next) break;
-			slab* old = head_;
-			head_ = next;
-			consumer_recycle_slab(old);
-		}
-		return head_->front();
-	}
-
-	[[nodiscard]] const T& front() const
-	{
-		return const_cast<buffered_queue_spsc*>(this)->front();
-	}
-
-	// Clear all elements (consumer operation, but callable during reset)
-	void clear()
-	{
-		while (head_)
-		{
-			head_->clear_consumer();
-			slab* next = head_->next_slab.load(std::memory_order_relaxed);
-			if (next)
-			{
-				consumer_recycle_slab(head_);
-				head_ = next;
-			}
-			else
-			{
-				// Keep one slab for reuse
-				head_->reset_for_reuse();
-				tail_ = head_;
-				break;
-			}
-		}
-		// clear() only runs with the producer stopped (reset/seek restart),
-		// so resetting the producer-side counter here is safe.
-		pushed_local_ = 0;
-		popped_local_ = 0;
-		pushed_.store(0, std::memory_order_relaxed);
-		popped_.store(0, std::memory_order_relaxed);
-	}
-
-	// Approximate element count. The two counters are published with relaxed
-	// stores, so the loads may be mutually stale; clamp because a reader can
-	// observe popped_ ahead of pushed_. The producer sees an exact-or-over
-	// estimate, the consumer exact-or-under - both safe for throttling.
-	[[nodiscard]] size_t approximate_size() const
-	{
-		size_t p = pushed_.load(std::memory_order_relaxed);
-		size_t c = popped_.load(std::memory_order_relaxed);
-		return p > c ? p - c : 0;
-	}
-
-	// Consumer iterator for traversal
-	struct iterator
-	{
-		slab* current_slab;
-		T* cur;
-		T* slab_end;  // cached end for current slab
-
-		iterator(slab* s, T* p, T* e) : current_slab(s), cur(p), slab_end(e) {}
-
-		T& operator*() { return *cur; }
-		T* operator->() { return cur; }
-
-		iterator& operator++()
-		{
-			++cur;
-			if (cur >= slab_end)
-			{
-				slab* next = current_slab ?
-					current_slab->next_slab.load(std::memory_order_acquire) : nullptr;
-				if (next)
-				{
-					current_slab = next;
-					cur = current_slab->begin;
-					slab_end = current_slab->end.load(std::memory_order_acquire);
-				}
-				// else: stay at end position
-			}
-			return *this;
-		}
-
-		bool operator!=(const iterator& other) const { return cur != other.cur; }
-		bool operator==(const iterator& other) const { return cur == other.cur; }
-	};
-
-	// Consumer: begin iterator
-	[[nodiscard]] iterator begin()
-	{
-		if (!head_)
-			return iterator(nullptr, nullptr, nullptr);
-		T* e = head_->end.load(std::memory_order_acquire);
-		return iterator(head_, head_->begin, e);
-	}
-
-	// Consumer: end iterator (snapshot of current tail position)
-	[[nodiscard]] iterator end()
-	{
-		if (!tail_)
-			return iterator(nullptr, nullptr, nullptr);
-		T* e = tail_->end.load(std::memory_order_acquire);
-		return iterator(tail_, e, e);
-	}
-};
-
 struct simple_player
 {
 	using tick_type = std::uint64_t;
@@ -806,7 +469,7 @@ struct simple_player
 
 	// Get device names as vector of strings for UI
 	std::vector<std::string> get_device_names() const
-	{	
+	{
 		std::vector<std::string> names;
 		names.reserve(devices.size());
 
@@ -828,10 +491,18 @@ struct simple_player
 	}
 
 	// Change the current device
-	void set_device(size_t device_index)
+	bool set_device(size_t device_index)
 	{
-		if (device_index >= devices.size() || (device_index == current_device && short_msg))
-			return;
+		// Device teardown/open and playback both mutate the output sink. Refuse a
+		// device switch while a run owns the player instead of racing its sender.
+		std::unique_lock<std::mutex> run_lock(playback_run_mutex, std::try_to_lock);
+		if (!run_lock.owns_lock())
+			return false;
+
+		if (device_index >= devices.size())
+			return false;
+		if (device_index == current_device && has_output())
+			return true;
 
 		// Close current device if open
 		close_midi_out();
@@ -843,6 +514,23 @@ struct simple_player
 		// Call callback if set
 		if (on_device_changed)
 			on_device_changed(device_index);
+
+		return has_output();
+	}
+
+	// Whether a MIDI out sink is ready for immediate messages
+	bool has_output() const
+	{
+		return hout.load(std::memory_order_acquire) != nullptr && short_msg != nullptr;
+	}
+
+	// Send an immediate note on/off outside of playback (piano roll audition)
+	void preview_note(uint8_t channel, uint8_t key, uint8_t velocity, bool on)
+	{
+		if (!short_msg)
+			return;
+
+		short_msg(make_smsg((on ? 0x90 : 0x80) | (channel & 0x0F), key & 0x7F, on ? (velocity & 0x7F) : 0x40));
 	}
 
 	// Restore device by name (for registry persistence)
@@ -855,20 +543,34 @@ struct simple_player
 		{
 			if (devices[i].szPname != device_name)
 				continue;
-			
-			set_device(i);
-			
-			return true;
+
+			return set_device(i);
 		}
 
 		return false;
 	}
 
+	// Make playback usable even when the persisted device name is empty or no
+	// longer exists. update_devices() selects index 0 but intentionally does not
+	// open it, so callers must fall back to opening that current device.
+	bool ensure_output(const std::wstring& preferred_device_name)
+	{
+		if (has_output())
+			return true;
+		if (restore_device_by_name(preferred_device_name))
+			return true;
+		return set_device(current_device);
+	}
+
 	// Callback for when device changes (for UI updates)
 	void(*on_device_changed)(size_t device_index) = nullptr;
 
-	void simple_run(std::wstring filename)
+	void simple_run(std::wstring filename, double start_fraction = 0.0)
 	{
+		std::unique_lock<std::mutex> run_lock(playback_run_mutex, std::try_to_lock);
+		if (!run_lock.owns_lock())
+			return;
+
 		memory_failure_reported.store(false, std::memory_order_release);
 		cancel_requested.store(false, std::memory_order_release);
 
@@ -883,13 +585,58 @@ struct simple_player
 			if (!res)
 			{
 				throw_alert_error("Playback failed");
-				return;
-			}
+				mmap.reset();
+			return;
+		}
 
-			playback_thread();
+			start_fraction = std::clamp(start_fraction, 0.0, 1.0);
+		playback_thread(static_cast<uint64_t>(start_fraction * info.total_duration_us));
+
+		// Release the mapping so the caller can delete or replace the file.
+		// info.tracks' pointers into it stay dead until the next open().
+		mmap.reset();
 		}
 		catch (const std::bad_alloc&)
 		{
+			info.open_complete = true;
+			handle_memory_failure(true);
+		}
+	}
+
+	// Play events from an external source (e.g. the MIDI editor's live in-memory
+	// notes) instead of a file on disk. Mirrors simple_run: blocks until playback
+	// ends. The caller owns 'src' and must keep it alive for the whole call.
+	void run_from_external(playback_event_source* src, double start_fraction = 0.0,
+		bool start_paused = true)
+	{
+		if (!src)
+			return;
+
+		std::unique_lock<std::mutex> run_lock(playback_run_mutex, std::try_to_lock);
+		if (!run_lock.owns_lock())
+			return;
+
+		memory_failure_reported.store(false, std::memory_order_release);
+		cancel_requested.store(false, std::memory_order_release);
+
+		try
+		{
+			// The external parser converts ticks to time itself, so info only
+			// needs the total duration for seek-fraction mapping and the UI bar.
+			info = midi_info{};
+			info.total_duration_us = src->total_duration_us();
+			info.open_complete = true;
+
+			start_fraction = std::clamp(start_fraction, 0.0, 1.0);
+
+			external_source = src;
+			playback_thread(static_cast<uint64_t>(start_fraction * info.total_duration_us),
+				start_paused);
+			external_source = nullptr;
+		}
+		catch (const std::bad_alloc&)
+		{
+			external_source = nullptr;
 			info.open_complete = true;
 			handle_memory_failure(true);
 		}
@@ -995,7 +742,32 @@ struct simple_player
 		return state.playing.load(std::memory_order_acquire);
 	}
 
+	// True while the parser is fast-forwarding to a seek target. A caller that
+	// unpauses after starting playback must wait for this to clear, else it can
+	// resume() before the seek's own re-pause and lose the race (stuck paused).
+	bool is_fast_forwarding() const
+	{
+		return state.seeking_ff.load(std::memory_order_acquire);
+	}
+
 	const std::wstring& get_filename() const { return current_filename; }
+
+	// Current playback position in microseconds, wall-clock-smooth (same timing
+	// the falling-notes visualization uses). Returns the pause point while
+	// paused and 0 when stopped.
+	uint64_t get_position_us() const
+	{
+		if (state.playing.load(std::memory_order_acquire) &&
+			!state.paused.load(std::memory_order_acquire))
+		{
+			auto elapsed = std::chrono::steady_clock::now() - state.start_time;
+			return state.start_offset_us +
+				std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count();
+		}
+		if (state.paused.load(std::memory_order_acquire))
+			return state.pause_position_us.load(std::memory_order_acquire);
+		return 0;
+	}
 
 	bool open(std::wstring filename)
 	{
@@ -1023,7 +795,7 @@ struct simple_player
 		}
 
 		info.ppq = (begin[12] << 8) | (begin[13]);
-		
+
 		auto ptr = begin + 14;
 
 		while (ptr < end)
@@ -1123,14 +895,17 @@ struct simple_player
 				state.sender_position_us.store(skip_to_us, std::memory_order_release);
 				state.parsed_up_to_us.store(skip_to_us, std::memory_order_release);
 
-				// Signal sender to transition from immediate drain to timed playback
-				state.seeking_ff.store(false, std::memory_order_release);
-
+				// Re-pause (if requested) BEFORE clearing seeking_ff, so a waiter
+				// that resumes on !is_fast_forwarding() already observes paused ==
+				// true and its resume() wins instead of racing the re-pause.
 				if (pause_after_seek)
 				{
 					state.pause_position_us.store(skip_to_us, std::memory_order_release);
 					state.paused.store(true, std::memory_order_release);
 				}
+
+				// Signal sender to transition from immediate drain to timed playback
+				state.seeking_ff.store(false, std::memory_order_release);
 			}
 
 			if (!fast_forwarding)
@@ -1358,6 +1133,125 @@ struct simple_player
 		state.parser_done.store(true, std::memory_order_release);
 	}
 
+	// Parser variant that pulls from an external event source instead of the
+	// mmap'd file. Shares the sender thread, timing, throttle, visuals, pause
+	// and seek machinery with the file path — only event production differs.
+	// skip_to_us > 0: fast-forward to that time, emitting controller/program
+	// state (not notes) so the synth is correct at the seek point.
+	SIMPLE_PLAYER_FORCE_NO_INLINE void parser_from_source_thread_func(
+		playback_event_source* src, uint64_t skip_to_us = 0, bool pause_after_seek = false)
+	{
+		bool fast_forwarding = (skip_to_us > 0);
+		if (fast_forwarding)
+		{
+			state.seeking_ff.store(true, std::memory_order_release);
+			// Jump the source to the target (skips the note prefix) rather than
+			// walking every event up to it — critical in dense regions.
+			src->seek(skip_to_us);
+		}
+		else
+			src->rewind();
+
+		uint32_t cap_check_counter = 0;
+		generated_event ev;
+
+		while (!state.stop_requested && src->next(ev))
+		{
+			uint64_t batch_time_us = ev.time_us;
+
+			// Check if fast-forward is complete
+			if (fast_forwarding && batch_time_us >= skip_to_us)
+			{
+				fast_forwarding = false;
+
+				// Set timing so the sender starts from the seek position
+				state.start_offset_us = skip_to_us;
+				state.start_time = std::chrono::steady_clock::now();
+				state.current_time_us = skip_to_us;
+				state.sender_position_us.store(skip_to_us, std::memory_order_release);
+				state.parsed_up_to_us.store(skip_to_us, std::memory_order_release);
+
+				// Re-pause (if requested) BEFORE clearing seeking_ff, so a waiter
+				// that resumes on !is_fast_forwarding() already observes paused ==
+				// true and its resume() wins instead of racing the re-pause.
+				if (pause_after_seek)
+				{
+					state.pause_position_us.store(skip_to_us, std::memory_order_release);
+					state.paused.store(true, std::memory_order_release);
+				}
+
+				// Signal sender to transition from immediate drain to timed playback
+				state.seeking_ff.store(false, std::memory_order_release);
+			}
+
+			if (!fast_forwarding)
+			{
+				// Throttle: wait if too far ahead in time, too many pending events
+				// buffered, or paused. Identical policy to the file parser.
+				while (!state.stop_requested)
+				{
+					if (state.paused.load(std::memory_order_acquire))
+					{
+						std::this_thread::sleep_for(std::chrono::milliseconds(10));
+						continue;
+					}
+
+					uint64_t sender_pos = state.sender_position_us.load(std::memory_order_acquire);
+					uint64_t lookahead = (batch_time_us > sender_pos) ? (batch_time_us - sender_pos) : 0;
+					size_t pending = state.send_buffer.approximate_size();
+
+					if (lookahead < playback_state::max_lookahead_us &&
+						pending < playback_state::max_pending_events)
+						break;
+
+					std::this_thread::sleep_for(std::chrono::milliseconds(1));
+				}
+
+				if (state.stop_requested)
+					break;
+
+				state.parsed_up_to_us.store(batch_time_us, std::memory_order_release);
+			}
+
+			const bool is_note = (ev.k == generated_event::kind::note_on ||
+				ev.k == generated_event::kind::note_off);
+
+			// During fast-forward, drop notes but keep controller/program state so
+			// the synth sounds correct at the seek target (matches the file parser).
+			if (fast_forwarding && is_note)
+				continue;
+
+			// Falling-notes visuals (only in timed playback, matching the file path)
+			if (!fast_forwarding)
+			{
+				if (ev.k == generated_event::kind::note_on)
+					state.visuals.push_note_on(ev.key, batch_time_us, ev.track_index, ev.channel, ev.velocity);
+				else if (ev.k == generated_event::kind::note_off)
+					state.visuals.push_note_off(ev.key, batch_time_us, ev.track_index, ev.channel);
+			}
+
+			if (ev.short_msg != 0)
+			{
+				state.send_buffer.push({batch_time_us, ev.short_msg});
+
+				// Same intra-batch size cap as the file parser (sampled every 1024).
+				if ((++cap_check_counter & 1023u) == 0)
+				{
+					while (!fast_forwarding && !state.stop_requested &&
+						state.send_buffer.approximate_size() >= playback_state::max_pending_events)
+					{
+						if (state.paused.load(std::memory_order_acquire))
+							std::this_thread::sleep_for(std::chrono::microseconds(100));
+						else
+							std::this_thread::sleep_for(std::chrono::microseconds(10));
+					}
+				}
+			}
+		}
+
+		state.parser_done.store(true, std::memory_order_release);
+	}
+
 	// Sender thread: sends pre-parsed events with precise timing
 	// During seek fast-forward (seeking_ff == true), drains buffer immediately
 	SIMPLE_PLAYER_FORCE_NO_INLINE void sender_thread_func()
@@ -1472,26 +1366,33 @@ struct simple_player
 		}
 	}
 
-	void playback_thread()
+	void playback_thread(uint64_t initial_skip_to_us = 0, bool start_paused = true)
 	{
 		try
 		{
 			state.reset();
 			state.start_time = std::chrono::steady_clock::now();
+
+			// Publish fast-forward BEFORE playing, so a waiter that observes
+			// is_playing() never sees the brief pre-fast-forward window as "done".
+			state.seeking_ff.store(initial_skip_to_us > 0, std::memory_order_release);
 			state.playing.store(true, std::memory_order_release);
 
-			// Start paused by default so user can select synth first
-			state.paused.store(true, std::memory_order_release);
+			// The normal player starts paused so a synth can be selected. Editor
+			// playback prepares its output first and requests immediate playback.
+			state.paused.store(start_paused, std::memory_order_release);
 			state.pause_position_us.store(0, std::memory_order_release);
 
-			uint64_t skip_to_us = 0;
-			bool pause_after_seek = false;
+			uint64_t skip_to_us = initial_skip_to_us;
+			bool pause_after_seek = initial_skip_to_us > 0 && start_paused;
 
 			for (;;)
 			{
 				// reset per-iteration state
 				state.stop_requested.store(false, std::memory_order_relaxed);
-				state.seeking_ff.store(false, std::memory_order_relaxed);
+				// A seek (skip_to_us > 0) fast-forwards; keep seeking_ff set from
+				// here through completion so the pre-fast-forward window stays closed.
+				state.seeking_ff.store(skip_to_us > 0, std::memory_order_relaxed);
 				state.parser_done.store(false, std::memory_order_relaxed);
 				state.parsed_up_to_us.store(0, std::memory_order_relaxed);
 				state.sender_position_us.store(0, std::memory_order_relaxed);
@@ -1509,7 +1410,10 @@ struct simple_player
 					parser_thread = std::thread([this, skip_to_us, pause_after_seek]() {
 						try
 						{
-							parser_thread_func(skip_to_us, pause_after_seek);
+							if (external_source)
+								parser_from_source_thread_func(external_source, skip_to_us, pause_after_seek);
+							else
+								parser_thread_func(skip_to_us, pause_after_seek);
 						}
 						catch (const std::bad_alloc&)
 						{
@@ -1625,7 +1529,7 @@ struct simple_player
 				return (Key & 1);
 		}
 
-		constexpr static int white_keys_count() 
+		constexpr static int white_keys_count()
 		{
 			int count = 0;
 			for (uint8_t key = 0; key < 128; key++)
@@ -1813,21 +1717,7 @@ struct simple_player
 		auto& visuals = get_visuals();
 
 		// Compute current playback position from wall-clock for smooth visualization
-		uint64_t current_us;
-		const auto& st = get_state();
-		if (st.playing.load(std::memory_order_acquire) && !st.paused.load(std::memory_order_acquire))
-		{
-			auto elapsed = std::chrono::steady_clock::now() - st.start_time;
-			current_us = st.start_offset_us + std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count();
-		}
-		else if (st.paused.load(std::memory_order_acquire))
-		{
-			current_us = st.pause_position_us.load(std::memory_order_acquire);
-		}
-		else
-		{
-			current_us = 0;
-		}
+		uint64_t current_us = get_position_us();
 
 		if (data.enable_simulated_lag)
 		{
@@ -2042,7 +1932,7 @@ struct simple_player
 			const auto& key = data.keyboard[i];
 			auto color = keyboard_colors[i];
 			uint8_t glare = 0;
-			
+
 			if (color.r == 0 && color.g == 0 && color.b == 0)
 			{
 				if (i < total_white)
@@ -2117,6 +2007,12 @@ struct simple_player
 	}
 
 private:
+	// A simple_player owns one state object, parser buffer and output sink. The
+	// editor and SIMPLAYER use different workers, so is_playing() alone cannot
+	// close the scheduling window before a worker starts. This mutex makes a
+	// second run fail closed instead of corrupting the shared state.
+	std::mutex playback_run_mutex;
+
 	void handle_memory_failure(bool report_now = false)
 	{
 		state.memory_failure.store(true, std::memory_order_release);
@@ -2513,6 +2409,10 @@ private:
 	playback_state state;
 	mutable tempo_cache tcache;
 
+	// Non-null only during run_from_external: playback_thread routes the parser
+	// through this source instead of the mmap'd file. Owned by the caller.
+	playback_event_source* external_source = nullptr;
+
 	size_t current_device = ~0ULL;
 	std::vector<MIDIOUTCAPSW> devices;
 	inline static std::atomic<HMIDIOUT> hout;
@@ -2524,90 +2424,6 @@ private:
 
 	constexpr static std::uint32_t MTrk_header = 1297379947;
 	constexpr static std::uint32_t MThd_header = 1297377380;
-};
-
-struct player_viewer : public handleable_ui_part
-{
-	float xpos, ypos;
-	std::unique_ptr<simple_player::draw_data> data;
-
-	player_viewer(float xpos, float ypos):
-		xpos(xpos),
-		ypos(ypos),
-		data(std::make_unique<simple_player::draw_data>())
-	{
-		data->init(40, 22.5f, 0);
-		data->move(xpos - 0.5f * data->width, ypos);
-	}
-
-	void draw() override
-	{
-		std::lock_guard<std::recursive_mutex> locker(lock);
-
-		player->draw(*data);
-	}
-
-	void safe_move(float dx, float dy) override
-	{
-		std::lock_guard<std::recursive_mutex> locker(lock);
-
-		xpos += dx;
-		ypos += dy;
-
-		data->move(dx, dy);
-	}
-
-	void safe_change_position(float NewX, float NewY) override
-	{
-		std::lock_guard<std::recursive_mutex> locker(lock);
-
-		NewX -= xpos;
-		NewY -= ypos;
-
-		safe_move(NewX, NewY);
-	}
-
-	void safe_change_position_argumented(std::uint8_t Arg, float NewX, float NewY) override
-	{
-		std::lock_guard<std::recursive_mutex> locker(lock);
-		float CW = 0.5f * (
-			(std::int32_t)((bool)(GLOBAL_LEFT & Arg))
-			- (std::int32_t)((bool)(GLOBAL_RIGHT & Arg))
-			) * data->width,
-			CH = 0.5f * (
-				(std::int32_t)((bool)(GLOBAL_BOTTOM & Arg))
-				- (std::int32_t)((bool)(GLOBAL_TOP & Arg))
-				) * data->height;
-		safe_change_position(NewX + CW, NewY + CH);
-	}
-
-	void rescale_and_reposition(float new_xpos, float new_ypos, float new_width, float new_height)
-	{
-		std::lock_guard<std::recursive_mutex> locker(lock);
-
-		float width_factor_change = new_width / data->width;
-		constexpr float black_relative_height = 22.5f / 40.f;
-
-		xpos = new_xpos;
-		ypos = new_ypos;
-		data->reinit(new_width, new_height, data->last_keyboard_height * width_factor_change, data->last_keyboard_height * width_factor_change * black_relative_height, 0.f);
-		data->move(new_xpos - 0.5f * data->width, new_ypos);
-	}
-
-	void keyboard_handler(char) override
-	{
-		return;
-	}
-
-	void safe_string_replace(std::string) override
-	{
-		return;
-	}
-
-	[[nodiscard]] bool mouse_handler(float, float, char, char) override
-	{
-		return false;
-	}
 };
 
 #endif

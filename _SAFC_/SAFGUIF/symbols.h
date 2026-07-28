@@ -169,31 +169,28 @@ public:
 	}
 };
 
-float font_height_to_width = 2.5;
+inline float font_height_to_width = 2.5;
 namespace lfont_symbols_info
 {
 
-bool is_init = false;
-GLuint current_font = 0;
-HFONT selected_font = nullptr;
-std::int32_t font_size = 15;
+inline bool is_init = false;
+inline GLuint current_font = 0;
+inline HFONT selected_font = nullptr;
+inline HGDIOBJ previously_selected_font = nullptr;
+inline std::int32_t font_size = 15;
 
-std::int32_t previous_font_size = font_size;
-float previous_font_height_to_width = font_height_to_width;
-std::string previous_font_name;
+inline std::int32_t previous_font_size = font_size;
+inline float previous_font_height_to_width = font_height_to_width;
+inline std::string previous_font_name;
 
-struct font_symb_infos_list_destructor { ~font_symb_infos_list_destructor() { glDeleteLists(current_font, 256); } };
-font_symb_infos_list_destructor __font_destructor{};
-
-void initialise_font(const std::string& font_name, bool force = false)
+inline void initialise_font(const std::string& font_name, bool force = false)
 {
+	if (!is_fonted || !hDc)
+		return;
+
 	if (!force && font_name == previous_font_name && previous_font_size == font_size &&
 		(std::abs)(previous_font_height_to_width - font_height_to_width) < std::numeric_limits<float>::epsilon())
 		return;
-
-	previous_font_name = font_name;
-	previous_font_size = font_size;
-	previous_font_height_to_width = font_height_to_width;
 
 	if (!is_init)
 	{
@@ -204,7 +201,7 @@ void initialise_font(const std::string& font_name, bool force = false)
 	auto height = font_size * (base_internal_range / internal_range);
 	auto width = (font_size > 0) ? font_size * (base_internal_range / internal_range) / font_height_to_width : 0;
 
-	selected_font = CreateFontA(
+	auto new_font = CreateFontA(
 		height,
 		width,
 		0, 0,
@@ -220,12 +217,47 @@ void initialise_font(const std::string& font_name, bool force = false)
 		font_name.c_str()
 	);
 
-	if (selected_font)
+	if (new_font)
 	{
-		auto hdiobj = SelectObject(hDc, selected_font);
+		auto replaced_font = SelectObject(hDc, new_font);
+		if (!replaced_font || replaced_font == HGDI_ERROR)
+		{
+			DeleteObject(new_font);
+			return;
+		}
+
+		if (!selected_font)
+			previously_selected_font = replaced_font;
+		else
+			DeleteObject(selected_font);
+		selected_font = new_font;
+
 		auto status = wglUseFontBitmaps(hDc, 0, 255, current_font);
 		SetMapMode(hDc, MM_TEXT);
+
+		previous_font_name = font_name;
+		previous_font_size = font_size;
+		previous_font_height_to_width = font_height_to_width;
 	}
+}
+
+inline void destroy_font()
+{
+	if (hDc && selected_font)
+	{
+		if (previously_selected_font)
+			SelectObject(hDc, previously_selected_font);
+		DeleteObject(selected_font);
+	}
+
+	if (is_init && current_font)
+		glDeleteLists(current_font, 256);
+
+	selected_font = nullptr;
+	previously_selected_font = nullptr;
+	current_font = 0;
+	is_init = false;
+	previous_font_name.clear();
 }
 
 inline void call_list_on_char(char C)

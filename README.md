@@ -1,8 +1,9 @@
-Simple AF Converter (SAFC)
+Simple AF Complex (SAFC)
 ==========================
 
-Allows merging completely different midis by completely different ways!
+Allows merging completely different midis in multitude of ways!
 Also aims at restoring badly damaged/formatted midi files that other editors, players and tools cannot parse!
+Has additional embedded midis player and piano roll editor.
 
 And other funky stuff :P
 

@@ -153,6 +153,9 @@
     <ClInclude Include="SAFC_InnerModules\bool_settings.h">
       <Filter>Файлы заголовков\MIDI Processing</Filter>
     </ClInclude>
+    <ClInclude Include="SAFC_InnerModules\buffered_queue_spsc.h">
+      <Filter>Файлы заголовков\MIDI Processing</Filter>
+    </ClInclude>
     <ClInclude Include="SAFC_InnerModules\simple_player.h">
       <Filter>Файлы заголовков</Filter>
     </ClInclude>
@@ -162,8 +165,29 @@
     <ClInclude Include="SAFC_InnerModules\single_midi_processor_lean.h">
       <Filter>Файлы заголовков\MIDI Processing</Filter>
     </ClInclude>
+    <ClInclude Include="SAFC_InnerModules\midi_editor.h">
+      <Filter>Файлы заголовков</Filter>
+    </ClInclude>
+    <ClInclude Include="SAFCGUIF_Local\midi_editor_viewer.h">
+      <Filter>Файлы заголовков\SAFGUIF\Specific</Filter>
+    </ClInclude>
+	<ClInclude Include="SAFCGUIF_Local\midi_editor_tools_ui.h">
+	  <Filter>Файлы заголовков\SAFGUIF\Specific</Filter>
+	</ClInclude>
+	<ClInclude Include="SAFCGUIF_Local\simple_player_viewer.h">
+	  <Filter>Файлы заголовков\SAFGUIF\Specific</Filter>
+	</ClInclude>
+    <ClInclude Include="SAFC_InnerModules\playback_event_source.h">
+      <Filter>Файлы заголовков\MIDI Processing</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
+	<ClCompile Include="SAFCGUIF_Local\midi_editor_tools_ui.cpp">
+	  <Filter>Исходные файлы</Filter>
+	</ClCompile>
+	<ClCompile Include="SAFC_InnerModules\midi_editor_tools.cpp">
+	  <Filter>Исходные файлы</Filter>
+	</ClCompile>
     <ClCompile Include="_SAFC_.cpp">
       <Filter>Исходные файлы</Filter>
     </ClCompile>

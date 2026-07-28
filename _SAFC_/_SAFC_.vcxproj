@@ -36,7 +36,8 @@
     <SpectreMitigation>false</SpectreMitigation>
     <EnableASAN>false</EnableASAN>
     <EnableFuzzer>false</EnableFuzzer>
-    <VCToolsVersion>14.50.35717</VCToolsVersion>
+    <VCToolsVersion>
+    </VCToolsVersion>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
@@ -48,7 +49,8 @@
     <EnableUnitySupport>false</EnableUnitySupport>
     <EnableASAN>false</EnableASAN>
     <EnableFuzzer>false</EnableFuzzer>
-    <VCToolsVersion>14.50.35717</VCToolsVersion>
+    <VCToolsVersion>
+    </VCToolsVersion>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
@@ -58,7 +60,8 @@
     <SpectreMitigation>false</SpectreMitigation>
     <EnableASAN>false</EnableASAN>
     <EnableFuzzer>false</EnableFuzzer>
-    <VCToolsVersion>14.50.35717</VCToolsVersion>
+    <VCToolsVersion>
+    </VCToolsVersion>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
@@ -70,7 +73,8 @@
     <SpectreMitigation>false</SpectreMitigation>
     <EnableASAN>false</EnableASAN>
     <EnableFuzzer>false</EnableFuzzer>
-    <VCToolsVersion>14.50.35717</VCToolsVersion>
+    <VCToolsVersion>
+    </VCToolsVersion>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <ImportGroup Label="ExtensionSettings">
@@ -112,7 +116,7 @@
   </PropertyGroup>
   <PropertyGroup Label="Vcpkg" Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <VcpkgUseStatic>true</VcpkgUseStatic>
-    <VcpkgConfiguration>Debug</VcpkgConfiguration>
+    <VcpkgConfiguration>Release</VcpkgConfiguration>
   </PropertyGroup>
   <PropertyGroup Label="Vcpkg" Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <VcpkgUseStatic>true</VcpkgUseStatic>
@@ -312,13 +316,19 @@
     <ClInclude Include="SAFCGUIF_Local\cut_and_transpose_piano.h" />
     <ClInclude Include="SAFCGUIF_Local\drag_n_drop_handler.h" />
     <ClInclude Include="SAFCGUIF_Local\graphing.h" />
+    <ClInclude Include="SAFCGUIF_Local\midi_editor_viewer.h" />
+	<ClInclude Include="SAFCGUIF_Local\midi_editor_tools_ui.h" />
+	<ClInclude Include="SAFCGUIF_Local\simple_player_viewer.h" />
     <ClInclude Include="SAFCGUIF_Local\volume_graph.h" />
     <ClInclude Include="SAFCGUIF_Local\SAFGUIF_L.h" />
     <ClInclude Include="SAFCGUIF_Local\midi_processor_visualiser.h" />
     <ClInclude Include="SAFC_InnerModules\bool_settings.h" />
+    <ClInclude Include="SAFC_InnerModules\buffered_queue_spsc.h" />
     <ClInclude Include="SAFC_InnerModules\cut_and_transpose.h" />
     <ClInclude Include="SAFC_InnerModules\fast_midi_checker.h" />
     <ClInclude Include="SAFC_InnerModules\midi_collection_threaded_merger.h" />
+    <ClInclude Include="SAFC_InnerModules\midi_editor.h" />
+    <ClInclude Include="SAFC_InnerModules\playback_event_source.h" />
     <ClInclude Include="SAFC_InnerModules\simple_player.h" />
     <ClInclude Include="SAFC_InnerModules\polyline_converter.h" />
     <ClInclude Include="SAFC_InnerModules\include_all.h" />
@@ -351,6 +361,8 @@
     <ClInclude Include="WinRegWrappers.h" />
   </ItemGroup>
   <ItemGroup>
+	<ClCompile Include="SAFCGUIF_Local\midi_editor_tools_ui.cpp" />
+	<ClCompile Include="SAFC_InnerModules\midi_editor_tools.cpp" />
     <ClCompile Include="_SAFC_.cpp" />
   </ItemGroup>
   <ItemGroup>

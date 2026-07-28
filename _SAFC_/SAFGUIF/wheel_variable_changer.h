@@ -10,7 +10,7 @@
 
 struct wheel_variable_changer : handleable_ui_part
 {
-	enum class Type { exponential, addictable };
+	enum class Type { exponent, addition };
 	enum class Sensitivity { on_enter, on_click, on_wheel };
 
 	Type type;
@@ -34,7 +34,7 @@ struct wheel_variable_changer : handleable_ui_part
 		single_text_line_settings& stls,
 		std::string var_string = " ",
 		std::string fac_string = " ",
-		Type type = Type::exponential):
+		Type type = Type::exponent):
 			width(100), height(50)
 	{
 		this->on_apply = std::move(on_apply);
@@ -179,8 +179,8 @@ struct wheel_variable_changer : handleable_ui_part
 						{
 							switch (type)
 							{
-								case wheel_variable_changer::Type::exponential: { variable *= factor; break; }
-								case wheel_variable_changer::Type::addictable:  { variable += factor; break; }
+								case wheel_variable_changer::Type::exponent: { variable *= factor; break; }
+								case wheel_variable_changer::Type::addition:  { variable += factor; break; }
 							}
 
 							var_if->update_input_string(std::to_string(variable));
@@ -198,8 +198,8 @@ struct wheel_variable_changer : handleable_ui_part
 						{
 							switch (type)
 							{
-								case wheel_variable_changer::Type::exponential: { variable /= factor; break; }
-								case wheel_variable_changer::Type::addictable:  { variable -= factor; break; }
+								case wheel_variable_changer::Type::exponent: { variable /= factor; break; }
+								case wheel_variable_changer::Type::addition:  { variable -= factor; break; }
 							}
 
 							var_if->update_input_string(std::to_string(variable));

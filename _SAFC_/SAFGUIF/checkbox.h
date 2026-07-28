@@ -3,6 +3,7 @@
 #define SAFGUIF_CHECKBOX
 
 #include <memory>
+#include <functional>
 
 #include "header_utils.h"
 #include "handleable_ui_part.h"
@@ -14,11 +15,12 @@ struct checkbox : handleable_ui_part
 	std::uint32_t border_rgba_color, unchecked_rgba_background, checked_rgba_background;
 	std::unique_ptr<single_text_line> tip;
 	bool state, focused;
+	std::function<void(bool)> on_change;
 	std::uint8_t border_width;
 
 	~checkbox() override = default;
 
-	checkbox(float x_pos, float y_pos, float side_size, std::uint32_t border_rgba_color, std::uint32_t unchecked_rgba_background, std::uint32_t checked_rgba_background, std::uint8_t border_width, bool start_state = false, single_text_line_settings* tip_settings = nullptr, _Align tip_align = _Align::left, std::string tip_text = " ")
+	checkbox(float x_pos, float y_pos, float side_size, std::uint32_t border_rgba_color, std::uint32_t unchecked_rgba_background, std::uint32_t checked_rgba_background, std::uint8_t border_width, bool start_state = false, single_text_line_settings* tip_settings = nullptr, _Align tip_align = _Align::left, std::string tip_text = " ", std::function<void(bool)> changed = nullptr)
 	{
 		this->x_pos = x_pos;
 		this->y_pos = y_pos;
@@ -29,6 +31,7 @@ struct checkbox : handleable_ui_part
 		this->state = start_state;
 		this->focused = false;
 		this->border_width = border_width;
+		this->on_change = std::move(changed);
 		if (tip_settings)
 		{
 			this->tip.reset(tip_settings->create_one(tip_text));
@@ -142,7 +145,11 @@ struct checkbox : handleable_ui_part
 			if (button)
 			{
 				if (state_val == 1)
+				{
 					this->state = !this->state;
+					if (on_change)
+						on_change(this->state);
+				}
 				return true;
 			}
 			else
