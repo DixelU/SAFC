@@ -127,7 +127,7 @@ struct single_text_line
 		}
 		else
 		{
-			chars[i]->render_way = legacy_draw_map[ch_val];
+			chars[i]->render_way = legacy_draw_map[(unsigned char)ch_val];
 			chars[i]->update_point_placement_positions();
 		}
 

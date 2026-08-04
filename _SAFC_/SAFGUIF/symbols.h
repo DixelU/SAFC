@@ -42,14 +42,14 @@ struct dotted_symbol
 	}
 
 	dotted_symbol(char symbol, float x_pos, float y_pos, float x_unit_size, float y_unit_size, std::uint8_t line_width = 2, std::uint8_t red = 255, std::uint8_t green = 255, std::uint8_t blue = 255, std::uint8_t alpha = 255) :
-		dotted_symbol(legacy_draw_map[symbol], x_pos, y_pos, x_unit_size, y_unit_size, line_width, red, green, blue, alpha) {}
+		dotted_symbol(legacy_draw_map[(unsigned char)symbol], x_pos, y_pos, x_unit_size, y_unit_size, line_width, red, green, blue, alpha) {}
 
 	// Value-by-value RGBA constructor (replaces the old raw-pointer owning constructors)
 	dotted_symbol(std::string render_way, float x_pos, float y_pos, float x_unit_size, float y_unit_size, std::uint8_t line_width, std::uint32_t rgba_color) :
 		dotted_symbol(render_way, x_pos, y_pos, x_unit_size, y_unit_size, line_width, rgba_color >> 24, (rgba_color >> 16) & 0xFF, (rgba_color >> 8) & 0xFF, rgba_color & 0xFF) {}
 
 	dotted_symbol(char symbol, float x_pos, float y_pos, float x_unit_size, float y_unit_size, std::uint8_t line_width, std::uint32_t rgba_color) :
-		dotted_symbol(legacy_draw_map[symbol], x_pos, y_pos, x_unit_size, y_unit_size, line_width, rgba_color >> 24, (rgba_color >> 16) & 0xFF, (rgba_color >> 8) & 0xFF, rgba_color & 0xFF) {}
+		dotted_symbol(legacy_draw_map[(unsigned char)symbol], x_pos, y_pos, x_unit_size, y_unit_size, line_width, rgba_color >> 24, (rgba_color >> 16) & 0xFF, (rgba_color >> 8) & 0xFF, rgba_color & 0xFF) {}
 
 	virtual ~dotted_symbol() = default;
 
@@ -363,13 +363,13 @@ struct bi_colored_dotted_symbol : dotted_symbol
 		std::uint8_t red = 255, std::uint8_t green = 255, std::uint8_t blue = 255, std::uint8_t alpha = 255,
 		std::uint8_t g_red = 255, std::uint8_t g_green = 255, std::uint8_t g_blue = 255, std::uint8_t g_alpha = 255,
 		std::uint8_t base_color_point = 5, std::uint8_t grad_color_point = 8) :
-		bi_colored_dotted_symbol(legacy_draw_map[symbol], x_pos, y_pos, x_unit_size, y_unit_size, line_width, red, green, blue, alpha, g_red, g_green, g_blue, g_alpha, base_color_point, grad_color_point) {}
+		bi_colored_dotted_symbol(legacy_draw_map[(unsigned char)symbol], x_pos, y_pos, x_unit_size, y_unit_size, line_width, red, green, blue, alpha, g_red, g_green, g_blue, g_alpha, base_color_point, grad_color_point) {}
 
 	// Value-based constructors (replace old raw-pointer owning constructors)
 	bi_colored_dotted_symbol(char symbol, float x_pos, float y_pos, float x_unit_size, float y_unit_size, std::uint8_t line_width,
 		std::uint32_t rgba_color, std::uint32_t g_rgba_color,
 		std::uint8_t base_color_point = 5, std::uint8_t grad_color_point = 8) :
-		bi_colored_dotted_symbol(legacy_draw_map[symbol], x_pos, y_pos, x_unit_size, y_unit_size, line_width,
+		bi_colored_dotted_symbol(legacy_draw_map[(unsigned char)symbol], x_pos, y_pos, x_unit_size, y_unit_size, line_width,
 			rgba_color >> 24, (rgba_color >> 16) & 0xFF, (rgba_color >> 8) & 0xFF, rgba_color & 0xFF,
 			g_rgba_color >> 24, (g_rgba_color >> 16) & 0xFF, (g_rgba_color >> 8) & 0xFF, g_rgba_color & 0xFF,
 			base_color_point, grad_color_point) {}
