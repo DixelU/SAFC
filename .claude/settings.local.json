@@ -4,7 +4,7 @@
       "Bash(powershell:*)",
       "Bash(grep:*)",
       "PowerShell(Out-File *)",
-      "PowerShell($errs = Select-String -Path 'build_output.txt' -Pattern ': error C' | Measure-Object; Write-Output \"Errors: $\\($errs.Count\\)\"; Get-Content 'build_output.txt' | Select-Object -Last 6)",
+      "PowerShell($errs = Select-String -Path 'build_output.txt' -Pattern ': error C' | Measure-Object; Write-Output \"Errors: $\\($errs.Count\\)\"; Get-Content 'build_output.txt' | Select-Object -Last 6)"
     ]
   }
 }
