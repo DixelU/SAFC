@@ -19,6 +19,7 @@
 #include <queue>
 
 #include <memory_mapped_file_reader.h>
+
 #include "single_midi_processor_2.h"
 #include "single_midi_info_collector.h"
 #include "playback_event_source.h"
