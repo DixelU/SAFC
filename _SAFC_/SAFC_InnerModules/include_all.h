@@ -3,6 +3,7 @@
 #define SAFC_IM_INCLUDE_ALL
 
 #include <versions/polyline_converter/safc-v1/polyline_converter.h>
+
 #include "cut_and_transpose.h"
 #include "single_midi_info_collector.h"
 #include "single_midi_processor_2.h"
