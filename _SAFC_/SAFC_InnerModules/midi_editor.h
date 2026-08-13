@@ -18,7 +18,7 @@
 #include <set>
 #include <queue>
 
-#include <versions/bbb_ffio/safc/bbb_ffio.h>
+#include <memory_mapped_file_reader.h>
 #include "single_midi_processor_2.h"
 #include "single_midi_info_collector.h"
 #include "playback_event_source.h"
@@ -814,7 +814,7 @@ public:
 
 private:
 	std::wstring filename;
-	std::unique_ptr<bbb_mmap> mmap_file;
+	std::unique_ptr<dixelu::memory_mapped_file_reader> mmap_file;
 
 	// Load progress state (only touched while load_file runs)
 	const std::uint8_t* progress_begin = nullptr;
@@ -1139,14 +1139,14 @@ public:
 		next_note_id = 1;
 		active_track = 0;
 
-		mmap_file = std::make_unique<bbb_mmap>(filepath.c_str());
+		mmap_file = std::make_unique<dixelu::memory_mapped_file_reader>(filepath);
 		if (!mmap_file || !mmap_file->good())
 			return false;
 
 		filename = filepath;
 
-		const auto begin = mmap_file->begin();
-		const auto size = mmap_file->length();
+		const auto begin = reinterpret_cast<const std::uint8_t*>(mmap_file->data());
+		const auto size = mmap_file->size();
 		const auto end = begin + size;
 
 		if (size < 18 || std::memcmp(begin, "MThd", 4) != 0)

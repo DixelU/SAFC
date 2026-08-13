@@ -371,7 +371,7 @@ struct midi_processor_with_editor
 /**
  * Example: Create a filter that applies a specific edit operation
  */
-inline single_midi_processor_2::event_transforming_filter 
+inline auto
 make_note_delete_filter(
     const std::vector<midi_editor::piano_note>& notes_to_delete)
 {
@@ -423,7 +423,7 @@ make_note_delete_filter(
 /**
  * Example: Create a filter that applies velocity changes
  */
-inline single_midi_processor_2::event_transforming_filter
+inline auto
 make_velocity_change_filter(
     const std::map<std::pair<std::uint64_t, std::uint8_t>, std::uint8_t>& velocity_changes)
 {

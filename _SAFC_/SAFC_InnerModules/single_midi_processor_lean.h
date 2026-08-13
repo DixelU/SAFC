@@ -9,7 +9,7 @@
 #include <atomic>
 #include <memory>
 
-#include <versions/bbb_ffio/safc/bbb_ffio.h>
+#include "midi_file_reader.h"
 #include "../SAFGUIF/header_utils.h"
 
 #include "single_midi_processor_2.h"
@@ -139,13 +139,13 @@ struct single_midi_processor_lean
 		return size;
 	}
 
-	FORCEDINLINE static std::uint64_t get_vlv(bbb_ffr& in)
+	FORCEDINLINE static std::uint64_t get_vlv(midi_file_reader& in)
 	{
 		std::uint64_t value = 0;
 		base_type byte;
 		do
 		{
-			byte = in.get();
+			byte = read_midi_byte(in);
 			value = (value << 7) | (byte & 0x7F);
 		} while ((byte & 0x80) && !in.eof());
 		return value;
@@ -239,7 +239,7 @@ struct single_midi_processor_lean
 	}
 
 	static bool process_track(
-		bbb_ffr& in,
+		midi_file_reader& in,
 		std::ofstream& out,
 		std::vector<base_type>& track_buffer,
 		const settings_obj& settings,
@@ -249,7 +249,7 @@ struct single_midi_processor_lean
 	{
 		std::uint32_t hdr = 0;
 		while (hdr != MTrk_header && in.good() && !in.eof())
-			hdr = (hdr << 8) | in.get();
+			hdr = (hdr << 8) | read_midi_byte(in);
 
 		if (in.eof())
 		{
@@ -258,7 +258,7 @@ struct single_midi_processor_lean
 		}
 
 		for (int i = 0; i < 4 && in.good(); ++i)
-			in.get();
+			static_cast<void>(read_midi_byte(in));
 
 		if (in.eof())
 		{
@@ -292,7 +292,7 @@ struct single_midi_processor_lean
 				new_abs = previous_tick;
 			tick_type new_delta = new_abs - previous_tick;
 
-			base_type cmd = in.get();
+			base_type cmd = read_midi_byte(in);
 			base_type p1 = 0;
 			bool p1_consumed = false;
 
@@ -300,7 +300,7 @@ struct single_midi_processor_lean
 			{
 				if (rsb_in < 0x80) [[unlikely]]
 				{
-					(*buffers.error) << log_event{log_event_type::unexpected_zero_rsb, (uint64_t)(std::streamoff)in.tellg()};
+					(*buffers.error) << log_event{log_event_type::unexpected_zero_rsb, in.position()};
 					return false;
 				}
 
@@ -314,8 +314,8 @@ struct single_midi_processor_lean
 				case 0x8: case 0x9:
 				{
 					rsb_in = cmd;
-					base_type key = p1_consumed ? p1 : in.get();
-					base_type vel = in.get();
+					base_type key = p1_consumed ? p1 : read_midi_byte(in);
+					base_type vel = read_midi_byte(in);
 
 					// 0x9x vel=0 normalisation: collapse to 0x8x vel=0 unless the
 					// legacy flag wants to keep 0x9x (in which case vel=0 is bumped
@@ -350,8 +350,8 @@ struct single_midi_processor_lean
 				case 0xA: case 0xB: case 0xE:
 				{
 					rsb_in = cmd;
-					base_type a = p1_consumed ? p1 : in.get();
-					base_type b = in.get();
+					base_type a = p1_consumed ? p1 : read_midi_byte(in);
+					base_type b = read_midi_byte(in);
 
 					emit_delta(writer, new_delta, rsb_out, overflow_fix);
 					emit_channel_status(writer, cmd, rsb_out, compression);
@@ -367,7 +367,7 @@ struct single_midi_processor_lean
 					if (settings.filter.piano_only)
 					{
 						rsb_in = cmd;
-						base_type read_param = p1_consumed ? p1 : in.get();
+						base_type read_param = p1_consumed ? p1 : read_midi_byte(in);
 						break;
 					}
 
@@ -376,7 +376,7 @@ struct single_midi_processor_lean
 				case 0xD:
 				{
 					rsb_in = cmd;
-					base_type read_param1 = p1_consumed ? p1 : in.get();
+					base_type read_param1 = p1_consumed ? p1 : read_midi_byte(in);
 
 					emit_delta(writer, new_delta, rsb_out, overflow_fix);
 					emit_channel_status(writer, cmd, rsb_out, compression);
@@ -395,13 +395,13 @@ struct single_midi_processor_lean
 					{
 						// Meta event. p1_consumed can't be true here because 0xFF
 						// is never reached via running status.
-						base_type meta_type = in.get();
+						base_type meta_type = read_midi_byte(in);
 
 						if (meta_type == 0x2F)
 						{
 							std::uint64_t eot_len = get_vlv(in);
 							for (std::uint64_t i = 0; i < eot_len; ++i)
-								in.get();
+								static_cast<void>(read_midi_byte(in));
 							track_ended = true;
 							break;
 						}
@@ -410,9 +410,9 @@ struct single_midi_processor_lean
 
 						if (meta_type == 0x51 && len == 3)
 						{
-							base_type tb1 = in.get();
-							base_type tb2 = in.get();
-							base_type tb3 = in.get();
+							base_type tb1 = read_midi_byte(in);
+							base_type tb2 = read_midi_byte(in);
+							base_type tb3 = read_midi_byte(in);
 							std::uint32_t tempo =
 								(std::uint32_t(tb1) << 16) |
 								(std::uint32_t(tb2) << 8)  |
@@ -441,7 +441,7 @@ struct single_midi_processor_lean
 						writer.push(meta_type);
 						push_vlv(len, writer);
 						for (std::uint64_t i = 0; i < len && in.good(); ++i)
-							writer.push(in.get());
+							writer.push(read_midi_byte(in));
 						rsb_out = 0;
 
 						previous_tick = new_abs;
@@ -454,7 +454,7 @@ struct single_midi_processor_lean
 						{
 							std::uint64_t len = get_vlv(in);
 							for (std::uint64_t i = 0; i < len && in.good(); ++i)
-								in.get();
+								static_cast<void>(read_midi_byte(in));
 							break;
 						}
 
@@ -465,7 +465,7 @@ struct single_midi_processor_lean
 						push_vlv(len, writer);
 
 						for (std::uint64_t i = 0; i < len && in.good(); ++i)
-							writer.push(in.get());
+							writer.push(read_midi_byte(in));
 						rsb_out = 0;
 
 						previous_tick = new_abs;
@@ -474,12 +474,12 @@ struct single_midi_processor_lean
 					}
 					else
 					{
-						(*buffers.error) << log_event{log_event_type::unknown_event_type, (uint64_t)(std::streamoff)in.tellg(), (uint64_t)cmd};
+						(*buffers.error) << log_event{log_event_type::unknown_event_type, in.position(), (uint64_t)cmd};
 						return false;
 					}
 				}
 				default: {
-					(*buffers.error) << log_event{log_event_type::unknown_event_type, (uint64_t)(std::streamoff)in.tellg(), (uint64_t)cmd};
+					(*buffers.error) << log_event{log_event_type::unknown_event_type, in.position(), (uint64_t)cmd};
 					return false;
 				}
 			}
@@ -503,15 +503,15 @@ struct single_midi_processor_lean
 
 		std::vector<base_type> track(track_writer::capacity); // 1 MiB fixed buffer
 
-		bbb_ffr file_input(data.filename.c_str());
+		midi_file_reader file_input(data.filename);
 		std::ofstream file_output(data.filename + data.postfix,
 			std::ios::binary | std::ios::out);
 
 		for (int i = 0; i < 12 && file_input.good(); ++i)
-			file_output.put(file_input.get());
+			file_output.put(read_midi_byte(file_input));
 
-		data.settings.old_ppqn  = std::uint16_t(file_input.get()) << 8;
-		data.settings.old_ppqn |= std::uint16_t(file_input.get());
+		data.settings.old_ppqn  = std::uint16_t(read_midi_byte(file_input)) << 8;
+		data.settings.old_ppqn |= std::uint16_t(read_midi_byte(file_input));
 		file_output.put(char(data.settings.new_ppqn >> 8));
 		file_output.put(char(data.settings.new_ppqn & 0xFF));
 
@@ -529,7 +529,7 @@ struct single_midi_processor_lean
 				reached_eof,
 				tracks_written);
 
-			loggers.last_input_position = file_input.tellg();
+			loggers.last_input_position = file_input.position();
 			(*loggers.log) << log_event{log_event_type::tracks_processed, (uint64_t)tracks_written, 1};
 		}
 

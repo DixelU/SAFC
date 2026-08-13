@@ -12,6 +12,7 @@ include_directories(SAFC_InnerModules)
 include_directories(SAFCGUIF_Local)
 include_directories(SAFGUIF)
 include_directories(../utility)
+include_directories(../utility/include)
 
 add_executable(_SAFC_
 	_SAFC_.cpp)

@@ -102,6 +102,9 @@
     <ClInclude Include="SAFC_InnerModules\midi_collection_threaded_merger.h">
       <Filter>Файлы заголовков\MIDI Processing</Filter>
     </ClInclude>
+	<ClInclude Include="SAFC_InnerModules\midi_file_reader.h">
+	  <Filter>Файлы заголовков\MIDI Processing</Filter>
+	</ClInclude>
     <ClInclude Include="SAFC_InnerModules\include_all.h">
       <Filter>Файлы заголовков\MIDI Processing</Filter>
     </ClInclude>

@@ -3,10 +3,11 @@
 #define SAFGUIF_L_PLCV
 
 #include "../SAFGUIF/SAFGUIF.h"
+#include <vector>
 
 struct volume_graph : handleable_ui_part
 {
-	std::shared_ptr<polyline_converter<std::uint8_t, std::uint8_t>> plc_bb;
+	std::shared_ptr<dixelu::polyline_converter<std::uint8_t, std::uint8_t>> plc_bb;
 	std::pair<std::uint8_t, std::uint8_t> hovered_point;
 	std::unique_ptr<single_text_line> stl_msg;
 	float cx_pos, cy_pos, horizontal_sides_size, vertical_sides_size;
@@ -18,7 +19,7 @@ struct volume_graph : handleable_ui_part
 	~volume_graph() override = default;
 
 	volume_graph(float cx_pos, float cy_pos, float width, float height,
-		std::shared_ptr<polyline_converter<std::uint8_t, std::uint8_t>> plc_bb = nullptr)
+		std::shared_ptr<dixelu::polyline_converter<std::uint8_t, std::uint8_t>> plc_bb = nullptr)
 	{
 		this->plc_bb = std::move(plc_bb);
 		this->cx_pos = cx_pos;
@@ -71,41 +72,41 @@ struct volume_graph : handleable_ui_part
 			glVertex2f(begx + horizontal_sides_size, begy + y_sq_sz * (ycp + 1));
 			glEnd();
 		}
-		if (plc_bb && plc_bb->map.size())
+		if (plc_bb && !plc_bb->empty())
 		{
 			glLineWidth(3);
 			glColor4f(1, 0.75f, 1, 0.5f);
 			glBegin(GL_LINE_STRIP);
-			glVertex2f(begx, begy + y_sq_sz * (plc_bb->at(0) + 0.5f));
+			glVertex2f(begx, begy + y_sq_sz * (plc_bb->at(0, dixelu::polyline_extrapolation::linear) + 0.5f));
 
-			for (auto y = plc_bb->map.begin(); y != plc_bb->map.end(); y++)
+			for (auto y = plc_bb->points().begin(); y != plc_bb->points().end(); y++)
 				glVertex2f(begx + (y->first + 0.5f) * x_sq_sz, begy + (y->second + 0.5f) * y_sq_sz);
 
-			glVertex2f(begx + 255.5f * x_sq_sz, begy + y_sq_sz * (plc_bb->at(255) + 0.5f));
+			glVertex2f(begx + 255.5f * x_sq_sz, begy + y_sq_sz * (plc_bb->at(255, dixelu::polyline_extrapolation::linear) + 0.5f));
 			glEnd();
 			glColor4f(1, 1, 1, 0.75f);
 			glPointSize(5);
 			glBegin(GL_POINTS);
-			for (auto y = plc_bb->map.begin(); y != plc_bb->map.end(); y++)
+			for (auto y = plc_bb->points().begin(); y != plc_bb->points().end(); y++)
 				glVertex2f(begx + (y->first + 0.5f) * x_sq_sz, begy + (y->second + 0.5f) * y_sq_sz);
 			glEnd();
 		}
 		if (active_setting)
 		{
-			std::map<std::uint8_t, std::uint8_t>::iterator y;
+			dixelu::polyline_converter<std::uint8_t, std::uint8_t>::map_type::const_iterator y;
 			glBegin(GL_LINES);
 			glVertex2f(begx + (fpx + 0.5f) * x_sq_sz, begy + (fpy + 0.5f) * y_sq_sz);
 			glVertex2f(begx + (xcp + 0.5f) * x_sq_sz, begy + (ycp + 0.5f) * y_sq_sz);
 			if (fpx < xcp)
 			{
-				y = plc_bb->map.upper_bound(xcp);
-				if (y != plc_bb->map.end())
+				y = plc_bb->points().upper_bound(xcp);
+				if (y != plc_bb->points().end())
 				{
 					glVertex2f(begx + (y->first + 0.5f) * x_sq_sz, begy + (y->second + 0.5f) * y_sq_sz);
 					glVertex2f(begx + (xcp + 0.5f) * x_sq_sz, begy + (ycp + 0.5f) * y_sq_sz);
 				}
-				y = plc_bb->map.lower_bound(fpx);
-				if (y != plc_bb->map.end() && y != plc_bb->map.begin())
+				y = plc_bb->points().lower_bound(fpx);
+				if (y != plc_bb->points().end() && y != plc_bb->points().begin())
 				{
 					--y;
 					glVertex2f(begx + (y->first + 0.5f) * x_sq_sz, begy + (y->second + 0.5f) * y_sq_sz);
@@ -113,14 +114,14 @@ struct volume_graph : handleable_ui_part
 				}
 			}
 			else {
-				y = plc_bb->map.upper_bound(fpx);
-				if (y != plc_bb->map.end())
+				y = plc_bb->points().upper_bound(fpx);
+				if (y != plc_bb->points().end())
 				{
 					glVertex2f(begx + (y->first + 0.5f) * x_sq_sz, begy + (y->second + 0.5f) * y_sq_sz);
 					glVertex2f(begx + (fpx + 0.5f) * x_sq_sz, begy + (fpy + 0.5f) * y_sq_sz);
 				}
-				y = plc_bb->map.lower_bound(xcp);
-				if (y != plc_bb->map.end() && y != plc_bb->map.begin())
+				y = plc_bb->points().lower_bound(xcp);
+				if (y != plc_bb->points().end() && y != plc_bb->points().begin())
 				{
 					--y;
 					glVertex2f(begx + (y->first + 0.5f) * x_sq_sz, begy + (y->second + 0.5f) * y_sq_sz);
@@ -157,14 +158,14 @@ struct volume_graph : handleable_ui_part
 		std::lock_guard locker(lock);
 		if (plc_bb)
 		{
-			std::uint8_t tf, ts;
-			for (auto y = plc_bb->map.begin(); y != plc_bb->map.end();)
+			const auto original_points = plc_bb->points();
+			for (const auto& [key, value] : original_points)
 			{
-				tf = y->first;
-				ts = y->second;
-				y = plc_bb->map.erase(y);
-				if (plc_bb->at(tf) != ts)
-					plc_bb->map[tf] = ts;
+				static_cast<void>(plc_bb->erase(key));
+				const auto interpolated = plc_bb->evaluate_as<std::uint8_t>(
+					key, dixelu::polyline_extrapolation::linear);
+				if (interpolated.value_or(key) != value)
+					plc_bb->insert(key, value);
 			}
 		}
 	}
@@ -214,9 +215,14 @@ struct volume_graph : handleable_ui_part
 				std::swap(a, b);
 				std::swap(val_a, val_b);
 			}
-			auto it_a = plc_bb->map.lower_bound(a), it_b = plc_bb->map.upper_bound(b);
-			while (it_a != it_b)
-				it_a = plc_bb->map.erase(it_a);
+			std::vector<std::uint8_t> keys_to_erase;
+			for (auto current = plc_bb->points().lower_bound(a), end = plc_bb->points().upper_bound(b);
+				current != end; ++current)
+			{
+				keys_to_erase.push_back(current->first);
+			}
+			for (const auto key : keys_to_erase)
+				static_cast<void>(plc_bb->erase(key));
 
 			plc_bb->insert(a, val_a);
 			plc_bb->insert(b, val_b);

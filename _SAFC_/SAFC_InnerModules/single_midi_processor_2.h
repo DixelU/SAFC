@@ -8,7 +8,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
-#include <functional>
+#include <tuple>
 #include <array>
 #include <atomic>
 #include <ostream>
@@ -16,10 +16,10 @@
 
 #include <syncstream>
 
-#include <versions/bbb_ffio/safc/bbb_ffio.h>
+#include "midi_file_reader.h"
 #include "../SAFGUIF/header_utils.h"
-#include <versions/function_wrapper/safc-v1/function_wrapper.h>
-#include <versions/polyline_converter/safc-v1/polyline_converter.h>
+#include <function_ref.h>
+#include <polyline_converter.h>
 #include "cut_and_transpose.h"
 
 #include "single_midi_info_collector.h"
@@ -260,12 +260,11 @@ struct single_midi_processor_2
 	using data_iterator = std::vector<base_type>::iterator;
 
 	/* returns false if event was disabled */
-	using event_transforming_filter = dixelu::type_erased_function_container<
+	using event_transforming_filter = dixelu::function_ref<
 		bool(const data_iterator&,
 			const data_iterator&,
 			const data_iterator&,
 			single_track_data&)>;
-	// using this instead of std::function because of profiling transparency
 	/* begin, end, cur */
 
 	struct message_buffers
@@ -389,8 +388,8 @@ struct single_midi_processor_2
 		bool enable_imp_events_filter = false;
 		important_filter_settings imp_events_filter;
 
-		std::shared_ptr<byte_plc_core> volume_map;
-		std::shared_ptr<_14bit_plc_core> pitch_map;
+		std::shared_ptr<dixelu::byte_polyline_lookup_table> volume_map;
+		std::shared_ptr<dixelu::midi14_polyline_lookup_table> pitch_map;
 		std::shared_ptr<cut_and_transpose> key_converter;
 		details_data details;
 		processing_details proc_details;
@@ -451,13 +450,13 @@ struct single_midi_processor_2
 		return stack_size;
 	}
 
-	FORCEDINLINE static uint64_t get_vlv(bbb_ffr& file_input)
+	FORCEDINLINE static uint64_t get_vlv(midi_file_reader& file_input)
 	{
 		uint64_t value = 0;
 		base_type single_byte;
 		do
 		{
-			single_byte = file_input.get();
+			single_byte = read_midi_byte(file_input);
 			value = value << 7 | single_byte & 0x7F;
 		} while (single_byte & 0x80 && !file_input.eof());
 		return value;
@@ -638,7 +637,7 @@ struct single_midi_processor_2
 	};
 
 	inline static bool put_data_in_buffer(
-		bbb_ffr& file_input,
+		midi_file_reader& file_input,
 		data_buffers& data_buffers,
 		message_buffers& buffers,
 		const settings_obj& settings,
@@ -659,10 +658,10 @@ struct single_midi_processor_2
 		bool is_going = true;
 
 		while (header != MTrk_header && file_input.good()) //MTrk = 1297379947
-			header = (header << 8) | file_input.get();
+			header = (header << 8) | read_midi_byte(file_input);
 
 		for (int i = 0; i < 4 && file_input.good(); i++)
-			track_expected_size = (track_expected_size << 8) | file_input.get();
+			track_expected_size = (track_expected_size << 8) | read_midi_byte(file_input);
 
 		data_buffer.reserve(track_expected_size * expected_size(0x80) / 4);
 
@@ -710,7 +709,7 @@ struct single_midi_processor_2
 			auto delta_time = get_vlv(file_input);
 			current_tick += delta_time;
 
-			command = file_input.get();
+			command = read_midi_byte(file_input);
 			if (command < 0x80)
 			{
 				param_buffer = command;
@@ -722,7 +721,7 @@ struct single_midi_processor_2
 					rsb = command;
 
 				if (command < 0xF0 || command == 0xFF)
-					param_buffer = file_input.get();
+					param_buffer = read_midi_byte(file_input);
 				else 
 					param_buffer = 0xFF;
 			}
@@ -730,7 +729,7 @@ struct single_midi_processor_2
 			if (command < 0x80)
 			{
 				is_good = false;
-				(*buffers.error) << log_event{log_event_type::unexpected_zero_rsb, (uint64_t)(std::streamoff)file_input.tellg()};
+				(*buffers.error) << log_event{log_event_type::unexpected_zero_rsb, file_input.position()};
 				break;
 			}
 
@@ -741,7 +740,7 @@ struct single_midi_processor_2
 			case 0x8: case 0x9:	{
 				base_type com = command;
 				base_type key = param_buffer;
-				base_type vel = file_input.get();
+				base_type vel = read_midi_byte(file_input);
 				tick_type reference = disable_tick;
 
 				if (!settings.legacy.enable_zero_velocity) [[likely]]
@@ -764,14 +763,14 @@ struct single_midi_processor_2
 					else
 					{
 						polyphony_error = true;
-						(*buffers.warning) << log_event{log_event_type::incorrect_note_ref, (uint64_t)(std::streamoff)file_input.tellg(), (uint64_t)other_note_reference};
+						(*buffers.warning) << log_event{log_event_type::incorrect_note_ref, file_input.position(), (uint64_t)other_note_reference};
 					}
 				}
 				else
 				{
 					polyphony_error = true;
 					++noteoff_misses;
-					(*buffers.warning) << log_event{log_event_type::off_of_non_on_note, (uint64_t)(std::streamoff)file_input.tellg(), (uint64_t)noteoff_misses};
+					(*buffers.warning) << log_event{log_event_type::off_of_non_on_note, file_input.position(), (uint64_t)noteoff_misses};
 				}
 
 				if (polyphony_error) [[unlikely]]
@@ -787,7 +786,7 @@ struct single_midi_processor_2
 			case 0xA: case 0xB: case 0xE: {
 				base_type com = command;
 				base_type p1 = param_buffer;
-				base_type p2 = file_input.get();
+				base_type p2 = read_midi_byte(file_input);
 
 				copy_back_traits::copy_back(data_buffer, current_tick, com, p1, p2);
 
@@ -824,7 +823,7 @@ struct single_midi_processor_2
 				auto encoded_length = push_vlv_s(length, meta_buffer);
 
 				for (std::size_t i = 0; i < length; ++i)
-					meta_buffer.push_back(file_input.get());
+					meta_buffer.push_back(read_midi_byte(file_input));
 				length += encoded_length;
 				
 				if (com == 0xFF) [[likely]]
@@ -856,7 +855,7 @@ struct single_midi_processor_2
 				break;
 			}
 			default: {
-				(*buffers.error) << log_event{log_event_type::unknown_event_type, (uint64_t)(std::streamoff)file_input.tellg(), (uint64_t)command};
+				(*buffers.error) << log_event{log_event_type::unknown_event_type, file_input.position(), (uint64_t)command};
 				break;
 			}
 			}
@@ -1077,12 +1076,12 @@ struct single_midi_processor_2
 		return true;
 	}
 
-	inline static std::multimap<base_type, event_transforming_filter> 
+	inline static auto
 		filters_constructor(const settings_obj& settings)
 	{
 		std::multimap<base_type, event_transforming_filter> filters;
 
-		const event_transforming_filter selection_filter = [&selection_data = settings.selection_data, &filter = settings.filter]
+		auto selection_filter = [&selection_data = settings.selection_data, &filter = settings.filter]
 		(const data_iterator& begin, const data_iterator& end, const data_iterator& cur, single_track_data& std_ref) -> bool
 		{
 			auto& tick = get_value<tick_type>(cur, tick_position);
@@ -1249,7 +1248,7 @@ struct single_midi_processor_2
 			return false;
 		};
 
-		const event_transforming_filter program_transform = [filtering = settings.filter]
+		auto program_transform = [filtering = settings.filter]
 		(const data_iterator& begin, const data_iterator& end, const data_iterator& cur, single_track_data& std_ref) -> bool 
 		{
 			auto& tick = get_value<tick_type>(cur, tick_position);
@@ -1269,7 +1268,7 @@ struct single_midi_processor_2
 			return true;
 		};
 
-		const event_transforming_filter pitch_transform = [filtering = settings.filter, pm = settings.pitch_map]
+		auto pitch_transform = [filtering = settings.filter, pm = settings.pitch_map]
 		(const data_iterator& begin, const data_iterator& end, const data_iterator& cur, single_track_data& std_ref) -> bool
 		{
 			auto& tick = get_value<tick_type>(cur, tick_position);
@@ -1287,7 +1286,7 @@ struct single_midi_processor_2
 				auto& msb = get_value<base_type>(cur, event_param2);
 
 				std::uint16_t pitch = ((msb & 0x7F) << 7) | (lsb & 0x7F);
-				pitch = (*pm)[pitch];
+				pitch = pm->at(pitch).value_or(0x4000);
 
 				msb = (pitch >> 7) & 0x7F;
 				lsb = (pitch & 0x7F);
@@ -1296,7 +1295,7 @@ struct single_midi_processor_2
 			return true;
 		};
 
-		const event_transforming_filter key_transform = [ filtering = settings.filter, cat = settings.key_converter, vm = settings.volume_map ]
+		auto key_transform = [ filtering = settings.filter, cat = settings.key_converter, vm = settings.volume_map ]
 		(const data_iterator& begin, const data_iterator& end, const data_iterator& cur, single_track_data& std_ref) -> bool
 		{
 			auto& tick = get_value<tick_type>(cur, tick_position);
@@ -1333,7 +1332,7 @@ struct single_midi_processor_2
 			if (vm && (type & 0x10)) [[unlikely]] // only for note-on events
 			{
 				auto& velocity = get_value<base_type>(cur, event_param2);
-				velocity = (*vm)[velocity];
+				velocity = (*vm)[velocity].value_or(velocity);
 
 				if (!velocity)
 				{
@@ -1349,7 +1348,7 @@ struct single_midi_processor_2
 			return true;
 		};
 
-		const event_transforming_filter meta_transform = [ filtering = settings.filter, tempo = settings.tempo ]
+		auto meta_transform = [ filtering = settings.filter, tempo = settings.tempo ]
 		(const data_iterator& begin, const data_iterator& end, const data_iterator& cur, single_track_data& std_ref) -> bool
 		{
 			auto& tick = get_value<tick_type>(cur, tick_position);
@@ -1404,7 +1403,7 @@ struct single_midi_processor_2
 			return tick != disable_tick;
 		};
 
-		const event_transforming_filter others_transform = [ filtering = settings.filter ]
+		auto others_transform = [ filtering = settings.filter ]
 		(const data_iterator& begin, const data_iterator& end, const data_iterator& cur, single_track_data& std_ref) -> bool
 		{
 			auto& tick = get_value<tick_type>(cur, tick_position);
@@ -1418,7 +1417,7 @@ struct single_midi_processor_2
 			return true;
 		};
 
-		const event_transforming_filter tick_positive_linear_transform =
+		auto tick_positive_linear_transform =
 			[old_ppqn = settings.old_ppqn,
 			 new_ppqn = settings.new_ppqn, 
 			 offset = settings.offset,
@@ -1449,7 +1448,7 @@ struct single_midi_processor_2
 			return (tick = new_tick), true;
 		};
 
-		const event_transforming_filter rsb_compression_note_switchup = []
+		auto rsb_compression_note_switchup = []
 		(const data_iterator& begin, const data_iterator& end, const data_iterator& cur, single_track_data& std_ref) -> bool
 		{
 			auto& type = get_value<base_type>(cur, event_type);
@@ -1465,7 +1464,7 @@ struct single_midi_processor_2
 			return true;
 		};
 
-		const event_transforming_filter important_events_checker = [filter = settings.imp_events_filter]
+		auto important_events_checker = [filter = settings.imp_events_filter]
 		(const data_iterator& begin, const data_iterator& end, const data_iterator& cur, single_track_data& std_ref) -> bool
 		{
 			auto tick = get_value<tick_type>(cur, tick_position);
@@ -1509,7 +1508,7 @@ struct single_midi_processor_2
 			return true;
 		};
 
-		const event_transforming_filter flatten_transform = 
+		auto flatten_transform =
 			[&time_map = settings.original_time_map,
 			old_ppqn = settings.old_ppqn,
 			new_ppqn = settings.new_ppqn,
@@ -1521,6 +1520,7 @@ struct single_midi_processor_2
 				return false;
 
 			using uint128_t = dixelu::long_uint<0>;
+			using uint256_t = dixelu::long_uint<1>;
 			const auto target_tick = convert_ppq(tick, new_ppqn, old_ppqn);
 
 			const auto upper_bound = time_map.upper_bound(target_tick);
@@ -1532,54 +1532,76 @@ struct single_midi_processor_2
 			uint64_t a_d = (rhs->first == lhs->first) ? 1 : rhs->first - lhs->first; // denominator
 			// a_d >= a_n >= 0;
 
-			auto time_numerator = 
-				uint128_t::__direct_karatsuba_mul<0>(a_n, rhs->second.numerator) + 
-				uint128_t::__direct_karatsuba_mul<0>(a_d - a_n, lhs->second.numerator);
+			auto time_numerator =
+				uint256_t(a_n) * uint256_t(rhs->second.numerator) +
+				uint256_t(a_d - a_n) * uint256_t(lhs->second.numerator);
 			auto time_denominator = a_d * target_tempo_val;
 
 			auto new_tick = (time_numerator * new_ppqn) / (time_denominator * old_ppqn);
-			tick = new_tick.lo.lo; // omg ... 
+			tick = new_tick[0];
 
 			return true;
 		};
 
-		filters.emplace( 0, selection_filter );
+		using filter_storage = std::tuple<
+			decltype(selection_filter),
+			decltype(program_transform),
+			decltype(pitch_transform),
+			decltype(key_transform),
+			decltype(meta_transform),
+			decltype(others_transform),
+			decltype(tick_positive_linear_transform),
+			decltype(rsb_compression_note_switchup),
+			decltype(important_events_checker),
+			decltype(flatten_transform)>;
+		auto storage = std::make_unique<filter_storage>(
+			std::move(selection_filter),
+			std::move(program_transform),
+			std::move(pitch_transform),
+			std::move(key_transform),
+			std::move(meta_transform),
+			std::move(others_transform),
+			std::move(tick_positive_linear_transform),
+			std::move(rsb_compression_note_switchup),
+			std::move(important_events_checker),
+			std::move(flatten_transform));
+
+		filters.emplace(0, event_transforming_filter{std::get<0>(*storage)});
 		
-		filters.emplace(0, tick_positive_linear_transform);
+		filters.emplace(0, event_transforming_filter{std::get<6>(*storage)});
 		if (settings.flatten)
-			filters.emplace(0, flatten_transform);
+			filters.emplace(0, event_transforming_filter{std::get<9>(*storage)});
 
 		if (settings.enable_imp_events_filter)
-			filters.emplace( 0, important_events_checker );
+			filters.emplace(0, event_transforming_filter{std::get<8>(*storage)});
 		
 		if (settings.key_converter || settings.volume_map || !settings.filter.pass_notes)
 		{
-			filters.emplace(0x80, key_transform);
-			filters.emplace(0x90, key_transform);
+			filters.emplace(0x80, event_transforming_filter{std::get<3>(*storage)});
+			filters.emplace(0x90, event_transforming_filter{std::get<3>(*storage)});
 		}
 
 		if (settings.legacy.rsb_compression)
-			filters.emplace(0x80, rsb_compression_note_switchup);
+			filters.emplace(0x80, event_transforming_filter{std::get<7>(*storage)});
 
 		if (!settings.filter.pass_other)
 		{
-			filters.emplace(0xA0, others_transform);
-			filters.emplace(0xB0, others_transform);
+			filters.emplace(0xA0, event_transforming_filter{std::get<5>(*storage)});
+			filters.emplace(0xB0, event_transforming_filter{std::get<5>(*storage)});
 		}
 
 		if (!settings.filter.pass_other || settings.filter.piano_only)
 		{
-			filters.emplace(0xC0, program_transform);
-			filters.emplace(0xD0, others_transform);
+			filters.emplace(0xC0, event_transforming_filter{std::get<1>(*storage)});
+			filters.emplace(0xD0, event_transforming_filter{std::get<5>(*storage)});
 		}
 
 		if (settings.pitch_map || !settings.filter.pass_pitch)
-			filters.emplace(0xE0, pitch_transform);
+			filters.emplace(0xE0, event_transforming_filter{std::get<2>(*storage)});
 
-		filters.emplace(0xF0, meta_transform);
+		filters.emplace(0xF0, event_transforming_filter{std::get<4>(*storage)});
 
-
-		return filters;
+		return std::pair{std::move(storage), std::move(filters)};
 	}
 
 	template<bool channels_split>
@@ -1959,17 +1981,17 @@ struct single_midi_processor_2
 		write_buffer.reserve(1ull << (24 - 4 * channels_split));
 		track_buffers.meta_buffer.reserve(1ull << 10);
 
-		auto filters = filters_constructor(data.settings);
-		auto filter_iters = make_filter_bounding_iters(filters);
+		auto filter_bundle = filters_constructor(data.settings);
+		auto filter_iters = make_filter_bounding_iters(filter_bundle.second);
 
-		bbb_ffr file_input(data.filename.c_str());
+		midi_file_reader file_input(data.filename);
 		std::ofstream file_output(data.filename + data.postfix, std::ios::binary | std::ios::out);
 
 		for (int i = 0; i < 12 && file_input.good(); i++)
-			file_output.put(file_input.get());
+			file_output.put(read_midi_byte(file_input));
 
-		data.settings.old_ppqn = ((std::uint16_t)file_input.get()) << 8;
-		data.settings.old_ppqn |= ((std::uint16_t)file_input.get());
+		data.settings.old_ppqn = static_cast<std::uint16_t>(read_midi_byte(file_input)) << 8;
+		data.settings.old_ppqn |= static_cast<std::uint16_t>(read_midi_byte(file_input));
 		file_output.put(data.settings.new_ppqn >> 8);
 		file_output.put(data.settings.new_ppqn & 0xFF);
 
@@ -2044,7 +2066,7 @@ struct single_midi_processor_2
 				write_buffer.clear();
 			}
 
-			loggers.last_input_position = file_input.tellg();
+			loggers.last_input_position = file_input.position();
 			(*loggers.log) << log_event{log_event_type::tracks_processed, (uint64_t)track_counter, (uint64_t)current_count};
 		}
 

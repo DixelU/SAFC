@@ -5,9 +5,9 @@
 #include <string>
 #include <array>
 
-#include <versions/bbb_ffio/safc/bbb_ffio.h>
+#include "midi_file_reader.h"
 #include "../btree/btree_map.h"
-#include <versions/integers/custom-math/integers.h>
+#include <long_uint.h>
 
 #include <boost/container/deque.hpp>
 #include <boost/container/flat_map.hpp>
@@ -158,7 +158,7 @@ struct single_midi_info_collector
 		der_polyphony_graph poly_differences;
 		processing = true;
 
-		bbb_ffr file_input(filename.c_str());
+		midi_file_reader file_input(filename);
 
 		std::uint32_t MTRK = 0, vlv = 0;
 		std::uint64_t last_tick = 0;
@@ -173,10 +173,10 @@ struct single_midi_info_collector
 		poly_differences[-1] = note_on_off_counter();
 
 		for (int i = 0; i < 12 && file_input.good(); i++)
-			static_cast<void>(file_input.get());
+			static_cast<void>(read_midi_byte(file_input));
 
-		ppq = ((std::uint16_t)file_input.get()) << 8;
-		ppq |= ((std::uint16_t)file_input.get());
+		ppq = static_cast<std::uint16_t>(read_midi_byte(file_input)) << 8;
+		ppq |= static_cast<std::uint16_t>(read_midi_byte(file_input));
 
 		while (file_input.good())
 		{
@@ -186,19 +186,19 @@ struct single_midi_info_collector
 			MTRK = 0;
 
 			while (MTRK != MTrk && file_input.good())
-				MTRK = (MTRK << 8) | (file_input.get());
+				MTRK = (MTRK << 8) | read_midi_byte(file_input);
 
 			for (int i = 0; i < 4; i++)
-				file_input.get();
+				static_cast<void>(read_midi_byte(file_input));
 
 			IO = rsb_byte = 0;
 			while (file_input.good())
 			{
-				track_data.MTrk_pos = file_input.tellg() - 8;
+				track_data.MTrk_pos = file_input.position() - 8;
 				vlv = 0;
 				do 
 				{
-					IO = file_input.get();
+					IO = read_midi_byte(file_input);
 					vlv = (vlv << 7) | (IO & 0x7F);
 				} while (IO & 0x80 && !file_input.eof());
 
@@ -208,17 +208,17 @@ struct single_midi_info_collector
 
 				auto& current_poly_diff = poly_differences[current_tick];
 
-				std::uint8_t event_type = file_input.get();
+				std::uint8_t event_type = read_midi_byte(file_input);
 				if (event_type == 0xFF)
 				{
 					if(allow_legacy_rsb_meta_interaction)
 						rsb_byte = 0;
 
-					std::uint8_t type = file_input.get();
+					std::uint8_t type = read_midi_byte(file_input);
 					std::uint32_t meta_data_size = 0;
 					do 
 					{
-						IO = file_input.get();
+						IO = read_midi_byte(file_input);
 						meta_data_size = meta_data_size << 7 | IO & 0x7F;
 					} while (IO & 0x80 && !file_input.eof());
 
@@ -231,23 +231,23 @@ struct single_midi_info_collector
 					else if (type == 0x51)
 					{
 						tempo_event TE;
-						TE.a = file_input.get();
-						TE.b = file_input.get();
-						TE.c = file_input.get();
+						TE.a = read_midi_byte(file_input);
+						TE.b = read_midi_byte(file_input);
+						TE.c = read_midi_byte(file_input);
 						tempo_map[current_tick] = TE;
 					}
 					else
 					{
 						while (meta_data_size--)
-							file_input.get();
+							static_cast<void>(read_midi_byte(file_input));
 					}
 				}
 				else if (event_type >= 0x80 && event_type <= 0x9F)
 				{
 					rsb_byte = event_type;
 					int change = (event_type & 0x10) ? 1 : -1;
-					auto key = file_input.get();
-					auto volume = file_input.get();
+					auto key = read_midi_byte(file_input);
+					auto volume = read_midi_byte(file_input);
 
 					if (!volume && change == 1)
 						change = -1;
@@ -268,13 +268,13 @@ struct single_midi_info_collector
 					(event_type >= 0xE0 && event_type <= 0xEF))
 				{
 					rsb_byte = event_type;
-					file_input.get();
-					file_input.get();
+					static_cast<void>(read_midi_byte(file_input));
+					static_cast<void>(read_midi_byte(file_input));
 				}
 				else if (event_type >= 0xC0 && event_type <= 0xDF)
 				{
 					rsb_byte = event_type;
-					file_input.get();
+					static_cast<void>(read_midi_byte(file_input));
 				}
 				else if (event_type == 0xF0 || event_type == 0xF7)
 				{
@@ -285,12 +285,12 @@ struct single_midi_info_collector
 
 					do
 					{
-						IO = file_input.get();
+						IO = read_midi_byte(file_input);
 						meta_data_size = (meta_data_size << 7) | (IO & 0x7F);
 					} while (IO & 0x80 && !file_input.eof());
 
 					while (meta_data_size--)
-						file_input.get();
+						static_cast<void>(read_midi_byte(file_input));
 				}
 				else 
 				{
@@ -299,7 +299,7 @@ struct single_midi_info_collector
 					if (event_type >= 0x80 && event_type <= 0x9F)
 					{
 						int change = (event_type & 0x10) ? 1 : -1;
-						auto volume = file_input.get();
+						auto volume = read_midi_byte(file_input);
 
 						if (!volume && change == 1)
 							change = -1;
@@ -318,7 +318,7 @@ struct single_midi_info_collector
 					}
 					else if ((event_type >= 0xA0 && event_type <= 0xBF) || (event_type >= 0xE0 && event_type <= 0xEF))
 					{
-						file_input.get();
+						static_cast<void>(read_midi_byte(file_input));
 					}
 					else if (event_type >= 0xC0 && event_type <= 0xDF)
 					{
@@ -326,7 +326,7 @@ struct single_midi_info_collector
 					}
 					else
 					{
-						error_line = "Corruption detected at: " + std::to_string(file_input.tellg());
+						error_line = "Corruption detected at: " + std::to_string(file_input.position());
 						break;
 					}
 				}

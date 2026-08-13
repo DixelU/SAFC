@@ -16,7 +16,7 @@ A memory-efficient MIDI piano roll editor that reads directly from memory-mapped
   window construction.
 - `simple_player_viewer.h` contains player visualization; playback remains in
   `simple_player.h`, while its reusable SPSC queue comes from
-  `utility/versions/buffered_queue_spsc/safc-v1/buffered_queue_spsc.h`.
+  `utility/include/buffered_queue_spsc.h`.
 
 File I/O and live playback-source generation remain in `midi_editor.h` for now.
 They share private parser/editor representation and should move after a
@@ -29,7 +29,7 @@ deliberate private implementation boundary is introduced.
 │  │  Piano Roll     │  │   Functor       │  │   mmap-based    │ │
 │  │  Data Structure │  │   System        │  │   File I/O      │ │
 │  │                 │  │                 │  │                 │ │
-│  │  - piano_note   │  │  - insert_note  │  │  - bbb_mmap     │ │
+│  │  - piano_note   │  │  - insert_note  │  │  - mapped reader│ │
 │  │  - track_info   │  │  - delete_notes │  │  - Direct parse │ │
 │  │  - selection    │  │  - move_notes   │  │    from file    │ │
 │  │                 │  │  - resize_note  │  │                 │ │
@@ -71,7 +71,7 @@ deliberate private implementation boundary is introduced.
 Like `simple_player.h`, the editor reads MIDI data directly from memory-mapped files:
 
 ```cpp
-std::unique_ptr<bbb_mmap> mmap_file;
+std::unique_ptr<dixelu::memory_mapped_file_reader> mmap_file;
 ```
 
 **Benefits:**
@@ -243,7 +243,7 @@ filter.add_deletion(480, 960, 62, 0);
 ```
 Memory Map:
 ┌─────────────────────────────────────────┐
-│  mmap_file (bbb_mmap)                   │
+│  mmap_file (memory_mapped_file_reader)  │
 │  ┌───────────────────────────────────┐  │
 │  │  Raw MIDI bytes                   │  │
 │  │  - MThd header                    │  │
@@ -328,9 +328,9 @@ SAFC_InnerModules/
 ## Dependencies
 
 - C++17 or later (std::optional, structured bindings)
-- Windows API (for memory-mapped files via bbb_mmap)
+- Windows API (used by the consolidated memory-mapped reader)
 - Shared utility and existing SAFC headers:
-  - `utility/versions/bbb_ffio/safc/bbb_ffio.h` (memory-mapped file wrapper)
+  - `utility/include/memory_mapped_file_reader.h` (memory-mapped file reader)
   - `single_midi_processor_2.h` (filter types)
   - `single_midi_info_collector.h` (reference)
 

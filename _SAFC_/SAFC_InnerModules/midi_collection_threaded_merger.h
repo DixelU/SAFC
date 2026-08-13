@@ -11,7 +11,7 @@ void throw_alert_warning(std::string&& AlertText);
 #include <vector>
 #include <syncstream>
 
-#include <versions/bbb_ffio/safc/bbb_ffio.h>
+#include "midi_file_reader.h"
 
 #include "single_midi_processor_2.h"
 
@@ -308,13 +308,13 @@ private:
 	std::future<std::uint64_t> regular_merge_future_;
 	std::future<void> final_merge_future_;
 
-	static std::uint32_t read_vlv(bbb_ffr& f)
+	static std::uint32_t read_vlv(midi_file_reader& f)
 	{
 		std::uint32_t result = 0;
 		std::uint8_t b;
 		do
 		{
-			b = f.get();
+			b = read_midi_byte(f);
 			result = (result << 7) | (b & 0x7F);
 		} while (b & 0x80);
 		return result;
@@ -330,14 +330,14 @@ private:
 
 		std::uint64_t track_count = 0;
 
-		std::vector<std::unique_ptr<bbb_ffr>> streams;
+		std::vector<std::unique_ptr<midi_file_reader>> streams;
 		streams.reserve(candidates.size());
 		for (auto& [pdata, _] : candidates)
 		{
-			auto& s = streams.emplace_back(std::make_unique<bbb_ffr>(
-				(pdata->filename + pdata->postfix).c_str()));
+			auto& s = streams.emplace_back(std::make_unique<midi_file_reader>(
+				pdata->filename + pdata->postfix));
 			for (int i = 0; i < 14; i++)
-				s->get();
+				static_cast<void>(read_midi_byte(*s));
 		}
 
 		std::ofstream out(save_to + L".I.mid", std::ios::binary | std::ios::out);
@@ -359,10 +359,10 @@ private:
 
 				std::uint32_t header = 0;
 				while (reader.good() && header != single_midi_processor_2::MTrk_header)
-					header = (header << 8) | reader.get();
+					header = (header << 8) | read_midi_byte(reader);
 
 				for (int w = 0; w < 4; w++)
-					reader.get(); // skip track size
+					static_cast<void>(read_midi_byte(reader)); // skip track size
 
 				if (reader.good())
 				{
@@ -396,17 +396,17 @@ private:
 
 					while (delta_time == 0)
 					{
-						std::uint8_t event_type = reader.get();
+						std::uint8_t event_type = read_midi_byte(reader);
 						auto delta_len = single_midi_processor_2::push_vlv(in_track_delta, track);
 						in_track_delta = 0;
 
 						bool track_ended = false;
 						if (event_type == 0xFF)
 						{
-							std::uint8_t meta_type = reader.get();
+							std::uint8_t meta_type = read_midi_byte(reader);
 							if (meta_type == 0x2F)
 							{
-								reader.get(); // skip 0x00 length byte
+								static_cast<void>(read_midi_byte(reader)); // skip 0x00 length byte
 								for (int l = 0; l < (int)delta_len; l++)
 									track.pop_back();
 								track_ended = true;
@@ -419,13 +419,13 @@ private:
 								std::uint8_t last_byte;
 								do
 								{
-									last_byte = reader.get();
+									last_byte = read_midi_byte(reader);
 									track.push_back(last_byte);
 									meta_len = (meta_len << 7) | (last_byte & 0x7F);
 								} while (last_byte & 0x80);
 
 								for (std::uint32_t j = 0; j < meta_len; j++)
-									track.push_back(reader.get());
+									track.push_back(read_midi_byte(reader));
 							}
 						}
 						else if (event_type == 0xF0 || event_type == 0xF7)
@@ -436,29 +436,29 @@ private:
 
 							do
 							{
-								last_byte = reader.get();
+								last_byte = read_midi_byte(reader);
 								track.push_back(last_byte);
 								sysex_len = (sysex_len << 7) | (last_byte & 0x7F);
 							} while (last_byte & 0x80);
 
 							for (std::uint32_t j = 0; j < sysex_len; j++)
-								track.push_back(reader.get());
+								track.push_back(read_midi_byte(reader));
 						}
 						else if ((event_type >= 0x80 && event_type <= 0xBF) ||
 						         (event_type >= 0xE0 && event_type <= 0xEF))
 						{
 							track.push_back(event_type);
-							track.push_back(reader.get());
-							track.push_back(reader.get());
+							track.push_back(read_midi_byte(reader));
+							track.push_back(read_midi_byte(reader));
 						}
 						else if (event_type >= 0xC0 && event_type <= 0xDF)
 						{
 							track.push_back(event_type);
-							track.push_back(reader.get());
+							track.push_back(read_midi_byte(reader));
 						}
 						else
 						{
-							auto pos = reader.tellg();
+							auto pos = reader.position();
 							throw_alert_error("DTI Failure at " + std::to_string(pos) + ". Type: " +
 								std::to_string(event_type) + ". Tell developer about it and give him source midi.\n");
 							track.push_back(0xCA);
@@ -638,18 +638,18 @@ private:
 		out.put((char)(ppqn >> 8));
 		out.put((char)ppqn);
 
-		bbb_ffr file_input(
-			(candidates.front().first->filename + candidates.front().first->postfix).c_str());
+		midi_file_reader file_input(
+			candidates.front().first->filename + candidates.front().first->postfix);
 
 		for (auto it = candidates.begin(); it != candidates.end(); ++it)
 		{
 			auto& pd = *it->first;
 			std::wstring src = pd.filename + pd.postfix;
 			if (it != candidates.begin())
-				file_input.reopen_next_file(src.c_str());
+				file_input.reopen(src);
 			for (int i = 0; i < 14; i++)
-				file_input.get();
-			file_input.put_into_ostream(out);
+				static_cast<void>(read_midi_byte(file_input));
+			file_input.copy_to(out);
 			track_count += pd.tracks_count;
 			if (pd.settings.proc_details.remove_remnants)
 				_wremove(src.c_str());
@@ -673,8 +673,8 @@ private:
 		auto inplace_path = save_to + L".I.mid";
 		auto regular_path = save_to + L".R.mid";
 
-		auto im = std::make_unique<bbb_ffr>(inplace_path.c_str());
-		auto rm = std::make_unique<bbb_ffr>(regular_path.c_str());
+		auto im = std::make_unique<midi_file_reader>(inplace_path);
+		auto rm = std::make_unique<midi_file_reader>(regular_path);
 
 		bool im_good = !im->eof();
 		bool rm_good = !rm->eof();
@@ -710,18 +710,19 @@ private:
 		out.put(0); out.put(0); out.put(0); out.put(6);
 		out.put(0); out.put(1);
 
-		for (int i = 0; i < 12; i++) im->get();
-		for (int i = 0; i < 12; i++) rm->get();
+		for (int i = 0; i < 12; i++) static_cast<void>(read_midi_byte(*im));
+		for (int i = 0; i < 12; i++) static_cast<void>(read_midi_byte(*rm));
 
 		out.put((char)(total_tracks >> 8));
 		out.put((char)(total_tracks & 0xFF));
 
-		im->get(); im->get(); // skip inplace timing
-		out.put((char)rm->get()); // use regular timing
-		out.put((char)rm->get());
+		static_cast<void>(read_midi_byte(*im));
+		static_cast<void>(read_midi_byte(*im)); // skip inplace timing
+		out.put(static_cast<char>(read_midi_byte(*rm))); // use regular timing
+		out.put(static_cast<char>(read_midi_byte(*rm)));
 
-		im->put_into_ostream(out);
-		rm->put_into_ostream(out);
+		im->copy_to(out);
+		rm->copy_to(out);
 
 		im->close();
 		rm->close();

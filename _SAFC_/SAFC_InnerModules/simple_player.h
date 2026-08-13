@@ -17,14 +17,14 @@
 #include <new>
 #include <limits>
 
-#include <versions/bbb_ffio/safc/bbb_ffio.h>
+#include <memory_mapped_file_reader.h>
 
 #include "single_midi_processor_2.h"
 #include "single_midi_info_collector.h"
 #include "playback_event_source.h"
 
 #define SIMPLE_PLAYER_FORCE_NO_INLINE
-#include <versions/buffered_queue_spsc/safc-v1/buffered_queue_spsc.h>
+#include <buffered_queue_spsc.h>
 // __declspec(noinline)
 // __declspec(noinline)
 
@@ -166,7 +166,7 @@ struct simple_player
 
 		// Per-key SPSC queues for falling notes visualization
 		// Producer: parser thread, Consumer: render thread
-		std::array<buffered_queue_spsc<buffered_note>, key_count> falling_notes;
+		std::array<dixelu::buffered_queue_spsc<buffered_note>, key_count> falling_notes;
 
 		// Per-key pending note trackers for note_off matching
 		// Parser-private: only accessed by parser thread
@@ -384,7 +384,7 @@ struct simple_player
 
 		// Lookahead buffer for pre-parsed MIDI messages (SPSC; parser throttles
 		// when it gets too far ahead in time or holds too many pending events).
-		buffered_queue_spsc<send_event> send_buffer;
+		dixelu::buffered_queue_spsc<send_event> send_buffer;
 		std::atomic<bool> seeking_ff{false};        // parser is fast-forwarding (sender drains immediately)
 		std::atomic<bool> parser_done{false};       // parser finished all events
 		std::atomic<uint64_t> parsed_up_to_us{0};   // how far ahead the parser has reached (in us)
@@ -773,7 +773,7 @@ struct simple_player
 	{
 		current_filename = filename;
 		// prerequisite: this is a midi file with valid header;
-		mmap = std::make_unique<bbb_mmap>(filename.c_str());
+		mmap = std::make_unique<dixelu::memory_mapped_file_reader>(filename);
 		info = midi_info{};
 
 		if (!mmap || !mmap->good())
@@ -782,8 +782,8 @@ struct simple_player
 			return false;
 		}
 
-		const auto begin = mmap->begin();
-		const auto size = mmap->length();
+		const auto begin = reinterpret_cast<const std::uint8_t*>(mmap->data());
+		const auto size = mmap->size();
 		const auto end = begin + size;
 
 		info.size = size;
@@ -2201,7 +2201,7 @@ private:
 
 			if (command < 0x80 || cur >= end)
 			{
-				throw_alert_error("Byte " + std::to_string(cur - mmap->begin()) + ": Unexpected 0 RSB\nAt least one track was skipped!");
+				throw_alert_error("Byte " + std::to_string(cur - reinterpret_cast<const std::uint8_t*>(mmap->data())) + ": Unexpected 0 RSB\nAt least one track was skipped!");
 				is_good = false;
 				break;
 			}
@@ -2249,7 +2249,7 @@ private:
 				}
 				default:
 				{
-					throw_alert_warning("Byte " + (std::to_string(cur - mmap->begin()) + ": Unknown event type " + std::to_string(command)));
+					throw_alert_warning("Byte " + (std::to_string(cur - reinterpret_cast<const std::uint8_t*>(mmap->data())) + ": Unknown event type " + std::to_string(command)));
 					is_good = false;
 					break;
 				}
@@ -2406,7 +2406,7 @@ private:
 	std::shared_ptr<logger_base> warnings;
 
 	std::wstring current_filename;
-	std::unique_ptr<bbb_mmap> mmap;
+	std::unique_ptr<dixelu::memory_mapped_file_reader> mmap;
 
 	midi_info info;
 	playback_state state;

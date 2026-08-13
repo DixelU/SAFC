@@ -6,6 +6,7 @@ set(CMAKE_CXX_STANDARD 23)
 include_directories(_SAFC_)
 include_directories(_SAFC_/JSON)
 include_directories(utility)
+include_directories(utility/include)
 
 set(ADDITIONAL_INCLUDES "" CACHE STRING "Include paths")
 

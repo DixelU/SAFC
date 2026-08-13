@@ -56,7 +56,9 @@
 #include "SAFC_InnerModules/bool_settings.h"
 #include "consts.h"
 
-#include <versions/background_worker/safc/background_worker.h>
+#include <background_worker.h>
+
+using dixelu::worker_singleton;
 
 #include <boost/dll.hpp>
 #include <archive.h>
@@ -660,8 +662,8 @@ struct file_settings
 		ppqn_manually_set = false;
 
 	std::shared_ptr<cut_and_transpose> key_map;
-	std::shared_ptr<polyline_converter<std::uint8_t, std::uint8_t>> volume_map;
-	std::shared_ptr<polyline_converter<std::uint16_t, std::uint16_t>> pitch_bend_map;
+	std::shared_ptr<dixelu::polyline_converter<std::uint8_t, std::uint8_t>> volume_map;
+	std::shared_ptr<dixelu::polyline_converter<std::uint16_t, std::uint16_t>> pitch_bend_map;
 
 	single_midi_info_collector::time_graph time_map;
 
@@ -711,9 +713,12 @@ struct file_settings
 		smrp_data->postfix = w_file_name_postfix;
 
 		if(volume_map)
-			settings.volume_map = std::make_shared<byte_plc_core>(volume_map);
+			settings.volume_map = std::make_shared<dixelu::byte_polyline_lookup_table>(
+				*volume_map, dixelu::polyline_extrapolation::linear);
 		if(pitch_bend_map)
-			settings.pitch_map = std::make_shared<_14bit_plc_core>(pitch_bend_map);
+			settings.pitch_map = std::make_shared<dixelu::midi14_polyline_lookup_table>(
+				dixelu::make_midi14_polyline_lookup_table(
+					*pitch_bend_map, dixelu::polyline_extrapolation::linear));
 
 		settings.key_converter = key_map;
 		settings.new_ppqn = new_ppqn;
@@ -1837,7 +1842,7 @@ namespace props_and_sets
 			tool_ptr->re_put_mode = 0;
 
 			if (!g_data[current_id].volume_map)
-				g_data[current_id].volume_map = std::make_shared<polyline_converter<std::uint8_t, std::uint8_t>>();
+				g_data[current_id].volume_map = std::make_shared<dixelu::polyline_converter<std::uint8_t, std::uint8_t>>();
 			tool_ptr->plc_bb = g_data[current_id].volume_map;
 
 			global_window_handler->enable_window("VM");
@@ -1853,8 +1858,8 @@ namespace props_and_sets
 				auto degree_input = ((input_field*)(*window)["VM_DEGREE"]);
 				float degree = std::stof(degree_input->get_current_input("0"));
 
-				tool_ptr->plc_bb->map.clear();
-				tool_ptr->plc_bb->map[127] = 127;
+				tool_ptr->plc_bb->clear();
+				tool_ptr->plc_bb->insert(127, 127);
 
 				for (int i = 0; i < 128; i++)
 					tool_ptr->plc_bb->insert(i, std::ceil(std::pow(i / 127., degree) * 127.));
@@ -1881,16 +1886,18 @@ namespace props_and_sets
 
 			if (tool_ptr->plc_bb)
 			{
-				if (tool_ptr->plc_bb->map.empty())
+				if (tool_ptr->plc_bb->empty())
 					return;
 
 				std::uint8_t values_array[256]{};
 
 				for (int i = 0; i < 255; i++)
-					values_array[i] = tool_ptr->plc_bb->at(i);
+					values_array[i] = tool_ptr->plc_bb->evaluate_as<std::uint8_t>(
+						static_cast<std::uint8_t>(i), dixelu::polyline_extrapolation::linear)
+						.value_or(static_cast<std::uint8_t>(i));
 
 				for (int i = 0; i < 255; i++)
-					tool_ptr->plc_bb->map[i] = values_array[i];
+					tool_ptr->plc_bb->insert(static_cast<std::uint8_t>(i), values_array[i]);
 			}
 			else
 				throw_alert_error("If you see this message, some error might have happen, since PLC_bb is null");
@@ -1916,7 +1923,7 @@ namespace props_and_sets
 			auto tool_ptr = ((volume_graph*)(*window)["VM_PLC"]);
 
 			if (tool_ptr->plc_bb)
-				tool_ptr->plc_bb->map.clear();
+				tool_ptr->plc_bb->clear();
 			else
 				throw_alert_error("If you see this message, some error might have happen, since PLC_bb is null");
 		}
@@ -3867,7 +3874,7 @@ void init(bool reinitialise_font = true)
 	(*global_window_handler)["CAT"] = window;
 
 	window = new moveable_fui_window("Volume map.", system_white, -150, 150, 300, 350, 200, 2.5f, 100, 100, 2.5f, BACKGROUND_OPQ, HEADER, BORDER);
-	(*window)["VM_PLC"] = new volume_graph(0, 0 - moveable_window::window_header_size, 300 - moveable_window::window_header_size * 2, 300 - moveable_window::window_header_size * 2, std::make_shared<polyline_converter<std::uint8_t, std::uint8_t>>());///todo: interface
+	(*window)["VM_PLC"] = new volume_graph(0, 0 - moveable_window::window_header_size, 300 - moveable_window::window_header_size * 2, 300 - moveable_window::window_header_size * 2, std::make_shared<dixelu::polyline_converter<std::uint8_t, std::uint8_t>>());///todo: interface
 	(*window)["VM_SSBDIIF"] = button_buff = new button("Shape alike x^y", system_white, props_and_sets::volume_map::on_degree_shape, -110 + moveable_window::window_header_size, -150 - moveable_window::window_header_size, 80, 10, 1, 0xFFFFFF3F, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFAFFF3F, 0xFFAFFFFF, &system_white, "Where y is from frame bellow");///Set shape by degree in input field;
 	button_buff->tip->safe_change_position_argumented(_Align::left, -150 + moveable_window::window_header_size, -160 - moveable_window::window_header_size);
 	(*window)["VM_DEGREE"] = new input_field("1", -140 + moveable_window::window_header_size, -170 - moveable_window::window_header_size, 10, 20, system_white, nullptr, 0x007FFFFF, nullptr, " ", 4, _Align::center, _Align::center, input_field::Type::FP_PositiveNumbers);
