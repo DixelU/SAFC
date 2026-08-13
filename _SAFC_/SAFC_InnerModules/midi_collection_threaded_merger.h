@@ -11,6 +11,8 @@ void throw_alert_warning(std::string&& AlertText);
 #include <vector>
 #include <syncstream>
 
+#include <versions/bbb_ffio/safc/bbb_ffio.h>
+
 #include "single_midi_processor_2.h"
 
 struct midi_track_iterator

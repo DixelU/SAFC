@@ -17,14 +17,14 @@
 #include <new>
 #include <limits>
 
-#include "../bbb_ffio.h"
+#include <versions/bbb_ffio/safc/bbb_ffio.h>
 
 #include "single_midi_processor_2.h"
 #include "single_midi_info_collector.h"
 #include "playback_event_source.h"
 
 #define SIMPLE_PLAYER_FORCE_NO_INLINE
-#include "buffered_queue_spsc.h"
+#include <versions/buffered_queue_spsc/safc-v1/buffered_queue_spsc.h>
 // __declspec(noinline)
 // __declspec(noinline)
 

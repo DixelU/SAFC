@@ -9,7 +9,7 @@
 #include <atomic>
 #include <memory>
 
-#include "../bbb_ffio.h"
+#include <versions/bbb_ffio/safc/bbb_ffio.h>
 #include "../SAFGUIF/header_utils.h"
 
 #include "single_midi_processor_2.h"

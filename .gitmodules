@@ -1,0 +1,4 @@
+[submodule "utility"]
+	path = utility
+	url = https://github.com/DixelU/utility.git
+	branch = consolidation

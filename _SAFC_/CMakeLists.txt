@@ -11,6 +11,7 @@ include_directories(JSON)
 include_directories(SAFC_InnerModules)
 include_directories(SAFCGUIF_Local)
 include_directories(SAFGUIF)
+include_directories(../utility)
 
 add_executable(_SAFC_
 	_SAFC_.cpp)

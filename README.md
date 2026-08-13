@@ -18,6 +18,9 @@ There's discord server, where SAF apps (SAFC included) were publishing all that 
 
 You can compile it fairly easily using MSVC 2022 + vcpkg [(dependencies list)](https://github.com/DixelU/SAFC/blob/develop/dependencies.txt) :)
 
+Clone with `--recurse-submodules`, or run `git submodule update --init`, so the
+shared `utility` headers are available before building.
+
 ## SAST Tools 
 
 [PVS-Studio](https://pvs-studio.com/pvs-studio/?utm_source=website&utm_medium=github&utm_campaign=open_source) - static analyzer for C, C++, C#, and Java code.

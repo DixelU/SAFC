@@ -15,8 +15,8 @@ A memory-efficient MIDI piano roll editor that reads directly from memory-mapped
 - `midi_editor_tools_ui.h/.cpp` contains score-tool callbacks and settings
   window construction.
 - `simple_player_viewer.h` contains player visualization; playback remains in
-  `simple_player.h`, while its reusable SPSC queue lives in
-  `buffered_queue_spsc.h`.
+  `simple_player.h`, while its reusable SPSC queue comes from
+  `utility/versions/buffered_queue_spsc/safc-v1/buffered_queue_spsc.h`.
 
 File I/O and live playback-source generation remain in `midi_editor.h` for now.
 They share private parser/editor representation and should move after a
@@ -329,8 +329,8 @@ SAFC_InnerModules/
 
 - C++17 or later (std::optional, structured bindings)
 - Windows API (for memory-mapped files via bbb_mmap)
-- Existing SAFC headers:
-  - `bbb_ffio.h` (memory-mapped file wrapper)
+- Shared utility and existing SAFC headers:
+  - `utility/versions/bbb_ffio/safc/bbb_ffio.h` (memory-mapped file wrapper)
   - `single_midi_processor_2.h` (filter types)
   - `single_midi_info_collector.h` (reference)
 

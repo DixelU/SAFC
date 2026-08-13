@@ -16,15 +16,14 @@
 
 #include <syncstream>
 
-#include "../bbb_ffio.h"
+#include <versions/bbb_ffio/safc/bbb_ffio.h>
 #include "../SAFGUIF/header_utils.h"
-
-#include "polyline_converter.h"
+#include <versions/function_wrapper/safc-v1/function_wrapper.h>
+#include <versions/polyline_converter/safc-v1/polyline_converter.h>
 #include "cut_and_transpose.h"
 
 #include "single_midi_info_collector.h"
 
-#include "../function_wrapper.h"
 
 enum class log_event_type : uint8_t
 {

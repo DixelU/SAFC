@@ -56,7 +56,7 @@
 #include "SAFC_InnerModules/bool_settings.h"
 #include "consts.h"
 
-#include "background_worker.h"
+#include <versions/background_worker/safc/background_worker.h>
 
 #include <boost/dll.hpp>
 #include <archive.h>
