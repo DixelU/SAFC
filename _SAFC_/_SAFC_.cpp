@@ -2548,6 +2548,39 @@ void player_watch_func()
 	}
 }
 
+bool try_open_drop_in_player(const std::vector<std::wstring>& filenames)
+{
+	if (!global_window_handler || !player)
+		return false;
+
+	{
+		std::lock_guard locker(global_window_handler->lock);
+		const auto& active_windows = global_window_handler->active_windows;
+		if (active_windows.empty() || active_windows.front()->first != "SIMPLAYER")
+			return false;
+	}
+
+	auto filename = std::find_if(filenames.begin(), filenames.end(),
+		[](const std::wstring& value) { return !value.empty(); });
+	if (filename == filenames.end())
+		return true;
+
+	player->stop();
+	worker_singleton<struct player_thread>::instance().push([filename = *filename]()
+	{
+		if (!player->ensure_output(saved_midi_device_name))
+		{
+			throw_alert_error("No MIDI output device is available for playback");
+			return;
+		}
+
+		worker_singleton<struct player_watcher>::instance().push(player_watch_func);
+		player->simple_run(filename);
+	});
+
+	return true;
+}
+
 void on_open_player()
 {
 	if (player->get_state().playing)
@@ -4121,6 +4154,7 @@ void init(bool reinitialise_font = true)
 
 	DragAcceptFiles(hWnd, true);
 	OleInitialize(nullptr);
+	global_drag_and_drop_handler.drop_override = try_open_drop_in_player;
 
 	std::cout << "Registering Drag&Drop: " << (RegisterDragDrop(hWnd, &global_drag_and_drop_handler)) << std::endl;
 
@@ -4420,7 +4454,6 @@ struct safc_gui_runtime :
 		SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS);
 		//srand(1);
 		//srand(clock());
-		init_legacy_draw_map();
 		//cout << to_string((std::uint16_t)0) << endl;
 
 		srand(collect_time_data());

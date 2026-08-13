@@ -1341,10 +1341,10 @@ struct simple_player
 				if (static_cast<int64_t>(target_us) > cached_elapsed_us)
 				{
 					auto wait_us = target_us - cached_elapsed_us;
-					if (wait_us > 1000)
+					if (wait_us > 200)
 					{
 						// sleep for most of the wait time
-						std::this_thread::sleep_for(std::chrono::microseconds(wait_us - 50));
+						std::this_thread::sleep_for(std::chrono::microseconds(wait_us - 20));
 					}
 
 					// spin-wait for final precision
@@ -1839,16 +1839,19 @@ struct simple_player
 						0xFF
 					};
 
+					data.note_verts.reserve(data.note_verts.size() + 4);
 					data.note_verts.push_back({lx, begin_y});
 					data.note_verts.push_back({lx, end_y});
 					data.note_verts.push_back({rx, end_y});
 					data.note_verts.push_back({rx, begin_y});
 
+					data.note_colors.reserve(data.note_colors.size() + 4);
 					data.note_colors.push_back(note_color);
 					data.note_colors.push_back(note_color);
 					data.note_colors.push_back(note_color_shady);
 					data.note_colors.push_back(note_color_shady);
 
+					data.outline_verts.reserve(data.outline_verts.size() + 16);
 					data.outline_verts.push_back({lx, begin_y}); data.outline_verts.push_back({lx, end_y});
 					data.outline_verts.push_back({lx, end_y});   data.outline_verts.push_back({rx, end_y});
 					data.outline_verts.push_back({rx, end_y});   data.outline_verts.push_back({rx, begin_y});

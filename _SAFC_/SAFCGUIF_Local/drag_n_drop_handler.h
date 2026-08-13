@@ -7,14 +7,18 @@
 // #include "../SAFGUIF/SAFGUIF.h"
 // #include "../SAFC_InnerModules/include_all.h"
 
+#include <functional>
 #include <vector>
 
 #pragma comment (lib, "dwmapi.lib")
 
 struct drag_n_drop_handler : IDropTarget
 {
+	using drop_override_t = std::function<bool(const std::vector<std::wstring>&)>;
+
 	ULONG ref_count;
 	wchar_t buffer[8000];
+	drop_override_t drop_override;
 
 	drag_n_drop_handler()
 	{
@@ -107,7 +111,8 @@ struct drag_n_drop_handler : IDropTarget
 					}
 				}
 
-				add_files(wide_char_buffer);
+				if (!drop_override || !drop_override(wide_char_buffer))
+					add_files(wide_char_buffer);
 			}
 			else
 				throw_alert_error("drag_and_drop: GetData");
