@@ -13,5 +13,5 @@ using midi_file_reader = dixelu::buffered_file_reader;
 [[nodiscard]] inline std::uint8_t read_midi_byte(midi_file_reader& reader)
 {
 	const auto byte = reader.get();
-	return static_cast<std::uint8_t>(byte.value_or(std::uint8_t{0}));
+	return static_cast<std::uint8_t>(byte.value_or(std::byte{0}));
 }
