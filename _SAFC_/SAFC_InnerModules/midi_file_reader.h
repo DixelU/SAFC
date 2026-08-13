@@ -12,6 +12,5 @@ using midi_file_reader = dixelu::buffered_file_reader;
 // represents EOF explicitly and never aliases a real 0x00 byte with EOF.
 [[nodiscard]] inline std::uint8_t read_midi_byte(midi_file_reader& reader)
 {
-	const auto byte = reader.get();
-	return static_cast<std::uint8_t>(byte.value_or(std::byte{0}));
+	return std::to_integer<std::uint8_t>(reader.get_or(std::byte{0}));
 }
