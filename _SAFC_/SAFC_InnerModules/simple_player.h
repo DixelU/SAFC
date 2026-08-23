@@ -1542,9 +1542,13 @@ struct simple_player
 		{
 			constexpr int total = white_keys_count();
 			const float white_width = width / total;
-			const float general_connector_width = width / 128.25f;
+			// Black keys belong on the boundaries of the diatonic (white-key)
+			// grid.  Positioning them on a separate 128-note chromatic grid
+			// makes the two grids drift relative to one another across octaves.
+			const float black_half_width = white_width * 0.3f + black_margins;
 
 			quad_geometry* first = keyboard, *last = keyboard + 127;
+			uint32_t white_keys_seen = 0;
 
 			for (uint8_t key = 0; key < 128; key++)
 			{
@@ -1561,13 +1565,15 @@ struct simple_player
 					key_n[index] = key;
 
 					++first;
+					++white_keys_seen;
 				}
 				else
 				{
 					key_n[last - keyboard] = key;
 
-					last->bl.x = last->tl.x = key * general_connector_width - black_margins;
-					last->br.x = last->tr.x = (key + 1) * general_connector_width + black_margins;
+					const float boundary_x = white_keys_seen * white_width;
+					last->bl.x = last->tl.x = boundary_x - black_half_width;
+					last->br.x = last->tr.x = boundary_x + black_half_width;
 
 					last->bl.y = last->br.y = -0.5 * height - black_hight;
 					last->tl.y = last->tr.y = -0.5 * height;
