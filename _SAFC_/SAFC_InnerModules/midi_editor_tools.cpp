@@ -7,10 +7,22 @@ std::vector<midi_editor::piano_note> midi_editor::get_tool_target_notes() const
 {
 	std::lock_guard<std::recursive_mutex> lock(editor_mutex);
 	std::vector<piano_note> result;
-	for (const auto& note : notes)
-		if ((!selected_notes.empty() && selected_notes.count(note.id)) ||
-			(selected_notes.empty() && note.track_index == active_track))
-			result.push_back(note);
+	if (!selected_notes.empty())
+	{
+		result.reserve(selected_notes.size());
+		for (const auto id : selected_notes)
+			if (const auto* note = find_note_by_id(id))
+				result.push_back(*note);
+	}
+	else
+	{
+		for_each_logical_note([&](const piano_note& note)
+		{
+			if (note.track_index == active_track)
+				result.push_back(note);
+		});
+	}
+	std::sort(result.begin(), result.end());
 	return result;
 }
 

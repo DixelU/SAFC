@@ -121,7 +121,6 @@ struct midi_editor_viewer : public handleable_ui_part
 	bool right_down = false;
 	bool panning = false;
 	bool kb_scrolling = false;
-	std::set<std::uint32_t> base_selection; // selection before the band gesture
 	tick_type sel_cur_tick = 0;
 	std::uint8_t sel_cur_key = 0;
 	tick_type anchor_tick = 0;
@@ -251,7 +250,6 @@ struct midi_editor_viewer : public handleable_ui_part
 		move_delta_keys = 0;
 		pan_accum_ticks = 0.f;
 		kb_accum_keys = 0.f;
-		base_selection.clear();
 		gesture.clear();
 		audition_stop();
 	}
@@ -381,7 +379,8 @@ struct midi_editor_viewer : public handleable_ui_part
 		if (key_height <= 0.f)
 			return;
 
-		const auto selected = editor->get_selected_ids();
+		const auto selected = editor->get_selected_ids_in_range(
+			view_start, view_start + view_duration);
 
 		draw_key_lanes(l, key_low, key_high, key_height);
 		draw_time_grid(l, view_start, view_duration, ppqn);
@@ -560,7 +559,9 @@ struct midi_editor_viewer : public handleable_ui_part
 					continue;
 
 				std::uint8_t r, g, b;
-				const bool selected = active_pass && selected_ids.count(note.id) != 0;
+				bool selected = active_pass && selected_ids.count(note.id) != 0;
+				if (active_pass && selecting && note_in_selection_band(note))
+					selected = !select_remove;
 				if (active_pass)
 					note_fill_color(note.track_index, note.channel, note.velocity, selected, r, g, b);
 				else
@@ -615,6 +616,17 @@ struct midi_editor_viewer : public handleable_ui_part
 		y_bottom = l.roll_bottom + (note.key - key_low) * key_height;
 		y_top = y_bottom + key_height;
 		return true;
+	}
+
+	bool note_in_selection_band(const piano_note& note) const
+	{
+		const auto t0 = std::min(anchor_tick, sel_cur_tick);
+		const auto t1 = std::max(anchor_tick, sel_cur_tick) + 1;
+		const auto k0 = std::min(anchor_key, sel_cur_key);
+		const auto k1 = std::max(anchor_key, sel_cur_key);
+		return note.start_tick < t1 && note.end_tick > t0 &&
+			note.key >= k0 && note.key <= k1 &&
+			note.track_index == editor->get_active_track();
 	}
 
 	/**
@@ -833,7 +845,9 @@ struct midi_editor_viewer : public handleable_ui_part
 				if (x < l.notes_x || x > l.notes_x + l.notes_w - 1.f)
 					continue;
 
-				const bool selected = selected_ids.count(note.id) != 0;
+				bool selected = selected_ids.count(note.id) != 0;
+				if (selecting && note_in_selection_band(note))
+					selected = !select_remove;
 				std::uint8_t r, g, b;
 				note_fill_color(note.track_index, note.channel, note.velocity, selected, r, g, b);
 				if (has_selection && !selected)
@@ -1269,20 +1283,20 @@ struct midi_editor_viewer : public handleable_ui_part
 	}
 
 	// Set velocity for active-track notes starting within [t0, t1]; honors the selection
-	void lane_apply_flat(tick_type t0, tick_type t1, std::uint8_t vel,
-		const std::set<std::uint32_t>& selected_ids)
+	void lane_apply_flat(tick_type t0, tick_type t1, std::uint8_t vel)
 	{
 		if (t0 > t1)
 			std::swap(t0, t1);
 
 		const auto active_track = editor->get_active_track();
+		const bool has_selection = editor->has_selection();
 		const auto notes = editor->get_notes_in_range(t0, t1 + 1);
 		for (const auto& note : notes)
 		{
 			if (note.track_index != active_track ||
 				note.start_tick < t0 || note.start_tick > t1)
 				continue;
-			if (!selected_ids.empty() && !selected_ids.count(note.id))
+			if (has_selection && !editor->is_note_selected(note.id))
 				continue;
 			record_velocity_change(note, vel);
 		}
@@ -1290,21 +1304,21 @@ struct midi_editor_viewer : public handleable_ui_part
 
 	// Linear ramp between (tick_a, vel_a) and (tick_b, vel_b)
 	void lane_apply_ramp(tick_type tick_a, std::uint8_t vel_a,
-		tick_type tick_b, std::uint8_t vel_b,
-		const std::set<std::uint32_t>& selected_ids)
+		tick_type tick_b, std::uint8_t vel_b)
 	{
 		auto t0 = tick_a, t1 = tick_b;
 		if (t0 > t1)
 			std::swap(t0, t1);
 
 		const auto active_track = editor->get_active_track();
+		const bool has_selection = editor->has_selection();
 		const auto notes = editor->get_notes_in_range(t0, t1 + 1);
 		for (const auto& note : notes)
 		{
 			if (note.track_index != active_track ||
 				note.start_tick < t0 || note.start_tick > t1)
 				continue;
-			if (!selected_ids.empty() && !selected_ids.count(note.id))
+			if (has_selection && !editor->is_note_selected(note.id))
 				continue;
 
 			float f = 0.f;
@@ -1410,14 +1424,13 @@ struct midi_editor_viewer : public handleable_ui_part
 		// ---- Velocity lane gestures ----
 		if (lane_painting || lane_line)
 		{
-			const auto selected = editor->get_selected_ids();
 			const auto cur_tick = tick_at_clamped(mx);
 			const auto cur_vel = lane_velocity_at(my, l);
 
 			if (lane_painting)
 			{
 				if (current_lane_mode == lane_mode::note_velocity)
-					lane_apply_flat(lane_last_tick, cur_tick, cur_vel, selected);
+					lane_apply_flat(lane_last_tick, cur_tick, cur_vel);
 				else if (current_lane_mode == lane_mode::tempo)
 					lane_apply_tempo_flat(lane_last_tick, cur_tick, cur_vel);
 				else
@@ -1440,7 +1453,7 @@ struct midi_editor_viewer : public handleable_ui_part
 				lane_line = false;
 				if (current_lane_mode == lane_mode::note_velocity)
 				{
-					lane_apply_ramp(lane_anchor_tick, lane_anchor_vel, cur_tick, cur_vel, selected);
+					lane_apply_ramp(lane_anchor_tick, lane_anchor_vel, cur_tick, cur_vel);
 					commit_lane_gesture();
 				}
 				else if (current_lane_mode == lane_mode::tempo)
@@ -1580,7 +1593,7 @@ struct midi_editor_viewer : public handleable_ui_part
 				const auto tol = tick_type(2.f / l.notes_w * float(view_duration)) + 1;
 				if (current_lane_mode == lane_mode::note_velocity)
 					lane_apply_flat(cur_tick > tol ? cur_tick - tol : 0, cur_tick + tol,
-						cur_vel, editor->get_selected_ids());
+						cur_vel);
 				else if (current_lane_mode == lane_mode::tempo)
 					lane_apply_tempo_flat(cur_tick, cur_tick, cur_vel);
 				else
@@ -1758,7 +1771,6 @@ struct midi_editor_viewer : public handleable_ui_part
 				// Rubber-band selection: Shift adds, Shift+Alt removes
 				selecting = true;
 				select_remove = (modifiers & GLUT_ACTIVE_ALT) != 0;
-				base_selection = editor->get_selected_ids();
 				anchor_tick = tick;
 				anchor_key = key;
 				sel_cur_tick = tick;
@@ -1814,17 +1826,13 @@ struct midi_editor_viewer : public handleable_ui_part
 			const auto k0 = std::min(anchor_key, cur_key);
 			const auto k1 = std::max(anchor_key, cur_key);
 
-			// Live preview: the pre-gesture selection combined with the band
-			editor->set_selected_ids(base_selection);
-			const auto count = editor->select_rect(t0, t1 + 1, k0, k1,
-				editor->get_active_track(),
-				select_remove ? midi_editor::select_mode::remove
-				: midi_editor::select_mode::add);
-
 			if (left_release)
 			{
+				const auto count = editor->select_rect(t0, t1 + 1, k0, k1,
+					editor->get_active_track(),
+					select_remove ? midi_editor::select_mode::remove
+					: midi_editor::select_mode::add);
 				selecting = false;
-				base_selection.clear();
 				if (on_status)
 					on_status("Selected " + std::to_string(count) + " notes");
 			}

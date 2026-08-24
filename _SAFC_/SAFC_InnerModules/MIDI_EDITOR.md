@@ -83,9 +83,11 @@ std::unique_ptr<dixelu::memory_mapped_file_reader> mmap_file;
 - File must remain open during editing
 - Not suitable for streaming from network
 
-### 2. Dual Representation
+### 2. Loaded Base + Sparse Edit Overlay
 
-The editor maintains notes in a piano-roll friendly format while the original MIDI remains in mmap:
+The editor keeps the loaded piano-roll notes in one time-sorted base vector while
+interactive changes are stored in a sparse overlay. Changed/deleted base-note IDs
+are suppressed without shifting or re-sorting the source vector:
 
 ```cpp
 struct piano_note {
@@ -99,13 +101,14 @@ struct piano_note {
 ```
 
 **Benefits:**
-- O(1) note operations (insert, delete, move)
+- Average O(1) lookup and mutation for one-note insert/delete/move/undo
 - Easy piano roll rendering
-- Simple query interface
+- Range queries remain binary-searched over the base and scan only session edits
 
 **Trade-offs:**
 - Duplicate storage (editor notes + mmap)
-- Need to synchronize on save
+- Four bytes per loaded note for the dense ID-to-base-index table
+- Saving/playback materializes the logical base-plus-overlay note sequence
 
 ### 3. Functor-Based Edit System
 
@@ -227,15 +230,16 @@ filter.add_deletion(480, 960, 62, 0);
 
 | Operation | Time Complexity | Memory |
 |-----------|----------------|--------|
-| Load file | O(n) | O(1)* |
-| Insert note | O(1) amortized | O(1) |
-| Delete note | O(n) | O(1) |
-| Move notes | O(n) | O(k) |
-| Query range | O(n) | O(k) |
+| Load file | O(n log n) | O(n)* |
+| Insert note | O(1) average | O(1) |
+| Delete note | O(1) average | O(1) |
+| Move notes | O(k) average | O(k) |
+| Query range | O(log n + v + e) | O(v) |
 | Undo/Redo | O(k) | O(k) |
 | Save file | O(n log n) | O(n) |
 
-*n = total notes, k = affected notes
+*n = loaded notes, k = affected notes, v = notes intersecting the viewport,
+e = sparse session edits
 *File mmap not counted in memory
 
 ## Memory Layout
@@ -265,6 +269,8 @@ Editor State:
 │                                         │
 │  undo_stack (std::vector<op_ptr>)       │
 │  redo_stack (std::vector<op_ptr>)       │
+│  edited_notes / suppressed base ids     │
+│  compact selection bitset + dense ids   │
 └─────────────────────────────────────────┘
 ```
 
