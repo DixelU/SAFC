@@ -1513,6 +1513,151 @@ struct simple_player
 		std::vector<note_span>  key_note_spans;
 		std::vector<interval>   covered_intervals;
 
+		// Six faces per key, three shadow quads per black key, and three case/rail
+		// quads: 1,860 triangles for all 128 keys, independent of the note count.
+		// Geometry changes only on init/resize/move; colors only on key changes.
+		static constexpr size_t keyboard_vertex_capacity = (128 * 6 + 53 * 3 + 3) * 4;
+		struct keyboard_vertex { float x, y; uint8_t r, g, b, a; };
+		struct keyboard_tone { uint8_t gain, bias; };
+		std::array<keyboard_vertex, keyboard_vertex_capacity> keyboard_vertices;
+		std::array<keyboard_tone, keyboard_vertex_capacity> keyboard_tones;
+		std::array<size_t, 128> keyboard_face_offsets;
+		std::array<color, 128> last_keyboard_colors;
+		size_t keyboard_vertex_count = 0;
+		bool keyboard_colors_valid = false;
+
+		void init_keyboard_mesh()
+		{
+			keyboard_vertex_count = 0;
+			keyboard_colors_valid = false;
+			const float left = keyboard[0].tl.x;
+			const float right = keyboard[white_keys_count() - 1].tr.x;
+			const float bottom = keyboard[0].bl.y;
+			const float top = keyboard[0].tl.y;
+			const float white_width = keyboard[0].tr.x - left;
+			const float white_height = top - bottom;
+
+			auto quad = [&](point tl, point tr, point br, point bl,
+				keyboard_tone ctl, keyboard_tone ctr, keyboard_tone cbr, keyboard_tone cbl)
+			{
+				const point points[] = {tl, tr, br, bl};
+				const keyboard_tone tones[] = {ctl, ctr, cbr, cbl};
+				for (size_t v = 0; v < 4; ++v)
+				{
+					keyboard_vertices[keyboard_vertex_count] = {points[v].x, points[v].y, 0, 0, 0, 255};
+					keyboard_tones[keyboard_vertex_count++] = tones[v];
+				}
+			};
+			auto fixed_quad = [&](float l, float r, float b, float t, color c,
+				uint8_t atl, uint8_t atr, uint8_t abr, uint8_t abl)
+			{
+				const uint8_t alpha[] = {atl, atr, abr, abl};
+				quad({l, t}, {r, t}, {r, b}, {l, b}, {}, {}, {}, {});
+				for (size_t v = 0; v < 4; ++v)
+				{
+					auto& vertex = keyboard_vertices[keyboard_vertex_count - 4 + v];
+					vertex.r = c.r; vertex.g = c.g; vertex.b = c.b; vertex.a = alpha[v];
+				}
+			};
+
+			// The dark key bed shows through the narrow white-key seams.
+			fixed_quad(left, right, bottom, top, {24, 26, 30}, 255, 255, 255, 255);
+			for (int i = 0; i < white_keys_count(); ++i)
+			{
+				const auto& key = keyboard[i];
+				const float l = key.tl.x + white_width * 0.025f;
+				const float r = key.tr.x - white_width * 0.025f;
+				const float edge = white_width * 0.065f;
+				const float lip = std::min(white_width * 0.24f, white_height * 0.1f);
+				const float bevel = std::min(white_width * 0.09f, white_height * 0.04f);
+				const float face = bottom + lip;
+				const float surface = face + bevel;
+				keyboard_face_offsets[i] = keyboard_vertex_count;
+				// Long ivory surface, side bevels, rounded nose, and recessed front.
+				quad({l + edge, top}, {r - edge, top}, {r - edge, surface}, {l + edge, surface},
+					{204, 0}, {218, 0}, {255, 0}, {247, 0});
+				quad({l, top}, {l + edge, top}, {l + edge, surface}, {l, face},
+					{183, 0}, {204, 0}, {247, 0}, {226, 0});
+				quad({r - edge, top}, {r, top}, {r, face}, {r - edge, surface},
+					{218, 0}, {155, 0}, {199, 0}, {255, 0});
+				quad({l + edge, surface}, {r - edge, surface}, {r, face}, {l, face},
+					{247, 0}, {255, 0}, {219, 0}, {230, 0});
+				quad({l, face}, {r, face}, {r, bottom}, {l, bottom},
+					{190, 0}, {180, 0}, {132, 0}, {147, 0});
+				// Short falloff under the rear rail; no texture or lighting pass.
+				const float rear = top - std::min(white_width * 0.45f, white_height * 0.12f);
+				quad({l + edge, top}, {r - edge, top}, {r - edge, rear}, {l + edge, rear},
+					{144, 0}, {153, 0}, {222, 0}, {209, 0});
+			}
+
+			// Draw every shadow before the black keys. Alpha keeps active white-key
+			// colors visible underneath, and all shadows stay inside the keyboard.
+			for (int i = white_keys_count(); i < 128; ++i)
+			{
+				const auto& key = keyboard[i];
+				const float w = key.tr.x - key.tl.x;
+				const float spread = w * 0.19f;
+				const float b = std::max(bottom, key.bl.y - spread);
+				fixed_quad(std::max(left, key.tl.x - spread), key.tl.x, key.bl.y, top,
+					{0, 0, 0}, 0, 48, 48, 0);
+				fixed_quad(key.tr.x, std::min(right, key.tr.x + spread), key.bl.y, top,
+					{0, 0, 0}, 80, 0, 0, 80);
+				fixed_quad(key.tl.x, key.tr.x, b, key.bl.y, {0, 0, 0}, 80, 80, 0, 0);
+			}
+			for (int i = white_keys_count(); i < 128; ++i)
+			{
+				const auto& key = keyboard[i];
+				const float l = key.tl.x, r = key.tr.x, b = key.bl.y;
+				const float w = r - l, h = top - b;
+				const float inset = w * 0.14f;
+				const float face = b + std::min(w * 0.42f, h * 0.15f);
+				const float surface = face + std::min(w * 0.14f, h * 0.05f);
+				keyboard_face_offsets[i] = keyboard_vertex_count;
+				// Add a small neutral reflection to ebony, also when a key is lit.
+				quad({l + inset, top}, {r - inset, top}, {r - inset, surface}, {l + inset, surface},
+					{180, 46}, {168, 35}, {190, 12}, {205, 23});
+				quad({l, top}, {l + inset, top}, {l + inset, surface}, {l, face},
+					{120, 68}, {180, 46}, {205, 23}, {130, 50});
+				quad({r - inset, top}, {r, top}, {r, face}, {r - inset, surface},
+					{168, 35}, {76, 9}, {85, 5}, {190, 12});
+				quad({l + inset, surface}, {r - inset, surface}, {r, face}, {l, face},
+					{205, 23}, {190, 12}, {145, 36}, {175, 61});
+				quad({l, face}, {r, face}, {r, b}, {l, b},
+					{115, 22}, {95, 12}, {65, 4}, {80, 9});
+				const float rear = top - std::min(w * 0.09f, h * 0.03f);
+				quad({l + inset, top}, {r - inset, top}, {r - inset, rear}, {l + inset, rear},
+					{150, 63}, {140, 49}, {168, 35}, {180, 46});
+			}
+			const float rail = std::min(white_width * 0.18f, white_height * 0.04f);
+			fixed_quad(left, right, top - rail, top, {19, 16, 20}, 255, 255, 255, 255);
+			fixed_quad(left, right, top - rail * 0.45f, top, {154, 36, 42}, 255, 255, 255, 255);
+		}
+
+		void draw_keyboard(const color (&key_colors)[128])
+		{
+			for (size_t i = 0; i < 128; ++i)
+			{
+				const auto c = key_colors[i];
+				const auto& previous = last_keyboard_colors[i];
+				if (keyboard_colors_valid && c.r == previous.r && c.g == previous.g && c.b == previous.b)
+					continue;
+				for (size_t v = keyboard_face_offsets[i]; v < keyboard_face_offsets[i] + 6 * 4; ++v)
+				{
+					auto& vertex = keyboard_vertices[v];
+					const auto tone = keyboard_tones[v];
+					auto shade = [tone](uint8_t channel) {
+						return uint8_t(std::min(255, (channel * tone.gain + 127) / 255 + tone.bias));
+					};
+					vertex.r = shade(c.r); vertex.g = shade(c.g); vertex.b = shade(c.b);
+				}
+				last_keyboard_colors[i] = c;
+			}
+			keyboard_colors_valid = true;
+			glVertexPointer(2, GL_FLOAT, sizeof(keyboard_vertex), &keyboard_vertices[0].x);
+			glColorPointer(4, GL_UNSIGNED_BYTE, sizeof(keyboard_vertex), &keyboard_vertices[0].r);
+			glDrawArrays(GL_QUADS, 0, static_cast<GLsizei>(keyboard_vertex_count));
+		}
+
 		bool enable_simulated_lag = true;
 		uint8_t remove_overlaps = 0;
 
@@ -1588,6 +1733,7 @@ struct simple_player
 			}
 
 			last_keyboard_height = keyboard_height;
+			init_keyboard_mesh();
 		}
 
 		void move(float dx, float dy)
@@ -1605,6 +1751,11 @@ struct simple_player
 				quad.br.y += dy;
 				quad.tl.y += dy;
 				quad.tr.y += dy;
+			}
+			for (size_t v = 0; v < keyboard_vertex_count; ++v)
+			{
+				keyboard_vertices[v].x += dx;
+				keyboard_vertices[v].y += dy;
 			}
 		}
 
@@ -1937,87 +2088,9 @@ struct simple_player
 			data.outline_colors.clear();
 		}
 
+		data.draw_keyboard(keyboard_colors);
 		glDisableClientState(GL_COLOR_ARRAY);
 		glDisableClientState(GL_VERTEX_ARRAY);
-
-		glBegin(GL_QUADS);
-		for (uint8_t i = 0; i < 128; ++i)
-		{
-			const auto& key = data.keyboard[i];
-			auto color = keyboard_colors[i];
-			uint8_t glare = 0;
-
-			if (color.r == 0 && color.g == 0 && color.b == 0)
-			{
-				if (i < total_white)
-				{
-					color = {1, 1, 1};
-					glare = 0xAF;
-				}
-				else
-				{
-					color = {0, 0, 0};
-					glare = 48;
-				}
-			}
-
-			glColor3ub(scale<0.9f>(color.r) + glare, scale<0.9f>(color.g) + glare, scale<0.9f>(color.b) + glare);
-			glVertex2f(key.tl.x, key.tl.y);
-
-			glColor3ub(color.r, color.g, color.b);
-			glVertex2f(key.tr.x, key.tr.y);
-
-			glColor3ub(scale<0.9f>(color.r) + glare, scale<0.9f>(color.g) + glare, scale<0.9f>(color.b) + glare);
-			glVertex2f(key.br.x, key.br.y);
-
-			glColor3ub(color.r, color.g, color.b);
-			glVertex2f(key.bl.x, key.bl.y);
-		}
-		glEnd();
-
-		auto& black_example = data.keyboard[127];
-
-		glColor3ub(0, 0, 0);
-		glBegin(GL_LINES);
-		for (uint8_t i = 0; i < total_white - 1; ++i)
-		{
-			const auto& key = data.keyboard[i];
-
-			auto note = i % 7;
-
-			bool is_full = note == 2 || note == 6;
-
-			glVertex2f(key.tr.x, is_full ? key.tr.y : black_example.br.y);
-			glVertex2f(key.br.x, key.br.y);
-		}
-
-		for (uint8_t i = total_white; i < 128; ++i)
-		{
-			const auto& key = data.keyboard[i];
-
-			glVertex2f(key.tr.x, key.tr.y);
-			glVertex2f(key.br.x, key.br.y);
-			glVertex2f(key.br.x, key.br.y);
-			glVertex2f(key.bl.x, key.bl.y);
-			glVertex2f(key.bl.x, key.bl.y);
-			glVertex2f(key.tl.x, key.tl.y);
-		}
-		glEnd();
-
-
-		glColor3ub(0, 0, 0);
-		glLineWidth(4);
-		glBegin(GL_LINES);
-		glVertex2f(data.keyboard->tl.x, data.keyboard->tl.y);
-		glVertex2f(data.keyboard[total_white - 1].br.x, data.keyboard[total_white - 1].tr.y);
-		glEnd();
-
-		glColor3ub(191, 31, 0);
-		glLineWidth(2);
-		glBegin(GL_LINES);
-		glVertex2f(data.keyboard->tl.x, data.keyboard->tl.y);
-		glVertex2f(data.keyboard[total_white - 1].tr.x, data.keyboard[total_white - 1].tr.y);
-		glEnd();
 	}
 
 private:
