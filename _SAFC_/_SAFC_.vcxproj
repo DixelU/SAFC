@@ -317,6 +317,7 @@
     <ClInclude Include="SAFC_InnerModules\midi_collection_threaded_merger.h" />
     <ClInclude Include="SAFC_InnerModules\midi_editor.h" />
 	<ClInclude Include="SAFC_InnerModules\midi_file_reader.h" />
+	<ClInclude Include="SAFC_InnerModules\compressed_midi_event_source.h" />
     <ClInclude Include="SAFC_InnerModules\playback_event_source.h" />
     <ClInclude Include="SAFC_InnerModules\simple_player.h" />
     <ClInclude Include="SAFC_InnerModules\include_all.h" />
@@ -350,6 +351,7 @@
   </ItemGroup>
   <ItemGroup>
 	<ClCompile Include="SAFCGUIF_Local\midi_editor_tools_ui.cpp" />
+	<ClCompile Include="SAFC_InnerModules\compressed_midi_event_source.cpp" />
 	<ClCompile Include="SAFC_InnerModules\midi_editor_tools.cpp" />
     <ClCompile Include="_SAFC_.cpp" />
   </ItemGroup>

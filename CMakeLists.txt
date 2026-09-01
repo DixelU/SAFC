@@ -15,6 +15,7 @@ include_directories(${ADDITIONAL_INCLUDES})
 add_definitions(-DUNICODE -D_UNICODE)
 
 add_executable(SAFC
-    _SAFC_/JSON/JSON.cpp
-    _SAFC_/JSON/JSONValue.cpp
-    _SAFC_/_SAFC_.cpp)
+	_SAFC_/JSON/JSON.cpp
+	_SAFC_/JSON/JSONValue.cpp
+	_SAFC_/SAFC_InnerModules/compressed_midi_event_source.cpp
+	_SAFC_/_SAFC_.cpp)

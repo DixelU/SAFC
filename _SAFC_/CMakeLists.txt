@@ -15,4 +15,5 @@ include_directories(../utility)
 include_directories(../utility/include)
 
 add_executable(_SAFC_
+	SAFC_InnerModules/compressed_midi_event_source.cpp
 	_SAFC_.cpp)

@@ -47,6 +47,7 @@
 #include "SAFGUIF/fonted_manip.h"
 #include "SAFGUIF/SAFGUIF.h"
 #include "SAFC_InnerModules/include_all.h"
+#include "SAFC_InnerModules/compressed_midi_event_source.h"
 #include "SAFCGUIF_Local/SAFGUIF_L.h"
 #include "SAFCGUIF_Local/simple_player_viewer.h"
 #include "SAFCGUIF_Local/midi_editor_viewer.h"
@@ -1007,6 +1008,25 @@ std::vector<std::wstring> multiple_open_file_dialog(const wchar_t* Title)
 		}
 		return std::vector<std::wstring>{L""};
 	}
+}
+
+std::wstring compressed_midi_open_file_dialog()
+{
+	wchar_t filename[MAX_PATH]{};
+	OPENFILENAME ofn{};
+	ofn.lStructSize = sizeof(ofn);
+	ofn.hwndOwner = hWnd;
+	ofn.lpstrFile = filename;
+	ofn.nMaxFile = MAX_PATH;
+	ofn.lpstrFilter =
+		L"Compressed MIDI/archive files\0*.xz;*.zip;*.7z;*.gz;*.bz2;*.mid\0"
+		L"All files\0*.*\0";
+	ofn.nFilterIndex = 1;
+	ofn.lpstrTitle = L"Open compressed or nested MIDI";
+	ofn.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST | OFN_EXPLORER;
+	if (GetOpenFileName(&ofn))
+		return filename;
+	return {};
 }
 std::wstring save_open_file_dialog(const wchar_t* Title)
 {
@@ -2488,6 +2508,9 @@ void on_other_settings()
 }
 
 void update_device_list();
+void open_compressed_midi_file(std::wstring filename);
+void select_regular_player_source();
+bool restart_selected_compressed_source();
 
 void player_watch_func()
 {
@@ -2560,10 +2583,14 @@ bool try_open_drop_in_player(const std::vector<std::wstring>& filenames)
 	if (!global_window_handler || !player)
 		return false;
 
+	std::string active_window;
 	{
 		std::lock_guard locker(global_window_handler->lock);
 		const auto& active_windows = global_window_handler->active_windows;
-		if (active_windows.empty() || active_windows.front()->first != "SIMPLAYER")
+		if (active_windows.empty())
+			return false;
+		active_window = active_windows.front()->first;
+		if (active_window != "SIMPLAYER" && active_window != "ARCHIVE_SOURCE")
 			return false;
 	}
 
@@ -2572,6 +2599,13 @@ bool try_open_drop_in_player(const std::vector<std::wstring>& filenames)
 	if (filename == filenames.end())
 		return true;
 
+	if (active_window == "ARCHIVE_SOURCE")
+	{
+		open_compressed_midi_file(*filename);
+		return true;
+	}
+
+	select_regular_player_source();
 	player->stop();
 	worker_singleton<struct player_thread>::instance().push([filename = *filename]()
 	{
@@ -2626,6 +2660,7 @@ void on_open_player()
 		}
 
 		auto& id = midis_list->selected_id.front();
+		select_regular_player_source();
 
 		worker_singleton<struct player_watcher>::instance().push(player_watch_func);
 
@@ -2707,6 +2742,9 @@ void on_player_pause_toggle()
 {
 	if (!player->is_playing())
 	{
+		if (restart_selected_compressed_source())
+			return;
+
 		std::wstring filename = player->get_filename();
 		if (filename.empty())
 			return;
@@ -2802,6 +2840,198 @@ void on_playback_seek_to(float value)
 		return;
 
 	player->seek_to(value);
+}
+
+// ============================================================================
+// Compressed / nested-archive MIDI source dialog
+// ============================================================================
+
+std::mutex compressed_player_source_mutex;
+std::shared_ptr<compressed_midi_event_source> compressed_player_source;
+std::atomic<bool> compressed_player_preparing = false;
+std::atomic<bool> compressed_player_cancel = false;
+std::atomic<bool> compressed_player_playback_requested = false;
+std::atomic<bool> compressed_player_source_selected = false;
+
+void compressed_player_status(const std::string& message)
+{
+	if (auto status = _WH_t<text_box>("ARCHIVE_SOURCE", "TEXT"))
+		status->safe_string_replace(message);
+}
+
+void select_regular_player_source()
+{
+	compressed_player_source_selected.store(false, std::memory_order_release);
+}
+
+std::shared_ptr<compressed_midi_event_source> current_compressed_player_source()
+{
+	std::lock_guard locker(compressed_player_source_mutex);
+	return compressed_player_source;
+}
+
+void compressed_player_watch_func()
+{
+	global_window_handler->enable_window("SIMPLAYER");
+	update_device_list();
+
+	if (auto pause = _WH_t<button>("SIMPLAYER", "PAUSE"))
+		pause->safe_string_replace("\200");
+
+	while (compressed_player_playback_requested.load(std::memory_order_acquire) &&
+		!player->is_playing())
+		std::this_thread::sleep_for(std::chrono::milliseconds(2));
+
+	while (compressed_player_playback_requested.load(std::memory_order_acquire) &&
+		player->is_playing())
+	{
+		auto window = (*global_window_handler)["SIMPLAYER"];
+		if (!window->drawable)
+		{
+			player->stop();
+			break;
+		}
+
+		const auto current_us = player->get_position_us();
+		const auto total_us = player->get_info().total_duration_us;
+		const auto seconds = current_us / 1000000;
+		const auto parts_of_second = current_us % 1000000;
+		if (auto status = _WH_t<text_box>("SIMPLAYER", "TEXT"))
+			status->safe_string_replace(std::format(
+				"{:0>2}:{:0>2}:{:0>2}", seconds / 60, seconds % 60,
+				parts_of_second / 10000));
+
+		if (auto seek = _WH_t<slider>("SIMPLAYER", "SEEK_TO");
+			seek && !seek->dragging && total_us != 0)
+			seek->set_value(static_cast<float>(current_us) / total_us, false);
+
+		std::this_thread::sleep_for(std::chrono::milliseconds(20));
+	}
+
+	if (auto status = _WH_t<text_box>("SIMPLAYER", "TEXT"))
+		status->safe_string_replace("Stopped - press Play to restart the prepared archive");
+	if (auto pause = _WH_t<button>("SIMPLAYER", "PAUSE"))
+		pause->safe_string_replace("\200");
+}
+
+void play_compressed_source_in_worker(const std::shared_ptr<compressed_midi_event_source>& source)
+{
+	if (!source)
+		return;
+
+	bool expected = false;
+	if (!compressed_player_playback_requested.compare_exchange_strong(
+		expected, true, std::memory_order_acq_rel))
+		return;
+
+	struct playback_request_guard
+	{
+		~playback_request_guard()
+		{
+			compressed_player_playback_requested.store(false, std::memory_order_release);
+		}
+	} guard;
+
+	if (!player->ensure_output(saved_midi_device_name))
+	{
+		throw_alert_error("No MIDI output device is available for playback");
+		return;
+	}
+
+	worker_singleton<struct compressed_player_watcher>::instance().push(
+		compressed_player_watch_func);
+	// Match the normal player: prepare everything, then wait paused for Play.
+	player->run_from_external(source.get(), 0.0, true);
+}
+
+bool restart_selected_compressed_source()
+{
+	if (!compressed_player_source_selected.load(std::memory_order_acquire))
+		return false;
+
+	auto source = current_compressed_player_source();
+	if (!source || compressed_player_preparing.load(std::memory_order_acquire))
+		return true;
+
+	worker_singleton<struct player_thread>::instance().push(
+		[source]() { play_compressed_source_in_worker(source); });
+	return true;
+}
+
+void open_compressed_midi_file(std::wstring filename)
+{
+	if (filename.empty() || !player)
+		return;
+
+	bool expected = false;
+	if (!compressed_player_preparing.compare_exchange_strong(
+		expected, true, std::memory_order_acq_rel))
+	{
+		throw_alert_warning("A compressed MIDI is already being prepared");
+		return;
+	}
+
+	compressed_player_cancel.store(false, std::memory_order_release);
+	select_regular_player_source();
+	player->stop();
+
+	global_window_handler->enable_window("ARCHIVE_SOURCE");
+	compressed_player_status("Opening archive pipeline...");
+
+	worker_singleton<struct player_thread>::instance().push([filename = std::move(filename)]()
+	{
+		struct preparation_guard
+		{
+			~preparation_guard()
+			{
+				compressed_player_preparing.store(false, std::memory_order_release);
+			}
+		} guard;
+
+		std::string error;
+		auto source = compressed_midi_event_source::open(
+			filename,
+			[](const std::string& message) { compressed_player_status(message); },
+			&compressed_player_cancel,
+			error);
+		if (!source)
+		{
+			if (error != "Compressed MIDI preparation was cancelled")
+				throw_alert_error("Unable to prepare compressed MIDI: " + error);
+			compressed_player_status(error);
+			return;
+		}
+
+		{
+			std::lock_guard locker(compressed_player_source_mutex);
+			compressed_player_source = source;
+		}
+
+		compressed_player_source_selected.store(true, std::memory_order_release);
+		compressed_player_preparing.store(false, std::memory_order_release);
+		compressed_player_status(std::format(
+			"Prepared {} events in {} tracks from {} archive layer(s)",
+			source->event_count(), source->track_count(), source->archive_depth()));
+		global_window_handler->enable_window("SIMPLAYER");
+		global_window_handler->disable_window("ARCHIVE_SOURCE");
+		play_compressed_source_in_worker(source);
+	});
+}
+
+void on_compressed_player_open()
+{
+	open_compressed_midi_file(compressed_midi_open_file_dialog());
+}
+
+void on_compressed_preparation_cancel()
+{
+	if (compressed_player_preparing.load(std::memory_order_acquire))
+	{
+		compressed_player_cancel.store(true, std::memory_order_release);
+		compressed_player_status("Cancelling preparation...");
+	}
+	else
+		global_window_handler->disable_window("ARCHIVE_SOURCE");
 }
 
 // ============================================================================
@@ -3048,6 +3278,7 @@ void on_editor_play_from(bool from_view_start)
 			play_btn->safe_string_replace("Play");
 		return;
 	}
+	select_regular_player_source();
 
 	// Close the window between the UI click and the worker publishing
 	// state.playing. Without this, rapid clicks queue another full playback that
@@ -3760,6 +3991,17 @@ void init(bool reinitialise_font = true)
 	(*window)["ADD_Butt"] = new button("Add MIDIs", system_white, on_add, 150, 167.5, 75, 12, 1, 0x00003FAF, 0xFFFFFFFF, 0x00003FFF, 0xFFFFFFFF, 0xF7F7F7FF, nullptr, " ");
 	(*window)["REM_Butt"] = new button("Remove selected", system_white, on_rem, 150, 155, 75, 12, 1, 0x3F0000AF, 0xFFFFFFFF, 0x3F0000FF, 0xFFFFFFFF, 0xF7F7F7FF, nullptr, " ");
 	(*window)["REM_ALL_Butt"] = new button("Remove all", system_white, on_rem_all, 150, 142.5, 75, 12, 1, 0xAF0000AF, 0xFFFFFFFF, 0xAF0000AF, 0xFFFFFFFF, 0xF7F7F7FF, &system_white, "May cause lag");
+	(*window)["OPEN_ARCHIVE_PLAYER"] = new button(
+		"Open archive", system_black, []()
+		{
+			if (!compressed_player_preparing.load(std::memory_order_acquire))
+				compressed_player_status(
+					"Choose or drop an XZ/ZIP/7z archive; nested layers are supported");
+			global_window_handler->enable_window("ARCHIVE_SOURCE");
+		},
+		150, 130, 75, 12, 1,
+		0xFFFFFFAF, 0x0F0F0FFF, 0xFFFFFFFF, 0x000000FF, 0xFFFFFFFF,
+		nullptr, "Open MIDI directly from XZ/ZIP/7z, including nested archives");
 
 	(*window)["OPEN_SIMPLAYER"] = new button("Play MIDI", system_black, on_open_player, 150, 117.5, 75, 12, 1, 0xFFFFFFAF, 0x0F0F0FFF, 0xFFFFFFFF, 0x000000FF, 0xFFFFFFFF, nullptr, " ");
 	(*window)["OPEN_MIDI_EDITOR"] = new button("MIDI Editor", system_black, []() {
@@ -4016,6 +4258,39 @@ void init(bool reinitialise_font = true)
 	(*window)["DEVICE_LIST"] = device_list_selector;
 
 	(*global_window_handler)["SIMPLAYER"] = window;
+
+	// ========================================================================
+	// Compressed / nested-archive MIDI source dialog. Playback is handed to
+	// SIMPLAYER so there is only one set of controls and one visualiser.
+	// ========================================================================
+	window = new moveable_fui_window("Open compressed MIDI", system_white,
+		-140, 55 + moveable_window::window_header_size,
+		280, 105, 180, 2.5, 30, 30, 2.5,
+		BACKGROUND_OPQ, HEADER, BORDER);
+	window->on_close = []()
+	{
+		if (compressed_player_preparing.load(std::memory_order_acquire))
+			compressed_player_cancel.store(true, std::memory_order_release);
+	};
+
+	(*window)["TEXT"] = new text_box(
+		"Choose or drop an XZ/ZIP/7z archive; nested layers are supported",
+		legacy_white, 0, 38 - moveable_window::window_header_size,
+		38, 250, 10, 0xFFFFFF1A, 0, 0,
+		_Align(center | top), text_box::VerticalOverflow::recalibrate);
+	(*window)["OPEN"] = new button(
+		"Browse...", system_white, on_compressed_player_open,
+		-45, -5 - moveable_window::window_header_size,
+		120, 12, 1, 0x7F3FFF7F, 0xFFFFFFFF, 0x7F3FFFFF,
+		0x7F3FFFFF, 0xFFFFFFFF, nullptr,
+		"Open XZ/ZIP/7z or a nested combination containing one MIDI");
+	(*window)["CANCEL"] = new button(
+		"Cancel", system_white, on_compressed_preparation_cancel,
+		85, -5 - moveable_window::window_header_size,
+		60, 12, 1, 0x5F5F5F7F, 0xFFFFFFFF, 0x7F7F7FFF,
+		0x7F7F7FFF, 0xFFFFFFFF, nullptr,
+		"Cancel preparation, or close this dialog");
+	(*global_window_handler)["ARCHIVE_SOURCE"] = window;
 
 	// ========================================================================
 	// MIDI Editor Window
@@ -4284,6 +4559,7 @@ void gl_close()
 
 	if (player)
 		player->stop();
+	compressed_player_cancel.store(true, std::memory_order_release);
 
 	lfont_symbols_info::destroy_font();
 	if (hWnd && hDc)
