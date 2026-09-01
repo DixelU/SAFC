@@ -1010,7 +1010,7 @@ std::vector<std::wstring> multiple_open_file_dialog(const wchar_t* Title)
 	}
 }
 
-std::wstring compressed_midi_open_file_dialog()
+std::wstring playback_source_open_file_dialog()
 {
 	wchar_t filename[MAX_PATH]{};
 	OPENFILENAME ofn{};
@@ -1019,10 +1019,10 @@ std::wstring compressed_midi_open_file_dialog()
 	ofn.lpstrFile = filename;
 	ofn.nMaxFile = MAX_PATH;
 	ofn.lpstrFilter =
-		L"Compressed MIDI/archive files\0*.xz;*.zip;*.7z;*.gz;*.bz2;*.mid\0"
+		L"MIDI and archive files\0*.mid;*.midi;*.xz;*.zip;*.7z;*.gz;*.bz2\0"
 		L"All files\0*.*\0";
 	ofn.nFilterIndex = 1;
-	ofn.lpstrTitle = L"Open compressed or nested MIDI";
+	ofn.lpstrTitle = L"Open MIDI or archive";
 	ofn.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST | OFN_EXPLORER;
 	if (GetOpenFileName(&ofn))
 		return filename;
@@ -2509,6 +2509,7 @@ void on_other_settings()
 
 void update_device_list();
 void open_compressed_midi_file(std::wstring filename);
+void open_player_file(std::wstring filename);
 void select_regular_player_source();
 bool restart_selected_compressed_source();
 
@@ -2599,78 +2600,9 @@ bool try_open_drop_in_player(const std::vector<std::wstring>& filenames)
 	if (filename == filenames.end())
 		return true;
 
-	if (active_window == "ARCHIVE_SOURCE")
-	{
-		open_compressed_midi_file(*filename);
-		return true;
-	}
-
-	select_regular_player_source();
-	player->stop();
-	worker_singleton<struct player_thread>::instance().push([filename = *filename]()
-	{
-		if (!player->ensure_output(saved_midi_device_name))
-		{
-			throw_alert_error("No MIDI output device is available for playback");
-			return;
-		}
-
-		worker_singleton<struct player_watcher>::instance().push(player_watch_func);
-		player->simple_run(filename);
-	});
+	open_player_file(*filename);
 
 	return true;
-}
-
-void on_open_player()
-{
-	if (player->get_state().playing)
-	{
-		global_window_handler->enable_window("SIMPLAYER");
-		return;
-	}
-
-	auto midis_list = _WH_t<selectable_properted_list>("MAIN", "List");
-	if (midis_list->selected_id.empty())
-	{
-		throw_alert_warning("Please first select the MIDI file before opening the player");
-		return;
-	}
-
-	if (player->get_state().paused)
-	{
-		auto window = (*global_window_handler)["SIMPLAYER"];
-		if (window->enabled)
-		{
-			global_window_handler->enable_window("SIMPLAYER");
-			return;
-		}
-
-		player->stop();
-		window->enable();
-	}
-
-	worker_singleton<struct player_thread>::instance().push([]()
-	{
-		auto midis_list = _WH_t<selectable_properted_list>("MAIN", "List");
-		if (midis_list->selected_id.empty())
-		{
-			throw_alert_error("Fastest mouse action on the wild west detected");
-			return;
-		}
-
-		auto& id = midis_list->selected_id.front();
-		select_regular_player_source();
-
-		worker_singleton<struct player_watcher>::instance().push(player_watch_func);
-
-		if (!player->ensure_output(saved_midi_device_name))
-		{
-			throw_alert_error("No MIDI output device is available for playback");
-			return;
-		}
-		player->simple_run(g_data[id].filename);
-	});
 }
 
 void update_device_list()
@@ -2843,7 +2775,7 @@ void on_playback_seek_to(float value)
 }
 
 // ============================================================================
-// Compressed / nested-archive MIDI source dialog
+// Unified MIDI / nested-archive playback source dialog
 // ============================================================================
 
 std::mutex compressed_player_source_mutex;
@@ -3018,9 +2950,55 @@ void open_compressed_midi_file(std::wstring filename)
 	});
 }
 
-void on_compressed_player_open()
+bool has_midi_extension(const std::wstring& filename)
 {
-	open_compressed_midi_file(compressed_midi_open_file_dialog());
+	const auto extension = std::filesystem::path(filename).extension().wstring();
+	return boost::iequals(extension, L".mid") || boost::iequals(extension, L".midi");
+}
+
+void open_regular_midi_file(std::wstring filename)
+{
+	if (filename.empty() || !player)
+		return;
+
+	select_regular_player_source();
+	player->stop();
+	global_window_handler->disable_window("ARCHIVE_SOURCE");
+
+	worker_singleton<struct player_thread>::instance().push([filename = std::move(filename)]()
+	{
+		if (!player->ensure_output(saved_midi_device_name))
+		{
+			throw_alert_error("No MIDI output device is available for playback");
+			return;
+		}
+
+		worker_singleton<struct player_watcher>::instance().push(player_watch_func);
+		player->simple_run(filename);
+	});
+}
+
+void open_player_file(std::wstring filename)
+{
+	if (filename.empty())
+		return;
+
+	if (has_midi_extension(filename))
+	{
+		if (compressed_player_preparing.load(std::memory_order_acquire))
+		{
+			throw_alert_warning("A compressed MIDI is already being prepared");
+			return;
+		}
+		open_regular_midi_file(std::move(filename));
+	}
+	else
+		open_compressed_midi_file(std::move(filename));
+}
+
+void on_player_source_open()
+{
+	open_player_file(playback_source_open_file_dialog());
 }
 
 void on_compressed_preparation_cancel()
@@ -3991,19 +3969,20 @@ void init(bool reinitialise_font = true)
 	(*window)["ADD_Butt"] = new button("Add MIDIs", system_white, on_add, 150, 167.5, 75, 12, 1, 0x00003FAF, 0xFFFFFFFF, 0x00003FFF, 0xFFFFFFFF, 0xF7F7F7FF, nullptr, " ");
 	(*window)["REM_Butt"] = new button("Remove selected", system_white, on_rem, 150, 155, 75, 12, 1, 0x3F0000AF, 0xFFFFFFFF, 0x3F0000FF, 0xFFFFFFFF, 0xF7F7F7FF, nullptr, " ");
 	(*window)["REM_ALL_Butt"] = new button("Remove all", system_white, on_rem_all, 150, 142.5, 75, 12, 1, 0xAF0000AF, 0xFFFFFFFF, 0xAF0000AF, 0xFFFFFFFF, 0xF7F7F7FF, &system_white, "May cause lag");
+
 	(*window)["OPEN_TOOLS"] = new button("Tools...", system_black, []() {
 		global_window_handler->enable_window("TOOLS");
 	}, 150, 117.5, 75, 12, 1, 0xFFFFFFAF, 0x0F0F0FFF, 0xFFFFFFFF, 0x000000FF, 0xFFFFFFFF, nullptr, " ");
 
-	(*window)["GLOBAL_PPQN_Butt"] = new button("Global PPQN", system_white, on_global_ppqn, 150, 82.5, 75, 12, 1, 0xFF3F00AF, 0xFFFFFFFF, 0xFF3F00AF, 0xFFFFFFFF, 0xF7F7F7FF, nullptr, " ");
-	(*window)["GLOBAL_OFFSET_Butt"] = new button("Global offset", system_white, on_global_offset, 150, 70, 75, 12, 1, 0xFF7F00AF, 0xFFFFFFFF, 0xFF7F00FF, 0xFFFFFFFF, 0xF7F7F7FF, nullptr, " ");
-	(*window)["GLOBAL_TEMPO_Butt"] = new button("Global tempo", system_white, on_global_tempo, 150, 57.5, 75, 12, 1, 0xFFAF00AF, 0xFFFFFFFF, 0xFFAF00AF, 0xFFFFFFFF, 0xF7F7F7FF, nullptr, " ");
+	(*window)["GLOBAL_PPQN_Butt"] = new button("Global PPQN", system_white, on_global_ppqn, 150, 92.5, 75, 12, 1, 0xFF3F00AF, 0xFFFFFFFF, 0xFF3F00AF, 0xFFFFFFFF, 0xF7F7F7FF, nullptr, " ");
+	(*window)["GLOBAL_OFFSET_Butt"] = new button("Global offset", system_white, on_global_offset, 150, 80, 75, 12, 1, 0xFF7F00AF, 0xFFFFFFFF, 0xFF7F00FF, 0xFFFFFFFF, 0xF7F7F7FF, nullptr, " ");
+	(*window)["GLOBAL_TEMPO_Butt"] = new button("Global tempo", system_white, on_global_tempo, 150, 67.5, 75, 12, 1, 0xFFAF00AF, 0xFFFFFFFF, 0xFFAF00AF, 0xFFFFFFFF, 0xF7F7F7FF, nullptr, " ");
 
-	(*window)["DELETE_ALL_VM"] = new button("Remove vol. maps", system_white, on_rem_vol_maps, 150, 32.5, 75, 12, 1,
+	(*window)["DELETE_ALL_VM"] = new button("Remove vol. maps", system_white, on_rem_vol_maps, 150, 42.5, 75, 12, 1,
 		0x7F7F7FAF, 0xFFFFFFFF, 0x7F7F7FAF, 0xFFFFFFFF, 0xF7F7F7FF, nullptr, " ");//0xFF007FAF
-	(*window)["DELETE_ALL_CAT"] = new button("Remove C&Ts", system_white, on_rem_cats, 150, 20, 75, 12, 1,
+	(*window)["DELETE_ALL_CAT"] = new button("Remove C&Ts", system_white, on_rem_cats, 150, 30, 75, 12, 1,
 		0x7F7F7FAF, 0xFFFFFFFF, 0x7F7F7FAF, 0xFFFFFFFF, 0xF7F7F7FF, nullptr, " ");
-	(*window)["DELETE_ALL_MODULES"] = new button("Remove modules", system_white, on_rem_all_modules, 150, 7.5, 75, 12, 1,
+	(*window)["DELETE_ALL_MODULES"] = new button("Remove modules", system_white, on_rem_all_modules, 150, 17.5, 75, 12, 1,
 		0x7F7F7FAF, 0xFFFFFFFF, 0x7F7F7FAF, 0xFFFFFFFF, 0xF7F7F7FF, nullptr, " ");
 
 	(*window)["APP_SETTINGS"] = new button("Settings...", system_white, settings::on_settings, 150, -140, 75, 12, 1,
@@ -4015,28 +3994,24 @@ void init(bool reinitialise_font = true)
 
 	(*global_window_handler)["MAIN"] = window;
 
-	window = new moveable_fui_window("MIDI tools", system_white, 65, 140, 130, 62.5f, 90, 2.5f, 10, 10, 3, BACKGROUND_OPQ, HEADER, BORDER);
-	(*window)["OPEN_ARCHIVE_PLAYER"] = new button(
-		"Open archive", system_black, []()
+	window = new moveable_fui_window("MIDI utilities", system_white, 65, 140, 130, 70, 90, 2.5f, 10, 10, 3, BACKGROUND_OPQ, HEADER, BORDER);
+	(*window)["OPEN_PLAYER"] = new button(
+		"On-drive MIDI Player", system_black, []()
 		{
 			global_window_handler->disable_window("TOOLS");
 			if (!compressed_player_preparing.load(std::memory_order_acquire))
 				compressed_player_status(
-					"Choose or drop an XZ/ZIP/7z archive; nested layers are supported");
+					"Choose or drag&drop a MIDI or XZ/ZIP/7z archive");
 			global_window_handler->enable_window("ARCHIVE_SOURCE");
 		},
-		130, 116.5, 100, 12, 1,
+		130, 105, 100, 12, 1,
 		0xFFFFFFAF, 0x0F0F0FFF, 0xFFFFFFFF, 0x000000FF, 0xFFFFFFFF,
 		nullptr, " ");
-	(*window)["OPEN_SIMPLAYER"] = new button("Play MIDI", system_black, []() {
-		global_window_handler->disable_window("TOOLS");
-		on_open_player();
-	}, 130, 104, 100, 12, 1, 0xFFFFFFAF, 0x0F0F0FFF, 0xFFFFFFFF, 0x000000FF, 0xFFFFFFFF, nullptr, " ");
-	(*window)["OPEN_MIDI_EDITOR"] = new button("MIDI Editor", system_black, []() {
+	(*window)["OPEN_MIDI_EDITOR"] = new button("Piano roll editor", system_black, []() {
 		global_window_handler->main_window_id = "MIDI_EDITOR";
 		global_window_handler->disable_all_windows();
 		global_window_handler->enable_window("MIDI_EDITOR");
-	}, 130, 91.5, 100, 12, 1, 0xFFFFFFAF, 0x0F0F0FFF, 0xFFFFFFFF, 0x000000FF, 0xFFFFFFFF, nullptr, " ");
+	}, 130, 92.5f, 100, 12, 1, 0xFFFFFFAF, 0x0F0F0FFF, 0xFFFFFFFF, 0x000000FF, 0xFFFFFFFF, nullptr, " ");
 
 	(*global_window_handler)["TOOLS"] = window;
 
@@ -4270,10 +4245,10 @@ void init(bool reinitialise_font = true)
 	(*global_window_handler)["SIMPLAYER"] = window;
 
 	// ========================================================================
-	// Compressed / nested-archive MIDI source dialog. Playback is handed to
+	// Unified MIDI / nested-archive source dialog. Playback is handed to
 	// SIMPLAYER so there is only one set of controls and one visualiser.
 	// ========================================================================
-	window = new moveable_fui_window("Open compressed MIDI", system_white,
+	window = new moveable_fui_window("Open MIDI or archive", system_white,
 		-140, 55 + moveable_window::window_header_size,
 		280, 105, 180, 2.5, 30, 30, 2.5,
 		BACKGROUND_OPQ, HEADER, BORDER);
@@ -4284,16 +4259,16 @@ void init(bool reinitialise_font = true)
 	};
 
 	(*window)["TEXT"] = new text_box(
-		"Choose or drop an XZ/ZIP/7z archive; nested layers are supported",
+		"Choose or drop a MIDI or XZ/ZIP/7z archive; nested layers are supported",
 		legacy_white, 0, 38 - moveable_window::window_header_size,
 		38, 250, 10, 0xFFFFFF1A, 0, 0,
 		_Align(center | top), text_box::VerticalOverflow::recalibrate);
 	(*window)["OPEN"] = new button(
-		"Browse...", system_white, on_compressed_player_open,
+		"Browse...", system_white, on_player_source_open,
 		-45, -5 - moveable_window::window_header_size,
 		120, 12, 1, 0x7F3FFF7F, 0xFFFFFFFF, 0x7F3FFFFF,
-		0x7F3FFFFF, 0xFFFFFFFF, nullptr,
-		"Open XZ/ZIP/7z or a nested combination containing one MIDI");
+		0xFFFFFFFF, 0x7F3FFFFF, nullptr,
+		"Open a MIDI, XZ/ZIP/7z, or a nested archive containing one MIDI");
 	(*window)["CANCEL"] = new button(
 		"Cancel", system_white, on_compressed_preparation_cancel,
 		85, -5 - moveable_window::window_header_size,
