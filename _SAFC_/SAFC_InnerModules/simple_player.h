@@ -25,6 +25,8 @@
 
 #define SIMPLE_PLAYER_FORCE_NO_INLINE
 #include <buffered_queue_spsc.h>
+#include <midi_overlap_filter.h>
+#include <midi_visual_note_store.h>
 // __declspec(noinline)
 // __declspec(noinline)
 
@@ -41,39 +43,14 @@ struct simple_player
 		const uint8_t* ending;
 	};
 
-	// Buffered note for notes display
-	// Note: end_time_us is atomic for lock-free note_off updates
-	struct buffered_note
-	{
-		uint64_t start_time_us;              // note on time (immutable after creation)
-		std::atomic<uint64_t> end_time_us;   // note off time (~0 = still held/pending)
-		uint32_t track_id;                   // (track_index << 4) | channel (immutable after creation)
+	using visual_note_store = dixelu::midi_visual_note_store<128>;
+	using buffered_note = visual_note_store::note;
 
-		buffered_note() : start_time_us(0), end_time_us(~0ULL), track_id(0) {}
-
-		buffered_note(uint64_t start, uint64_t end, uint32_t track)
-			: start_time_us(start), end_time_us(end), track_id(track) {}
-
-		// move constructor for queue operations
-		buffered_note(buffered_note&& other) noexcept
-			: start_time_us(other.start_time_us)
-			, end_time_us(other.end_time_us.load(std::memory_order_relaxed))
-			, track_id(other.track_id) {}
-
-		buffered_note& operator=(buffered_note&& other) noexcept
-		{
-			start_time_us = other.start_time_us;
-			end_time_us.store(other.end_time_us.load(std::memory_order_relaxed), std::memory_order_relaxed);
-			track_id = other.track_id;
-			return *this;
-		}
-	};
-
-	// Visuals viewport: manages notes display and keyboard state
-	// lock-free SPSC: parser thread pushes notes, render thread reads state
+	// Visuals viewport: parser publishes note lifecycle batches while the render
+	// thread owns the visible-note lists used for drawing and retirement.
 	struct visuals_viewport
 	{
-		static constexpr size_t key_count = 128;
+		static constexpr size_t key_count = visual_note_store::key_count;
 
 		// Pending note tracking entry - points to note in queue awaiting its note_off
 		// Only accessed by parser thread - no synchronization needed
@@ -159,14 +136,15 @@ struct simple_player
 
 			void clear()
 			{
-				slots.clear();
+				std::vector<slot>().swap(slots);
 				used = 0;
 			}
 		};
 
-		// Per-key SPSC queues for falling notes visualization
-		// Producer: parser thread, Consumer: render thread
-		std::array<dixelu::buffered_queue_spsc<buffered_note>, key_count> falling_notes;
+		// Stable notes are published to a renderer-owned intrusive list. Completed
+		// notes retire through an end-time FIFO, so an earlier held note cannot
+		// pin every later note on the same key in memory.
+		visual_note_store notes;
 
 		// Per-key pending note trackers for note_off matching
 		// Parser-private: only accessed by parser thread
@@ -196,24 +174,23 @@ struct simple_player
 
 		// Push a note_on event - creates visual note and tracks as pending
 		// Called from parser thread only - no locking needed
-		SIMPLE_PLAYER_FORCE_NO_INLINE void push_note_on(uint8_t key, uint64_t time_us, size_t track_index, uint8_t channel, uint8_t velocity)
+		SIMPLE_PLAYER_FORCE_NO_INLINE void push_note_on(uint8_t key,
+			uint64_t time_us, tick_type tick, size_t track_index,
+			uint8_t channel, uint8_t velocity)
 		{
 			if (key >= key_count)
 				return;
 
 			uint32_t track_id = make_color_id(track_index, channel);
 
-			// Push to falling notes queue (lock-free)
-			falling_notes[key].push({time_us, ~0ULL, track_id});
-
-			// Track as pending for note_off matching (parser-private)
-			buffered_note* note_ptr = &falling_notes[key].back();
+			buffered_note* note_ptr = notes.create(key, time_us, track_id, tick);
 			pending[key].push(track_id, note_ptr);
 		}
 
 		// Push a note_off event - finds matching pending note and sets end_time
 		// Called from parser thread only - atomic store for end_time_us
-		SIMPLE_PLAYER_FORCE_NO_INLINE void push_note_off(uint8_t key, uint64_t time_us, size_t track_index, uint8_t channel)
+		SIMPLE_PLAYER_FORCE_NO_INLINE void push_note_off(uint8_t key,
+			uint64_t time_us, tick_type tick, size_t track_index, uint8_t channel)
 		{
 			if (key >= key_count)
 				return;
@@ -223,38 +200,39 @@ struct simple_player
 			// Find matching pending note and set its end time (atomic store)
 			buffered_note* note = pending[key].find_and_remove(track_id);
 			if (note)
-				note->end_time_us.store(time_us, std::memory_order_release);
+				notes.finish(note, time_us, tick);
 		}
 
-		// Remove notes that have fully scrolled past (end_time < cutoff)
-		// Called from render thread only - no locking needed
-		SIMPLE_PLAYER_FORCE_NO_INLINE void cull_expired(int64_t cutoff_time_us)
+		// Incorporate parser additions and retire completed notes in ending order.
+		// Called from the render thread while access_mutex is held.
+		SIMPLE_PLAYER_FORCE_NO_INLINE size_t update_visible(int64_t cutoff_time_us)
 		{
-			for (size_t key = 0; key < key_count; ++key)
-			{
-				auto& queue = falling_notes[key];
-				while (!queue.empty())
-				{
-					auto& front = queue.front();
-					// Only cull if note has ended and end is before cutoff
-					// Atomic load for end_time_us
-					uint64_t end_time = front.end_time_us.load(std::memory_order_relaxed);
-					if (end_time != ~0ULL && static_cast<int64_t>(end_time) < cutoff_time_us)
-						queue.pop();
-					else
-						break;  // Queue is ordered by start_time, so stop if this one isn't expired
-				}
-			}
+			return notes.update(cutoff_time_us);
+		}
+
+		const buffered_note* first_visible_note(size_t key) const
+		{
+			return notes.first_visible(key);
+		}
+
+		// Parser-side collection of records retired by the renderer.
+		void reclaim_retired()
+		{
+			notes.reclaim();
+		}
+
+		void flush_lifecycle()
+		{
+			notes.flush();
 		}
 
 		// Clear all visual state
 		// Should only be called when no concurrent access (e.g., during reset)
 		void clear()
 		{
-			for (auto& q : falling_notes)
-				q.clear();
 			for (auto& p : pending)
 				p.clear();
+			notes.reset();
 		}
 
 		// reset for new playback
@@ -395,10 +373,9 @@ struct simple_player
 		static constexpr uint64_t max_lookahead_us = 5000000;  // 5 seconds max lookahead
 		static constexpr uint64_t min_lookahead_us = 2500000;  // 2.5 seconds min before resuming parse
 
-		// Event-count throttle: caps send_buffer at dense tick clusters where
-		// the time-based throttle alone won't fire (millions of events packed
-		// into a single tick or sub-millisecond span). 1M events * 24B ~= 24MB
-		// ceiling for the lookahead buffer regardless of MIDI density.
+		// Event-count throttle for dense tick clusters where the time-based
+		// throttle alone cannot fire. Keep the established 64M-event lookahead:
+		// reducing this to 1M serializes the parser and sender on black MIDIs.
 		static constexpr size_t max_pending_events = 1u << 26;
 
 		void reset()
@@ -914,9 +891,12 @@ struct simple_player
 				// pending events buffered, or are paused.
 				while (!state.stop_requested)
 				{
+					state.visuals.reclaim_retired();
+
 					// Wait while paused (sleep longer to avoid busy-wait)
 					if (state.paused.load(std::memory_order_acquire))
 					{
+						state.visuals.flush_lifecycle();
 						std::this_thread::sleep_for(std::chrono::milliseconds(10));
 						continue;
 					}
@@ -930,6 +910,7 @@ struct simple_player
 						break;
 
 					// Too far ahead - sleep until sender catches up closer
+					state.visuals.flush_lifecycle();
 					std::this_thread::sleep_for(std::chrono::milliseconds(1));
 				}
 
@@ -1010,7 +991,8 @@ struct simple_player
 							{
 								msg_to_send = make_smsg(command, data1, data2);
 								uint8_t channel = command & 0x0F;
-								state.visuals.push_note_off(data1, batch_time_us, ref.track_index, channel);
+								state.visuals.push_note_off(
+									data1, batch_time_us, batch_tick, ref.track_index, channel);
 							}
 							break;
 						}
@@ -1024,9 +1006,11 @@ struct simple_player
 								uint8_t channel = command & 0x0F;
 
 								if (data2 > 0)
-									state.visuals.push_note_on(data1, batch_time_us, ref.track_index, channel, data2);
+									state.visuals.push_note_on(
+										data1, batch_time_us, batch_tick, ref.track_index, channel, data2);
 								else
-									state.visuals.push_note_off(data1, batch_time_us, ref.track_index, channel);
+									state.visuals.push_note_off(
+										data1, batch_time_us, batch_tick, ref.track_index, channel);
 							}
 							break;
 						}
@@ -1130,6 +1114,8 @@ struct simple_player
 			}
 		}
 
+		state.visuals.flush_lifecycle();
+		state.visuals.reclaim_retired();
 		state.parser_done.store(true, std::memory_order_release);
 	}
 
@@ -1190,8 +1176,11 @@ struct simple_player
 				// buffered, or paused. Identical policy to the file parser.
 				while (!state.stop_requested)
 				{
+					state.visuals.reclaim_retired();
+
 					if (state.paused.load(std::memory_order_acquire))
 					{
+						state.visuals.flush_lifecycle();
 						std::this_thread::sleep_for(std::chrono::milliseconds(10));
 						continue;
 					}
@@ -1204,6 +1193,7 @@ struct simple_player
 						pending < playback_state::max_pending_events)
 						break;
 
+					state.visuals.flush_lifecycle();
 					std::this_thread::sleep_for(std::chrono::milliseconds(1));
 				}
 
@@ -1225,9 +1215,11 @@ struct simple_player
 			if (!fast_forwarding)
 			{
 				if (ev.k == generated_event::kind::note_on)
-					state.visuals.push_note_on(ev.key, batch_time_us, ev.track_index, ev.channel, ev.velocity);
+					state.visuals.push_note_on(
+						ev.key, batch_time_us, ev.tick, ev.track_index, ev.channel, ev.velocity);
 				else if (ev.k == generated_event::kind::note_off)
-					state.visuals.push_note_off(ev.key, batch_time_us, ev.track_index, ev.channel);
+					state.visuals.push_note_off(
+						ev.key, batch_time_us, ev.tick, ev.track_index, ev.channel);
 			}
 
 			if (ev.short_msg != 0)
@@ -1249,6 +1241,8 @@ struct simple_player
 			}
 		}
 
+		state.visuals.flush_lifecycle();
+		state.visuals.reclaim_retired();
 		state.parser_done.store(true, std::memory_order_release);
 	}
 
@@ -1492,6 +1486,8 @@ struct simple_player
 
 		struct note_span
 		{
+			uint64_t start_tick;
+			uint64_t end_tick;
 			float begin_y;
 			float end_y;
 			uint32_t track_n;
@@ -1499,19 +1495,32 @@ struct simple_player
 			bool touches_keyboard;
 		};
 
-		struct interval
-		{
-			float begin_y;
-			float end_y;
-			uint32_t track;
-		};
-
 		std::vector<note_vert>  note_verts;
 		std::vector<note_color> note_colors;
 		std::vector<note_vert>  outline_verts;
 		std::vector<note_color> outline_colors;
 		std::vector<note_span>  key_note_spans;
-		std::vector<interval>   covered_intervals;
+		std::vector<note_span>  overlap_reorder_scratch;
+
+		void clear_note_scratch() noexcept
+		{
+			note_verts.clear();
+			note_colors.clear();
+			outline_verts.clear();
+			outline_colors.clear();
+			key_note_spans.clear();
+			overlap_reorder_scratch.clear();
+		}
+
+		void release_note_scratch() noexcept
+		{
+			std::vector<note_vert>().swap(note_verts);
+			std::vector<note_color>().swap(note_colors);
+			std::vector<note_vert>().swap(outline_verts);
+			std::vector<note_color>().swap(outline_colors);
+			std::vector<note_span>().swap(key_note_spans);
+			std::vector<note_span>().swap(overlap_reorder_scratch);
+		}
 
 		// Six faces per key, three shadow quads per black key, and three case/rail
 		// quads: 1,860 triangles for all 128 keys, independent of the note count.
@@ -1661,7 +1670,7 @@ struct simple_player
 		bool enable_simulated_lag = true;
 		uint8_t remove_overlaps = 0;
 
-		static constexpr uint8_t MAX_OVERLAPS_REMOVAL_VERSION = 1;
+		static constexpr uint8_t MAX_OVERLAPS_REMOVAL_VERSION = 0;
 		static constexpr float DEFAULT_WIDTH = 400, DEFAULT_HEIGHT = 250;
 		float width = DEFAULT_WIDTH, height = DEFAULT_HEIGHT;
 		float last_keyboard_height = 0;
@@ -1777,99 +1786,10 @@ struct simple_player
 		return static_cast<uint8_t>(temp >> 16);
 	}
 
-	SIMPLE_PLAYER_FORCE_NO_INLINE void overlaps_removal_v1(
-		std::vector<draw_data::note_span>& note_spans)
+	SIMPLE_PLAYER_FORCE_NO_INLINE void remove_redundant_overlaps(draw_data& data)
 	{
-		if (note_spans.empty())
-			return;
-
-		// Backward redundancy filter, in place. Walk right→left; within each
-		// begin_y block, keep an entry iff its end_y exceeds the running max of
-		// later kept end_ys in that block. Zero-height entries are always kept
-		// and do not contribute to run_max. Survivors are written toward the
-		// tail of the vector, then compacted to the front.
-		const std::size_t size	= note_spans.size();
-		std::size_t	write	= size;
-		float		run_max = -std::numeric_limits<float>::infinity();
-		float		prev_a	= std::numeric_limits<float>::infinity();
-
-		for (std::size_t k = size; k-- > 0; )
-		{
-			if (note_spans[k].begin_y != prev_a)
-			{
-				run_max = -std::numeric_limits<float>::infinity();
-				prev_a = note_spans[k].begin_y;
-			}
-
-			const bool zero_height = (note_spans[k].begin_y == note_spans[k].end_y);
-			const bool extends = (note_spans[k].end_y > run_max);
-
-			if (!zero_height && extends)
-			{
-				run_max = note_spans[k].end_y;
-				--write;
-				note_spans[write] = note_spans[k];
-			}
-			// else: covered by a later kept stripe in this block → drop
-		}
-
-		const std::size_t kept = size - write;
-		if (write > 0)
-			std::move(note_spans.begin() + write, note_spans.end(), note_spans.begin());
-		note_spans.resize(kept);
-	}
-
-	SIMPLE_PLAYER_FORCE_NO_INLINE void overlaps_removal_v0(
-		draw_data& data,
-		const auto& emit_span)
-	{
-		data.covered_intervals.clear();
-		data.covered_intervals.reserve(data.key_note_spans.size());
-
-		auto add_covered_interval = [&](float begin_y, float end_y)
-		{
-			if (begin_y >= end_y)
-				return;
-
-			auto insert_it = data.covered_intervals.begin();
-			while (insert_it != data.covered_intervals.end() && insert_it->end_y < begin_y)
-				++insert_it;
-
-			float merged_begin = begin_y;
-			float merged_end = end_y;
-			while (insert_it != data.covered_intervals.end() && insert_it->begin_y <= merged_end)
-			{
-				merged_begin = std::min(merged_begin, insert_it->begin_y);
-				merged_end = std::max(merged_end, insert_it->end_y);
-				insert_it = data.covered_intervals.erase(insert_it);
-			}
-
-			data.covered_intervals.insert(insert_it, {merged_begin, merged_end});
-		};
-
-		for (auto it = data.key_note_spans.rbegin(); it != data.key_note_spans.rend(); ++it)
-		{
-			float cursor = it->begin_y;
-			for (const auto& covered : data.covered_intervals)
-			{
-				if (covered.end_y <= cursor)
-					continue;
-				if (covered.begin_y >= it->end_y)
-					break;
-
-				if (covered.begin_y > cursor)
-					emit_span(cursor, std::min(covered.begin_y, it->end_y), it->color);
-
-				cursor = std::max(cursor, covered.end_y);
-				if (cursor >= it->end_y)
-					break;
-			}
-
-			if (cursor < it->end_y)
-				emit_span(cursor, it->end_y, it->color);
-
-			add_covered_interval(it->begin_y, it->end_y);
-		}
+		dixelu::remove_redundant_midi_overlaps(
+			data.key_note_spans, data.overlap_reorder_scratch);
 	}
 
 	SIMPLE_PLAYER_FORCE_NO_INLINE void draw(draw_data& data)
@@ -1886,7 +1806,8 @@ struct simple_player
 			uint64_t max = state.parsed_up_to_us.load(std::memory_order_relaxed);
 
 			if (max < current_us + data.scroll_window_us)
-				current_us = max - data.scroll_window_us;
+				current_us = max > data.scroll_window_us ?
+					max - data.scroll_window_us : 0;
 		}
 
 		// draw falling notes
@@ -1896,58 +1817,55 @@ struct simple_player
 
 		GLsizei white_fill_verts = 0;
 		GLsizei white_outline_verts = 0;
+		data.clear_note_scratch();
 
 		try
 		{
 			// lock against visuals.reset() which may be called by playback_thread on seek/restart.
 			std::lock_guard<std::mutex> visuals_lock(visuals.access_mutex);
 
-			visuals.cull_expired(int64_t(current_us) - data.scroll_window_us);
-
-			size_t queued_notes = 0;
-			for (const auto& queue : visuals.falling_notes)
-				queued_notes += queue.approximate_size();
-
-			const size_t fill_vert_capacity = queued_notes * 4;
-			const size_t outline_vert_capacity = queued_notes * 8;
-			if (data.note_verts.capacity() < fill_vert_capacity)
-				data.note_verts.reserve(fill_vert_capacity);
-			if (data.note_colors.capacity() < fill_vert_capacity)
-				data.note_colors.reserve(fill_vert_capacity);
-			if (data.outline_verts.capacity() < outline_vert_capacity)
-				data.outline_verts.reserve(outline_vert_capacity);
-			if (data.outline_colors.capacity() < outline_vert_capacity)
-				data.outline_colors.reserve(outline_vert_capacity);
+			const int64_t expiry_cutoff = current_us > data.scroll_window_us ?
+				static_cast<int64_t>(current_us - data.scroll_window_us) : -1;
+			static_cast<void>(visuals.update_visible(expiry_cutoff));
 
 			auto batch_notes_for_index = [&](int index)
 			{
 				uint8_t key = data.key_n[index];
 				data.key_note_spans.clear();
 
-				for (auto it = visuals.falling_notes[key].begin();
-					it != visuals.falling_notes[key].end(); ++it)
+				for (const auto* note_ptr = visuals.first_visible_note(key);
+					note_ptr; note_ptr = note_ptr->visible_next)
 				{
-					auto& note = *it;
+					const auto& note = *note_ptr;
 
-					// Atomic load for end_time_us (may be updated by parser)
+					// The acquire load also publishes end_tick, which finish() stores
+					// immediately before the completed time.
 					uint64_t end_time = note.end_time_us.load(std::memory_order_acquire);
+					uint64_t end_tick = end_time == ~0ULL ? ~0ULL :
+						note.end_tick.load(std::memory_order_relaxed);
 
-					int64_t start_offset = note.start_time_us - current_us;
-					int64_t end_offset = end_time - current_us;
+					const int64_t start_offset = static_cast<int64_t>(note.start_time_us) -
+						static_cast<int64_t>(current_us);
 
 					float begin_y = float(start_offset) / float(data.scroll_window_us);
 					float end_y = 1;
 
 					if (end_time != ~0ULL)
+					{
+						const int64_t end_offset = static_cast<int64_t>(end_time) -
+							static_cast<int64_t>(current_us);
 						end_y = float(end_offset) / float(data.scroll_window_us);
+					}
 
 					if (begin_y > 1.01f)
-						break; // Queue is ordered by start_time_us, so later notes are even further above view.
+						break; // Visible list is ordered by note-on time.
 
 					if (end_y < -0.01f)
 						continue;
 
 					data.key_note_spans.push_back({
+						note.start_tick,
+						end_tick,
 						std::clamp(begin_y, 0.f, 1.f),
 						std::clamp(end_y, 0.f, 1.f),
 						note.track_id,
@@ -1959,18 +1877,27 @@ struct simple_player
 				if (data.key_note_spans.empty())
 					return;
 
-				for (auto it = data.key_note_spans.rbegin(); it != data.key_note_spans.rend(); ++it)
+				const draw_data::note_span* keyboard_top = nullptr;
+				for (const auto& span : data.key_note_spans)
 				{
-					if (!it->touches_keyboard)
+					if (!span.touches_keyboard)
 						continue;
-
-					keyboard_colors[index] = {
-						uint8_t(it->color >> 24),
-						uint8_t(it->color >> 16),
-						uint8_t(it->color >> 8),
-					};
-					break;
+					if (!keyboard_top || span.start_tick > keyboard_top->start_tick ||
+						(span.start_tick == keyboard_top->start_tick &&
+							span.track_n > keyboard_top->track_n))
+						keyboard_top = &span;
 				}
+				if (keyboard_top)
+				{
+					keyboard_colors[index] = {
+						uint8_t(keyboard_top->color >> 24),
+						uint8_t(keyboard_top->color >> 16),
+						uint8_t(keyboard_top->color >> 8),
+					};
+				}
+
+				if (data.remove_overlaps <= draw_data::MAX_OVERLAPS_REMOVAL_VERSION)
+					remove_redundant_overlaps(data);
 
 				const float lx = data.keyboard[index].tl.x;
 				const float rx = data.keyboard[index].tr.x;
@@ -2013,7 +1940,7 @@ struct simple_player
 					data.note_colors.push_back(note_color_shady);
 					data.note_colors.push_back(note_color_shady);
 
-					data.outline_verts.reserve(data.outline_verts.size() + 16);
+					data.outline_verts.reserve(data.outline_verts.size() + 8);
 					data.outline_verts.push_back({lx, begin_y}); data.outline_verts.push_back({lx, end_y});
 					data.outline_verts.push_back({lx, end_y});   data.outline_verts.push_back({rx, end_y});
 					data.outline_verts.push_back({rx, end_y});   data.outline_verts.push_back({rx, begin_y});
@@ -2022,20 +1949,6 @@ struct simple_player
 					for (int e = 0; e < 8; ++e)
 						data.outline_colors.push_back(note_border_col);
 				};
-
-				if (data.remove_overlaps <= draw_data::MAX_OVERLAPS_REMOVAL_VERSION)
-				{
-					if (data.remove_overlaps == 0)
-					{
-						overlaps_removal_v0(data, emit_span);
-						return;
-					}
-					else if (data.remove_overlaps == 1)
-					{
-						overlaps_removal_v1(data.key_note_spans);
-						// [[fallthrough]];
-					}
-				}
 
 				for (const auto& span : data.key_note_spans)
 					emit_span(span.begin_y, span.end_y, span.color);
@@ -2052,6 +1965,7 @@ struct simple_player
 		}
 		catch (const std::bad_alloc&)
 		{
+			data.release_note_scratch();
 			handle_memory_failure(true);
 			return;
 		}
@@ -2082,10 +1996,7 @@ struct simple_player
 			glColorPointer(4, GL_UNSIGNED_BYTE, 0, data.outline_colors.data());
 			glDrawArrays(GL_LINES, white_outline_verts, total_outline - white_outline_verts); // black outlines
 
-			data.note_verts.clear();
-			data.note_colors.clear();
-			data.outline_verts.clear();
-			data.outline_colors.clear();
+			data.clear_note_scratch();
 		}
 
 		data.draw_keyboard(keyboard_colors);

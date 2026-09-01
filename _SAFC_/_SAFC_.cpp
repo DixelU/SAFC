@@ -2750,15 +2750,11 @@ void on_overlap_removal_switch_action(bool with_increment)
 	auto overlap_switch = (button*)(*window)["OVERLAP_SWITCH"];
 
 	if (with_increment)
-	{
-		player_view->data->remove_overlaps += 1;
-		if (player_view->data->remove_overlaps > 1)
-			player_view->data->remove_overlaps = 0xFF;
-	}
+		player_view->data->remove_overlaps =
+			player_view->data->remove_overlaps == 0 ? 0xFF : 0;
 
-	const char* states[] = {"Overlaps drawn", "Naive OR", "R/t OR (Beta)"};
-
-	overlap_switch->safe_string_replace( states[(player_view->data->remove_overlaps + 1) & 0xFF]);
+	overlap_switch->safe_string_replace(
+		player_view->data->remove_overlaps == 0 ? "Strict OR" : "Overlaps drawn");
 }
 
 void on_overlap_removal_switch()

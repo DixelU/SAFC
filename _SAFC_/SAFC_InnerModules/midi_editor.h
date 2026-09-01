@@ -3320,6 +3320,7 @@ public:
 			seek_held_idx_ = 0;
 			seek_anchor_pending_ = false;
 			seek_target_us_ = 0;
+			seek_target_tick_ = 0;
 		}
 
 		void seek(std::uint64_t target_us) override
@@ -3333,6 +3334,7 @@ public:
 			tick_type cross_tick = tick_at_us(target_us);
 			if (us_at_tick_scan(cross_tick) < target_us)
 				++cross_tick;
+			seek_target_tick_ = cross_tick;
 
 			on_idx_ = std::size_t(std::lower_bound(notes_.begin(), notes_.end(), cross_tick,
 				[](const piano_note& note, tick_type t) { return note.start_tick < t; })
@@ -3441,6 +3443,7 @@ public:
 			{
 				generated_event ge;
 				ge.time_us = us_at_tick_scan(ev.tick);
+				ge.tick = ev.tick;
 				ge.short_msg = ev.short_msg;
 				ge.k = generated_event::kind::control;
 				seek_state_.push_back(ge);
@@ -3455,6 +3458,7 @@ public:
 			{
 				generated_event ge;
 				ge.time_us = us_at_tick_scan(tick);
+				ge.tick = tick;
 				ge.short_msg = smsg(0xB0 | (ch & 0x0F), cc, val);
 				ge.k = generated_event::kind::control;
 				seek_state_.push_back(ge);
@@ -3506,6 +3510,7 @@ public:
 				seek_anchor_pending_ = false;
 				out = generated_event{};
 				out.time_us = seek_target_us_;
+				out.tick = seek_target_tick_;
 				return true;
 			}
 
@@ -3514,6 +3519,7 @@ public:
 				const auto& note = seek_held_notes_[seek_held_idx_++];
 				const std::uint8_t vel = std::max<std::uint8_t>(note.velocity, 1);
 				out.time_us = seek_target_us_;
+				out.tick = note.start_tick;
 				out.short_msg = smsg(0x90 | (note.channel & 0x0F), note.key, vel);
 				out.k = generated_event::kind::note_on;
 				out.key = note.key;
@@ -3548,6 +3554,7 @@ public:
 				const auto entry = off_heap_.top();
 				off_heap_.pop();
 				out.time_us = time_us;
+				out.tick = entry.end_tick;
 				out.short_msg = smsg(0x80 | (entry.channel & 0x0F), entry.key, 0x40);
 				out.k = generated_event::kind::note_off;
 				out.key = entry.key;
@@ -3558,6 +3565,7 @@ public:
 			else if (which == pick_raw)
 			{
 				out.time_us = time_us;
+				out.tick = tick;
 				out.short_msg = controls_[raw_idx_].short_msg;
 				out.k = generated_event::kind::control;
 				out.key = out.velocity = out.channel = 0;
@@ -3569,6 +3577,7 @@ public:
 				const auto& note = notes_[on_idx_];
 				const std::uint8_t vel = std::max<std::uint8_t>(note.velocity, 1);
 				out.time_us = time_us;
+				out.tick = note.start_tick;
 				out.short_msg = smsg(0x90 | (note.channel & 0x0F), note.key, vel);
 				out.k = generated_event::kind::note_on;
 				out.key = note.key;
@@ -3673,6 +3682,7 @@ public:
 		std::vector<piano_note> seek_held_notes_;
 		std::size_t seek_held_idx_ = 0;
 		std::uint64_t seek_target_us_ = 0;
+		tick_type seek_target_tick_ = 0;
 		bool seek_anchor_pending_ = false;
 
 		// Monotonic tick->us walker state

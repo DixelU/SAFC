@@ -944,6 +944,7 @@ struct compressed_midi_event_source::impl
 
 		out = generated_event{};
 		out.time_us = tick_to_us(event.tick);
+		out.tick = event.tick;
 		out.short_msg = event.short_msg;
 		out.k = static_cast<generated_event::kind>(event.kind);
 		out.key = event.key;
