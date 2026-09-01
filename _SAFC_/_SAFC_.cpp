@@ -3991,24 +3991,9 @@ void init(bool reinitialise_font = true)
 	(*window)["ADD_Butt"] = new button("Add MIDIs", system_white, on_add, 150, 167.5, 75, 12, 1, 0x00003FAF, 0xFFFFFFFF, 0x00003FFF, 0xFFFFFFFF, 0xF7F7F7FF, nullptr, " ");
 	(*window)["REM_Butt"] = new button("Remove selected", system_white, on_rem, 150, 155, 75, 12, 1, 0x3F0000AF, 0xFFFFFFFF, 0x3F0000FF, 0xFFFFFFFF, 0xF7F7F7FF, nullptr, " ");
 	(*window)["REM_ALL_Butt"] = new button("Remove all", system_white, on_rem_all, 150, 142.5, 75, 12, 1, 0xAF0000AF, 0xFFFFFFFF, 0xAF0000AF, 0xFFFFFFFF, 0xF7F7F7FF, &system_white, "May cause lag");
-	(*window)["OPEN_ARCHIVE_PLAYER"] = new button(
-		"Open archive", system_black, []()
-		{
-			if (!compressed_player_preparing.load(std::memory_order_acquire))
-				compressed_player_status(
-					"Choose or drop an XZ/ZIP/7z archive; nested layers are supported");
-			global_window_handler->enable_window("ARCHIVE_SOURCE");
-		},
-		150, 130, 75, 12, 1,
-		0xFFFFFFAF, 0x0F0F0FFF, 0xFFFFFFFF, 0x000000FF, 0xFFFFFFFF,
-		nullptr, "Open MIDI directly from XZ/ZIP/7z, including nested archives");
-
-	(*window)["OPEN_SIMPLAYER"] = new button("Play MIDI", system_black, on_open_player, 150, 117.5, 75, 12, 1, 0xFFFFFFAF, 0x0F0F0FFF, 0xFFFFFFFF, 0x000000FF, 0xFFFFFFFF, nullptr, " ");
-	(*window)["OPEN_MIDI_EDITOR"] = new button("MIDI Editor", system_black, []() {
-		global_window_handler->main_window_id = "MIDI_EDITOR";
-		global_window_handler->disable_all_windows();
-		global_window_handler->enable_window("MIDI_EDITOR");
-	}, 150, 105, 75, 12, 1, 0xFFFFFFAF, 0x0F0F0FFF, 0xFFFFFFFF, 0x000000FF, 0xFFFFFFFF, nullptr, "Open MIDI Piano Roll Editor");
+	(*window)["OPEN_TOOLS"] = new button("Tools...", system_black, []() {
+		global_window_handler->enable_window("TOOLS");
+	}, 150, 117.5, 75, 12, 1, 0xFFFFFFAF, 0x0F0F0FFF, 0xFFFFFFFF, 0x000000FF, 0xFFFFFFFF, nullptr, " ");
 
 	(*window)["GLOBAL_PPQN_Butt"] = new button("Global PPQN", system_white, on_global_ppqn, 150, 82.5, 75, 12, 1, 0xFF3F00AF, 0xFFFFFFFF, 0xFF3F00AF, 0xFFFFFFFF, 0xF7F7F7FF, nullptr, " ");
 	(*window)["GLOBAL_OFFSET_Butt"] = new button("Global offset", system_white, on_global_offset, 150, 70, 75, 12, 1, 0xFF7F00AF, 0xFFFFFFFF, 0xFF7F00FF, 0xFFFFFFFF, 0xF7F7F7FF, nullptr, " ");
@@ -4029,6 +4014,31 @@ void init(bool reinitialise_font = true)
 		0x000000AF, 0xFFFFFFFF, 0x000000AF, 0xFFFFFFFF, 0xF7F7F7FF, nullptr, " ");//177.5
 
 	(*global_window_handler)["MAIN"] = window;
+
+	window = new moveable_fui_window("MIDI tools", system_white, 65, 140, 130, 62.5f, 90, 2.5f, 10, 10, 3, BACKGROUND_OPQ, HEADER, BORDER);
+	(*window)["OPEN_ARCHIVE_PLAYER"] = new button(
+		"Open archive", system_black, []()
+		{
+			global_window_handler->disable_window("TOOLS");
+			if (!compressed_player_preparing.load(std::memory_order_acquire))
+				compressed_player_status(
+					"Choose or drop an XZ/ZIP/7z archive; nested layers are supported");
+			global_window_handler->enable_window("ARCHIVE_SOURCE");
+		},
+		130, 116.5, 100, 12, 1,
+		0xFFFFFFAF, 0x0F0F0FFF, 0xFFFFFFFF, 0x000000FF, 0xFFFFFFFF,
+		nullptr, " ");
+	(*window)["OPEN_SIMPLAYER"] = new button("Play MIDI", system_black, []() {
+		global_window_handler->disable_window("TOOLS");
+		on_open_player();
+	}, 130, 104, 100, 12, 1, 0xFFFFFFAF, 0x0F0F0FFF, 0xFFFFFFFF, 0x000000FF, 0xFFFFFFFF, nullptr, " ");
+	(*window)["OPEN_MIDI_EDITOR"] = new button("MIDI Editor", system_black, []() {
+		global_window_handler->main_window_id = "MIDI_EDITOR";
+		global_window_handler->disable_all_windows();
+		global_window_handler->enable_window("MIDI_EDITOR");
+	}, 130, 91.5, 100, 12, 1, 0xFFFFFFAF, 0x0F0F0FFF, 0xFFFFFFFF, 0x000000FF, 0xFFFFFFFF, nullptr, " ");
+
+	(*global_window_handler)["TOOLS"] = window;
 
 	window = new moveable_fui_window("Props. and sets.", system_white, -100, 100, 200, 225, 100, 2.5f, 75, 50, 3, BACKGROUND_OPQ, HEADER, BORDER);
 	(*window)["FileName"] = new text_box("_", system_white, 0, 88.5 - moveable_window::window_header_size, 6, 200 - 1.5 * moveable_window::window_header_size, 7.5, 0, 0, 0, _Align::left, text_box::VerticalOverflow::cut);
