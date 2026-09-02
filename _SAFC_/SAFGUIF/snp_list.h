@@ -66,6 +66,18 @@ struct selectable_properted_list : handleable_ui_part
 		calculated_height = space_between * selectors.size();
 	}
 
+	void safe_clear()
+	{
+		std::lock_guard locker(lock);
+
+		selectors_text.clear();
+		selectors.clear();
+		selected_id.clear();
+		current_top_line_id = 0;
+		calculated_height = 0;
+		top_arrow_hovered = bottom_arrow_hovered = 0;
+	}
+
 	[[nodiscard]] bool mouse_handler(float mx, float my, char button_btn, char state) override
 	{
 		std::lock_guard locker(lock);

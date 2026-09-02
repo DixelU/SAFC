@@ -2,3 +2,7 @@
 	path = utility
 	url = https://github.com/DixelU/utility.git
 	branch = consolidation
+[submodule "SYNCore"]
+	path = SYNCore
+	url = https://github.com/DixelU/SAFSYNCore.git
+	branch = master

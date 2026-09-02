@@ -19,6 +19,7 @@ inline std::wstring default_reg_path = L"Software\\SAFC\\";
 
 inline std::string default_font_name = "Arial";
 inline std::wstring saved_midi_device_name = L"";
+inline std::wstring saved_syncore_bank_path = L"";
 inline bool is_fonted = true;
 
 //#define ROT_ANGLE 0.7

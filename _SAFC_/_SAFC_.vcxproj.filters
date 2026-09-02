@@ -22,6 +22,9 @@
     <Filter Include="Файлы заголовков\SAFGUIF\Specific">
       <UniqueIdentifier>{05cbd868-f101-4136-8d0b-2bbc53b83065}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Исходные файлы\SYNCore">
+      <UniqueIdentifier>{C075E463-8286-4FAB-864D-43E62523B211}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="consts.h">
@@ -171,6 +174,9 @@
     <ClInclude Include="SAFC_InnerModules\compressed_midi_event_source.h">
       <Filter>Файлы заголовков\MIDI Processing</Filter>
     </ClInclude>
+	<ClInclude Include="SAFC_InnerModules\syncore_output.h">
+	  <Filter>Файлы заголовков\MIDI Processing</Filter>
+	</ClInclude>
   </ItemGroup>
   <ItemGroup>
 	<ClCompile Include="SAFCGUIF_Local\midi_editor_tools_ui.cpp">
@@ -182,8 +188,41 @@
 	<ClCompile Include="SAFC_InnerModules\compressed_midi_event_source.cpp">
 	  <Filter>Исходные файлы</Filter>
 	</ClCompile>
+	<ClCompile Include="SAFC_InnerModules\syncore_output.cpp">
+	  <Filter>Исходные файлы</Filter>
+	</ClCompile>
     <ClCompile Include="_SAFC_.cpp">
       <Filter>Исходные файлы</Filter>
+    </ClCompile>
+    <ClCompile Include="..\SYNCore\SAFSYN\core.cpp">
+      <Filter>Исходные файлы\SYNCore</Filter>
+    </ClCompile>
+    <ClCompile Include="..\SYNCore\SAFSYN\cohort_engine.cpp">
+      <Filter>Исходные файлы\SYNCore</Filter>
+    </ClCompile>
+    <ClCompile Include="..\SYNCore\SAFSYN\engine.cpp">
+      <Filter>Исходные файлы\SYNCore</Filter>
+    </ClCompile>
+    <ClCompile Include="..\SYNCore\SAFSYN\mastering.cpp">
+      <Filter>Исходные файлы\SYNCore</Filter>
+    </ClCompile>
+    <ClCompile Include="..\SYNCore\SAFSYN\phase.cpp">
+      <Filter>Исходные файлы\SYNCore</Filter>
+    </ClCompile>
+    <ClCompile Include="..\SYNCore\SAFSYN\playback.cpp">
+      <Filter>Исходные файлы\SYNCore</Filter>
+    </ClCompile>
+    <ClCompile Include="..\SYNCore\SAFSYN\smf.cpp">
+      <Filter>Исходные файлы\SYNCore</Filter>
+    </ClCompile>
+    <ClCompile Include="..\SYNCore\SAFSYN\smf_renderer.cpp">
+      <Filter>Исходные файлы\SYNCore</Filter>
+    </ClCompile>
+    <ClCompile Include="..\SYNCore\SAFSYN\wav_writer.cpp">
+      <Filter>Исходные файлы\SYNCore</Filter>
+    </ClCompile>
+    <ClCompile Include="..\SYNCore\SAFSYN\windows_synth.cpp">
+      <Filter>Исходные файлы\SYNCore</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>

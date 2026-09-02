@@ -68,6 +68,8 @@ using dixelu::worker_singleton;
 // major.minor.patch.build; std::array gives lexicographic <, ==, > for free
 using version_t = std::array<std::uint16_t, 4>;
 version_t g_version_tuple{};
+syncore_preferences saved_syncore_preferences{};
+syncore_preferences syncore_preferences_draft{};
 
 // Fully-qualified path of the running executable. GetModuleFileNameW(NULL, ...)
 // has been observed to return a bare "SAFC.exe" (no directory) when the process
@@ -1028,6 +1030,27 @@ std::wstring playback_source_open_file_dialog()
 		return filename;
 	return {};
 }
+
+std::wstring syncore_bank_open_file_dialog()
+{
+	wchar_t filename[MAX_PATH]{};
+	OPENFILENAME ofn{};
+	ofn.lStructSize = sizeof(ofn);
+	ofn.hwndOwner = hWnd;
+	ofn.lpstrFile = filename;
+	ofn.nMaxFile = MAX_PATH;
+	ofn.lpstrFilter =
+		L"SoundFont and SFZ banks\0*.sf2;*.sfz\0"
+		L"SoundFont banks\0*.sf2\0"
+		L"SFZ banks\0*.sfz\0";
+	ofn.nFilterIndex = 1;
+	ofn.lpstrTitle = L"Choose a bank for embedded SYNCore";
+	ofn.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST | OFN_EXPLORER;
+	if (GetOpenFileName(&ofn))
+		return filename;
+	return {};
+}
+
 std::wstring save_open_file_dialog(const wchar_t* Title)
 {
 	wchar_t filename[MAX_PATH];
@@ -1037,6 +1060,7 @@ std::wstring save_open_file_dialog(const wchar_t* Title)
 	ofn.lStructSize = sizeof(ofn);
 	ofn.hwndOwner = NULL;  // If you have a merge_preview_container to center over, put its HANDLE here
 	ofn.lpstrFilter = L"MIDI files(*.mid)\0*.mid\0";
+	ofn.lpstrDefExt = L"mid";
 	ofn.lpstrFile = filename;
 	ofn.nMaxFile = MAX_PATH;
 	ofn.lpstrTitle = Title;
@@ -2498,6 +2522,64 @@ void restore_reg_settings()
 		saved_midi_device_name = settings::regestry_access.GetStringValue(L"MIDI_DEVICE_NAME");
 	}
 	catch (...) { std::cout << "Exception thrown while restoring MIDI_DEVICE_NAME from registry\n"; }
+	try
+	{
+		saved_syncore_bank_path = settings::regestry_access.GetStringValue(L"SYNCORE_BANK_PATH");
+	}
+	catch (...) { std::cout << "No saved SYNCore bank path\n"; }
+	try
+	{
+		const auto value = settings::regestry_access.GetDwordValue(L"SYNCORE_SAMPLE_RATE");
+		if (value >= 8000 && value <= 192000)
+			saved_syncore_preferences.sample_rate = value;
+	}
+	catch (...) {}
+	try
+	{
+		const auto value = settings::regestry_access.GetDwordValue(L"SYNCORE_BUFFER_FRAMES");
+		if (value >= 256 && value <= 1048576)
+			saved_syncore_preferences.buffer_frames = value;
+	}
+	catch (...) {}
+	try
+	{
+		const auto value = settings::regestry_access.GetDwordValue(L"SYNCORE_MAX_COHORTS");
+		if (value >= 1 && value <= 1048576)
+			saved_syncore_preferences.maximum_cohorts = value;
+	}
+	catch (...) {}
+	try
+	{
+		const auto value = settings::regestry_access.GetDwordValue(L"SYNCORE_RENDER_THREADS");
+		if (value <= 64)
+			saved_syncore_preferences.render_threads = value;
+	}
+	catch (...) {}
+	try
+	{
+		const auto value = settings::regestry_access.GetDwordValue(L"SYNCORE_PHASE_MODE");
+		if (value <= static_cast<std::uint32_t>(syncore_phase_mode::independent_bins))
+			saved_syncore_preferences.phase_mode = static_cast<syncore_phase_mode>(value);
+	}
+	catch (...) {}
+	try
+	{
+		const auto value = std::stod(settings::regestry_access.GetStringValue(L"SYNCORE_GAIN_DB"));
+		if (value >= -60.0 && value <= 12.0)
+			saved_syncore_preferences.output_gain_db = value;
+	}
+	catch (...) {}
+	try
+	{
+		saved_syncore_preferences.limiter_enabled =
+			settings::regestry_access.GetDwordValue(L"SYNCORE_LIMITER") != 0;
+	}
+	catch (...) {}
+	if (player)
+	{
+		player->set_syncore_bank_path(saved_syncore_bank_path);
+		player->set_syncore_preferences(saved_syncore_preferences);
+	}
 
 	settings::regestry_access.Close();
 }
@@ -2512,6 +2594,15 @@ void open_compressed_midi_file(std::wstring filename);
 void open_player_file(std::wstring filename);
 void select_regular_player_source();
 bool restart_selected_compressed_source();
+
+void report_player_output_error()
+{
+	auto detail = player ? player->get_last_output_error() : std::string{};
+	if (detail.empty())
+		throw_alert_error(std::string("No MIDI output device is available for playback"));
+	else
+		throw_alert_error(std::move(detail));
+}
 
 void player_watch_func()
 {
@@ -2612,9 +2703,10 @@ void update_device_list()
 
 	auto device_list = _WH_t<selectable_properted_list>("SIMPLAYER", "DEVICE_LIST");
 
-	// Clear existing items
-	device_list->selectors_text.clear();
-	device_list->selected_id.clear();
+	// Rebuild both the text model and its visible row buttons. Clearing only
+	// selectors_text leaves the previous buttons alive and stacks duplicate
+	// rows every time the MIDI devices are refreshed.
+	device_list->safe_clear();
 
 	// Get device names from player
 	auto device_names = player->get_device_names();
@@ -2670,6 +2762,303 @@ void on_device_select(int device_id)
 	});
 }
 
+const char* syncore_phase_mode_name(syncore_phase_mode mode)
+{
+	switch (mode)
+	{
+	case syncore_phase_mode::coherent: return "Coherent";
+	case syncore_phase_mode::random_polarity: return "Random polarity";
+	case syncore_phase_mode::analytic: return "Analytic";
+	case syncore_phase_mode::smooth_field: return "Smooth field";
+	case syncore_phase_mode::independent_bins: return "Independent bins";
+	}
+	return "Coherent";
+}
+
+std::string syncore_bank_display_name()
+{
+	if (saved_syncore_bank_path.empty())
+		return "Bank: built-in sine (choose SF2/SFZ below)";
+
+	const auto filename = std::filesystem::path(saved_syncore_bank_path).filename().wstring();
+	std::string result = "Bank: ";
+	result.reserve(result.size() + filename.size());
+	for (const auto character : filename)
+		result.push_back(character >= 32 && character < 127 ? static_cast<char>(character) : '?');
+	return result;
+}
+
+std::atomic_bool syncore_status_watcher_running{false};
+
+bool syncore_settings_is_open()
+{
+	if (!global_window_handler)
+		return false;
+	std::lock_guard locker(global_window_handler->lock);
+	for (const auto& active_window : global_window_handler->active_windows)
+		if (active_window->first == "SYNCORE_SETTINGS")
+			return true;
+	return false;
+}
+
+std::string syncore_runtime_status_text()
+{
+	if (!player)
+		return "Status: unavailable";
+
+	const auto status = player->get_syncore_runtime_status();
+	if (!status.error.empty())
+		return "Status: " + status.message + "\n" + status.error;
+
+	if (status.preparing && status.preparation_total)
+	{
+		const double percent = 100.0 * status.preparation_completed /
+			status.preparation_total;
+		return std::format(
+			"Status: {}\nPhase preparation: {} / {} ({:.1f}%) | {:.1f} / {:.1f} MiB",
+			status.message, status.preparation_completed, status.preparation_total,
+			percent, status.cache_bytes / 1048576.0,
+			status.total_cache_bytes / 1048576.0);
+	}
+
+	return "Status: " + status.message;
+}
+
+void refresh_syncore_runtime_status()
+{
+	if (!simple_player::syncore_available() || !global_window_handler)
+		return;
+	auto window = (*global_window_handler)["SYNCORE_SETTINGS"];
+	if (window && (*window)["STATUS"])
+		((text_box*)(*window)["STATUS"])->safe_string_replace(
+			syncore_runtime_status_text());
+}
+
+void start_syncore_status_watcher();
+
+void syncore_status_watch_func()
+{
+	unsigned inactive_ticks = 0;
+	while (inactive_ticks < 5)
+	{
+		if (syncore_settings_is_open())
+		{
+			inactive_ticks = 0;
+			refresh_syncore_runtime_status();
+		}
+		else
+			++inactive_ticks;
+		std::this_thread::sleep_for(std::chrono::milliseconds(100));
+	}
+
+	syncore_status_watcher_running.store(false, std::memory_order_release);
+	// Cover a close/reopen that lands between the last activity check and the
+	// running-flag reset.
+	if (syncore_settings_is_open())
+		start_syncore_status_watcher();
+}
+
+void start_syncore_status_watcher()
+{
+	if (syncore_status_watcher_running.exchange(true, std::memory_order_acq_rel))
+		return;
+	worker_singleton<struct syncore_status_watcher>::instance().push(
+		syncore_status_watch_func);
+}
+
+void refresh_syncore_setup_controls()
+{
+	if (!simple_player::syncore_available())
+		return;
+	auto window = (*global_window_handler)["SYNCORE_SETTINGS"];
+	if (!window)
+		return;
+
+	((text_box*)(*window)["BANK"])->safe_string_replace(syncore_bank_display_name());
+	((input_field*)(*window)["SAMPLE_RATE"])->safe_string_replace(
+		std::to_string(syncore_preferences_draft.sample_rate));
+	((input_field*)(*window)["BUFFER_FRAMES"])->safe_string_replace(
+		std::to_string(syncore_preferences_draft.buffer_frames));
+	((input_field*)(*window)["MAX_COHORTS"])->safe_string_replace(
+		std::to_string(syncore_preferences_draft.maximum_cohorts));
+	((input_field*)(*window)["RENDER_THREADS"])->safe_string_replace(
+		std::to_string(syncore_preferences_draft.render_threads));
+	((input_field*)(*window)["GAIN_DB"])->safe_string_replace(
+		std::to_string(syncore_preferences_draft.output_gain_db));
+	((button*)(*window)["PHASE_MODE"])->safe_string_replace(
+		std::string("Phase: ") + syncore_phase_mode_name(syncore_preferences_draft.phase_mode));
+	((checkbox*)(*window)["LIMITER"])->state = syncore_preferences_draft.limiter_enabled;
+	refresh_syncore_runtime_status();
+}
+
+void persist_syncore_preferences()
+{
+	settings::regestry_access.Open(HKEY_CURRENT_USER, default_reg_path);
+	settings::regestry_access.SetStringValue(L"MIDI_DEVICE_NAME", saved_midi_device_name);
+	settings::regestry_access.SetStringValue(L"SYNCORE_BANK_PATH", saved_syncore_bank_path);
+	settings::regestry_access.SetDwordValue(L"SYNCORE_SAMPLE_RATE", saved_syncore_preferences.sample_rate);
+	settings::regestry_access.SetDwordValue(L"SYNCORE_BUFFER_FRAMES", saved_syncore_preferences.buffer_frames);
+	settings::regestry_access.SetDwordValue(L"SYNCORE_MAX_COHORTS", saved_syncore_preferences.maximum_cohorts);
+	settings::regestry_access.SetDwordValue(L"SYNCORE_RENDER_THREADS", saved_syncore_preferences.render_threads);
+	settings::regestry_access.SetDwordValue(L"SYNCORE_PHASE_MODE",
+		static_cast<std::uint32_t>(saved_syncore_preferences.phase_mode));
+	settings::regestry_access.SetStringValue(L"SYNCORE_GAIN_DB",
+		std::to_wstring(saved_syncore_preferences.output_gain_db));
+	settings::regestry_access.SetDwordValue(L"SYNCORE_LIMITER", saved_syncore_preferences.limiter_enabled);
+	settings::regestry_access.Close();
+}
+
+void on_syncore_setup_open()
+{
+	if (!player || !player->syncore_available())
+	{
+		throw_alert_warning("This SAFC build does not include embedded SYNCore");
+		return;
+	}
+	syncore_preferences_draft = player->get_syncore_preferences();
+	refresh_syncore_setup_controls();
+	global_window_handler->enable_window("SYNCORE_SETTINGS");
+	start_syncore_status_watcher();
+}
+
+void on_syncore_phase_cycle()
+{
+	auto mode = static_cast<std::uint32_t>(syncore_preferences_draft.phase_mode);
+	mode = (mode + 1) % (static_cast<std::uint32_t>(syncore_phase_mode::independent_bins) + 1);
+	syncore_preferences_draft.phase_mode = static_cast<syncore_phase_mode>(mode);
+	((button*)(*(*global_window_handler)["SYNCORE_SETTINGS"])["PHASE_MODE"])->safe_string_replace(
+		std::string("Phase: ") + syncore_phase_mode_name(syncore_preferences_draft.phase_mode));
+}
+
+void on_syncore_preferences_apply()
+{
+	auto window = (*global_window_handler)["SYNCORE_SETTINGS"];
+	syncore_preferences preferences = syncore_preferences_draft;
+	try
+	{
+		preferences.sample_rate = std::stoul(
+			((input_field*)(*window)["SAMPLE_RATE"])->get_current_input("48000"));
+		preferences.buffer_frames = std::stoul(
+			((input_field*)(*window)["BUFFER_FRAMES"])->get_current_input("4096"));
+		preferences.maximum_cohorts = std::stoul(
+			((input_field*)(*window)["MAX_COHORTS"])->get_current_input("4096"));
+		preferences.render_threads = std::stoul(
+			((input_field*)(*window)["RENDER_THREADS"])->get_current_input("0"));
+		preferences.output_gain_db = std::stod(
+			((input_field*)(*window)["GAIN_DB"])->get_current_input("-12"));
+		preferences.limiter_enabled = ((checkbox*)(*window)["LIMITER"])->state;
+	}
+	catch (...)
+	{
+		throw_alert_warning("One or more SYNCore settings are not valid numbers");
+		return;
+	}
+
+	if (preferences.sample_rate < 8000 || preferences.sample_rate > 192000 ||
+		preferences.buffer_frames < 256 || preferences.buffer_frames > 1048576 ||
+		preferences.maximum_cohorts < 1 || preferences.maximum_cohorts > 1048576 ||
+		preferences.render_threads > 64 ||
+		preferences.output_gain_db < -60.0 || preferences.output_gain_db > 12.0)
+	{
+		throw_alert_warning(
+			"SYNCore ranges: rate 8000-192000, buffer 256-1048576, cohorts 1-1048576, "
+			"threads 0-64, gain -60 to +12 dB");
+		return;
+	}
+
+	worker_singleton<struct midi_out_selct>::instance().push([preferences]()
+	{
+		if (!player->set_syncore_preferences(preferences))
+		{
+			throw_alert_warning("Stop playback before changing SYNCore preferences");
+			return;
+		}
+		saved_syncore_preferences = preferences;
+		syncore_preferences_draft = preferences;
+		try
+		{
+			persist_syncore_preferences();
+		}
+		catch (...)
+		{
+			std::cout << "Exception thrown while saving SYNCore preferences\n";
+		}
+	});
+}
+
+void on_syncore_bank_select()
+{
+	if (!player || !player->syncore_available())
+	{
+		throw_alert_warning("This SAFC build does not include embedded SYNCore");
+		return;
+	}
+
+	auto bank_path = syncore_bank_open_file_dialog();
+	if (bank_path.empty())
+		return;
+
+	worker_singleton<struct midi_out_selct>::instance().push([bank_path = std::move(bank_path)]()
+	{
+		if (!player->set_syncore_bank_path(bank_path))
+		{
+			throw_alert_warning("Stop playback before changing the SYNCore sound bank");
+			return;
+		}
+
+		const auto device_id = player->get_syncore_device_index();
+		if (device_id == ~size_t{0} || !player->set_device(device_id))
+		{
+			throw_alert_warning("Unable to select embedded SYNCore");
+			return;
+		}
+
+		const auto device_names = player->get_device_names();
+		if (device_id < device_names.size())
+			saved_midi_device_name.assign(device_names[device_id].begin(), device_names[device_id].end());
+		saved_syncore_bank_path = bank_path;
+
+		try
+		{
+			persist_syncore_preferences();
+		}
+		catch (...)
+		{
+			std::cout << "Exception thrown while saving SYNCore settings to registry\n";
+		}
+
+		refresh_syncore_setup_controls();
+		update_device_list();
+	});
+}
+
+void on_syncore_use_builtin_bank()
+{
+	if (!player || !player->syncore_available())
+		return;
+
+	worker_singleton<struct midi_out_selct>::instance().push([]()
+	{
+		if (!player->set_syncore_bank_path({}))
+		{
+			throw_alert_warning("Stop playback before changing the SYNCore sound bank");
+			return;
+		}
+		const auto device_id = player->get_syncore_device_index();
+		if (device_id == ~size_t{0} || !player->set_device(device_id))
+		{
+			throw_alert_warning("Unable to select embedded SYNCore");
+			return;
+		}
+		saved_syncore_bank_path.clear();
+		saved_midi_device_name = L"SYNCore (embedded)";
+		try { persist_syncore_preferences(); }
+		catch (...) { std::cout << "Exception thrown while saving SYNCore settings\n"; }
+		refresh_syncore_setup_controls();
+		update_device_list();
+	});
+}
+
 void on_player_pause_toggle()
 {
 	if (!player->is_playing())
@@ -2686,7 +3075,7 @@ void on_player_pause_toggle()
 		{
 			if (!player->ensure_output(saved_midi_device_name))
 			{
-				throw_alert_error("No MIDI output device is available for playback");
+				report_player_output_error();
 				return;
 			}
 			player->simple_run(filename);
@@ -2866,7 +3255,7 @@ void play_compressed_source_in_worker(const std::shared_ptr<compressed_midi_even
 
 	if (!player->ensure_output(saved_midi_device_name))
 	{
-		throw_alert_error("No MIDI output device is available for playback");
+		report_player_output_error();
 		return;
 	}
 
@@ -2969,7 +3358,7 @@ void open_regular_midi_file(std::wstring filename)
 	{
 		if (!player->ensure_output(saved_midi_device_name))
 		{
-			throw_alert_error("No MIDI output device is available for playback");
+			report_player_output_error();
 			return;
 		}
 
@@ -3063,10 +3452,7 @@ void update_editor_track_list()
 	if (!track_list || !editor)
 		return;
 
-	track_list->selectors_text.clear();
-	track_list->selectors.clear();
-	track_list->selected_id.clear();
-	track_list->current_top_line_id = 0;
+	track_list->safe_clear();
 
 	if (!editor->is_file_loaded())
 	{
@@ -3298,7 +3684,7 @@ void on_editor_play_from(bool from_view_start)
 
 		if (!player->ensure_output(saved_midi_device_name))
 		{
-			throw_alert_error("No MIDI output device is available for playback");
+			report_player_output_error();
 			return;
 		}
 		editor_playback_active = true;
@@ -4153,9 +4539,92 @@ void init(bool reinitialise_font = true)
 	(*window)["AS_THREADS_COUNT"] = new input_field(std::to_string(g_data.detected_threads), 92.5 - moveable_window::window_header_size, 75 - moveable_window::window_header_size, 10, 20, system_white, nullptr, 0x007FFFFF, &system_white, "Threads count", 2, _Align::center, _Align::right, input_field::Type::NaturalNumbers);
 
 	(*window)["AUTOUPDATECHECK"] = new checkbox(-97.5 + moveable_window::window_header_size, 35 - moveable_window::window_header_size, 10, 0x007FFFFF, 0xFF3F007F, 0x3FFF007F, 1, check_autoupdates, &system_white, _Align::left, "Check for updates automatically");
+	if (simple_player::syncore_available())
+	{
+		(*window)["AS_SYNCORE"] = new button(
+			"SYNCore...", system_white, on_syncore_setup_open,
+			72.5 - moveable_window::window_header_size,
+			-47.5 - moveable_window::window_header_size,
+			65, 10, 1, 0x7F3FFF3F, 0x7F3FFFFF,
+			0xFFFFFFFF, 0x7F3FFFFF, 0xFFFFFFFF, nullptr,
+			"Sound bank, audio buffering, phase, gain, and limiter settings");
+	}
 	/*(*window)["FEEDBACK"] = button_buff = new button("F/B", system_white, settings::feedback_open, 50 - moveable_window::window_header_size, -87.5 - moveable_window::window_header_size, 20, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr, "_");*/
 
 	(*global_window_handler)["APP_SETTINGS"] = window;
+
+	if (simple_player::syncore_available())
+	{
+		window = new moveable_fui_window("SYNCore setup", system_white,
+			-150, 130 + moveable_window::window_header_size,
+			300, 300, 175, 2.5f, 70, 70, 2.5f,
+			BACKGROUND_OPQ, HEADER, BORDER);
+
+		(*window)["BANK"] = new text_box(
+			"Bank: built-in sine (choose SF2/SFZ below)", legacy_white,
+			0, 112, 16, 270, 10, 0xFFFFFF1A, 0, 0,
+			_Align(center | top), text_box::VerticalOverflow::cut);
+		(*window)["CHOOSE_BANK"] = new button(
+			"Choose SF2/SFZ...", system_white, on_syncore_bank_select,
+			-65, 88, 125, 10, 1, 0x7F3FFF3F, 0x7F3FFFFF,
+			0xFFFFFFFF, 0x7F3FFFFF, 0xFFFFFFFF, nullptr,
+			"Choose a SoundFont 2 or SFZ bank and select SYNCore output");
+		(*window)["BUILTIN_BANK"] = new button(
+			"Built-in sine", system_white, on_syncore_use_builtin_bank,
+			75, 88, 90, 10, 1, 0x007FFF3F, 0x007FFFFF,
+			0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr,
+			"Clear the bank path and use SYNCore's test sine instrument");
+		(*window)["NOTE"] = new text_box(
+			"Changes take effect on the next note/playback; 0 threads means auto",
+			system_white, 0, 65, 12, 270, 9, 0, 0, 0, _Align::center);
+
+		auto add_syncore_field = [&](const char* key, const char* label,
+			const std::string& value, float y, input_field::Type type, std::uint8_t max_chars)
+		{
+			(*window)[std::string(key) + "_LABEL"] = new text_box(
+				label, system_white, -62.5f, y, 12, 120, 10,
+				0, 0, 0, _Align::right);
+			(*window)[key] = new input_field(
+				value, 45, y, 12, 80, system_white, nullptr,
+				0x007FFFFF, &system_white, label, max_chars,
+				_Align::center, _Align::left, type);
+		};
+
+		add_syncore_field("SAMPLE_RATE", "Sample rate", "48000", 42,
+			input_field::Type::NaturalNumbers, 6);
+		add_syncore_field("BUFFER_FRAMES", "Buffer frames", "4096", 20,
+			input_field::Type::NaturalNumbers, 7);
+		add_syncore_field("MAX_COHORTS", "Maximum cohorts", "4096", -2,
+			input_field::Type::NaturalNumbers, 7);
+		add_syncore_field("RENDER_THREADS", "Render threads", "0", -24,
+			input_field::Type::NaturalNumbers, 2);
+		add_syncore_field("GAIN_DB", "Output gain (dB)", "-12", -46,
+			input_field::Type::FP_Any, 7);
+
+		(*window)["PHASE_MODE"] = new button(
+			"Phase: Coherent", system_white, on_syncore_phase_cycle,
+			-45, -72, 150, 10, 1, 0x7F3FFF3F, 0x7F3FFFFF,
+			0xFFFFFFFF, 0x7F3FFFFF, 0xFFFFFFFF, nullptr,
+			"Cycle the SYNCore phase policy; coherent is the deterministic default");
+		(*window)["LIMITER_LABEL"] = new text_box(
+			"Limiter", system_white, 78, -72, 12, 55, 10,
+			0, 0, 0, _Align::right);
+		(*window)["LIMITER"] = new checkbox(
+			115, -72, 12, 0x007FFFFF, 0xFF00007F, 0x00FF007F,
+			1, true, &system_white, _Align::right,
+			"Enable SYNCore's -1 dB sample-peak limiter");
+		(*window)["STATUS"] = new text_box(
+			"Status: Stopped", system_white, 0, -105, 30, 270, 8,
+			0x07121FAF, 0x007FFFFF, 1, _Align::center,
+			text_box::VerticalOverflow::cut);
+		(*window)["APPLY"] = new button(
+			"Apply and save", system_white, on_syncore_preferences_apply,
+			0, -137, 110, 10, 1, 0x007FFF3F, 0x007FFFFF,
+			0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr,
+			"Persist these settings and restart SYNCore if it is open");
+
+		(*global_window_handler)["SYNCORE_SETTINGS"] = window;
+	}
 
 	window = new moveable_window("SMRP Container", system_white, -300, 300, 600, 600, 0x000000CF, 0xFFFFFF7F);
 
@@ -4243,6 +4712,7 @@ void init(bool reinitialise_font = true)
 	(*window)["DEVICE_LIST"] = device_list_selector;
 
 	(*global_window_handler)["SIMPLAYER"] = window;
+	update_device_list();
 
 	// ========================================================================
 	// Unified MIDI / nested-archive source dialog. Playback is handed to
@@ -4344,7 +4814,6 @@ void init(bool reinitialise_font = true)
 	// Playback button
 	(*window)["PLAY"] = new button("Play", system_black, on_editor_play, 150, 92.5, 75, 12, 1, 0xFFFFFFAF, 0x0F0F0FFF, 0xFFFFFFFF, 0x000000FF, 0xFFFFFFFF, nullptr, "Play / stop current MIDI");
 	(*window)["PLAY_FROM"] = new button("Play from view", system_white, on_editor_play_from_view, 150, 80, 75, 12, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr, "Play from the visible start tick");
-
 	// Maximise button
 	(*window)["MAXIMISE"] = new button("Maximise", system_white, switch_midieditor_maximise, 150, 67.5, 75, 12, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr, "Expand editor to full window");
 

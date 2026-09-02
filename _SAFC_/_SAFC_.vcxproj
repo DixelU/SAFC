@@ -94,6 +94,12 @@
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
+  <PropertyGroup Condition="Exists('$(SolutionDir)SYNCore\SAFSYN\windows_synth.cpp')">
+    <SYNCoreEnabled>true</SYNCoreEnabled>
+    <SYNCoreIncludeDirectories>$(SolutionDir)SYNCore\SAFSYN;$(SolutionDir)SYNCore\third_party\utility\include;</SYNCoreIncludeDirectories>
+    <SYNCorePreprocessorDefinitions>SAFC_WITH_SYNCORE;</SYNCorePreprocessorDefinitions>
+    <SYNCoreLinkDependencies>ole32.lib;uuid.lib;winmm.lib;avrt.lib;</SYNCoreLinkDependencies>
+  </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <LinkIncremental>false</LinkIncremental>
     <TargetName>SAFC</TargetName>
@@ -135,7 +141,7 @@
     <ClCompile>
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <Optimization>Disabled</Optimization>
-      <PreprocessorDefinitions>WIN32;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>$(SYNCorePreprocessorDefinitions)WIN32;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
       <InlineFunctionExpansion>Disabled</InlineFunctionExpansion>
@@ -147,7 +153,7 @@
       <LanguageStandard>stdcpp23</LanguageStandard>
       <AdditionalUsingDirectories>
       </AdditionalUsingDirectories>
-      <AdditionalIncludeDirectories>$(SolutionDir)utility\include;$(SolutionDir)utility;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SYNCoreIncludeDirectories)$(SolutionDir)utility\include;$(SolutionDir)utility;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>/bigobj %(AdditionalOptions)</AdditionalOptions>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
       <LanguageStandard_C>stdc17</LanguageStandard_C>
@@ -163,7 +169,7 @@
       </DelayLoadDLLs>
       <AdditionalLibraryDirectories>
       </AdditionalLibraryDirectories>
-      <AdditionalDependencies>%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>$(SYNCoreLinkDependencies)%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <ResourceCompile>
       <AdditionalIncludeDirectories>$(SolutionDir)utility\include;$(SolutionDir)utility;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
@@ -173,7 +179,7 @@
     <ClCompile>
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <Optimization>Disabled</Optimization>
-      <PreprocessorDefinitions>__X64;;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>$(SYNCorePreprocessorDefinitions)__X64;;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>false</ConformanceMode>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
       <AdditionalUsingDirectories>
@@ -181,7 +187,7 @@
       <LanguageStandard>stdcpp23</LanguageStandard>
       <FloatingPointModel>Fast</FloatingPointModel>
       <RuntimeTypeInfo>true</RuntimeTypeInfo>
-      <AdditionalIncludeDirectories>$(SolutionDir)utility\include;$(SolutionDir)utility;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SYNCoreIncludeDirectories)$(SolutionDir)utility\include;$(SolutionDir)utility;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>/bigobj %(AdditionalOptions)</AdditionalOptions>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
       <LanguageStandard_C>stdc17</LanguageStandard_C>
@@ -198,7 +204,7 @@
       </DelayLoadDLLs>
       <AdditionalLibraryDirectories>C:\dev\vcpkg\installed</AdditionalLibraryDirectories>
       <Profile>true</Profile>
-      <AdditionalDependencies>%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>$(SYNCoreLinkDependencies)%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <ResourceCompile>
       <AdditionalIncludeDirectories>$(SolutionDir)utility\include;$(SolutionDir)utility;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
@@ -210,7 +216,7 @@
       <Optimization>MaxSpeed</Optimization>
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
-      <PreprocessorDefinitions>WIN32;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>$(SYNCorePreprocessorDefinitions)WIN32;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>false</ConformanceMode>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
       <InlineFunctionExpansion>AnySuitable</InlineFunctionExpansion>
@@ -222,7 +228,7 @@
       <FloatingPointModel>Fast</FloatingPointModel>
       <AdditionalUsingDirectories>
       </AdditionalUsingDirectories>
-      <AdditionalIncludeDirectories>$(SolutionDir)utility\include;$(SolutionDir)utility;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SYNCoreIncludeDirectories)$(SolutionDir)utility\include;$(SolutionDir)utility;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <EnableEnhancedInstructionSet>NotSet</EnableEnhancedInstructionSet>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <StringPooling>true</StringPooling>
@@ -245,7 +251,7 @@
       </DelayLoadDLLs>
       <AdditionalLibraryDirectories>C:\dev\vcpkg\installed</AdditionalLibraryDirectories>
       <LinkTimeCodeGeneration>UseLinkTimeCodeGeneration</LinkTimeCodeGeneration>
-      <AdditionalDependencies>%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>$(SYNCoreLinkDependencies)%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <ResourceCompile>
       <AdditionalIncludeDirectories>$(SolutionDir)utility\include;$(SolutionDir)utility;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
@@ -257,7 +263,7 @@
       <Optimization>MaxSpeed</Optimization>
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
-      <PreprocessorDefinitions>__X64;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>$(SYNCorePreprocessorDefinitions)__X64;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>false</ConformanceMode>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
       <InlineFunctionExpansion>AnySuitable</InlineFunctionExpansion>
@@ -270,7 +276,7 @@
       </AdditionalUsingDirectories>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <RuntimeTypeInfo>true</RuntimeTypeInfo>
-      <AdditionalIncludeDirectories>$(SolutionDir)utility\include;$(SolutionDir)utility;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SYNCoreIncludeDirectories)$(SolutionDir)utility\include;$(SolutionDir)utility;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <EnableEnhancedInstructionSet>StreamingSIMDExtensions2</EnableEnhancedInstructionSet>
       <EnableParallelCodeGeneration>true</EnableParallelCodeGeneration>
       <StringPooling>true</StringPooling>
@@ -292,7 +298,7 @@
       <AdditionalLibraryDirectories>C:\dev\vcpkg\installed</AdditionalLibraryDirectories>
       <LinkTimeCodeGeneration>UseLinkTimeCodeGeneration</LinkTimeCodeGeneration>
       <Profile>false</Profile>
-      <AdditionalDependencies>%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>$(SYNCoreLinkDependencies)%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <ResourceCompile>
       <AdditionalIncludeDirectories>$(SolutionDir)utility\include;$(SolutionDir)utility;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
@@ -319,7 +325,8 @@
 	<ClInclude Include="SAFC_InnerModules\midi_file_reader.h" />
 	<ClInclude Include="SAFC_InnerModules\compressed_midi_event_source.h" />
     <ClInclude Include="SAFC_InnerModules\playback_event_source.h" />
-    <ClInclude Include="SAFC_InnerModules\simple_player.h" />
+	<ClInclude Include="SAFC_InnerModules\simple_player.h" />
+	<ClInclude Include="SAFC_InnerModules\syncore_output.h" />
     <ClInclude Include="SAFC_InnerModules\include_all.h" />
     <ClInclude Include="SAFC_InnerModules\single_midi_info_collector.h" />
     <ClInclude Include="SAFC_InnerModules\single_midi_processor_2.h" />
@@ -353,7 +360,20 @@
 	<ClCompile Include="SAFCGUIF_Local\midi_editor_tools_ui.cpp" />
 	<ClCompile Include="SAFC_InnerModules\compressed_midi_event_source.cpp" />
 	<ClCompile Include="SAFC_InnerModules\midi_editor_tools.cpp" />
+	<ClCompile Include="SAFC_InnerModules\syncore_output.cpp" />
     <ClCompile Include="_SAFC_.cpp" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(SYNCoreEnabled)'=='true'">
+    <ClCompile Include="..\SYNCore\SAFSYN\core.cpp" />
+    <ClCompile Include="..\SYNCore\SAFSYN\cohort_engine.cpp" />
+    <ClCompile Include="..\SYNCore\SAFSYN\engine.cpp" />
+    <ClCompile Include="..\SYNCore\SAFSYN\mastering.cpp" />
+    <ClCompile Include="..\SYNCore\SAFSYN\phase.cpp" />
+    <ClCompile Include="..\SYNCore\SAFSYN\playback.cpp" />
+    <ClCompile Include="..\SYNCore\SAFSYN\smf.cpp" />
+    <ClCompile Include="..\SYNCore\SAFSYN\smf_renderer.cpp" />
+    <ClCompile Include="..\SYNCore\SAFSYN\wav_writer.cpp" />
+    <ClCompile Include="..\SYNCore\SAFSYN\windows_synth.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="_SAFC_.rc" />

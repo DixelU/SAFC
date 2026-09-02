@@ -22,6 +22,7 @@
 #include "single_midi_processor_2.h"
 #include "single_midi_info_collector.h"
 #include "playback_event_source.h"
+#include "syncore_output.h"
 
 #define SIMPLE_PLAYER_FORCE_NO_INLINE
 #include <buffered_queue_spsc.h>
@@ -471,7 +472,7 @@ struct simple_player
 	std::vector<std::string> get_device_names() const
 	{
 		std::vector<std::string> names;
-		names.reserve(devices.size());
+		names.reserve(devices.size() + (syncore_output::available() ? 1 : 0));
 
 		for (const auto& device : devices)
 		{
@@ -480,8 +481,71 @@ struct simple_player
 			std::transform(wname.begin(), wname.end(), name.begin(), [](wchar_t c) { return static_cast<char>(c); });
 			names.push_back(std::move(name));
 		}
+		if (syncore_output::available())
+			names.emplace_back(syncore_device_name);
 
 		return names;
+	}
+
+	static bool syncore_available() noexcept
+	{
+		return syncore_output::available();
+	}
+
+	size_t get_syncore_device_index() const noexcept
+	{
+		return syncore_output::available() ? devices.size() : ~size_t{0};
+	}
+
+	bool set_syncore_bank_path(std::wstring bank_path)
+	{
+		std::unique_lock<std::mutex> run_lock(playback_run_mutex, std::try_to_lock);
+		if (!run_lock.owns_lock())
+			return false;
+
+		if (syncore_bank_path == bank_path)
+			return true;
+
+		const bool reopen = current_device == get_syncore_device_index() && has_output();
+		if (reopen)
+			close_midi_out();
+		syncore_bank_path = std::move(bank_path);
+		if (reopen)
+			init_midi_out(current_device);
+		return !reopen || has_output();
+	}
+
+	const std::wstring& get_syncore_bank_path() const noexcept
+	{
+		return syncore_bank_path;
+	}
+
+	bool set_syncore_preferences(syncore_preferences preferences)
+	{
+		std::unique_lock<std::mutex> run_lock(playback_run_mutex, std::try_to_lock);
+		if (!run_lock.owns_lock())
+			return false;
+
+		if (syncore_preferences_ == preferences)
+			return true;
+
+		const bool reopen = current_device == get_syncore_device_index() && has_output();
+		if (reopen)
+			close_midi_out();
+		syncore_preferences_ = preferences;
+		if (reopen)
+			init_midi_out(current_device);
+		return !reopen || has_output();
+	}
+
+	const syncore_preferences& get_syncore_preferences() const noexcept
+	{
+		return syncore_preferences_;
+	}
+
+	syncore_runtime_status get_syncore_runtime_status() const
+	{
+		return syncore.status();
 	}
 
 	// Get currently selected device index
@@ -497,40 +561,26 @@ struct simple_player
 		// device switch while a run owns the player instead of racing its sender.
 		std::unique_lock<std::mutex> run_lock(playback_run_mutex, std::try_to_lock);
 		if (!run_lock.owns_lock())
+		{
+			set_last_output_error("MIDI output is busy; stop playback before changing it");
 			return false;
+		}
 
-		if (device_index >= devices.size())
-			return false;
-		if (device_index == current_device && has_output())
-			return true;
-
-		// Close current device if open
-		close_midi_out();
-
-		// Open new device
-		current_device = device_index;
-		init_midi_out(device_index);
-
-		// Call callback if set
-		if (on_device_changed)
-			on_device_changed(device_index);
-
-		return has_output();
+		return set_device_locked(device_index);
 	}
 
 	// Whether a MIDI out sink is ready for immediate messages
 	bool has_output() const
 	{
-		return hout.load(std::memory_order_acquire) != nullptr && short_msg != nullptr;
+		return syncore.active() ||
+			(hout.load(std::memory_order_acquire) != nullptr && short_msg != nullptr);
 	}
 
 	// Send an immediate note on/off outside of playback (piano roll audition)
 	void preview_note(uint8_t channel, uint8_t key, uint8_t velocity, bool on)
 	{
-		if (!short_msg)
-			return;
-
-		short_msg(make_smsg((on ? 0x90 : 0x80) | (channel & 0x0F), key & 0x7F, on ? (velocity & 0x7F) : 0x40));
+		send_output_message(make_smsg((on ? 0x90 : 0x80) | (channel & 0x0F),
+			key & 0x7F, on ? (velocity & 0x7F) : 0x40));
 	}
 
 	// Restore device by name (for registry persistence)
@@ -539,9 +589,11 @@ struct simple_player
 		if (device_name.empty())
 			return false;
 
-		for (size_t i = 0; i < devices.size(); ++i)
+		const auto names = get_device_names();
+		for (size_t i = 0; i < names.size(); ++i)
 		{
-			if (devices[i].szPname != device_name)
+			const std::wstring candidate(names[i].begin(), names[i].end());
+			if (candidate != device_name)
 				continue;
 
 			return set_device(i);
@@ -557,9 +609,34 @@ struct simple_player
 	{
 		if (has_output())
 			return true;
-		if (restore_device_by_name(preferred_device_name))
+
+		// Device selection is prepared on a different worker. Its list row is
+		// highlighted immediately, so Play can arrive while set_device() is still
+		// loading a bank and opening WASAPI. Playback runs off the UI thread and
+		// should wait for that transition instead of reporting a false no-output
+		// failure from try_to_lock.
+		std::unique_lock<std::mutex> run_lock(playback_run_mutex);
+		if (has_output())
 			return true;
-		return set_device(current_device);
+
+		if (!preferred_device_name.empty())
+		{
+			const auto names = get_device_names();
+			for (size_t i = 0; i < names.size(); ++i)
+			{
+				const std::wstring candidate(names[i].begin(), names[i].end());
+				if (candidate == preferred_device_name)
+					return set_device_locked(i);
+			}
+		}
+
+		return set_device_locked(current_device);
+	}
+
+	std::string get_last_output_error() const
+	{
+		std::lock_guard error_lock(output_error_mutex);
+		return last_output_error;
 	}
 
 	// Callback for when device changes (for UI updates)
@@ -1276,8 +1353,8 @@ struct simple_player
 				if (!state.send_buffer.empty())
 				{
 					auto& ev = state.send_buffer.front();
-					if (short_msg && ev.short_msg != 0)
-						short_msg(ev.short_msg);
+					if (ev.short_msg != 0)
+						send_output_message(ev.short_msg);
 					state.send_buffer.pop();
 					continue;
 				}
@@ -1359,8 +1436,8 @@ struct simple_player
 			}
 
 			// send the event
-			if (short_msg && ev.short_msg != 0) [[likely]]
-				short_msg(ev.short_msg);
+			if (ev.short_msg != 0) [[likely]]
+				send_output_message(ev.short_msg);
 
 			state.send_buffer.pop();
 		}
@@ -2099,6 +2176,39 @@ private:
 	// close the scheduling window before a worker starts. This mutex makes a
 	// second run fail closed instead of corrupting the shared state.
 	std::mutex playback_run_mutex;
+	mutable std::mutex output_error_mutex;
+	std::string last_output_error;
+
+	void set_last_output_error(std::string message)
+	{
+		std::lock_guard error_lock(output_error_mutex);
+		last_output_error = std::move(message);
+	}
+
+	bool set_device_locked(size_t device_index)
+	{
+		if (device_index >= get_device_names().size())
+		{
+			set_last_output_error("The selected MIDI output device is no longer available");
+			return false;
+		}
+		if (device_index == current_device && has_output())
+			return true;
+
+		close_midi_out();
+		current_device = device_index;
+		set_last_output_error({});
+		init_midi_out(device_index);
+
+		if (on_device_changed)
+			on_device_changed(device_index);
+
+		if (has_output())
+			return true;
+		if (get_last_output_error().empty())
+			set_last_output_error("The selected MIDI output could not be opened");
+		return false;
+	}
 
 	void handle_memory_failure(bool report_now = false)
 	{
@@ -2142,7 +2252,10 @@ private:
 		if (!kdmapi_status || !kdmapi_status())
 			return;
 
-		short_msg = (decltype(short_msg))GetProcAddress(moduleHandle, "SendDirectData");
+		auto direct_send = reinterpret_cast<void(WINAPI*)(uint32_t)>(
+			GetProcAddress(moduleHandle, "SendDirectData"));
+		if (direct_send)
+			short_msg = direct_send;
 	}
 
 	SIMPLE_PLAYER_FORCE_NO_INLINE void update_tempo_cache_at(size_t index) const
@@ -2397,19 +2510,22 @@ private:
 			devices.emplace_back(std::move(out));
 		}
 
-		if (devices.size())
+		if (devices.size() || syncore_output::available())
 			current_device = 0; // select first one
 	}
 
 	void close_midi_out()
 	{
 		int attempts = 0;
+		set_short_msg_noop();
+
+		if (syncore.active())
+			syncore.stop();
 
 		if (!hout)
 			return;
 
 		kdmapi_status = nullptr;
-		set_short_msg_noop();
 
 		auto hout_copy = hout.load();
 		hout = nullptr;
@@ -2433,8 +2549,21 @@ private:
 			{ L"OmniMIDI", L"K[q093jfpowe" };
 
 		auto hout_copy = hout.load();
-		if (hout_copy)
+		if (hout_copy || syncore.active())
 			return;
+
+		if (device == get_syncore_device_index())
+		{
+			std::string error;
+			if (!syncore.start(syncore_bank_path, syncore_preferences_, error))
+			{
+				set_last_output_error("Unable to start SYNCore: " + error);
+				throw_alert_error(get_last_output_error());
+				return;
+			}
+			set_last_output_error({});
+			return;
+		}
 
 		if (device >= devices.size())
 			return;
@@ -2446,13 +2575,15 @@ private:
 				std::wstring name = devices[device].szPname;
 				std::string readable_name(name.size(), '\0');
 				std::transform(name.begin(), name.end(), readable_name.begin(), [](wchar_t c) { return static_cast<char>(c); });
-				throw_alert_error("Unable to open MIDI out '" + readable_name + "'!");
+				set_last_output_error("Unable to open MIDI out '" + readable_name + "'!");
+				throw_alert_error(get_last_output_error());
 				hout = nullptr;
 			}
 			else
 			{
 				hout = hout_copy;
 				short_msg = [](uint32_t msg) { midiOutShortMsg(hout, msg); };
+				set_last_output_error({});
 			}
 
 			if (!kdmapi_status && kdmapi_allowed.contains(devices[device].szPname))
@@ -2460,20 +2591,31 @@ private:
 		}
 		catch (...)
 		{
-			throw_alert_error("midiOutOpen() horribly failed...\n");
+			set_last_output_error("midiOutOpen() failed unexpectedly");
+			throw_alert_error(get_last_output_error());
 		}
 	}
 
 	void all_notes_off_channel(uint8_t channel)
 	{
-		if (!short_msg) [[unlikely]]
+		if (!has_output()) [[unlikely]]
 			return;
 
 		channel &= 0x0F;
 
-		short_msg(make_smsg(0xB0 | channel, 120));
-		short_msg(make_smsg(0xB0 | channel, 121));
-		short_msg(make_smsg(0xB0 | channel, 123));
+		send_output_message(make_smsg(0xB0 | channel, 120));
+		send_output_message(make_smsg(0xB0 | channel, 121));
+		send_output_message(make_smsg(0xB0 | channel, 123));
+	}
+
+	bool send_output_message(uint32_t message) noexcept
+	{
+		if (syncore.active())
+			return syncore.send_short_message(message);
+		if (!short_msg)
+			return false;
+		short_msg(message);
+		return true;
 	}
 
 	void all_notes_off()
@@ -2502,12 +2644,16 @@ private:
 
 	size_t current_device = ~0ULL;
 	std::vector<MIDIOUTCAPSW> devices;
+	syncore_output syncore;
+	std::wstring syncore_bank_path;
+	syncore_preferences syncore_preferences_;
 	inline static std::atomic<HMIDIOUT> hout;
 	std::atomic<bool> memory_failure_reported{false};
 	std::atomic<bool> cancel_requested{false};
 
 	void(WINAPI* short_msg)(uint32_t msg) = nullptr;
 	bool(WINAPI* kdmapi_status)() = nullptr;
+	inline static constexpr const char* syncore_device_name = "SYNCore (embedded)";
 
 	constexpr static std::uint32_t MTrk_header = 1297379947;
 	constexpr static std::uint32_t MThd_header = 1297377380;
