@@ -210,12 +210,16 @@ void validate_settings(const simple_player_video_settings& settings,
 		throw std::runtime_error("AAC bitrate must be 96, 128, 160, or 192 kbps");
 	if (settings.audio_sample_rate != 44100 && settings.audio_sample_rate != 48000)
 		throw std::runtime_error("AAC sample rate must be 44100 or 48000 Hz");
-	if (settings.maximum_cohorts > 1048576)
-		throw std::runtime_error("export cohort limit must be zero or at most 1048576");
 	if (!std::isfinite(settings.tail_seconds) || settings.tail_seconds < 0.0 ||
 		settings.tail_seconds > 60.0 || !std::isfinite(settings.visible_seconds) ||
 		settings.visible_seconds < 0.25 || settings.visible_seconds > 60.0)
 		throw std::runtime_error("tail and visible seconds are outside the supported range");
+	if (preferences.sample_rate < 8000 || preferences.sample_rate > 192000)
+		throw std::runtime_error("SYNCore sample rate is outside the supported range");
+	if (preferences.buffer_frames < 256 || preferences.buffer_frames > 1048576)
+		throw std::runtime_error("SYNCore buffer size is outside the supported range");
+	if (preferences.maximum_cohorts == 0 || preferences.maximum_cohorts > 1048576)
+		throw std::runtime_error("SYNCore cohort ceiling is outside the supported range");
 	if (preferences.render_threads > 64)
 		throw std::runtime_error("SYNCore thread setting is outside the supported range");
 }
@@ -404,12 +408,12 @@ public:
 	}
 
 	void open(const std::wstring& output_path,
-		const simple_player_video_settings& settings, std::uint32_t sample_rate)
+		const simple_player_video_settings& settings, std::uint32_t pcm_sample_rate)
 	{
 		width_ = settings.width;
 		height_ = settings.height;
 		fps_ = settings.fps;
-		sample_rate_ = sample_rate;
+		sample_rate_ = pcm_sample_rate;
 		ComPtr<IMFAttributes> writer_attributes;
 		require_hr(MFCreateAttributes(writer_attributes.GetAddressOf(), 1),
 			"creating MP4 sink writer attributes");
@@ -466,7 +470,8 @@ public:
 			"setting AAC output subtype");
 		require_hr(audio_out->SetUINT32(MF_MT_AUDIO_NUM_CHANNELS, 2),
 			"setting AAC channels");
-		require_hr(audio_out->SetUINT32(MF_MT_AUDIO_SAMPLES_PER_SECOND, sample_rate),
+		require_hr(audio_out->SetUINT32(MF_MT_AUDIO_SAMPLES_PER_SECOND,
+			settings.audio_sample_rate),
 			"setting AAC sample rate");
 		require_hr(audio_out->SetUINT32(MF_MT_AUDIO_BITS_PER_SAMPLE, 16),
 			"setting AAC bits per sample");
@@ -483,14 +488,14 @@ public:
 			"setting PCM input subtype");
 		require_hr(audio_in->SetUINT32(MF_MT_AUDIO_NUM_CHANNELS, 2),
 			"setting PCM channels");
-		require_hr(audio_in->SetUINT32(MF_MT_AUDIO_SAMPLES_PER_SECOND, sample_rate),
+		require_hr(audio_in->SetUINT32(MF_MT_AUDIO_SAMPLES_PER_SECOND, pcm_sample_rate),
 			"setting PCM sample rate");
 		require_hr(audio_in->SetUINT32(MF_MT_AUDIO_BITS_PER_SAMPLE, 16),
 			"setting PCM bits per sample");
 		require_hr(audio_in->SetUINT32(MF_MT_AUDIO_BLOCK_ALIGNMENT, 4),
 			"setting PCM block alignment");
 		require_hr(audio_in->SetUINT32(MF_MT_AUDIO_AVG_BYTES_PER_SECOND,
-			sample_rate * 4U), "setting PCM byte rate");
+			pcm_sample_rate * 4U), "setting PCM byte rate");
 		require_hr(writer_->SetInputMediaType(audio_stream_, audio_in.Get(), nullptr),
 			"setting audio input type");
 
@@ -1408,17 +1413,16 @@ bool write_media_foundation_pcm(const float* audio, std::uint32_t frames,
 
 safsyn::SmfRenderOptions make_audio_options(
 	const syncore_preferences& preferences,
-	const simple_player_video_settings& settings, std::uint64_t tail_frames,
-	audio_progress_bridge& progress)
+	std::uint64_t tail_frames, audio_progress_bridge& progress)
 {
 	safsyn::SmfRenderOptions options;
-	options.sample_rate = settings.audio_sample_rate;
+	options.sample_rate = preferences.sample_rate;
 	options.voice_capacity = 256;
 	options.voice_model = safsyn::VoiceModel::Cohorts;
-	options.maximum_cohorts = settings.maximum_cohorts;
+	options.maximum_cohorts = preferences.maximum_cohorts;
 	options.render_threads = render_threads_from_preferences(preferences);
 	options.tail_frames = tail_frames;
-	options.block_frames = std::clamp(preferences.buffer_frames, 256U, 8192U);
+	options.block_frames = preferences.buffer_frames;
 	options.phase = phase_settings_from_preferences(preferences);
 	options.mastering = mastering_from_preferences(preferences);
 	options.progress_callback = on_audio_progress;
@@ -1450,19 +1454,19 @@ void write_audio_lead_in(media_foundation_writer& writer,
 
 template<class Render>
 std::uint64_t render_audio_stream(media_foundation_writer& writer,
-	const syncore_preferences& preferences, const simple_player_video_settings& settings,
+	const syncore_preferences& preferences,
 	std::uint64_t lead_in_frames, std::uint64_t tail_frames,
 	export_progress_state& progress_state, render_cancellation* cancel,
 	simple_player_video_progress_callback progress, void* progress_user_data,
 	Render&& render)
 {
-	const auto block_frames = std::clamp(preferences.buffer_frames, 256U, 8192U);
+	const auto block_frames = preferences.buffer_frames;
 	write_audio_lead_in(writer, lead_in_frames, block_frames, progress_state,
 		cancel, progress, progress_user_data);
 
 	audio_progress_bridge bridge{&progress_state, lead_in_frames, cancel,
 		progress, progress_user_data};
-	auto options = make_audio_options(preferences, settings, tail_frames, bridge);
+	auto options = make_audio_options(preferences, tail_frames, bridge);
 	media_foundation_pcm_sink sink{&writer, lead_in_frames};
 	safsyn::SmfRenderResult render_result;
 	const bool rendered = render(options, render_result,
@@ -1616,9 +1620,9 @@ simple_player_video_result render_video_and_audio(
 	auto bank = load_bank(bank_path);
 	const auto lead_in_frames = seconds_to_frames(
 		simple_player::default_start_lead_in_us / 1'000'000.0,
-		settings.audio_sample_rate);
+		synth_preferences.sample_rate);
 	const auto tail_frames = seconds_to_frames(
-		settings.tail_seconds, settings.audio_sample_rate);
+		settings.tail_seconds, synth_preferences.sample_rate);
 	const auto tail_us = seconds_to_us(settings.tail_seconds);
 	const auto maximum_clip_us = static_cast<std::uint64_t>(
 		(std::numeric_limits<LONGLONG>::max)()) / 10ULL;
@@ -1632,7 +1636,7 @@ simple_player_video_result render_video_and_audio(
 		lead_in_frames - tail_frames)
 		throw std::runtime_error("audio duration is too large");
 	const auto total_audio_frames = lead_in_frames + duration_frames + tail_frames;
-	(void)frame_to_time(total_audio_frames, settings.audio_sample_rate);
+	(void)frame_to_time(total_audio_frames, synth_preferences.sample_rate);
 	(void)video_sample_time(total_video_frames, settings.fps);
 	progress_state.total_frames.store(total_video_frames, std::memory_order_relaxed);
 	progress_state.total_audio_frames.store(total_audio_frames, std::memory_order_relaxed);
@@ -1640,7 +1644,7 @@ simple_player_video_result render_video_and_audio(
 	media_runtime runtime;
 	temporary_mp4_output temporary(output_path);
 	media_foundation_writer writer;
-	writer.open(temporary.path(), settings, settings.audio_sample_rate);
+	writer.open(temporary.path(), settings, synth_preferences.sample_rate);
 
 	std::exception_ptr first_error;
 	bool first_error_is_cancellation = false;
@@ -1679,7 +1683,7 @@ simple_player_video_result render_video_and_audio(
 					return render_audio(*bank, effective_cancel, options, result,
 						write_pcm, write_user_data);
 				};
-				audio_frames = render_audio_stream(writer, synth_preferences, settings,
+				audio_frames = render_audio_stream(writer, synth_preferences,
 					lead_in_frames, tail_frames, progress_state, &effective_cancel,
 					progress, progress_user_data, render_with_bank);
 				writer.finish_audio_stream();
@@ -1828,16 +1832,16 @@ simple_player_video_result render_simple_player_video(
 				"invalid MIDI file"));
 
 		safsyn::SmfAnalysisOptions analysis_options;
-		analysis_options.sample_rate = settings.audio_sample_rate;
+		analysis_options.sample_rate = synth_preferences.sample_rate;
 		safsyn::SmfAnalysis analysis;
 		if (!safsyn::analyze_smf(file, analysis_options, analysis))
 			throw std::runtime_error(first_smf_error(analysis.diagnostics,
 				"could not analyze MIDI file"));
 
 		scheduled_smf_visual_source visual_events(
-			file, analysis, settings.audio_sample_rate);
+			file, analysis, synth_preferences.sample_rate);
 		const auto duration_us = scale_time(
-			analysis.duration_frames, 1'000'000ULL, settings.audio_sample_rate);
+			analysis.duration_frames, 1'000'000ULL, synth_preferences.sample_rate);
 		auto render_audio = [&](const safsyn::Soundfont& bank,
 			render_cancellation&,
 			const safsyn::SmfRenderOptions& options,
@@ -1896,7 +1900,7 @@ simple_player_video_result render_simple_player_video_events(
 			throw std::runtime_error(
 				"prepared audio and visual event sources have different durations");
 		const auto duration_frames = scale_time(
-			duration_us, settings.audio_sample_rate, 1'000'000ULL);
+			duration_us, synth_preferences.sample_rate, 1'000'000ULL);
 		auto render_audio = [&](const safsyn::Soundfont& bank,
 			render_cancellation& cancellation,
 			const safsyn::SmfRenderOptions& options,
@@ -1905,7 +1909,7 @@ simple_player_video_result render_simple_player_video_events(
 		{
 			audio_events.rewind();
 			playback_audio_source source{
-				&audio_events, settings.audio_sample_rate, &cancellation};
+				&audio_events, synth_preferences.sample_rate, &cancellation};
 			const bool rendered = safsyn::render_timed_midi_pcm(
 				duration_frames, bank, next_playback_audio_event, &source,
 				options, render_result, write_pcm, write_user_data);

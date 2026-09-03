@@ -1,8 +1,10 @@
+#define NOMINMAX
 #include <array>
 
 #include "../SAFC_InnerModules/simple_player_video_export.h"
 #include "../SAFC_InnerModules/playback_event_source.h"
 #include "../SAFC_InnerModules/compressed_midi_event_source.h"
+#include "../SAFC_InnerModules/simple_player.h"
 
 #include <atomic>
 #include <chrono>
@@ -12,6 +14,7 @@
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -43,6 +46,201 @@ void test_text_box_layout_isolation()
 	check(&first.stls != &second.stls && &first.stls != &shared_style &&
 		&second.stls != &shared_style,
 		"text boxes keep independent mutable layout cursors");
+}
+
+void test_visual_storage_has_no_artificial_limit()
+{
+	simple_player::visuals_viewport visuals;
+	constexpr std::uint8_t key = 60;
+	visuals.push_note_on(key, 10, 0, 0, 100);
+	visuals.push_note_on(key, 10, 0, 0, 100);
+	check(visuals.buffered_note_count() == 2,
+		"identical notes retain separate exact visual spans");
+	visuals.push_note_off(key, 20, 0, 0);
+	visuals.push_note_off(key, 30, 0, 0);
+	check(visuals.falling_notes[key].front().end_time_us.load(
+		std::memory_order_relaxed) == 30,
+		"exact visual spans retain independent note-off matching");
+	visuals.clear();
+
+	// Cross the former 2,000,000-note abort threshold and the removed
+	// per-key detail threshold. Every note must still have its own span.
+	constexpr std::size_t note_count = 2'004'096;
+	for (std::size_t index = 0; index < note_count; ++index)
+		visuals.push_note_on(key, static_cast<std::uint64_t>(index), 0, 0, 100);
+	check(visuals.buffered_note_count() == note_count,
+		"visual storage has no artificial note cap or low-detail fallback");
+}
+
+class seek_probe_source final : public playback_event_source
+{
+public:
+	std::uint64_t total_duration_us() const override { return 20'000'000; }
+
+	void rewind() override
+	{
+		cursor_ = 0;
+		rewind_calls.fetch_add(1, std::memory_order_release);
+	}
+
+	void seek(std::uint64_t target_us) override
+	{
+		last_seek_us.store(target_us, std::memory_order_release);
+		seek_calls.fetch_add(1, std::memory_order_release);
+		rewind();
+	}
+
+	bool next(generated_event& output) override
+	{
+		if (cursor_ >= 2)
+			return false;
+		output = {};
+		output.time_us = cursor_++ == 0 ? 0 : 19'000'000;
+		return true;
+	}
+
+	std::atomic_uint32_t rewind_calls{0};
+	std::atomic_uint32_t seek_calls{0};
+	std::atomic_uint64_t last_seek_us{0};
+
+private:
+	std::size_t cursor_ = 0;
+};
+
+class distant_event_source final : public playback_event_source
+{
+public:
+	std::uint64_t total_duration_us() const override { return 4'000'000; }
+	void rewind() override { emitted_ = false; }
+	bool next(generated_event& output) override
+	{
+		if (emitted_)
+			return false;
+		emitted_ = true;
+		output = {};
+		output.time_us = 4'000'000;
+		output.short_msg = 0x000000C0;
+		return true;
+	}
+
+private:
+	bool emitted_ = false;
+};
+
+template<class Predicate>
+bool wait_until(Predicate&& predicate)
+{
+	const auto deadline = std::chrono::steady_clock::now() +
+		std::chrono::seconds(2);
+	while (std::chrono::steady_clock::now() < deadline)
+	{
+		if (predicate())
+			return true;
+		std::this_thread::sleep_for(std::chrono::milliseconds(1));
+	}
+	return predicate();
+}
+
+void test_player_slider_seek_restart()
+{
+	simple_player player;
+	seek_probe_source source;
+	std::thread playback([&]() { player.run_from_external(&source, 0.0, true); });
+
+	const bool started = wait_until([&]() {
+		return player.is_playing() && player.is_paused();
+	});
+	check(started, "player reaches its initial paused state");
+	if (started)
+	{
+		player.seek_to(0.75);
+		check(player.is_seeking(),
+			"seek state covers the request-to-parser-restart gap");
+		const bool sought_forward = wait_until([&]() {
+			return source.seek_calls.load(std::memory_order_acquire) != 0 &&
+				!player.is_seeking() && player.is_paused() &&
+				player.get_position_us() == 15'000'000;
+		});
+		check(sought_forward &&
+			source.last_seek_us.load(std::memory_order_acquire) == 15'000'000,
+			"paused player fast-forward lands at the slider target and stays paused");
+
+		player.resume();
+		player.seek_to(0.25);
+		const bool sought_while_playing = wait_until([&]() {
+			return source.seek_calls.load(std::memory_order_acquire) >= 2 &&
+				!player.is_seeking() && !player.is_paused() &&
+				player.get_position_us() >= 5'000'000;
+		});
+		check(sought_while_playing &&
+			source.last_seek_us.load(std::memory_order_acquire) == 5'000'000,
+			"playing player fast-forward lands at the slider target and keeps playing");
+		player.pause();
+
+		const auto rewinds_before_start_seek =
+			source.rewind_calls.load(std::memory_order_acquire);
+		player.seek_to(0.0);
+		const bool sought_to_start = wait_until([&]() {
+			return source.rewind_calls.load(std::memory_order_acquire) >
+				rewinds_before_start_seek && player.is_paused() &&
+				player.get_position_us() == 0;
+		});
+		check(sought_to_start,
+			"slider seek to the beginning resets the playback clock");
+	}
+
+	player.stop();
+	playback.join();
+}
+
+void test_stop_interrupts_distant_event_wait()
+{
+	simple_player player;
+	distant_event_source source;
+	std::thread playback([&]() { player.run_from_external(&source, 0.0, false); });
+	const bool waiting = wait_until([&]() {
+		return player.is_playing() &&
+			player.get_state().parser_done.load(std::memory_order_acquire);
+	});
+	check(waiting, "player queues a distant event before the stop test");
+	const auto stop_started = std::chrono::steady_clock::now();
+	player.stop();
+	playback.join();
+	const auto stop_elapsed = std::chrono::steady_clock::now() - stop_started;
+	check(stop_elapsed < std::chrono::milliseconds(250),
+		"Stop interrupts a sender waiting for a distant event");
+}
+
+void test_file_player_slider_seek(const std::filesystem::path& midi_path)
+{
+	simple_player player;
+	std::thread playback([&]() { player.simple_run(midi_path.wstring()); });
+	const bool started = wait_until([&]() {
+		return player.is_playing() && player.is_paused();
+	});
+	check(started, "file player reaches its initial paused state");
+	if (started)
+	{
+		const auto target_us = player.get_info().total_duration_us / 2;
+		player.seek_to(0.5);
+		check(wait_until([&]() {
+			return !player.is_seeking() && player.is_paused() &&
+				player.get_position_us() == target_us;
+		}), "file player fast-forward lands at the slider target");
+		check(player.get_visuals().buffered_note_count() == 1 &&
+			player.get_state().send_buffer.approximate_size() == 1,
+			"file seek restores a note held across the target for visuals and audio");
+
+		player.resume();
+		const auto backward_target_us = player.get_info().total_duration_us / 4;
+		player.seek_to(0.25);
+		check(wait_until([&]() {
+			return !player.is_seeking() && !player.is_paused() &&
+				player.get_position_us() == backward_target_us;
+		}), "playing file player accepts a backward slider seek");
+	}
+	player.stop();
+	playback.join();
 }
 
 void append_be16(std::vector<std::uint8_t>& output, std::uint16_t value)
@@ -154,7 +352,6 @@ simple_player_video_settings test_settings(std::uint32_t sample_rate = 48000,
 	settings.video_bitrate_kbps = 500;
 	settings.audio_bitrate_kbps = audio_bitrate;
 	settings.audio_sample_rate = sample_rate;
-	settings.maximum_cohorts = 0;
 	settings.tail_seconds = 0.0;
 	settings.visible_seconds = 1.0;
 	return settings;
@@ -173,6 +370,8 @@ syncore_preferences test_preferences()
 struct progress_capture
 {
 	std::uint32_t calls = 0;
+	std::uint64_t maximum_active_cohorts = 0;
+	std::uint64_t maximum_reported_peak_cohorts = 0;
 	bool cancel_after_video_frame = false;
 	bool saw_accelerated_video = false;
 	bool saw_software_video = false;
@@ -186,6 +385,10 @@ bool capture_progress(const simple_player_video_progress& progress,
 {
 	auto& capture = *static_cast<progress_capture*>(user_data);
 	++capture.calls;
+	capture.maximum_active_cohorts = (std::max)(
+		capture.maximum_active_cohorts, progress.active_cohorts);
+	capture.maximum_reported_peak_cohorts = (std::max)(
+		capture.maximum_reported_peak_cohorts, progress.peak_active_cohorts);
 	capture.saw_accelerated_video = capture.saw_accelerated_video ||
 		progress.stage.find("accelerated OpenGL") != std::string::npos;
 	capture.saw_software_video = capture.saw_software_video ||
@@ -261,12 +464,16 @@ generated_event short_event(std::uint64_t time_us, std::uint8_t status,
 int main(int argc, char** argv)
 {
 	test_text_box_layout_isolation();
+	test_visual_storage_has_no_artificial_limit();
+	test_player_slider_seek_restart();
+	test_stop_interrupts_distant_event_wait();
 	const auto directory = std::filesystem::absolute(
 		argc > 1 ? std::filesystem::path(argv[1]) :
 		std::filesystem::path("player-video-test-data"));
 	std::filesystem::create_directories(directory);
 	const auto midi_path = directory / "smpte.mid";
 	write_bytes(midi_path, smpte_fixture());
+	test_file_player_slider_seek(midi_path);
 	const auto prepared_midi_path = directory / "prepared.mid";
 	write_bytes(prepared_midi_path, ppq_fixture());
 	const std::vector<std::uint8_t> sentinel{'k', 'e', 'e', 'p'};
@@ -358,14 +565,14 @@ int main(int argc, char** argv)
 			{}, mux_preferences, mux_settings, nullptr,
 			capture_progress, &progress);
 		const auto bytes = read_bytes(output);
-		check(result.ok && result.video_frames == 240 && result.audio_frames == 176400 &&
+		check(result.ok && result.video_frames == 240 && result.audio_frames == 192000 &&
 			progress.calls < 100 && contains_atom(bytes, "vide") &&
 			contains_atom(bytes, "soun") && contains_atom(bytes, "avc1") &&
 			contains_atom(bytes, "mp4a") &&
 			(progress.saw_accelerated_video || progress.saw_software_video) &&
 			(progress.saw_framebuffer_video || progress.saw_backbuffer_video) &&
 			progress.saw_non_background_preview,
-			"SMPTE timing, supported AAC, bounded progress, and muxed streams render together");
+			"SMPTE timing, SYNCore-to-AAC resampling, bounded progress, and muxed streams render together");
 		std::cout << "SMPTE video path: " <<
 			(progress.saw_accelerated_video ? "accelerated OpenGL" :
 				"software OpenGL fallback") <<
@@ -434,14 +641,19 @@ int main(int argc, char** argv)
 		vector_event_source audio(100000, events);
 		vector_event_source visual(100000, events);
 		auto settings = test_settings();
-		settings.maximum_cohorts = 1;
+		auto constrained_preferences = preferences;
+		constrained_preferences.maximum_cohorts = 1;
+		progress_capture progress;
 		const auto output = directory / "prepared-cohort-warning.mp4";
 		std::filesystem::remove(output);
 		const auto result = render_simple_player_video_events(L"prepared.mid", audio, visual,
-			events.size(), output.wstring(), {}, preferences, settings, nullptr, nullptr, nullptr);
+			events.size(), output.wstring(), {}, constrained_preferences, settings,
+			nullptr, capture_progress, &progress);
 		check(result.ok && result.cohort_capacity_steals != 0 && !result.warning.empty() &&
+			progress.maximum_active_cohorts <= constrained_preferences.maximum_cohorts &&
+			progress.maximum_reported_peak_cohorts <= constrained_preferences.maximum_cohorts &&
 			!read_bytes(output).empty(),
-			"prepared-event export works and reports an explicit cohort-capacity warning");
+			"prepared-event export enforces and reports the configured cohort ceiling");
 	}
 
 	if (failures != 0)

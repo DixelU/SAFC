@@ -47,7 +47,8 @@ bank (which also selects the embedded output), return to the built-in sine, and
 configure sample rate, buffering, cohort limit, render threads, phase mode,
 output gain, and the limiter. These preferences and the bank path are restored
 on the next run. Player playback, editor playback, and editor note audition all
-share the selected output.
+share the selected output. MP4 export uses the same SYNCore bank and synthesis
+preferences; its separate AAC rate controls only the encoded audio stream.
 
 ## SAST Tools 
 

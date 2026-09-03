@@ -2667,7 +2667,7 @@ void player_watch_func()
 			str = std::format("Starts in {:.1f}s", lead_in_us / 1000000.0);
 		textbox->safe_string_replace(str);
 
-		if (!seek_to_slider->dragging)
+		if (!seek_to_slider->dragging && !player->is_seeking())
 			seek_to_slider->set_value(position, false);
 
 		std::this_thread::sleep_for(std::chrono::milliseconds(20));
@@ -3243,7 +3243,7 @@ void compressed_player_watch_func()
 		}
 
 		if (auto seek = _WH_t<slider>("SIMPLAYER", "SEEK_TO");
-			seek && !seek->dragging && total_us != 0)
+			seek && !seek->dragging && !player->is_seeking() && total_us != 0)
 			seek->set_value(static_cast<float>(current_us) / total_us, false);
 
 		std::this_thread::sleep_for(std::chrono::milliseconds(20));
@@ -4584,70 +4584,73 @@ void init(bool reinitialise_font = true)
 	if (simple_player::syncore_available())
 	{
 		window = new moveable_fui_window("SYNCore setup", system_white,
-			-150, 130 + moveable_window::window_header_size,
-			300, 300, 175, 2.5f, 70, 70, 2.5f,
+			-130, 130 + moveable_window::window_header_size,
+			260, 245, 140, 2.5f, 55, 45, 2.5f,
 			BACKGROUND_OPQ, HEADER, BORDER);
 
 		(*window)["BANK"] = new text_box(
 			"Bank: built-in sine (choose SF2/SFZ below)", legacy_white,
-			0, 112, 16, 270, 10, 0xFFFFFF1A, 0, 0,
-			_Align(center | top), text_box::VerticalOverflow::cut);
+			0, 115, 12, 230, 7, 0, 0, 0,
+			_Align::left, text_box::VerticalOverflow::cut);
 		(*window)["CHOOSE_BANK"] = new button(
 			"Choose SF2/SFZ...", system_white, on_syncore_bank_select,
-			-65, 88, 125, 10, 1, 0x7F3FFF3F, 0x7F3FFFFF,
+			-57.5, 94, 105, 10, 1, 0x7F3FFF3F, 0x7F3FFFFF,
 			0xFFFFFFFF, 0x7F3FFFFF, 0xFFFFFFFF, nullptr,
 			"Choose a SoundFont 2 or SFZ bank and select SYNCore output");
 		(*window)["BUILTIN_BANK"] = new button(
 			"Built-in sine", system_white, on_syncore_use_builtin_bank,
-			75, 88, 90, 10, 1, 0x007FFF3F, 0x007FFFFF,
+			67.5, 94, 80, 10, 1, 0x007FFF3F, 0x007FFFFF,
 			0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr,
 			"Clear the bank path and use SYNCore's test sine instrument");
 		(*window)["NOTE"] = new text_box(
-			"Changes take effect on the next note/playback; 0 threads means auto",
-			system_white, 0, 65, 12, 270, 9, 0, 0, 0, _Align::center);
+			"Changes apply to the next playback | 0 threads = auto",
+			system_white, 0, 72, 10, 230, 7, 0, 0, 0, _Align::center);
 
 		auto add_syncore_field = [&](const char* key, const char* label,
-			const std::string& value, float y, input_field::Type type, std::uint8_t max_chars)
+			const std::string& value, float y, bool right_column,
+			input_field::Type type, std::uint8_t max_chars)
 		{
+			const float label_x = right_column ? 44.0f : -86.0f;
+			const float input_x = right_column ? 100.0f : -30.0f;
 			(*window)[std::string(key) + "_LABEL"] = new text_box(
-				label, system_white, -62.5f, y, 12, 120, 10,
-				0, 0, 0, _Align::right);
+				label, system_white, label_x, y, 10, 68, 7,
+				0, 0, 0, _Align::right, text_box::VerticalOverflow::cut);
 			(*window)[key] = new input_field(
-				value, 45, y, 12, 80, system_white, nullptr,
-				0x007FFFFF, &system_white, label, max_chars,
+				value, input_x, y, 10, 40, system_white, nullptr,
+				0x007FFFFF, nullptr, " ", max_chars,
 				_Align::center, _Align::left, type);
 		};
 
-		add_syncore_field("SAMPLE_RATE", "Sample rate", "48000", 42,
+		add_syncore_field("SAMPLE_RATE", "Sample rate", "48000", 48, false,
 			input_field::Type::NaturalNumbers, 6);
-		add_syncore_field("BUFFER_FRAMES", "Buffer frames", "4096", 20,
+		add_syncore_field("BUFFER_FRAMES", "Buffer frames", "4096", 48, true,
 			input_field::Type::NaturalNumbers, 7);
-		add_syncore_field("MAX_COHORTS", "Maximum cohorts", "4096", -2,
+		add_syncore_field("MAX_COHORTS", "Cohort ceiling", "4096", 28, false,
 			input_field::Type::NaturalNumbers, 7);
-		add_syncore_field("RENDER_THREADS", "Render threads", "0", -24,
+		add_syncore_field("RENDER_THREADS", "Render threads", "0", 28, true,
 			input_field::Type::NaturalNumbers, 2);
-		add_syncore_field("GAIN_DB", "Output gain (dB)", "-12", -46,
+		add_syncore_field("GAIN_DB", "Gain (dB)", "-12", 8, false,
 			input_field::Type::FP_Any, 7);
 
 		(*window)["PHASE_MODE"] = new button(
 			"Phase: Coherent", system_white, on_syncore_phase_cycle,
-			-45, -72, 150, 10, 1, 0x7F3FFF3F, 0x7F3FFFFF,
+			-22.5, -16, 175, 10, 1, 0x7F3FFF3F, 0x7F3FFFFF,
 			0xFFFFFFFF, 0x7F3FFFFF, 0xFFFFFFFF, nullptr,
 			"Cycle the SYNCore phase policy; coherent is the deterministic default");
 		(*window)["LIMITER_LABEL"] = new text_box(
-			"Limiter", system_white, 78, -72, 12, 55, 10,
+			"Limiter", system_white, 62, 8, 10, 68, 7,
 			0, 0, 0, _Align::right);
 		(*window)["LIMITER"] = new checkbox(
-			115, -72, 12, 0x007FFFFF, 0xFF00007F, 0x00FF007F,
+			112, 8, 10, 0x007FFFFF, 0xFF00007F, 0x00FF007F,
 			1, true, &system_white, _Align::right,
 			"Enable SYNCore's -1 dB sample-peak limiter");
 		(*window)["STATUS"] = new text_box(
-			"Status: Stopped", system_white, 0, -105, 30, 270, 8,
-			0x07121FAF, 0x007FFFFF, 1, _Align::center,
+			"Status: Stopped", system_white, 0, -48, 30, 240, 7,
+			0xFFFFFF0A, 0x007FFF5F, 1, _Align::center,
 			text_box::VerticalOverflow::cut);
 		(*window)["APPLY"] = new button(
 			"Apply and save", system_white, on_syncore_preferences_apply,
-			0, -137, 110, 10, 1, 0x007FFF3F, 0x007FFFFF,
+			0, -78, 100, 10, 1, 0x007FFF3F, 0x007FFFFF,
 			0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr,
 			"Persist these settings and restart SYNCore if it is open");
 
@@ -4724,7 +4727,14 @@ void init(bool reinitialise_font = true)
 		on_overlap_removal_switch,
 		155, 150 - moveable_window::window_header_size, 80, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr);
 
-	(*window)["SEEK_TO"] = new slider(slider::Orientation::horizontal, 0, 130 - moveable_window::window_header_size, 375, 0, 1, 0, on_playback_seek_to, 0x808080FF, 0xFFFFFFFF, 0xAACFFFFF, 0x007FFFFF, 0x808080FF, 10, 4);
+	auto playback_seek_slider = new slider(slider::Orientation::horizontal, 0,
+		130 - moveable_window::window_header_size, 375, 0, 1, 0,
+		on_playback_seek_to, 0x808080FF, 0xFFFFFFFF, 0xAACFFFFF,
+		0x007FFFFF, 0x808080FF, 10, 4);
+	// Restarting the parser for every mouse-move event causes dense files to
+	// spend the entire drag cancelling seeks. Commit the final slider value once.
+	playback_seek_slider->fire_on_release = true;
+	(*window)["SEEK_TO"] = playback_seek_slider;
 
 	(*window)["MAXIMISE"] = new button("Maximise", system_white, switch_maximise, 175, 165 - moveable_window::window_header_size, 40, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr);
 

@@ -3356,8 +3356,8 @@ public:
 
 			// Reconstruct channel state at the seek point, emitted first by next()
 			// during fast-forward. Same final synth state as replaying every event
-			// below the target, without touching the dense note prefix; held notes
-			// are not re-struck.
+			// below the target, without touching the dense note prefix. Held notes
+			// are emitted separately at the seek boundary below.
 			//
 			// Absolute controllers (volume, pan, pitch bend, program, pressure,
 			// aftertouch) collapse to their last value per channel/lane. RPN/NRPN

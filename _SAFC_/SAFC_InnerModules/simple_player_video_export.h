@@ -17,9 +17,9 @@ struct simple_player_video_settings
 	std::uint32_t fps = 60;
 	std::uint32_t video_bitrate_kbps = 12000;
 	std::uint32_t audio_bitrate_kbps = 192;
+	// MP4/AAC output rate. SYNCore renders at syncore_preferences::sample_rate;
+	// Media Foundation resamples that PCM for the AAC encoder when necessary.
 	std::uint32_t audio_sample_rate = 48000;
-	// Zero gives offline rendering dynamic cohort growth without stealing.
-	std::uint32_t maximum_cohorts = 0;
 	double tail_seconds = 2.0;
 	double visible_seconds = 4.2;
 };

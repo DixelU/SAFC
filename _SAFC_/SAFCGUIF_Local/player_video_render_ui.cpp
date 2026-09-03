@@ -366,6 +366,41 @@ std::wstring save_dialog()
 
 std::string one_decimal(double value) { return std::format("{:.1f}", value); }
 
+const char* render_phase_name(syncore_phase_mode mode)
+{
+	switch (mode)
+	{
+	case syncore_phase_mode::coherent: return "Coherent";
+	case syncore_phase_mode::random_polarity: return "Random polarity";
+	case syncore_phase_mode::analytic: return "Analytic";
+	case syncore_phase_mode::smooth_field: return "Smooth field";
+	case syncore_phase_mode::independent_bins: return "Independent bins";
+	}
+	return "Unknown phase";
+}
+
+std::string syncore_summary()
+{
+	const auto& synth = saved_syncore_preferences;
+	std::string bank_name = "built-in sine";
+	if (!saved_syncore_bank_path.empty())
+	{
+		const auto filename = std::filesystem::path(saved_syncore_bank_path).filename().wstring();
+		bank_name.clear();
+		bank_name.reserve(filename.size());
+		for (const auto character : filename)
+			bank_name.push_back(character >= 32 && character < 127
+				? static_cast<char>(character) : '?');
+	}
+	return std::format(
+		"SYNCore: {}\n{} Hz | {} buffer | {} cohorts | {} threads\n"
+		"{} | {:+.1f} dB | limiter {}",
+		bank_name, synth.sample_rate, synth.buffer_frames, synth.maximum_cohorts,
+		synth.render_threads == 0 ? "auto" : std::to_string(synth.render_threads),
+		render_phase_name(synth.phase_mode), synth.output_gain_db,
+		synth.limiter_enabled ? "on" : "off");
+}
+
 void refresh_controls()
 {
 	if (!global_window_handler || !(*global_window_handler)["PLAYER_RENDER_SETTINGS"])
@@ -382,12 +417,12 @@ void refresh_controls()
 		field->safe_string_replace(std::to_string(draft_settings.audio_bitrate_kbps));
 	if (auto field = render_ui<input_field>("AUDIO_RATE"))
 		field->safe_string_replace(std::to_string(draft_settings.audio_sample_rate));
-	if (auto field = render_ui<input_field>("MAX_COHORTS"))
-		field->safe_string_replace(std::to_string(draft_settings.maximum_cohorts));
 	if (auto field = render_ui<input_field>("TAIL_SECONDS"))
 		field->safe_string_replace(one_decimal(draft_settings.tail_seconds));
 	if (auto field = render_ui<input_field>("VISIBLE_SECONDS"))
 		field->safe_string_replace(one_decimal(draft_settings.visible_seconds));
+	if (auto summary = render_ui<text_box>("SYNCORE_SUMMARY"))
+		summary->safe_string_replace(syncore_summary());
 	status(render_running.load(std::memory_order_acquire) ? "Rendering..." : "Ready");
 }
 
@@ -401,7 +436,6 @@ void persist_settings()
 	registry.SetDwordValue(L"PLAYER_RENDER_VIDEO_KBPS", saved_settings.video_bitrate_kbps);
 	registry.SetDwordValue(L"PLAYER_RENDER_AUDIO_KBPS", saved_settings.audio_bitrate_kbps);
 	registry.SetDwordValue(L"PLAYER_RENDER_AUDIO_RATE", saved_settings.audio_sample_rate);
-	registry.SetDwordValue(L"PLAYER_RENDER_MAX_COHORTS", saved_settings.maximum_cohorts);
 	registry.SetStringValue(L"PLAYER_RENDER_TAIL_SECONDS",
 		std::to_wstring(saved_settings.tail_seconds));
 	registry.SetStringValue(L"PLAYER_RENDER_VISIBLE_SECONDS",
@@ -422,8 +456,6 @@ bool read_controls(simple_player_video_settings& settings)
 			render_ui<input_field>("AUDIO_KBPS")->get_current_input("192"));
 		settings.audio_sample_rate = std::stoul(
 			render_ui<input_field>("AUDIO_RATE")->get_current_input("48000"));
-		settings.maximum_cohorts = std::stoul(
-			render_ui<input_field>("MAX_COHORTS")->get_current_input("0"));
 		settings.tail_seconds = std::stod(
 			render_ui<input_field>("TAIL_SECONDS")->get_current_input("2.0"));
 		settings.visible_seconds = std::stod(
@@ -445,13 +477,12 @@ bool read_controls(simple_player_video_settings& settings)
 		settings.video_bitrate_kbps < 64 || settings.video_bitrate_kbps > 250000 ||
 		!audio_bitrate_valid ||
 		(settings.audio_sample_rate != 44100 && settings.audio_sample_rate != 48000) ||
-		settings.maximum_cohorts > 1048576 ||
 		settings.tail_seconds < 0.0 || settings.tail_seconds > 60.0 ||
 		settings.visible_seconds < 0.25 || settings.visible_seconds > 60.0)
 	{
 		throw_alert_warning(
 			"Render ranges: even size 16-8192, FPS 1-240, video 64-250000 kbps, "
-			"AAC 96/128/160/192 kbps at 44100/48000 Hz, cohorts 0-1048576, "
+			"AAC 96/128/160/192 kbps at 44100/48000 Hz, "
 			"tail 0-60s, visible 0.25-60s");
 		return false;
 	}
@@ -491,33 +522,51 @@ std::string progress_text(const simple_player_video_progress& progress)
 {
 	std::ostringstream text;
 	text << progress.stage;
+	std::ostringstream completion;
+	auto append_completion = [&](const char* name, std::uint64_t value,
+		std::uint64_t total)
+	{
+		if (total == 0)
+			return;
+		if (completion.tellp() > 0)
+			completion << " | ";
+		completion << name << ' ' << std::format("{:.1f}", 100.0 * value / total) << '%';
+	};
+	append_completion("Audio", progress.completed_audio_frames,
+		progress.total_audio_frames);
+	append_completion("Video", progress.completed_frames, progress.total_frames);
+	append_completion("Events", progress.completed_events, progress.total_events);
+	if (completion.tellp() > 0)
+		text << '\n' << completion.str();
+
+	std::ostringstream synthesis;
 	if (progress.total_audio_frames != 0)
-		text << "\nAudio: " << std::format("{:.1f}",
-			100.0 * progress.completed_audio_frames / progress.total_audio_frames) << "%";
-	if (progress.total_frames != 0)
-		text << "\nVideo: " << std::format("{:.1f}",
-			100.0 * progress.completed_frames / progress.total_frames) << "%";
-	if (progress.total_events != 0)
-		text << "\nEvents: " << std::format("{:.1f}",
-			100.0 * progress.completed_events / progress.total_events) << "%";
-	if (progress.audio_render_threads != 0)
 	{
-		text << "\nThreads: ";
-		if (progress.requested_audio_render_threads == 0)
-			text << "auto->";
-		text << progress.audio_render_threads << "  Voices: " << progress.active_voices <<
-			"/" << progress.peak_active_voices;
+		if (progress.audio_render_threads != 0)
+		{
+			synthesis << "Threads ";
+			if (progress.requested_audio_render_threads == 0)
+				synthesis << "auto->";
+			synthesis << progress.audio_render_threads << " | Voices " <<
+				progress.active_voices << '/' << progress.peak_active_voices;
+		}
+		if (progress.peak_active_cohorts != 0 || progress.active_cohorts != 0)
+		{
+			if (synthesis.tellp() > 0)
+				synthesis << " | ";
+			synthesis << "Cohorts " << progress.active_cohorts << '/' <<
+				progress.peak_active_cohorts;
+			if (progress.cohort_capacity_steals != 0)
+				synthesis << " | Steals " << progress.cohort_capacity_steals;
+		}
 	}
-	if (progress.peak_active_cohorts != 0 || progress.active_cohorts != 0)
-	{
-		text << "\nCohorts: " << progress.active_cohorts << "/" <<
-			progress.peak_active_cohorts;
-		if (progress.cohort_capacity_steals != 0)
-			text << "  Steals: " << progress.cohort_capacity_steals;
-	}
+	if (synthesis.tellp() > 0)
+		text << '\n' << synthesis.str();
 	if (progress.parallel_render_calls != 0)
-		text << "\nParallel: " << progress.parallel_render_calls << " calls, " <<
+	{
+		text << "\nParallel " << progress.parallel_render_calls << " calls | " <<
 			progress.parallel_rendered_frames << " frames";
+	}
 	return text.str();
 }
 
@@ -673,7 +722,6 @@ void load_player_video_render_settings()
 		load_dword(L"PLAYER_RENDER_VIDEO_KBPS", saved_settings.video_bitrate_kbps, 64, 250000);
 		load_dword(L"PLAYER_RENDER_AUDIO_KBPS", saved_settings.audio_bitrate_kbps, 96, 192);
 		load_dword(L"PLAYER_RENDER_AUDIO_RATE", saved_settings.audio_sample_rate, 44100, 48000);
-		load_dword(L"PLAYER_RENDER_MAX_COHORTS", saved_settings.maximum_cohorts, 0, 1048576);
 		try
 		{
 			const auto value = std::stod(registry.GetStringValue(L"PLAYER_RENDER_TAIL_SECONDS"));
@@ -710,13 +758,13 @@ void initialize_player_video_render_window(
 	unsigned background_color, unsigned header_color, unsigned border_color)
 {
 	auto window = new moveable_fui_window("Player video render", system_white,
-		-190, 190 + moveable_window::window_header_size,
-		380, 350, 220, 2.5, 55, 55, 2.5,
+		-170, 175 + moveable_window::window_header_size,
+		340, 340, 200, 2.5, 45, 45, 2.5,
 		background_color, header_color, border_color);
 	window->on_close = []() { cancel_render(); };
-	(*window)["PREVIEW"] = new preview_pane(0, 145, 340, 92);
+	(*window)["PREVIEW"] = new preview_pane(0, 120, 310, 100);
 	(*window)["STATUS"] = new render_status_pane(
-		"Ready", system_white, 0, 68, 48, 340, 7, 0xFFFFFF1A, 0, 0,
+		"Ready", system_white, 0, 48, 36, 310, 7, 0xFFFFFF0A, 0x007FFF5F, 1,
 		_Align(center | top), text_box::VerticalOverflow::recalibrate);
 
 	auto add_field = [&](const char* key, const char* label, const char* value,
@@ -724,40 +772,41 @@ void initialize_player_video_render_window(
 		std::uint32_t max_chars)
 	{
 		(*window)[std::string(key) + "_LABEL"] = new text_box(
-			label, system_white, label_x, y, 10, 80, 7, 0, 0, 0,
+			label, system_white, label_x, y, 10, 70, 7, 0, 0, 0,
 			_Align::right, text_box::VerticalOverflow::cut);
-		(*window)[key] = new input_field(value, input_x, y, 10, 70, system_white,
+		(*window)[key] = new input_field(value, input_x, y, 10, 55, system_white,
 			nullptr, 0x007FFFFF, nullptr, " ", max_chars,
 			_Align::center, _Align::center, type);
 	};
-	add_field("WIDTH", "Width", "1280", -135, -55, 32,
+	add_field("WIDTH", "Width", "1280", -125, -60, 22,
 		input_field::Type::NaturalNumbers, 4);
-	add_field("HEIGHT", "Height", "720", -135, -55, 14,
+	add_field("HEIGHT", "Height", "720", -125, -60, 5,
 		input_field::Type::NaturalNumbers, 4);
-	add_field("FPS", "FPS", "60", -135, -55, -4,
+	add_field("FPS", "FPS", "60", -125, -60, -12,
 		input_field::Type::NaturalNumbers, 3);
-	add_field("VISIBLE_SECONDS", "Visible sec", "4.2", -135, -55, -22,
+	add_field("VISIBLE_SECONDS", "Visible sec", "4.2", -125, -60, -29,
 		input_field::Type::FP_PositiveNumbers, 5);
-	add_field("MAX_COHORTS", "Max cohorts", "0", -135, -55, -40,
-		input_field::Type::NaturalNumbers, 7);
-	add_field("VIDEO_KBPS", "Video kbps", "12000", 55, 135, 32,
+	add_field("VIDEO_KBPS", "Video kbps", "12000", 45, 110, 22,
 		input_field::Type::NaturalNumbers, 6);
-	add_field("AUDIO_KBPS", "AAC kbps", "192", 55, 135, 14,
+	add_field("AUDIO_KBPS", "AAC kbps", "192", 45, 110, 5,
 		input_field::Type::NaturalNumbers, 3);
-	add_field("AUDIO_RATE", "Audio Hz", "48000", 55, 135, -4,
+	add_field("AUDIO_RATE", "AAC Hz", "48000", 45, 110, -12,
 		input_field::Type::NaturalNumbers, 5);
-	add_field("TAIL_SECONDS", "Tail sec", "2.0", 55, 135, -22,
+	add_field("TAIL_SECONDS", "Tail sec", "2.0", 45, 110, -29,
 		input_field::Type::FP_PositiveNumbers, 5);
+	(*window)["SYNCORE_SUMMARY"] = new text_box(
+		syncore_summary(), legacy_white, 0, -60, 30, 310, 7, 0, 0, 0,
+		_Align::center, text_box::VerticalOverflow::cut);
 	(*window)["RENDER"] = new button(
-		"Render MP4", system_white, start_render, -90, -115, 80, 10, 1,
+		"Render MP4", system_white, start_render, -82.5, -98, 75, 10, 1,
 		0x7F3FFF3F, 0x7F3FFFFF, 0xFFFFFFFF, 0x7F3FFFFF, 0xFFFFFFFF,
 		nullptr, "Render the current MIDI or prepared archive to MP4");
 	(*window)["APPLY"] = new button(
-		"Apply", system_white, apply_settings, 10, -115, 55, 10, 1,
+		"Apply", system_white, apply_settings, 7.5, -98, 55, 10, 1,
 		0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF,
 		nullptr, "Save render settings");
 	(*window)["CANCEL"] = new button(
-		"Cancel", system_white, cancel_render, 87.5, -115, 55, 10, 1,
+		"Cancel", system_white, cancel_render, 77.5, -98, 55, 10, 1,
 		0x5F5F5F7F, 0xFFFFFFFF, 0x7F7F7FFF, 0x7F7F7FFF, 0xFFFFFFFF,
 		nullptr, "Cancel active render");
 	(*global_window_handler)["PLAYER_RENDER_SETTINGS"] = window;

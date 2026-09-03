@@ -72,13 +72,15 @@ Status values used below are `open`, `in progress`, `fixed`, and `accepted limit
      stage boundaries and preview frames force delivery.
    - Evidence: the SMPTE integration export asserts a bounded callback count.
 
-8. **Offline export silently inherits the live cohort-stealing ceiling** — `fixed`
-   - Dense output may lose voices while still returning success.
-   - Resolution: offline export defaults to dynamic cohort growth. The UI exposes an
-     optional explicit maximum, and any capacity steals are returned and shown as a
-     warning.
-   - Evidence: a constrained prepared-event export verifies both the steal metric and
-     visible warning result.
+8. **Offline export silently diverges from the selected SYNCore settings** — `fixed`
+   - The initial export UI replaced SYNCore's sample rate and cohort ceiling with separate
+     renderer values, so rendered audio did not necessarily match playback.
+   - Resolution: export now uses the selected SYNCore sample rate and cohort ceiling. Media
+     Foundation resamples that PCM to the separately selected 44.1/48 kHz AAC rate, and any
+     cohort-capacity steals are returned and shown as a warning.
+   - Evidence: a 48 kHz SYNCore render muxed to 44.1 kHz AAC succeeds, while a constrained
+     prepared-event export verifies the steal metric, visible warning, and that both the
+     live and reported peak cohort counts stay at or below the selected ceiling.
 
 9. **Concurrent error capture can hide the originating failure as cancellation** — `fixed`
    - The shared cancel flag is set before the real exception is recorded, so the peer can
@@ -160,15 +162,16 @@ Status values used below are `open`, `in progress`, `fixed`, and `accepted limit
      dialog behavior live in `SAFCGUIF_Local/player_video_render_ui.*`; `_SAFC_.cpp` retains
      application wiring only.
 
-5. **Large-MIDI path is not bounded and prepared archives are unsupported** — `fixed`
+5. **Large-MIDI path duplicates input and prepared archives are unsupported** — `fixed`
    - The regular MIDI is copied into SYNCore-owned memory and separately mapped for visual
      parsing. Prepared archives are rejected.
    - Resolution: regular SMF uses one parsed/scheduled representation rather than a second
      visual parser. Prepared compressed page stores can fork independent streaming readers
-     for audio and visuals without copying raw events. Offline visual state rejects more
-     than 2,000,000 buffered notes instead of growing without limit.
-   - Accepted limitations: SYNCore's standard-SMF scheduler still owns its parsed event
-     list in memory, and the prepared compressed format still rejects SMPTE files at import.
+     for audio and visuals without copying raw events. Offline visual state retains one exact
+     rectangle per note, with no artificial note ceiling and no low-detail/coalesced mode.
+   - Accepted limitations: exact visuals grow with the notes retained in the viewport,
+     SYNCore's standard-SMF scheduler still owns its parsed event list in memory, and the
+     prepared compressed format still rejects SMPTE files at import.
 
 6. **Exporter-specific automated coverage is absent** — `fixed`
    - Required coverage: SMPTE timing, supported/unsupported AAC settings, pre-cancel and
@@ -177,7 +180,8 @@ Status values used below are `open`, `in progress`, `fixed`, and `accepted limit
    - Added coverage: a Windows integration target exercises actual compressed page-store
      preparation/forking, invalid AAC settings, cancellation, collisions, output
      preservation, SMPTE scheduling, muxed H.264/AAC markers and durations, progress
-     throttling, cohort warnings, and exception precedence.
+     throttling, cohort warnings, exception precedence, exact storage beyond the former
+     two-million-note abort, and paused slider seek/seek-to-start behavior.
    - Remaining manual coverage: closing the GUI during an active render, preview behavior,
      listening quality, heavy/black-MIDI throughput, and all phase modes.
 
@@ -255,5 +259,5 @@ Status values used below are `open`, `in progress`, `fixed`, and `accepted limit
   verification output `build/codex-full-release/SAFC.exe` without interrupting that render.
 - `git diff --check` passed; Git reported only the checkout's expected LF-to-CRLF notices.
 - Not run: interactive GUI cancellation/preview, subjective listening, device playback,
-  moving both affected windows in the rebuilt executable, heavy/black-MIDI performance, or
+  moving both affected windows in the rebuilt executable, full-file black-MIDI performance, or
   exhaustive phase-mode runtime tests.

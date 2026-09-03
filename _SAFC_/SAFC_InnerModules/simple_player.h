@@ -17,6 +17,8 @@
 #include <new>
 #include <limits>
 #include <set>
+#include <list>
+#include <unordered_map>
 
 #include <memory_mapped_file_reader.h>
 
@@ -80,12 +82,6 @@ struct simple_player
 
 		// Pending note tracking entry - points to note in queue awaiting its note_off
 		// Only accessed by parser thread - no synchronization needed
-		struct pending_entry
-		{
-			buffered_note* note_ptr;
-			uint32_t track_id;
-		};
-
 		// Per-track_id LIFO stacks of pending notes per key.
 		// Flat open-addressing hash table (linear probing, power-of-two size):
 		// a lookup is one probe into a contiguous array instead of
@@ -283,6 +279,53 @@ struct simple_player
 		uint32_t short_msg;  // prepared MIDI short message (0 = invalid/empty)
 	};
 
+	struct seek_held_note
+	{
+		uint64_t start_time_us;
+		size_t track_index;
+		uint8_t key;
+		uint8_t channel;
+		uint8_t velocity;
+	};
+
+	// While the parser walks to a seek target, retain only notes that are still
+	// held there. The list preserves note-on order; per-identity stacks provide
+	// the same LIFO note-off matching used by the live visual path.
+	struct seek_note_tracker
+	{
+		using note_list = std::list<seek_held_note>;
+		using note_iterator = note_list::iterator;
+
+		note_list active;
+		std::unordered_map<uint64_t, std::vector<note_iterator>> pending;
+
+		static uint64_t identity(uint8_t key, size_t track_index, uint8_t channel)
+		{
+			const uint32_t color_id = visuals_viewport::make_color_id(track_index, channel);
+			return (static_cast<uint64_t>(color_id) << 7) | key;
+		}
+
+		void note_on(uint8_t key, uint64_t time_us, size_t track_index,
+			uint8_t channel, uint8_t velocity)
+		{
+			active.push_back({time_us, track_index, key, channel, velocity});
+			auto note = active.end();
+			--note;
+			pending[identity(key, track_index, channel)].push_back(note);
+		}
+
+		void note_off(uint8_t key, size_t track_index, uint8_t channel)
+		{
+			auto found = pending.find(identity(key, track_index, channel));
+			if (found == pending.end() || found->second.empty())
+				return;
+			active.erase(found->second.back());
+			found->second.pop_back();
+			if (found->second.empty())
+				pending.erase(found);
+		}
+	};
+
 	struct track_playback_state
 	{
 		const uint8_t* position;
@@ -379,7 +422,6 @@ struct simple_player
 		std::unique_lock<std::mutex> run_lock;
 		bool active = false;
 		bool has_next_event = false;
-		std::uint32_t notes_since_capacity_check = 0;
 
 		void reset()
 		{
@@ -387,7 +429,6 @@ struct simple_player
 			next_event = {};
 			active = false;
 			has_next_event = false;
-			notes_since_capacity_check = 0;
 			run_lock = {};
 		}
 	};
@@ -816,40 +857,53 @@ struct simple_player
 	// Seek to a position in the file (0.0 = start, 1.0 = end)
 	void seek_to(double fraction)
 	{
-		if (!state.playing.load(std::memory_order_acquire))
-			return;
-
-		fraction = std::clamp(fraction, 0.0, 1.0);
-		uint64_t target_us = static_cast<uint64_t>(fraction * info.total_duration_us);
-
-		// Remember whether we were paused so we can restore after seek
-		const bool was_paused = state.paused.load(std::memory_order_acquire);
-		if (!was_paused)
 		{
-			const auto current_position = get_position_us();
-			state.pending_start_lead_in_us.store(
-				current_start_lead_in_remaining_us(current_position),
-				std::memory_order_release);
-		}
-		state.seek_resume_paused.store(was_paused, std::memory_order_relaxed);
-		state.seek_target_us.store(target_us, std::memory_order_relaxed);
-		state.seek_requested.store(true, std::memory_order_release);
+			std::lock_guard seek_lock(seek_request_mutex);
+			if (!state.playing.load(std::memory_order_acquire))
+				return;
 
-		// Signal threads to stop (unpause if needed so they can exit)
-		if (state.paused.load(std::memory_order_acquire))
+			fraction = std::clamp(fraction, 0.0, 1.0);
+			const uint64_t target_us = static_cast<uint64_t>(
+				fraction * info.total_duration_us);
+
+			// A seek temporarily unpauses the parser. If another slider request
+			// arrives during that restart, preserve the user's original pause state.
+			const bool seek_in_progress =
+				state.seek_requested.load(std::memory_order_relaxed) ||
+				state.seeking_ff.load(std::memory_order_acquire);
+			const bool was_paused = seek_in_progress
+				? state.seek_resume_paused.load(std::memory_order_relaxed)
+				: state.paused.load(std::memory_order_acquire);
+			if (!was_paused && !seek_in_progress)
+			{
+				const auto current_position = get_position_us();
+				state.pending_start_lead_in_us.store(
+					current_start_lead_in_remaining_us(current_position),
+					std::memory_order_release);
+			}
+			state.seek_resume_paused.store(was_paused, std::memory_order_relaxed);
+			state.seek_target_us.store(target_us, std::memory_order_relaxed);
+			state.seek_requested.store(true, std::memory_order_release);
+
+			// Signal both playback threads to stop. The restart loop consumes the
+			// latest request under this same mutex, so rapid seeks cannot be lost.
 			state.paused.store(false, std::memory_order_release);
-		state.stop_requested.store(true, std::memory_order_release);
+			state.stop_requested.store(true, std::memory_order_release);
+		}
 	}
 
 	// Stop playback completely
 	void stop()
 	{
-		cancel_requested.store(true, std::memory_order_release);
-		state.stop_requested.store(true, std::memory_order_release);
+		{
+			std::lock_guard seek_lock(seek_request_mutex);
+			cancel_requested.store(true, std::memory_order_release);
+			state.seek_requested.store(false, std::memory_order_release);
+			state.stop_requested.store(true, std::memory_order_release);
 
-		// If paused, unpause so threads can exit
-		if (state.paused.load(std::memory_order_acquire))
+			// If paused, unpause so threads can exit
 			state.paused.store(false, std::memory_order_release);
+		}
 	}
 
 	bool is_paused() const
@@ -868,6 +922,14 @@ struct simple_player
 	bool is_fast_forwarding() const
 	{
 		return state.seeking_ff.load(std::memory_order_acquire);
+	}
+
+	// Covers both the request-to-restart gap and the parser's fast-forward.
+	// UI progress must not overwrite the user's slider target during either.
+	bool is_seeking() const
+	{
+		return state.seek_requested.load(std::memory_order_acquire) ||
+			state.seeking_ff.load(std::memory_order_acquire);
 	}
 
 	const std::wstring& get_filename() const { return current_filename; }
@@ -1028,17 +1090,8 @@ struct simple_player
 
 			state.parsed_up_to_us.store(event.time_us, std::memory_order_release);
 			if (event.k == generated_event::kind::note_on)
-			{
 				state.visuals.push_note_on(event.key, event.time_us, event.track_index,
 					event.channel, event.velocity);
-				if (++offline_visual.notes_since_capacity_check >= 4096)
-				{
-					offline_visual.notes_since_capacity_check = 0;
-					if (state.visuals.buffered_note_count() > 2'000'000)
-						throw std::runtime_error(
-							"offline visual buffer exceeded 2,000,000 notes");
-				}
-			}
 			else if (event.k == generated_event::kind::note_off)
 				state.visuals.push_note_off(event.key, event.time_us, event.track_index,
 					event.channel);
@@ -1065,12 +1118,13 @@ struct simple_player
 	}
 
 	// Parser thread: pre-parses MIDI events into the lookahead buffer
-	// skip_to_us > 0: fast-forward to that time, pushing channel state to buffer for sender
+	// skip_to_us > 0: reconstruct channel and held-note state at that time.
 	SIMPLE_PLAYER_FORCE_NO_INLINE void parser_thread_func(uint64_t skip_to_us = 0, bool pause_after_seek = false)
 	{
 		update_tempo_cache_at(~0ULL); // initialize cache for tick 0
 
 		bool fast_forwarding = (skip_to_us > 0);
+		seek_note_tracker held_notes;
 		if (fast_forwarding)
 			state.seeking_ff.store(true, std::memory_order_release);
 
@@ -1107,26 +1161,7 @@ struct simple_player
 			if (fast_forwarding && batch_time_us >= skip_to_us)
 			{
 				fast_forwarding = false;
-
-				// Set timing so sender starts from the seek position
-				state.start_offset_us = skip_to_us;
-				state.current_time_us = skip_to_us;
-				state.sender_position_us.store(skip_to_us, std::memory_order_release);
-				state.parsed_up_to_us.store(skip_to_us, std::memory_order_release);
-
-				// Re-pause (if requested) BEFORE clearing seeking_ff, so a waiter
-				// that resumes on !is_fast_forwarding() already observes paused ==
-				// true and its resume() wins instead of racing the re-pause.
-				if (pause_after_seek)
-				{
-					state.pause_position_us.store(skip_to_us, std::memory_order_release);
-					state.paused.store(true, std::memory_order_release);
-				}
-				else
-					set_playback_clock_from_pending_lead(skip_to_us);
-
-				// Signal sender to transition from immediate drain to timed playback
-				state.seeking_ff.store(false, std::memory_order_release);
+				complete_fast_forward(skip_to_us, pause_after_seek, &held_notes);
 			}
 
 			if (!fast_forwarding)
@@ -1223,26 +1258,36 @@ struct simple_player
 
 					switch (command >> 4)
 					{
-						case 0x8: // note off
+					case 0x8: // note off
 						{
 							data2 = get_value_and_increment(track.position, track.end);
+							uint8_t channel = command & 0x0F;
 
-							if (!fast_forwarding)
+							if (fast_forwarding)
+								held_notes.note_off(data1, ref.track_index, channel);
+							else
 							{
 								msg_to_send = make_smsg(command, data1, data2);
-								uint8_t channel = command & 0x0F;
 								state.visuals.push_note_off(data1, batch_time_us, ref.track_index, channel);
 							}
 							break;
 						}
-						case 0x9: // note on
+					case 0x9: // note on
 						{
 							data2 = get_value_and_increment(track.position, track.end);
+							uint8_t channel = command & 0x0F;
 
-							if (!fast_forwarding)
+							if (fast_forwarding)
+							{
+								if (data2 > 0)
+									held_notes.note_on(data1, batch_time_us,
+										ref.track_index, channel, data2);
+								else
+									held_notes.note_off(data1, ref.track_index, channel);
+							}
+							else
 							{
 								msg_to_send = make_smsg(command, data1, data2);
-								uint8_t channel = command & 0x0F;
 
 								if (data2 > 0)
 									state.visuals.push_note_on(data1, batch_time_us, ref.track_index, channel, data2);
@@ -1299,7 +1344,11 @@ struct simple_player
 					// Push message to lookahead buffer.
 					if (msg_to_send != 0)
 					{
-						state.send_buffer.push({batch_time_us, msg_to_send});
+						// Reconstructed channel state belongs at the seek boundary.
+						// Historical timestamps would underflow against start_offset_us
+						// if the sender had not drained them before FF completed.
+						state.send_buffer.push({
+							fast_forwarding ? skip_to_us : batch_time_us, msg_to_send});
 
 						// Per-batch (outer) throttle only fires between unique
 						// ticks, so a single dense tick could otherwise push
@@ -1351,18 +1400,24 @@ struct simple_player
 			}
 		}
 
+		// The requested position can be after the final MIDI event. Complete the
+		// seek at that position instead of leaving the sender in fast-forward mode.
+		if (fast_forwarding && !state.stop_requested)
+			complete_fast_forward(skip_to_us, pause_after_seek, &held_notes);
+
 		state.parser_done.store(true, std::memory_order_release);
 	}
 
 	// Parser variant that pulls from an external event source instead of the
 	// mmap'd file. Shares the sender thread, timing, throttle, visuals, pause
 	// and seek machinery with the file path — only event production differs.
-	// skip_to_us > 0: fast-forward to that time, emitting controller/program
-	// state (not notes) so the synth is correct at the seek point.
+	// skip_to_us > 0: fast-forward to that time, reconstructing controller,
+	// program, and held-note state so the synth is correct at the seek point.
 	SIMPLE_PLAYER_FORCE_NO_INLINE void parser_from_source_thread_func(
 		playback_event_source* src, uint64_t skip_to_us = 0, bool pause_after_seek = false)
 	{
 		bool fast_forwarding = (skip_to_us > 0);
+		seek_note_tracker held_notes;
 		if (fast_forwarding)
 		{
 			state.seeking_ff.store(true, std::memory_order_release);
@@ -1384,26 +1439,7 @@ struct simple_player
 			if (fast_forwarding && batch_time_us >= skip_to_us)
 			{
 				fast_forwarding = false;
-
-				// Set timing so the sender starts from the seek position
-				state.start_offset_us = skip_to_us;
-				state.current_time_us = skip_to_us;
-				state.sender_position_us.store(skip_to_us, std::memory_order_release);
-				state.parsed_up_to_us.store(skip_to_us, std::memory_order_release);
-
-				// Re-pause (if requested) BEFORE clearing seeking_ff, so a waiter
-				// that resumes on !is_fast_forwarding() already observes paused ==
-				// true and its resume() wins instead of racing the re-pause.
-				if (pause_after_seek)
-				{
-					state.pause_position_us.store(skip_to_us, std::memory_order_release);
-					state.paused.store(true, std::memory_order_release);
-				}
-				else
-					set_playback_clock_from_pending_lead(skip_to_us);
-
-				// Signal sender to transition from immediate drain to timed playback
-				state.seeking_ff.store(false, std::memory_order_release);
+				complete_fast_forward(skip_to_us, pause_after_seek, &held_notes);
 			}
 
 			if (!fast_forwarding)
@@ -1438,10 +1474,17 @@ struct simple_player
 			const bool is_note = (ev.k == generated_event::kind::note_on ||
 				ev.k == generated_event::kind::note_off);
 
-			// During fast-forward, drop notes but keep controller/program state so
-			// the synth sounds correct at the seek target (matches the file parser).
+			// During fast-forward, retain only notes still held at the target. They
+			// are re-struck when the seek completes; ended notes are discarded.
 			if (fast_forwarding && is_note)
+			{
+				if (ev.k == generated_event::kind::note_on && ev.velocity != 0)
+					held_notes.note_on(ev.key, batch_time_us, ev.track_index,
+						ev.channel, ev.velocity);
+				else
+					held_notes.note_off(ev.key, ev.track_index, ev.channel);
 				continue;
+			}
 
 			// Falling-notes visuals (only in timed playback, matching the file path)
 			if (!fast_forwarding)
@@ -1454,7 +1497,8 @@ struct simple_player
 
 			if (ev.short_msg != 0)
 			{
-				state.send_buffer.push({batch_time_us, ev.short_msg});
+				state.send_buffer.push({
+					fast_forwarding ? skip_to_us : batch_time_us, ev.short_msg});
 
 				// Same intra-batch size cap as the file parser (sampled every 1024).
 				if ((++cap_check_counter & 1023u) == 0)
@@ -1470,6 +1514,9 @@ struct simple_player
 				}
 			}
 		}
+
+		if (fast_forwarding && !state.stop_requested)
+			complete_fast_forward(skip_to_us, pause_after_seek, &held_notes);
 
 		state.parser_done.store(true, std::memory_order_release);
 	}
@@ -1535,8 +1582,16 @@ struct simple_player
 				if (state.parser_done.load(std::memory_order_acquire))
 					break; // all done
 
-				// wait for parser to produce more events
-				std::this_thread::yield();
+				// With no queued event there is nothing else to publish the playback
+				// clock. Keep it moving so the parser can cross a long (> lookahead)
+				// rest instead of both threads waiting on each other forever.
+				const uint64_t clock_position = get_position_us();
+				const uint64_t published_position =
+					state.sender_position_us.load(std::memory_order_relaxed);
+				if (clock_position > published_position)
+					state.sender_position_us.store(clock_position, std::memory_order_release);
+
+				std::this_thread::sleep_for(std::chrono::microseconds(100));
 				continue;
 			}
 
@@ -1551,35 +1606,32 @@ struct simple_player
 				state.sender_position_us.store(ev.time_us, std::memory_order_release);
 			}
 
-			uint64_t target_us = ev.time_us - state.start_offset_us;
+			const uint64_t target_us = ev.time_us > state.start_offset_us
+				? ev.time_us - state.start_offset_us : 0;
 			const int64_t target_elapsed_us = clamp_to_i64(target_us);
 
-			// wait until it's time to send this event; if the cached clock
-			// already passed the target, send immediately without re-querying
-			if (target_elapsed_us > cached_elapsed_us)
+			// Wait in bounded slices so Stop, Pause, and a new seek remain
+			// responsive even when the next event is seconds or hours away.
+			while (!state.stop_requested &&
+				!state.paused.load(std::memory_order_acquire))
 			{
 				auto elapsed = std::chrono::steady_clock::now() - state.start_time;
 				cached_elapsed_us = std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count();
+				if (cached_elapsed_us >= target_elapsed_us)
+					break;
 
-				if (target_elapsed_us > cached_elapsed_us)
-				{
-					const auto wait_us = target_elapsed_us - cached_elapsed_us;
-					if (wait_us > 200)
-					{
-						// sleep for most of the wait time
-						std::this_thread::sleep_for(std::chrono::microseconds(wait_us - 20));
-					}
-
-					// spin-wait for final precision
-					while (!state.stop_requested)
-					{
-						elapsed = std::chrono::steady_clock::now() - state.start_time;
-						cached_elapsed_us = std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count();
-						if (cached_elapsed_us >= target_elapsed_us)
-							break;
-					}
-				}
+				const auto wait_us = target_elapsed_us - cached_elapsed_us;
+				if (wait_us > 200)
+					std::this_thread::sleep_for(std::chrono::microseconds(
+						(std::min)(wait_us - 20, int64_t{5'000})));
+				else
+					std::this_thread::yield();
 			}
+
+			if (state.stop_requested)
+				break;
+			if (state.paused.load(std::memory_order_acquire))
+				continue;
 
 			// send the event
 			if (ev.short_msg != 0) [[likely]]
@@ -1615,11 +1667,38 @@ struct simple_player
 
 			for (;;)
 			{
-				// reset per-iteration state
-				state.stop_requested.store(false, std::memory_order_relaxed);
-				// A seek (skip_to_us > 0) fast-forwards; keep seeking_ff set from
-				// here through completion so the pre-fast-forward window stays closed.
-				state.seeking_ff.store(skip_to_us > 0, std::memory_order_relaxed);
+				bool consumed_seek = false;
+				bool stop_before_restart = false;
+				{
+					std::lock_guard seek_lock(seek_request_mutex);
+					stop_before_restart = cancel_requested.load(std::memory_order_acquire);
+					if (!stop_before_restart &&
+						state.seek_requested.load(std::memory_order_acquire))
+					{
+						skip_to_us = state.seek_target_us.load(std::memory_order_relaxed);
+						pause_after_seek = state.seek_resume_paused.load(std::memory_order_relaxed);
+						state.seek_requested.store(false, std::memory_order_relaxed);
+						state.paused.store(pause_after_seek, std::memory_order_relaxed);
+						consumed_seek = true;
+					}
+
+					if (!stop_before_restart)
+					{
+						// Clear the previous parser's stop signal atomically with
+						// consuming the newest seek request. A later request cannot
+						// be overwritten by this restart.
+						state.stop_requested.store(false, std::memory_order_relaxed);
+						state.seeking_ff.store(skip_to_us > 0, std::memory_order_relaxed);
+					}
+				}
+				if (stop_before_restart)
+					break;
+
+				// Seeking to the start does not enter the parser's fast-forward
+				// branch, so reset its playback clock here.
+				if (consumed_seek && skip_to_us == 0)
+					complete_fast_forward(0, pause_after_seek);
+
 				state.parser_done.store(false, std::memory_order_relaxed);
 				state.parsed_up_to_us.store(0, std::memory_order_relaxed);
 				state.sender_position_us.store(0, std::memory_order_relaxed);
@@ -1671,18 +1750,17 @@ struct simple_player
 					break;
 				}
 
-				// Check if this was a seek (threads stopped due to seek_requested)
-				if (state.seek_requested.load(std::memory_order_acquire))
+				bool restart_for_seek = false;
 				{
-					skip_to_us = state.seek_target_us.load(std::memory_order_relaxed);
-					pause_after_seek = state.seek_resume_paused.load(std::memory_order_relaxed);
-
-					state.seek_requested.store(false, std::memory_order_relaxed);
-					if (pause_after_seek)
-						state.pause_position_us.store(skip_to_us, std::memory_order_release);
-
-					state.paused.store(pause_after_seek, std::memory_order_relaxed);
-
+					std::lock_guard seek_lock(seek_request_mutex);
+					restart_for_seek =
+						state.seek_requested.load(std::memory_order_acquire) &&
+						!cancel_requested.load(std::memory_order_acquire);
+					if (!restart_for_seek)
+						state.playing.store(false, std::memory_order_release);
+				}
+				if (restart_for_seek)
+				{
 					all_notes_off();
 					continue;
 				}
@@ -2332,6 +2410,7 @@ private:
 	// close the scheduling window before a worker starts. This mutex makes a
 	// second run fail closed instead of corrupting the shared state.
 	std::mutex playback_run_mutex;
+	mutable std::mutex seek_request_mutex;
 	mutable std::mutex output_error_mutex;
 	std::string last_output_error;
 
@@ -2385,6 +2464,49 @@ private:
 	{
 		set_playback_clock(start_offset_us,
 			state.pending_start_lead_in_us.exchange(0, std::memory_order_acq_rel));
+	}
+
+	void complete_fast_forward(uint64_t position_us, bool pause_after_seek,
+		seek_note_tracker* held_notes = nullptr)
+	{
+		state.start_offset_us = position_us;
+		state.current_time_us = position_us;
+		state.sender_position_us.store(position_us, std::memory_order_release);
+		state.parsed_up_to_us.store(position_us, std::memory_order_release);
+
+		// Publish the requested pause state before clearing seeking_ff. A Play
+		// click waiting on fast-forward then cannot race this re-pause.
+		if (pause_after_seek)
+		{
+			state.pause_position_us.store(position_us, std::memory_order_release);
+			state.paused.store(true, std::memory_order_release);
+		}
+		else
+		{
+			set_playback_clock_from_pending_lead(position_us);
+			state.paused.store(false, std::memory_order_release);
+		}
+
+		// Restore visuals before publishing seek completion, so the first frame at
+		// the new location already contains notes crossing the seek boundary.
+		if (held_notes)
+			for (const auto& note : held_notes->active)
+				state.visuals.push_note_on(note.key, note.start_time_us,
+					note.track_index, note.channel, note.velocity);
+
+		state.seeking_ff.store(false, std::memory_order_release);
+
+		// Audio note-ons are queued only after fast-forward has ended. Otherwise
+		// the sender's immediate-drain branch could sound them during a paused seek.
+		if (held_notes)
+		{
+			for (const auto& note : held_notes->active)
+				state.send_buffer.push({position_us, make_smsg(
+					static_cast<uint8_t>(0x90 | (note.channel & 0x0F)),
+					note.key, note.velocity)});
+			held_notes->active.clear();
+			held_notes->pending.clear();
+		}
 	}
 
 	bool set_device_locked(size_t device_index)
