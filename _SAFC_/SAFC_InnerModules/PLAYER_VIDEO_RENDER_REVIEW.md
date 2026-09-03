@@ -107,15 +107,30 @@ Status values used below are `open`, `in progress`, `fixed`, and `accepted limit
      and the render loop issued redundant flush/finish calls before synchronous readback.
    - The Media Foundation sink writer was created without opting into hardware transforms,
      so a hardware H.264 encoder could not be selected by the sink-writer path.
-   - Resolution: export first creates a hidden window-backed WGL context and reports whether
-     its selected pixel format is accelerated; the bitmap context remains a supported
-     fallback. BGRA-capable contexts now use row copies, redundant synchronization was
-     removed, and the sink writer enables hardware transforms while retaining normal
-     software fallback behavior.
-   - Evidence: the integration export reports accelerated OpenGL on this machine and renders
-     240 nonblank 640x360 frames at 60 fps into a valid muxed file. This proves path selection
-     and correctness, not a speedup for the user's long/dense MIDI or selection of a hardware
-     H.264 MFT.
+   - Resolution: export first creates an accelerated WGL context, then renders into a
+     texture-backed framebuffer object sized independently from its hidden context-provider
+     window. The default backbuffer and bitmap context remain explicit compatibility
+     fallbacks. BGRA-capable contexts use row copies, redundant synchronization was removed,
+     and the sink writer enables hardware transforms while retaining software fallback.
+   - Evidence: the integration export reports `accelerated OpenGL FBO` on this machine and
+     renders 240 nonblank 640x360 frames at 60 fps into a valid muxed file. This proves FBO
+     path selection and correctness, not selection of a hardware H.264 MFT.
+
+12. **Throttled Media Foundation writes can stall both render producers** — `fixed`
+   - Audio and video rendered on separate threads, but each held the same mutex while calling
+     `IMFSinkWriter::WriteSample`. Media Foundation throttles by blocking inside that call.
+     Once one stream ran ahead, it could block while owning the mutex needed to submit the
+     lagging stream. The observed near-zero CPU/GPU utilization with audio and video progress
+     frozen at different percentages matches this lock/back-pressure cycle.
+   - Resolution: audio and video now enter separate bounded queues (16 audio blocks and four
+     video frames). One MTA writer thread waits for both active streams and submits their
+     samples in timestamp order. This preserves Media Foundation's useful throttling without
+     holding an application mutex across `WriteSample`, prevents either producer from
+     monopolizing the queue, and keeps raw-frame memory bounded.
+   - Evidence: a new sustained case exports a 33-second program with 1,980 frames. It completed
+     in under one second on this machine, through the accelerated FBO path, while the complete
+     integration executable finished in approximately 2.7 seconds. The user's dense source
+     remains the required representative runtime confirmation.
 
 ## Overbuilt or unfinished areas
 
@@ -171,11 +186,11 @@ Status values used below are `open`, `in progress`, `fixed`, and `accepted limit
      represents the user's long/dense MIDI, selected bank, phase mode, resolution, and audio
      tail. Audio synthesis, video drawing/readback, and H.264 encoding are only reported as
      broad progress stages, so the dominant cost is not yet observable from the UI.
-   - Next evidence: rerun the reported file with the rebuilt application, record wall time
-     and whether the UI says accelerated or software OpenGL, then compare stage progress and
-     inspect/listen to the finalized MP4. Add finer timing or ETA only if that run remains
-     unexpectedly slow; do not infer player-versus-export parity because offline rendering
-     also encodes every video frame and synthesizes/writes all audio samples.
+   - Next evidence: rerun the reported file after the timestamp-ordered writer/FBO rebuild,
+     record wall time and its reported OpenGL path, then inspect/listen to the finalized MP4.
+     Add finer stage timing or ETA only if that run remains unexpectedly slow; do not infer
+     player-versus-export parity because offline rendering also encodes every video frame and
+     synthesizes/writes all audio samples.
 
 ## Additional soundness hardening found during remediation
 
@@ -211,6 +226,8 @@ Status values used below are `open`, `in progress`, `fixed`, and `accepted limit
 - [`PIXELFORMATDESCRIPTOR`](https://learn.microsoft.com/en-us/windows/win32/api/wingdi/ns-wingdi-pixelformatdescriptor)
   documents the generic-software and generic-accelerated pixel-format flags used to report
   the active OpenGL path.
+- [OpenGL 3.0 framebuffer objects](https://registry.khronos.org/OpenGL/specs/gl/glspec30.pdf)
+  define the separate texture/renderbuffer attachments used for offscreen rendering.
 
 ## Verification baseline
 
@@ -225,8 +242,12 @@ Status values used below are `open`, `in progress`, `fixed`, and `accepted limit
 - `safc-video-export-tests`: 1/1 passed. This single integration executable contains the
   focused exporter cases listed above and performs real Media Foundation MP4 writes.
 - The SMPTE case now renders 240 frames at 640x360/60 fps, verifies a nonblank preview, and
-  reported `accelerated OpenGL` on this machine. It also covers textbox layout-cursor
+  reported `accelerated OpenGL FBO` on this machine. It also covers textbox layout-cursor
   isolation.
+- A sustained timestamp-order regression rendered a 33-second program with 1,980 frames in
+  under one second on this machine; the complete exporter integration test took about 2.7
+  seconds. This crosses the short smoke test's buffering horizon without becoming a
+  heavy/black-MIDI benchmark.
 - SYNCore CTest suite: 8/8 passed, including playback, phase, cohorts, mastering, SMF,
   demo render, and coherent-render hash tests.
 - `_SAFC_.sln` x64 Release compiled through the final link step. Because the user's active

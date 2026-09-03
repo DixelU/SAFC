@@ -8,6 +8,18 @@
 #ifndef GL_BGRA
 #define GL_BGRA 0x80E1
 #endif
+#ifndef GL_FRAMEBUFFER
+#define GL_FRAMEBUFFER 0x8D40
+#endif
+#ifndef GL_COLOR_ATTACHMENT0
+#define GL_COLOR_ATTACHMENT0 0x8CE0
+#endif
+#ifndef GL_FRAMEBUFFER_COMPLETE
+#define GL_FRAMEBUFFER_COMPLETE 0x8CD5
+#endif
+#ifndef GL_RGBA8
+#define GL_RGBA8 0x8058
+#endif
 
 #include "simple_player_video_export.h"
 #include "simple_player.h"
@@ -15,7 +27,9 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <condition_variable>
 #include <cstring>
+#include <deque>
 #include <exception>
 #include <filesystem>
 #include <fstream>
@@ -383,6 +397,12 @@ struct media_runtime
 class media_foundation_writer
 {
 public:
+	~media_foundation_writer()
+	{
+		abort();
+		join_write_thread();
+	}
+
 	void open(const std::wstring& output_path,
 		const simple_player_video_settings& settings, std::uint32_t sample_rate)
 	{
@@ -475,11 +495,11 @@ public:
 			"setting audio input type");
 
 		require_hr(writer_->BeginWriting(), "beginning MP4 write");
+		write_thread_ = std::thread([this]() { write_queued_samples(); });
 	}
 
 	void write_video_frame(const std::uint8_t* rgb32_top_down, std::uint64_t frame)
 	{
-		std::lock_guard writer_lock(write_mutex_);
 		const DWORD bytes = width_ * height_ * 4U;
 		ComPtr<IMFMediaBuffer> buffer;
 		require_hr(MFCreateMemoryBuffer(bytes, buffer.GetAddressOf()),
@@ -504,8 +524,7 @@ public:
 			"setting video sample time");
 		require_hr(sample->SetSampleDuration(next_sample_time - sample_time),
 			"setting video sample duration");
-		require_hr(writer_->WriteSample(video_stream_, sample.Get()),
-			"writing video sample");
+		enqueue_sample(stream_kind::video, sample_time, std::move(sample));
 	}
 
 	void write_audio_frames(const std::int16_t* pcm_interleaved,
@@ -513,7 +532,6 @@ public:
 	{
 		if (frames == 0)
 			return;
-		std::lock_guard writer_lock(write_mutex_);
 		const DWORD bytes = frames * 2U * static_cast<DWORD>(sizeof(std::int16_t));
 		ComPtr<IMFMediaBuffer> buffer;
 		require_hr(MFCreateMemoryBuffer(bytes, buffer.GetAddressOf()),
@@ -538,13 +556,35 @@ public:
 			"setting audio sample time");
 		require_hr(sample->SetSampleDuration(next_sample_time - sample_time),
 			"setting audio sample duration");
-		require_hr(writer_->WriteSample(audio_stream_, sample.Get()),
-			"writing audio sample");
+		enqueue_sample(stream_kind::audio, sample_time, std::move(sample));
+	}
+
+	void finish_audio_stream() noexcept
+	{
+		finish_stream(stream_kind::audio);
+	}
+
+	void finish_video_stream() noexcept
+	{
+		finish_stream(stream_kind::video);
+	}
+
+	void abort() noexcept
+	{
+		{
+			std::lock_guard queue_lock(queue_mutex_);
+			aborted_ = true;
+		}
+		queue_changed_.notify_all();
 	}
 
 	void finalize()
 	{
-		std::lock_guard writer_lock(write_mutex_);
+		finish_audio_stream();
+		finish_video_stream();
+		join_write_thread();
+		if (write_error_)
+			std::rethrow_exception(write_error_);
 		if (writer_)
 		{
 			const HRESULT result = writer_->Finalize();
@@ -554,7 +594,108 @@ public:
 	}
 
 private:
-	std::mutex write_mutex_;
+	enum class stream_kind { audio, video };
+
+	struct queued_sample
+	{
+		LONGLONG timestamp = 0;
+		ComPtr<IMFSample> sample;
+	};
+
+	static constexpr std::size_t maximum_audio_queue_samples = 16;
+	static constexpr std::size_t maximum_video_queue_samples = 4;
+
+	void enqueue_sample(stream_kind stream, LONGLONG timestamp,
+		ComPtr<IMFSample> sample)
+	{
+		std::unique_lock queue_lock(queue_mutex_);
+		auto& queue = stream == stream_kind::audio ? audio_queue_ : video_queue_;
+		const auto limit = stream == stream_kind::audio
+			? maximum_audio_queue_samples : maximum_video_queue_samples;
+		queue_changed_.wait(queue_lock, [&]()
+		{
+			return aborted_ || queue.size() < limit;
+		});
+		if (aborted_)
+		{
+			const auto error = write_error_;
+			queue_lock.unlock();
+			if (error)
+				std::rethrow_exception(error);
+			throw std::runtime_error("cancelled");
+		}
+		queue.push_back({timestamp, std::move(sample)});
+		queue_lock.unlock();
+		queue_changed_.notify_all();
+	}
+
+	void finish_stream(stream_kind stream) noexcept
+	{
+		{
+			std::lock_guard queue_lock(queue_mutex_);
+			if (stream == stream_kind::audio)
+				audio_finished_ = true;
+			else
+				video_finished_ = true;
+		}
+		queue_changed_.notify_all();
+	}
+
+	std::optional<std::pair<DWORD, ComPtr<IMFSample>>> next_sample()
+	{
+		std::unique_lock queue_lock(queue_mutex_);
+		queue_changed_.wait(queue_lock, [&]()
+		{
+			return aborted_ ||
+				(!audio_queue_.empty() && (!video_queue_.empty() || video_finished_)) ||
+				(!video_queue_.empty() && audio_finished_) ||
+				(audio_finished_ && video_finished_);
+		});
+		if (aborted_)
+			return std::nullopt;
+		if (audio_queue_.empty() && video_queue_.empty())
+			return std::nullopt;
+
+		const bool take_audio = !audio_queue_.empty() &&
+			(video_queue_.empty() ||
+				audio_queue_.front().timestamp <= video_queue_.front().timestamp);
+		auto& queue = take_audio ? audio_queue_ : video_queue_;
+		auto queued = std::move(queue.front());
+		queue.pop_front();
+		const DWORD stream = take_audio ? audio_stream_ : video_stream_;
+		queue_lock.unlock();
+		queue_changed_.notify_all();
+		return std::pair<DWORD, ComPtr<IMFSample>>{stream, std::move(queued.sample)};
+	}
+
+	void write_queued_samples() noexcept
+	{
+		try
+		{
+			com_mta_scope thread_com;
+			while (auto queued = next_sample())
+				require_hr(writer_->WriteSample(queued->first, queued->second.Get()),
+					queued->first == audio_stream_
+						? "writing audio sample" : "writing video sample");
+		}
+		catch (...)
+		{
+			{
+				std::lock_guard queue_lock(queue_mutex_);
+				if (!write_error_)
+					write_error_ = std::current_exception();
+				aborted_ = true;
+			}
+			queue_changed_.notify_all();
+		}
+	}
+
+	void join_write_thread() noexcept
+	{
+		if (write_thread_.joinable())
+			write_thread_.join();
+	}
+
 	ComPtr<IMFSinkWriter> writer_;
 	DWORD video_stream_ = 0;
 	DWORD audio_stream_ = 0;
@@ -562,6 +703,15 @@ private:
 	std::uint32_t height_ = 0;
 	std::uint32_t fps_ = 0;
 	std::uint32_t sample_rate_ = 0;
+	std::mutex queue_mutex_;
+	std::condition_variable queue_changed_;
+	std::deque<queued_sample> audio_queue_;
+	std::deque<queued_sample> video_queue_;
+	bool audio_finished_ = false;
+	bool video_finished_ = false;
+	bool aborted_ = false;
+	std::exception_ptr write_error_;
+	std::thread write_thread_;
 };
 
 class offscreen_gl_surface
@@ -599,10 +749,12 @@ public:
 				version[2] >= '2'));
 		bgra_readback_ = core_bgra ||
 			(extensions && std::strstr(extensions, "GL_EXT_bgra"));
+		framebuffer_backed_ = create_framebuffer();
 		wglMakeCurrent(previous_dc, previous_context);
 	}
 
 	bool hardware_accelerated() const noexcept { return hardware_accelerated_; }
+	bool framebuffer_backed() const noexcept { return framebuffer_backed_; }
 
 	void render(simple_player& player, simple_player::draw_data& data,
 		std::int64_t position_us)
@@ -617,7 +769,13 @@ public:
 			~restore_context() { wglMakeCurrent(dc, context); }
 		} restore{previous_dc, previous_context};
 		while (glGetError() != GL_NO_ERROR) {}
-		glDrawBuffer(double_buffered_ ? GL_BACK : GL_FRONT);
+		if (framebuffer_backed_)
+		{
+			bind_framebuffer_(GL_FRAMEBUFFER, framebuffer_);
+			glDrawBuffer(GL_COLOR_ATTACHMENT0);
+		}
+		else
+			glDrawBuffer(double_buffered_ ? GL_BACK : GL_FRONT);
 
 		const float virtual_width = 400.0f;
 		const float half_width = virtual_width * 0.5f;
@@ -637,7 +795,8 @@ public:
 		glClear(GL_COLOR_BUFFER_BIT);
 		player.draw_at(data, position_us);
 		glPixelStorei(GL_PACK_ALIGNMENT, 1);
-		glReadBuffer(double_buffered_ ? GL_BACK : GL_FRONT);
+		glReadBuffer(framebuffer_backed_ ? GL_COLOR_ATTACHMENT0 :
+			(double_buffered_ ? GL_BACK : GL_FRONT));
 		glReadPixels(0, 0, static_cast<GLsizei>(width_), static_cast<GLsizei>(height_),
 			bgra_readback_ ? GL_BGRA : GL_RGBA, GL_UNSIGNED_BYTE, readback_.data());
 		if (glGetError() != GL_NO_ERROR)
@@ -667,6 +826,70 @@ public:
 	}
 
 private:
+	using gen_framebuffers_proc = void (APIENTRY *)(GLsizei, GLuint*);
+	using bind_framebuffer_proc = void (APIENTRY *)(GLenum, GLuint);
+	using framebuffer_texture_2d_proc = void (APIENTRY *)(
+		GLenum, GLenum, GLenum, GLuint, GLint);
+	using check_framebuffer_status_proc = GLenum (APIENTRY *)(GLenum);
+	using delete_framebuffers_proc = void (APIENTRY *)(GLsizei, const GLuint*);
+
+	static PROC load_gl_proc(const char* core_name, const char* extension_name)
+	{
+		auto result = wglGetProcAddress(core_name);
+		auto invalid = [](PROC value)
+		{
+			const auto address = reinterpret_cast<std::uintptr_t>(value);
+			return !value || address <= 3 || address ==
+				(std::numeric_limits<std::uintptr_t>::max)();
+		};
+		if (invalid(result) && extension_name)
+			result = wglGetProcAddress(extension_name);
+		return invalid(result) ? nullptr : result;
+	}
+
+	bool create_framebuffer()
+	{
+		gen_framebuffers_ = reinterpret_cast<gen_framebuffers_proc>(
+			load_gl_proc("glGenFramebuffers", "glGenFramebuffersEXT"));
+		bind_framebuffer_ = reinterpret_cast<bind_framebuffer_proc>(
+			load_gl_proc("glBindFramebuffer", "glBindFramebufferEXT"));
+		framebuffer_texture_2d_ = reinterpret_cast<framebuffer_texture_2d_proc>(
+			load_gl_proc("glFramebufferTexture2D", "glFramebufferTexture2DEXT"));
+		check_framebuffer_status_ = reinterpret_cast<check_framebuffer_status_proc>(
+			load_gl_proc("glCheckFramebufferStatus", "glCheckFramebufferStatusEXT"));
+		delete_framebuffers_ = reinterpret_cast<delete_framebuffers_proc>(
+			load_gl_proc("glDeleteFramebuffers", "glDeleteFramebuffersEXT"));
+		if (!gen_framebuffers_ || !bind_framebuffer_ || !framebuffer_texture_2d_ ||
+			!check_framebuffer_status_ || !delete_framebuffers_)
+			return false;
+
+		while (glGetError() != GL_NO_ERROR) {}
+		glGenTextures(1, &color_texture_);
+		glBindTexture(GL_TEXTURE_2D, color_texture_);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, static_cast<GLsizei>(width_),
+			static_cast<GLsizei>(height_), 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+		gen_framebuffers_(1, &framebuffer_);
+		bind_framebuffer_(GL_FRAMEBUFFER, framebuffer_);
+		framebuffer_texture_2d_(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+			GL_TEXTURE_2D, color_texture_, 0);
+		const bool complete = check_framebuffer_status_(GL_FRAMEBUFFER) ==
+			GL_FRAMEBUFFER_COMPLETE && glGetError() == GL_NO_ERROR;
+		bind_framebuffer_(GL_FRAMEBUFFER, 0);
+		glBindTexture(GL_TEXTURE_2D, 0);
+		if (complete)
+			return true;
+
+		if (framebuffer_)
+			delete_framebuffers_(1, &framebuffer_);
+		if (color_texture_)
+			glDeleteTextures(1, &color_texture_);
+		framebuffer_ = 0;
+		color_texture_ = 0;
+		return false;
+	}
+
 	static bool register_surface_window_class()
 	{
 		static const bool registered = []()
@@ -761,6 +984,18 @@ private:
 	{
 		if (context_)
 		{
+			const HDC previous_dc = wglGetCurrentDC();
+			const HGLRC previous_context = wglGetCurrentContext();
+			if ((framebuffer_ || color_texture_) && wglMakeCurrent(hdc_, context_))
+			{
+				if (framebuffer_ && delete_framebuffers_)
+					delete_framebuffers_(1, &framebuffer_);
+				if (color_texture_)
+					glDeleteTextures(1, &color_texture_);
+				framebuffer_ = 0;
+				color_texture_ = 0;
+				wglMakeCurrent(previous_dc, previous_context);
+			}
 			if (wglGetCurrentContext() == context_)
 				wglMakeCurrent(nullptr, nullptr);
 			wglDeleteContext(context_);
@@ -793,11 +1028,19 @@ private:
 	HBITMAP bitmap_ = nullptr;
 	HBITMAP old_bitmap_ = nullptr;
 	HGLRC context_ = nullptr;
+	GLuint framebuffer_ = 0;
+	GLuint color_texture_ = 0;
 	std::uint32_t width_ = 0;
 	std::uint32_t height_ = 0;
 	bool double_buffered_ = false;
 	bool hardware_accelerated_ = false;
 	bool bgra_readback_ = false;
+	bool framebuffer_backed_ = false;
+	gen_framebuffers_proc gen_framebuffers_ = nullptr;
+	bind_framebuffer_proc bind_framebuffer_ = nullptr;
+	framebuffer_texture_2d_proc framebuffer_texture_2d_ = nullptr;
+	check_framebuffer_status_proc check_framebuffer_status_ = nullptr;
+	delete_framebuffers_proc delete_framebuffers_ = nullptr;
 	std::vector<std::uint8_t> readback_;
 	std::vector<std::uint8_t> rgb32_;
 };
@@ -869,6 +1112,7 @@ struct export_progress_state
 	std::atomic<std::uint32_t> requested_audio_render_threads{0};
 	std::atomic<std::uint32_t> audio_render_threads{0};
 	std::atomic_bool software_video_renderer{false};
+	std::atomic_bool framebuffer_video_renderer{false};
 	std::mutex callback_mutex;
 	std::chrono::steady_clock::time_point next_callback{};
 };
@@ -1250,9 +1494,15 @@ std::uint64_t render_video_stream(media_foundation_writer& writer,
 	surface.create(settings.width, settings.height);
 	progress_state.software_video_renderer.store(
 		!surface.hardware_accelerated(), std::memory_order_relaxed);
+	progress_state.framebuffer_video_renderer.store(
+		surface.framebuffer_backed(), std::memory_order_relaxed);
 	const char* video_stage = surface.hardware_accelerated()
-		? "Rendering video (accelerated OpenGL)"
-		: "Rendering video (software OpenGL fallback)";
+		? (surface.framebuffer_backed()
+			? "Rendering video (accelerated OpenGL FBO)"
+			: "Rendering video (accelerated OpenGL backbuffer fallback)")
+		: (surface.framebuffer_backed()
+			? "Rendering video (software OpenGL FBO fallback)"
+			: "Rendering video (software OpenGL backbuffer fallback)");
 
 	simple_player visual_player;
 	if (!visual_player.begin_offline_visual_render(visual_events))
@@ -1408,6 +1658,7 @@ simple_player_video_result render_video_and_audio(
 			}
 		}
 		effective_cancel.request_internal();
+		writer.abort();
 	};
 
 	std::uint64_t audio_frames = 0;
@@ -1431,9 +1682,11 @@ simple_player_video_result render_video_and_audio(
 				audio_frames = render_audio_stream(writer, synth_preferences, settings,
 					lead_in_frames, tail_frames, progress_state, &effective_cancel,
 					progress, progress_user_data, render_with_bank);
+				writer.finish_audio_stream();
 			}
 			catch (...)
 			{
+				writer.finish_audio_stream();
 				capture_error();
 			}
 		});
@@ -1445,9 +1698,11 @@ simple_player_video_result render_video_and_audio(
 				video_frames = render_video_stream(writer, visual_events, settings,
 					clip_us, total_video_frames, progress_state, &effective_cancel,
 					progress, progress_user_data);
+				writer.finish_video_stream();
 			}
 			catch (...)
 			{
+				writer.finish_video_stream();
 				capture_error();
 			}
 		});
@@ -1455,6 +1710,7 @@ simple_player_video_result render_video_and_audio(
 	catch (...)
 	{
 		effective_cancel.request_internal();
+		writer.abort();
 		if (audio_thread.joinable())
 			audio_thread.join();
 		if (video_thread.joinable())

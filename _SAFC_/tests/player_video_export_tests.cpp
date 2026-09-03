@@ -5,6 +5,7 @@
 #include "../SAFC_InnerModules/compressed_midi_event_source.h"
 
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -175,6 +176,8 @@ struct progress_capture
 	bool cancel_after_video_frame = false;
 	bool saw_accelerated_video = false;
 	bool saw_software_video = false;
+	bool saw_framebuffer_video = false;
+	bool saw_backbuffer_video = false;
 	bool saw_non_background_preview = false;
 };
 
@@ -187,6 +190,10 @@ bool capture_progress(const simple_player_video_progress& progress,
 		progress.stage.find("accelerated OpenGL") != std::string::npos;
 	capture.saw_software_video = capture.saw_software_video ||
 		progress.stage.find("software OpenGL") != std::string::npos;
+	capture.saw_framebuffer_video = capture.saw_framebuffer_video ||
+		progress.stage.find("OpenGL FBO") != std::string::npos;
+	capture.saw_backbuffer_video = capture.saw_backbuffer_video ||
+		progress.stage.find("OpenGL backbuffer") != std::string::npos;
 	if (progress.preview_bgra && progress.preview_width != 0 &&
 		progress.preview_height != 0 && progress.preview_stride >= progress.preview_width * 4U)
 	{
@@ -356,11 +363,39 @@ int main(int argc, char** argv)
 			contains_atom(bytes, "soun") && contains_atom(bytes, "avc1") &&
 			contains_atom(bytes, "mp4a") &&
 			(progress.saw_accelerated_video || progress.saw_software_video) &&
+			(progress.saw_framebuffer_video || progress.saw_backbuffer_video) &&
 			progress.saw_non_background_preview,
 			"SMPTE timing, supported AAC, bounded progress, and muxed streams render together");
 		std::cout << "SMPTE video path: " <<
 			(progress.saw_accelerated_video ? "accelerated OpenGL" :
-				"software OpenGL fallback") << '\n';
+				"software OpenGL fallback") <<
+			(progress.saw_framebuffer_video ? " FBO" : " backbuffer") << '\n';
+	}
+
+	{
+		constexpr std::uint64_t program_duration_us = 30'000'000;
+		std::vector<generated_event> events{
+			short_event(0, 0x90, 60, 100),
+			short_event(program_duration_us, 0x80, 60, 0)};
+		vector_event_source audio(program_duration_us, events);
+		vector_event_source visual(program_duration_us, events);
+		auto settings = test_settings();
+		settings.width = 320;
+		settings.height = 180;
+		settings.fps = 60;
+		const auto output = directory / "sustained-mux.mp4";
+		std::filesystem::remove(output);
+		const auto started = std::chrono::steady_clock::now();
+		const auto result = render_simple_player_video_events(L"sustained.mid",
+			audio, visual, events.size(), output.wstring(), {}, preferences, settings,
+			nullptr, nullptr, nullptr);
+		const auto elapsed = std::chrono::steady_clock::now() - started;
+		const auto elapsed_milliseconds =
+			std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count();
+		check(result.ok && result.video_frames == 1980 &&
+			result.audio_frames == 1'584'000 && elapsed < std::chrono::seconds(60),
+			"sustained timestamp-ordered audio/video muxing does not stall");
+		std::cout << "Sustained 33-second mux render: " << elapsed_milliseconds << " ms\n";
 	}
 
 	{
