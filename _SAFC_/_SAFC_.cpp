@@ -2652,12 +2652,17 @@ void player_watch_func()
 			break;
 		}
 
-		auto seconds = state.current_time_us / 1000000;
-		auto parts_of_second = state.current_time_us % 1000000;
+		const auto current_us = player->get_position_us();
+		auto seconds = current_us / 1000000;
+		auto parts_of_second = current_us % 1000000;
 
-		auto position = float(state.current_time_us) / player->get_info().total_duration_us;
+		auto total_us = player->get_info().total_duration_us;
+		auto position = total_us == 0 ? 0.f : float(current_us) / total_us;
 
 		auto str = std::format("{:0>2}:{:0>2}:{:0>2}", seconds / 60, seconds % 60, parts_of_second / 10000);
+		const auto lead_in_us = player->get_start_lead_in_remaining_us();
+		if (lead_in_us != 0)
+			str = std::format("Starts in {:.1f}s", lead_in_us / 1000000.0);
 		textbox->safe_string_replace(str);
 
 		if (!seek_to_slider->dragging)
@@ -3218,9 +3223,15 @@ void compressed_player_watch_func()
 		const auto seconds = current_us / 1000000;
 		const auto parts_of_second = current_us % 1000000;
 		if (auto status = _WH_t<text_box>("SIMPLAYER", "TEXT"))
-			status->safe_string_replace(std::format(
+		{
+			auto str = std::format(
 				"{:0>2}:{:0>2}:{:0>2}", seconds / 60, seconds % 60,
-				parts_of_second / 10000));
+				parts_of_second / 10000);
+			const auto lead_in_us = player->get_start_lead_in_remaining_us();
+			if (lead_in_us != 0)
+				str = std::format("Starts in {:.1f}s", lead_in_us / 1000000.0);
+			status->safe_string_replace(str);
+		}
 
 		if (auto seek = _WH_t<slider>("SIMPLAYER", "SEEK_TO");
 			seek && !seek->dragging && total_us != 0)
@@ -4678,7 +4689,7 @@ void init(bool reinitialise_font = true)
 	(*window)["STOP"] = new button("\201", legacy_white, on_player_stop, -175, 180 - moveable_window::window_header_size, 10, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr);
 
 	auto player_view = new player_viewer(0, -20);
-	(*window)["VIEW_LEN_SLIDER"] = new slider(slider::Orientation::horizontal, -130, 180 - moveable_window::window_header_size, 65, 14, 21, log2f(player_view->data->scroll_window_us), on_view_length_change, 0x808080FF, 0xFFFFFFFF, 0xAACFFFFF, 0x007FFFFF, 0x808080FF, 10, 4);
+	(*window)["VIEW_LEN_SLIDER"] = new slider(slider::Orientation::horizontal, -130, 180 - moveable_window::window_header_size, 65, 14, 23, log2f(player_view->data->scroll_window_us), on_view_length_change, 0x808080FF, 0xFFFFFFFF, 0xAACFFFFF, 0x007FFFFF, 0x808080FF, 10, 4);
 	(*window)["BUFFERING_SWITCH"] = new button(
 		player_view->data->enable_simulated_lag ? "Simulate lag" : "Allow unbuffered",
 		system_white,

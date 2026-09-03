@@ -35,6 +35,7 @@
 struct simple_player
 {
 	using tick_type = std::uint64_t;
+	static constexpr std::uint64_t default_start_lead_in_us = 3'000'000ULL;
 
 	struct track_info
 	{
@@ -391,6 +392,7 @@ struct simple_player
 		std::atomic<uint64_t> parsed_up_to_us{0};   // how far ahead the parser has reached (in us)
 		std::atomic<uint64_t> sender_position_us{0}; // current sender playback position (in us)
 		std::atomic<bool> memory_failure{false};
+		std::atomic<uint64_t> pending_start_lead_in_us{0};
 
 		// Lookahead limits: parser throttles when too far ahead
 		static constexpr uint64_t max_lookahead_us = 5000000;  // 5 seconds max lookahead
@@ -419,6 +421,7 @@ struct simple_player
 			parsed_up_to_us = 0;
 			sender_position_us = 0;
 			memory_failure = false;
+			pending_start_lead_in_us = 0;
 			track_states.clear();
 			send_buffer.clear();
 			visuals.reset();
@@ -747,7 +750,11 @@ struct simple_player
 			return;
 
 		// Record where we are in the MIDI timeline
-		state.pause_position_us.store(state.current_time_us, std::memory_order_release);
+		const auto pause_position = get_position_us();
+		state.pending_start_lead_in_us.store(
+			current_start_lead_in_remaining_us(pause_position),
+			std::memory_order_release);
+		state.pause_position_us.store(pause_position, std::memory_order_release);
 		state.paused.store(true, std::memory_order_release);
 
 		// Silence all notes immediately
@@ -762,8 +769,7 @@ struct simple_player
 
 		// Update timing: set offset to where we paused, reset wall-clock start
 		uint64_t pause_pos = state.pause_position_us.load(std::memory_order_acquire);
-		state.start_offset_us = pause_pos;
-		state.start_time = std::chrono::steady_clock::now();
+		set_playback_clock_from_pending_lead(pause_pos);
 
 		// Unpause - sender thread will continue from here
 		state.paused.store(false, std::memory_order_release);
@@ -788,7 +794,15 @@ struct simple_player
 		uint64_t target_us = static_cast<uint64_t>(fraction * info.total_duration_us);
 
 		// Remember whether we were paused so we can restore after seek
-		state.seek_resume_paused.store(state.paused.load(std::memory_order_acquire), std::memory_order_relaxed);
+		const bool was_paused = state.paused.load(std::memory_order_acquire);
+		if (!was_paused)
+		{
+			const auto current_position = get_position_us();
+			state.pending_start_lead_in_us.store(
+				current_start_lead_in_remaining_us(current_position),
+				std::memory_order_release);
+		}
+		state.seek_resume_paused.store(was_paused, std::memory_order_relaxed);
 		state.seek_target_us.store(target_us, std::memory_order_relaxed);
 		state.seek_requested.store(true, std::memory_order_release);
 
@@ -837,13 +851,26 @@ struct simple_player
 		if (state.playing.load(std::memory_order_acquire) &&
 			!state.paused.load(std::memory_order_acquire))
 		{
-			auto elapsed = std::chrono::steady_clock::now() - state.start_time;
-			return state.start_offset_us +
-				std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count();
+			const auto audio_floor = state.start_offset_us;
+			const auto timeline_position = current_visual_position_us();
+			const auto floor_i64 = clamp_to_i64(audio_floor);
+			if (timeline_position <= floor_i64)
+				return audio_floor;
+			return static_cast<uint64_t>(timeline_position);
 		}
 		if (state.paused.load(std::memory_order_acquire))
 			return state.pause_position_us.load(std::memory_order_acquire);
 		return 0;
+	}
+
+	int64_t get_visual_position_us() const
+	{
+		return current_visual_position_us();
+	}
+
+	uint64_t get_start_lead_in_remaining_us() const
+	{
+		return current_start_lead_in_remaining_us(get_position_us());
 	}
 
 	bool open(std::wstring filename)
@@ -967,7 +994,6 @@ struct simple_player
 
 				// Set timing so sender starts from the seek position
 				state.start_offset_us = skip_to_us;
-				state.start_time = std::chrono::steady_clock::now();
 				state.current_time_us = skip_to_us;
 				state.sender_position_us.store(skip_to_us, std::memory_order_release);
 				state.parsed_up_to_us.store(skip_to_us, std::memory_order_release);
@@ -980,6 +1006,8 @@ struct simple_player
 					state.pause_position_us.store(skip_to_us, std::memory_order_release);
 					state.paused.store(true, std::memory_order_release);
 				}
+				else
+					set_playback_clock_from_pending_lead(skip_to_us);
 
 				// Signal sender to transition from immediate drain to timed playback
 				state.seeking_ff.store(false, std::memory_order_release);
@@ -1243,7 +1271,6 @@ struct simple_player
 
 				// Set timing so the sender starts from the seek position
 				state.start_offset_us = skip_to_us;
-				state.start_time = std::chrono::steady_clock::now();
 				state.current_time_us = skip_to_us;
 				state.sender_position_us.store(skip_to_us, std::memory_order_release);
 				state.parsed_up_to_us.store(skip_to_us, std::memory_order_release);
@@ -1256,6 +1283,8 @@ struct simple_player
 					state.pause_position_us.store(skip_to_us, std::memory_order_release);
 					state.paused.store(true, std::memory_order_release);
 				}
+				else
+					set_playback_clock_from_pending_lead(skip_to_us);
 
 				// Signal sender to transition from immediate drain to timed playback
 				state.seeking_ff.store(false, std::memory_order_release);
@@ -1407,17 +1436,18 @@ struct simple_player
 			}
 
 			uint64_t target_us = ev.time_us - state.start_offset_us;
+			const int64_t target_elapsed_us = clamp_to_i64(target_us);
 
 			// wait until it's time to send this event; if the cached clock
 			// already passed the target, send immediately without re-querying
-			if (static_cast<int64_t>(target_us) > cached_elapsed_us)
+			if (target_elapsed_us > cached_elapsed_us)
 			{
 				auto elapsed = std::chrono::steady_clock::now() - state.start_time;
 				cached_elapsed_us = std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count();
 
-				if (static_cast<int64_t>(target_us) > cached_elapsed_us)
+				if (target_elapsed_us > cached_elapsed_us)
 				{
-					auto wait_us = target_us - cached_elapsed_us;
+					const auto wait_us = target_elapsed_us - cached_elapsed_us;
 					if (wait_us > 200)
 					{
 						// sleep for most of the wait time
@@ -1429,7 +1459,7 @@ struct simple_player
 					{
 						elapsed = std::chrono::steady_clock::now() - state.start_time;
 						cached_elapsed_us = std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count();
-						if (cached_elapsed_us >= static_cast<int64_t>(target_us))
+						if (cached_elapsed_us >= target_elapsed_us)
 							break;
 					}
 				}
@@ -1459,6 +1489,10 @@ struct simple_player
 			// playback prepares its output first and requests immediate playback.
 			state.paused.store(start_paused, std::memory_order_release);
 			state.pause_position_us.store(0, std::memory_order_release);
+			state.pending_start_lead_in_us.store(default_start_lead_in_us,
+				std::memory_order_release);
+			if (!start_paused && initial_skip_to_us == 0)
+				set_playback_clock_from_pending_lead(0);
 
 			uint64_t skip_to_us = initial_skip_to_us;
 			bool pause_after_seek = initial_skip_to_us > 0 && start_paused;
@@ -1951,19 +1985,23 @@ struct simple_player
 
 	SIMPLE_PLAYER_FORCE_NO_INLINE void draw(draw_data& data)
 	{
+		draw_at(data, get_visual_position_us());
+	}
+
+	SIMPLE_PLAYER_FORCE_NO_INLINE void draw_at(draw_data& data, int64_t current_us)
+	{
 		constexpr int total_white = draw_data::white_keys_count();
 
 		auto& visuals = get_visuals();
 
-		// Compute current playback position from wall-clock for smooth visualization
-		uint64_t current_us = get_position_us();
-
 		if (data.enable_simulated_lag)
 		{
-			uint64_t max = state.parsed_up_to_us.load(std::memory_order_relaxed);
+			const auto max = clamp_to_i64(
+				state.parsed_up_to_us.load(std::memory_order_relaxed));
+			const auto latest_visible_start = max - clamp_to_i64(data.scroll_window_us);
 
-			if (max < current_us + data.scroll_window_us)
-				current_us = max - data.scroll_window_us;
+			if (current_us > latest_visible_start)
+				current_us = latest_visible_start;
 		}
 
 		// draw falling notes
@@ -1979,7 +2017,7 @@ struct simple_player
 			// lock against visuals.reset() which may be called by playback_thread on seek/restart.
 			std::lock_guard<std::mutex> visuals_lock(visuals.access_mutex);
 
-			visuals.cull_expired(int64_t(current_us) - data.scroll_window_us);
+			visuals.cull_expired(current_us - clamp_to_i64(data.scroll_window_us));
 
 			size_t queued_notes = 0;
 			for (const auto& queue : visuals.falling_notes)
@@ -2009,14 +2047,17 @@ struct simple_player
 					// Atomic load for end_time_us (may be updated by parser)
 					uint64_t end_time = note.end_time_us.load(std::memory_order_acquire);
 
-					int64_t start_offset = note.start_time_us - current_us;
-					int64_t end_offset = end_time - current_us;
+					int64_t start_offset = clamp_to_i64(note.start_time_us) - current_us;
+					int64_t end_offset = 0;
 
 					float begin_y = float(start_offset) / float(data.scroll_window_us);
 					float end_y = 1;
 
 					if (end_time != ~0ULL)
+					{
+						end_offset = clamp_to_i64(end_time) - current_us;
 						end_y = float(end_offset) / float(data.scroll_window_us);
+					}
 
 					if (begin_y > 1.01f)
 						break; // Queue is ordered by start_time_us, so later notes are even further above view.
@@ -2183,6 +2224,52 @@ private:
 	{
 		std::lock_guard error_lock(output_error_mutex);
 		last_output_error = std::move(message);
+	}
+
+	static int64_t clamp_to_i64(uint64_t value) noexcept
+	{
+		constexpr auto max_i64 = static_cast<uint64_t>((std::numeric_limits<int64_t>::max)());
+		return value > max_i64 ? (std::numeric_limits<int64_t>::max)() :
+			static_cast<int64_t>(value);
+	}
+
+	int64_t current_visual_position_us() const
+	{
+		if (state.playing.load(std::memory_order_acquire) &&
+			!state.paused.load(std::memory_order_acquire))
+		{
+			const auto elapsed = std::chrono::steady_clock::now() - state.start_time;
+			return clamp_to_i64(state.start_offset_us) +
+				std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count();
+		}
+		if (state.paused.load(std::memory_order_acquire))
+		{
+			return clamp_to_i64(state.pause_position_us.load(std::memory_order_acquire)) -
+				clamp_to_i64(state.pending_start_lead_in_us.load(std::memory_order_acquire));
+		}
+		return 0;
+	}
+
+	uint64_t current_start_lead_in_remaining_us(uint64_t audio_position_us) const
+	{
+		const auto audio_position = clamp_to_i64(audio_position_us);
+		const auto visual_position = current_visual_position_us();
+		return visual_position < audio_position
+			? static_cast<uint64_t>(audio_position - visual_position)
+			: 0;
+	}
+
+	void set_playback_clock(uint64_t start_offset_us, uint64_t lead_in_us)
+	{
+		state.start_offset_us = start_offset_us;
+		state.start_time = std::chrono::steady_clock::now() +
+			std::chrono::microseconds(clamp_to_i64(lead_in_us));
+	}
+
+	void set_playback_clock_from_pending_lead(uint64_t start_offset_us)
+	{
+		set_playback_clock(start_offset_us,
+			state.pending_start_lead_in_us.exchange(0, std::memory_order_acq_rel));
 	}
 
 	bool set_device_locked(size_t device_index)
