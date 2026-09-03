@@ -16,6 +16,7 @@
 #include <mutex>
 #include <new>
 #include <limits>
+#include <set>
 
 #include <memory_mapped_file_reader.h>
 
@@ -266,6 +267,14 @@ struct simple_player
 			std::lock_guard<std::mutex> lock(access_mutex);
 			clear();
 		}
+
+		std::size_t buffered_note_count() const noexcept
+		{
+			std::size_t result = 0;
+			for (const auto& queue : falling_notes)
+				result += queue.approximate_size();
+			return result;
+		}
 	};
 
 	struct send_event
@@ -360,6 +369,26 @@ struct simple_player
 				std::swap(data[i], data[smallest]);
 				i = smallest;
 			}
+		}
+	};
+
+	struct offline_visual_render_state
+	{
+		playback_event_source* source = nullptr;
+		generated_event next_event;
+		std::unique_lock<std::mutex> run_lock;
+		bool active = false;
+		bool has_next_event = false;
+		std::uint32_t notes_since_capacity_check = 0;
+
+		void reset()
+		{
+			source = nullptr;
+			next_event = {};
+			active = false;
+			has_next_event = false;
+			notes_since_capacity_check = 0;
+			run_lock = {};
 		}
 	};
 
@@ -946,6 +975,93 @@ struct simple_player
 		}
 
 		return true;
+	}
+
+	bool begin_offline_visual_render(playback_event_source& source)
+	{
+		if (offline_visual.active)
+			return false;
+
+		auto run_lock = std::unique_lock<std::mutex>(playback_run_mutex, std::try_to_lock);
+		if (!run_lock.owns_lock())
+			return false;
+
+		cancel_requested.store(false, std::memory_order_release);
+		memory_failure_reported.store(false, std::memory_order_release);
+
+		state.reset();
+		source.rewind();
+		offline_visual.source = &source;
+		offline_visual.has_next_event = source.next(offline_visual.next_event);
+		offline_visual.active = true;
+		offline_visual.run_lock = std::move(run_lock);
+		state.playing.store(true, std::memory_order_release);
+		state.paused.store(false, std::memory_order_release);
+		state.parser_done.store(!offline_visual.has_next_event, std::memory_order_release);
+		return true;
+	}
+
+	bool advance_offline_visual_render_to(int64_t current_us, uint64_t lookahead_us,
+		bool (*external_cancel)(void*) noexcept = nullptr,
+		void* external_cancel_user_data = nullptr)
+	{
+		if (!offline_visual.active)
+			return false;
+
+		state.current_time_us = current_us <= 0 ? 0 : static_cast<uint64_t>(current_us);
+		state.sender_position_us.store(state.current_time_us, std::memory_order_release);
+
+		const auto lookahead_i64 = clamp_to_i64(lookahead_us);
+		const int64_t target_i64 = current_us > (std::numeric_limits<int64_t>::max)() - lookahead_i64
+			? (std::numeric_limits<int64_t>::max)()
+			: current_us + lookahead_i64;
+		const uint64_t target_us = target_i64 <= 0 ? 0 : static_cast<uint64_t>(target_i64);
+
+		while (offline_visual.has_next_event && !state.stop_requested)
+		{
+			if (external_cancel && external_cancel(external_cancel_user_data))
+				return false;
+
+			const auto event = offline_visual.next_event;
+			if (event.time_us > target_us)
+				break;
+
+			state.parsed_up_to_us.store(event.time_us, std::memory_order_release);
+			if (event.k == generated_event::kind::note_on)
+			{
+				state.visuals.push_note_on(event.key, event.time_us, event.track_index,
+					event.channel, event.velocity);
+				if (++offline_visual.notes_since_capacity_check >= 4096)
+				{
+					offline_visual.notes_since_capacity_check = 0;
+					if (state.visuals.buffered_note_count() > 2'000'000)
+						throw std::runtime_error(
+							"offline visual buffer exceeded 2,000,000 notes");
+				}
+			}
+			else if (event.k == generated_event::kind::note_off)
+				state.visuals.push_note_off(event.key, event.time_us, event.track_index,
+					event.channel);
+
+			offline_visual.has_next_event =
+				offline_visual.source->next(offline_visual.next_event);
+		}
+
+		if (!offline_visual.has_next_event)
+		{
+			state.parser_done.store(true, std::memory_order_release);
+		}
+
+		return !state.stop_requested;
+	}
+
+	void end_offline_visual_render()
+	{
+		state.stop_requested.store(true, std::memory_order_release);
+		state.playing.store(false, std::memory_order_release);
+		state.visuals.reset();
+		state.track_states.clear();
+		offline_visual.reset();
 	}
 
 	// Parser thread: pre-parses MIDI events into the lookahead buffer
@@ -1991,7 +2107,6 @@ struct simple_player
 	SIMPLE_PLAYER_FORCE_NO_INLINE void draw_at(draw_data& data, int64_t current_us)
 	{
 		constexpr int total_white = draw_data::white_keys_count();
-
 		auto& visuals = get_visuals();
 
 		if (data.enable_simulated_lag)
@@ -2723,6 +2838,7 @@ private:
 
 	midi_info info;
 	playback_state state;
+	offline_visual_render_state offline_visual;
 	mutable tempo_cache tcache;
 
 	// Non-null only during run_from_external: playback_thread routes the parser

@@ -169,7 +169,7 @@
       </DelayLoadDLLs>
       <AdditionalLibraryDirectories>
       </AdditionalLibraryDirectories>
-      <AdditionalDependencies>$(SYNCoreLinkDependencies)%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>mfplat.lib;mfreadwrite.lib;mfuuid.lib;mf.lib;$(SYNCoreLinkDependencies)%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <ResourceCompile>
       <AdditionalIncludeDirectories>$(SolutionDir)utility\include;$(SolutionDir)utility;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
@@ -204,7 +204,7 @@
       </DelayLoadDLLs>
       <AdditionalLibraryDirectories>C:\dev\vcpkg\installed</AdditionalLibraryDirectories>
       <Profile>true</Profile>
-      <AdditionalDependencies>$(SYNCoreLinkDependencies)%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>mfplat.lib;mfreadwrite.lib;mfuuid.lib;mf.lib;$(SYNCoreLinkDependencies)%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <ResourceCompile>
       <AdditionalIncludeDirectories>$(SolutionDir)utility\include;$(SolutionDir)utility;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
@@ -251,7 +251,7 @@
       </DelayLoadDLLs>
       <AdditionalLibraryDirectories>C:\dev\vcpkg\installed</AdditionalLibraryDirectories>
       <LinkTimeCodeGeneration>UseLinkTimeCodeGeneration</LinkTimeCodeGeneration>
-      <AdditionalDependencies>$(SYNCoreLinkDependencies)%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>mfplat.lib;mfreadwrite.lib;mfuuid.lib;mf.lib;$(SYNCoreLinkDependencies)%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <ResourceCompile>
       <AdditionalIncludeDirectories>$(SolutionDir)utility\include;$(SolutionDir)utility;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
@@ -298,7 +298,7 @@
       <AdditionalLibraryDirectories>C:\dev\vcpkg\installed</AdditionalLibraryDirectories>
       <LinkTimeCodeGeneration>UseLinkTimeCodeGeneration</LinkTimeCodeGeneration>
       <Profile>false</Profile>
-      <AdditionalDependencies>$(SYNCoreLinkDependencies)%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>mfplat.lib;mfreadwrite.lib;mfuuid.lib;mf.lib;$(SYNCoreLinkDependencies)%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <ResourceCompile>
       <AdditionalIncludeDirectories>$(SolutionDir)utility\include;$(SolutionDir)utility;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
@@ -313,6 +313,7 @@
     <ClInclude Include="SAFCGUIF_Local\graphing.h" />
     <ClInclude Include="SAFCGUIF_Local\midi_editor_viewer.h" />
 	<ClInclude Include="SAFCGUIF_Local\midi_editor_tools_ui.h" />
+	<ClInclude Include="SAFCGUIF_Local\player_video_render_ui.h" />
 	<ClInclude Include="SAFCGUIF_Local\simple_player_viewer.h" />
     <ClInclude Include="SAFCGUIF_Local\volume_graph.h" />
     <ClInclude Include="SAFCGUIF_Local\SAFGUIF_L.h" />
@@ -326,6 +327,7 @@
 	<ClInclude Include="SAFC_InnerModules\compressed_midi_event_source.h" />
     <ClInclude Include="SAFC_InnerModules\playback_event_source.h" />
 	<ClInclude Include="SAFC_InnerModules\simple_player.h" />
+	<ClInclude Include="SAFC_InnerModules\simple_player_video_export.h" />
 	<ClInclude Include="SAFC_InnerModules\syncore_output.h" />
     <ClInclude Include="SAFC_InnerModules\include_all.h" />
     <ClInclude Include="SAFC_InnerModules\single_midi_info_collector.h" />
@@ -358,8 +360,10 @@
   </ItemGroup>
   <ItemGroup>
 	<ClCompile Include="SAFCGUIF_Local\midi_editor_tools_ui.cpp" />
+	<ClCompile Include="SAFCGUIF_Local\player_video_render_ui.cpp" />
 	<ClCompile Include="SAFC_InnerModules\compressed_midi_event_source.cpp" />
 	<ClCompile Include="SAFC_InnerModules\midi_editor_tools.cpp" />
+	<ClCompile Include="SAFC_InnerModules\simple_player_video_export.cpp" />
 	<ClCompile Include="SAFC_InnerModules\syncore_output.cpp" />
     <ClCompile Include="_SAFC_.cpp" />
   </ItemGroup>

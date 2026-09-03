@@ -21,7 +21,10 @@ struct text_box : handleable_ui_part
 	float x_pos, y_pos;
 	float width, height;
 	float vertical_offset, calculated_text_height;
-	single_text_line_settings& stls;
+	// Text layout mutates the style cursor while formatting and moving lines.
+	// Keep that cursor per text box; sharing a preset lets one window move the
+	// lines being rebuilt concurrently in another window.
+	single_text_line_settings stls;
 
 	std::uint8_t border_width;
 	std::uint32_t rgba_border, rgba_background;

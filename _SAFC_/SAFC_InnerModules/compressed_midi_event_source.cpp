@@ -444,6 +444,20 @@ namespace
 
 struct compressed_midi_event_source::impl
 {
+	struct temporary_files
+	{
+		std::wstring cache_path;
+		std::vector<std::wstring> archive_paths;
+
+		~temporary_files()
+		{
+			if (!cache_path.empty())
+				DeleteFileW(cache_path.c_str());
+			for (const auto& path : archive_paths)
+				DeleteFileW(path.c_str());
+		}
+	};
+
 	struct cached_event
 	{
 		std::uint64_t tick = 0;
@@ -500,6 +514,7 @@ struct compressed_midi_event_source::impl
 	explicit impl(progress_callback callback, const std::atomic<bool>* cancellation)
 		: progress(std::move(callback)), cancel_requested(cancellation)
 	{
+		files = std::make_shared<temporary_files>();
 		wchar_t temporary_directory[MAX_PATH + 1]{};
 		wchar_t temporary_filename[MAX_PATH + 1]{};
 		if (!GetTempPathW(MAX_PATH, temporary_directory) ||
@@ -507,19 +522,29 @@ struct compressed_midi_event_source::impl
 			throw std::runtime_error("Unable to create compressed MIDI page cache");
 
 		cache_path = temporary_filename;
+		files->cache_path = cache_path;
 		cache_writer.open(cache_path, std::ios::binary | std::ios::trunc);
 		if (!cache_writer)
 			throw std::runtime_error("Unable to open compressed MIDI page cache");
+	}
+
+	explicit impl(const impl& source)
+		: files(source.files), cache_path(source.cache_path), tracks(source.tracks),
+		  tempo_segments(source.tempo_segments), maximum_tick(source.maximum_tick),
+		  total_duration(source.total_duration), events_total(source.events_total),
+		  events_per_page(source.events_per_page),
+		  track_count_value(source.track_count_value), ppq(source.ppq), depth(source.depth)
+	{
+		cache_reader.open(cache_path, std::ios::binary);
+		if (!cache_reader)
+			throw std::runtime_error("Unable to open prepared MIDI page cache reader");
+		rewind();
 	}
 
 	~impl()
 	{
 		cache_writer.close();
 		cache_reader.close();
-		if (!cache_path.empty())
-			DeleteFileW(cache_path.c_str());
-		for (const auto& path : temporary_archive_paths)
-			DeleteFileW(path.c_str());
 	}
 
 	void check_cancelled() const
@@ -544,7 +569,7 @@ struct compressed_midi_event_source::impl
 			throw std::runtime_error("Unable to create a seekable nested-archive cache");
 
 		const std::wstring path = temporary_filename;
-		temporary_archive_paths.push_back(path);
+		files->archive_paths.push_back(path);
 		std::ofstream output(std::filesystem::path(path), std::ios::binary | std::ios::trunc);
 		if (!output)
 			throw std::runtime_error("Unable to open the seekable nested-archive cache");
@@ -959,8 +984,8 @@ struct compressed_midi_event_source::impl
 
 	progress_callback progress;
 	const std::atomic<bool>* cancel_requested = nullptr;
+	std::shared_ptr<temporary_files> files;
 	std::wstring cache_path;
-	std::vector<std::wstring> temporary_archive_paths;
 	std::ofstream cache_writer;
 	std::ifstream cache_reader;
 	std::vector<track_info> tracks;
@@ -1037,4 +1062,11 @@ std::uint64_t compressed_midi_event_source::event_count() const
 std::uint32_t compressed_midi_event_source::archive_depth() const
 {
 	return impl_->depth;
+}
+
+std::shared_ptr<compressed_midi_event_source>
+compressed_midi_event_source::fork_reader() const
+{
+	return std::shared_ptr<compressed_midi_event_source>(
+		new compressed_midi_event_source(std::make_unique<impl>(*impl_)));
 }

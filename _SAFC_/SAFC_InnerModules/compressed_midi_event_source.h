@@ -53,6 +53,10 @@ public:
 	std::uint64_t event_count() const;
 	std::uint32_t archive_depth() const;
 
+	// Create an independent cursor over the prepared page store. The cache files
+	// remain alive until the final reader is destroyed.
+	std::shared_ptr<compressed_midi_event_source> fork_reader() const;
+
 private:
 	struct impl;
 	explicit compressed_midi_event_source(std::unique_ptr<impl> implementation);

@@ -52,6 +52,7 @@
 #include "SAFCGUIF_Local/simple_player_viewer.h"
 #include "SAFCGUIF_Local/midi_editor_viewer.h"
 #include "SAFCGUIF_Local/midi_editor_tools_ui.h"
+#include "SAFCGUIF_Local/player_video_render_ui.h"
 
 #include "SAFC_InnerModules/single_midi_processor_2.h"
 #include "SAFC_InnerModules/bool_settings.h"
@@ -2575,6 +2576,7 @@ void restore_reg_settings()
 			settings::regestry_access.GetDwordValue(L"SYNCORE_LIMITER") != 0;
 	}
 	catch (...) {}
+	load_player_video_render_settings();
 	if (player)
 	{
 		player->set_syncore_bank_path(saved_syncore_bank_path);
@@ -3174,6 +3176,7 @@ void on_playback_seek_to(float value)
 
 std::mutex compressed_player_source_mutex;
 std::shared_ptr<compressed_midi_event_source> compressed_player_source;
+std::wstring compressed_player_filename;
 std::atomic<bool> compressed_player_preparing = false;
 std::atomic<bool> compressed_player_cancel = false;
 std::atomic<bool> compressed_player_playback_requested = false;
@@ -3194,6 +3197,12 @@ std::shared_ptr<compressed_midi_event_source> current_compressed_player_source()
 {
 	std::lock_guard locker(compressed_player_source_mutex);
 	return compressed_player_source;
+}
+
+std::wstring current_compressed_player_filename()
+{
+	std::lock_guard locker(compressed_player_source_mutex);
+	return compressed_player_filename;
 }
 
 void compressed_player_watch_func()
@@ -3337,6 +3346,7 @@ void open_compressed_midi_file(std::wstring filename)
 		{
 			std::lock_guard locker(compressed_player_source_mutex);
 			compressed_player_source = source;
+			compressed_player_filename = filename;
 		}
 
 		compressed_player_source_selected.store(true, std::memory_order_release);
@@ -3860,6 +3870,7 @@ struct simplayer_saved_state {
 	float text_x, text_y;
 	float pause_x, pause_y;
 	float stop_x, stop_y;
+	float render_x, render_y;
 	float buf_switch_x, buf_switch_y;
 	float overlap_switch_x, overlap_switch_y;
 	float max_x, max_y;
@@ -4174,6 +4185,7 @@ void apply_simplayer_maximised_layout()
 	auto text = (text_box*)(*window)["TEXT"];
 	auto pause_btn = (button*)(*window)["PAUSE"];
 	auto stop_btn = (button*)(*window)["STOP"];
+	auto render_btn = (button*)(*window)["RENDER_VIDEO"];
 	auto vls = (slider*)(*window)["VIEW_LEN_SLIDER"];
 	auto buf_sw = (button*)(*window)["BUFFERING_SWITCH"];
 	auto overlap_sw = (button*)(*window)["OVERLAP_SWITCH"];
@@ -4199,6 +4211,7 @@ void apply_simplayer_maximised_layout()
 	pause_btn->safe_change_position(-half_w + 10, row1_y);
 	stop_btn->safe_change_position(-half_w + 25, row1_y);
 	vls->safe_change_position(-half_w + 75, row1_y);
+	render_btn->safe_change_position(-half_w + 155, row1_y);
 	text->safe_change_position(0, row1_y - 20);
 	buf_sw->safe_change_position(half_w - 50, row1_y);
 
@@ -4230,6 +4243,7 @@ void switch_maximise()
 	auto text = (text_box*)(*window)["TEXT"];
 	auto pause_btn = (button*)(*window)["PAUSE"];
 	auto stop_btn = (button*)(*window)["STOP"];
+	auto render_btn = (button*)(*window)["RENDER_VIDEO"];
 	auto vls = (slider*)(*window)["VIEW_LEN_SLIDER"];
 	auto buf_sw = (button*)(*window)["BUFFERING_SWITCH"];
 	auto overlap_sw = (button*)(*window)["OVERLAP_SWITCH"];
@@ -4251,6 +4265,8 @@ void switch_maximise()
 		state.pause_y = pause_btn->y_pos;
 		state.stop_x = stop_btn->x_pos;
 		state.stop_y = stop_btn->y_pos;
+		state.render_x = render_btn->x_pos;
+		state.render_y = render_btn->y_pos;
 		state.vls_x = vls->x_pos;
 		state.vls_y = vls->y_pos;
 		state.buf_switch_x = buf_sw->x_pos;
@@ -4296,6 +4312,7 @@ void switch_maximise()
 		text->safe_change_position(state.text_x, state.text_y);
 		pause_btn->safe_change_position(state.pause_x, state.pause_y);
 		stop_btn->safe_change_position(state.stop_x, state.stop_y);
+		render_btn->safe_change_position(state.render_x, state.render_y);
 		vls->safe_change_position(state.vls_x, state.vls_y);
 		buf_sw->safe_change_position(state.buf_switch_x, state.buf_switch_y);
 		overlap_sw->safe_change_position(state.overlap_switch_x, state.overlap_switch_y);
@@ -4637,6 +4654,8 @@ void init(bool reinitialise_font = true)
 		(*global_window_handler)["SYNCORE_SETTINGS"] = window;
 	}
 
+	initialize_player_video_render_window(BACKGROUND_OPQ, HEADER, BORDER);
+
 	window = new moveable_window("SMRP Container", system_white, -300, 300, 600, 600, 0x000000CF, 0xFFFFFF7F);
 
 	(*window)["TIMER"] = new input_field("0 s", 0, 195, 10, 50, system_white, nullptr, 0, &system_white, "Timer", 12, _Align::center, _Align::center, input_field::Type::text);
@@ -4687,6 +4706,10 @@ void init(bool reinitialise_font = true)
 	(*window)["TEXT"] = new text_box("TIME", legacy_white, 0, 130 + moveable_window::window_header_size, 50, 175, 10, 0xFFFFFF1A, 0, 0, _Align(center | top), text_box::VerticalOverflow::cut);
 	(*window)["PAUSE"] = new button("\202", legacy_white, on_player_pause_toggle, -190, 180 - moveable_window::window_header_size, 10, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr);
 	(*window)["STOP"] = new button("\201", legacy_white, on_player_stop, -175, 180 - moveable_window::window_header_size, 10, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr);
+	(*window)["RENDER_VIDEO"] = new button("Render...", system_white,
+		open_player_video_render_settings, -62.5, 180 - moveable_window::window_header_size,
+		55, 10, 1, 0x7F3FFF3F, 0x7F3FFFFF, 0xFFFFFFFF,
+		0x7F3FFFFF, 0xFFFFFFFF, nullptr, "Render this MIDI as an MP4");
 
 	auto player_view = new player_viewer(0, -20);
 	(*window)["VIEW_LEN_SLIDER"] = new slider(slider::Orientation::horizontal, -130, 180 - moveable_window::window_header_size, 65, 14, 23, log2f(player_view->data->scroll_window_us), on_view_length_change, 0x808080FF, 0xFFFFFFFF, 0xAACFFFFF, 0x007FFFFF, 0x808080FF, 10, 4);
@@ -4754,7 +4777,7 @@ void init(bool reinitialise_font = true)
 		"Cancel", system_white, on_compressed_preparation_cancel,
 		85, -5 - moveable_window::window_header_size,
 		60, 12, 1, 0x5F5F5F7F, 0xFFFFFFFF, 0x7F7F7FFF,
-		0x7F7F7FFF, 0xFFFFFFFF, nullptr,
+		0xFFFFFFFF, 0x7F7F7FFF, nullptr,
 		"Cancel preparation, or close this dialog");
 	(*global_window_handler)["ARCHIVE_SOURCE"] = window;
 
@@ -5021,6 +5044,7 @@ void gl_init()
 void gl_close()
 {
 	settings::regestry_access.Close();
+	shutdown_player_video_render();
 
 	if (player)
 		player->stop();

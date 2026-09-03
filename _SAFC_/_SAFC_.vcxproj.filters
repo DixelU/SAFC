@@ -150,6 +150,9 @@
     <ClInclude Include="SAFC_InnerModules\simple_player.h">
       <Filter>Файлы заголовков</Filter>
     </ClInclude>
+	<ClInclude Include="SAFC_InnerModules\simple_player_video_export.h">
+	  <Filter>Файлы заголовков\MIDI Processing</Filter>
+	</ClInclude>
     <ClInclude Include="SAFGUIF\slider.h">
       <Filter>Файлы заголовков\SAFGUIF</Filter>
     </ClInclude>
@@ -163,6 +166,9 @@
       <Filter>Файлы заголовков\SAFGUIF\Specific</Filter>
     </ClInclude>
 	<ClInclude Include="SAFCGUIF_Local\midi_editor_tools_ui.h">
+	  <Filter>Файлы заголовков\SAFGUIF\Specific</Filter>
+	</ClInclude>
+	<ClInclude Include="SAFCGUIF_Local\player_video_render_ui.h">
 	  <Filter>Файлы заголовков\SAFGUIF\Specific</Filter>
 	</ClInclude>
 	<ClInclude Include="SAFCGUIF_Local\simple_player_viewer.h">
@@ -182,10 +188,16 @@
 	<ClCompile Include="SAFCGUIF_Local\midi_editor_tools_ui.cpp">
 	  <Filter>Исходные файлы</Filter>
 	</ClCompile>
+	<ClCompile Include="SAFCGUIF_Local\player_video_render_ui.cpp">
+	  <Filter>Исходные файлы</Filter>
+	</ClCompile>
 	<ClCompile Include="SAFC_InnerModules\midi_editor_tools.cpp">
 	  <Filter>Исходные файлы</Filter>
 	</ClCompile>
 	<ClCompile Include="SAFC_InnerModules\compressed_midi_event_source.cpp">
+	  <Filter>Исходные файлы</Filter>
+	</ClCompile>
+	<ClCompile Include="SAFC_InnerModules\simple_player_video_export.cpp">
 	  <Filter>Исходные файлы</Filter>
 	</ClCompile>
 	<ClCompile Include="SAFC_InnerModules\syncore_output.cpp">
