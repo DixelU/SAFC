@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #ifndef SAFC_SIMPLE_PLAYER
 #define SAFC_SIMPLE_PLAYER
 
@@ -18,6 +18,7 @@
 #include <limits>
 #include <set>
 #include <list>
+#include <memory>
 #include <unordered_map>
 
 #include <memory_mapped_file_reader.h>
@@ -28,6 +29,7 @@
 #include "syncore_output.h"
 
 #define SIMPLE_PLAYER_FORCE_NO_INLINE
+#include <buffered_block_list.h>
 #include <buffered_queue_spsc.h>
 // __declspec(noinline)
 // __declspec(noinline)
@@ -46,32 +48,18 @@ struct simple_player
 		const uint8_t* ending;
 	};
 
-	// Buffered note for notes display
-	// Note: end_time_us is atomic for lock-free note_off updates
+	// Buffered note for notes display. All fields are owned by the visual
+	// consumer after queued events cross the parser/render boundary.
 	struct buffered_note
 	{
-		uint64_t start_time_us;              // note on time (immutable after creation)
-		std::atomic<uint64_t> end_time_us;   // note off time (~0 = still held/pending)
-		uint32_t track_id;                   // (track_index << 4) | channel (immutable after creation)
+		uint64_t start_time_us;            // note on time (immutable after creation)
+		uint64_t end_time_us;              // note off time (~0 = still held/pending)
+		uint32_t track_id;                 // (track_index << 4) | channel
 
 		buffered_note() : start_time_us(0), end_time_us(~0ULL), track_id(0) {}
 
 		buffered_note(uint64_t start, uint64_t end, uint32_t track)
 			: start_time_us(start), end_time_us(end), track_id(track) {}
-
-		// move constructor for queue operations
-		buffered_note(buffered_note&& other) noexcept
-			: start_time_us(other.start_time_us)
-			, end_time_us(other.end_time_us.load(std::memory_order_relaxed))
-			, track_id(other.track_id) {}
-
-		buffered_note& operator=(buffered_note&& other) noexcept
-		{
-			start_time_us = other.start_time_us;
-			end_time_us.store(other.end_time_us.load(std::memory_order_relaxed), std::memory_order_relaxed);
-			track_id = other.track_id;
-			return *this;
-		}
 	};
 
 	// Visuals viewport: manages notes display and keyboard state
@@ -79,15 +67,25 @@ struct simple_player
 	struct visuals_viewport
 	{
 		static constexpr size_t key_count = 128;
+		static constexpr size_t note_list_slab_bytes = 1u << 8;
+		using note_list = dixelu::buffered_block_list<buffered_note, note_list_slab_bytes>;
 
-		// Pending note tracking entry - points to note in queue awaiting its note_off
-		// Only accessed by parser thread - no synchronization needed
+		struct queued_visual_event
+		{
+			uint64_t time_us;
+			uint32_t track_id;
+			uint8_t key;
+			bool note_on;
+		};
+
+		// Pending note tracking entry - points to a list note awaiting its note_off
+		// Only accessed by the visual consumer - no synchronization needed
 		// Per-track_id LIFO stacks of pending notes per key.
 		// Flat open-addressing hash table (linear probing, power-of-two size):
 		// a lookup is one probe into a contiguous array instead of
 		// unordered_map's bucket->node pointer chase, and emptied stacks keep
 		// their slot and capacity, so steady-state playback doesn't allocate.
-		// Parser-private: only accessed by parser thread
+		// Visual-consumer-private
 		struct pending_list
 		{
 			// track_id is (track_index << 4) | channel and never reaches ~0u
@@ -163,12 +161,15 @@ struct simple_player
 			}
 		};
 
-		// Per-key SPSC queues for falling notes visualization
-		// Producer: parser thread, Consumer: render thread
-		std::array<dixelu::buffered_queue_spsc<buffered_note>, key_count> falling_notes;
+		// The parser publishes compact events through one SPSC queue. The visual
+		// consumer drains them into per-key block lists, so list mutation, pending
+		// matching, reclamation and iteration all stay on one thread. Lists are
+		// allocated lazily to avoid the pool's default per-container slab cost.
+		dixelu::buffered_queue_spsc<queued_visual_event> queued_events;
+		std::array<std::unique_ptr<note_list>, key_count> falling_notes;
 
 		// Per-key pending note trackers for note_off matching
-		// Parser-private: only accessed by parser thread
+		// Visual-consumer-private
 		std::array<pending_list, key_count> pending;
 
 		// Mutex held by render thread during cull+iteration and by playback_thread during reset().
@@ -193,56 +194,100 @@ struct simple_player
 			return static_cast<uint8_t>(track_id & 0x0F);
 		}
 
-		// Push a note_on event - creates visual note and tracks as pending
-		// Called from parser thread only - no locking needed
+		void apply_visual_event(const queued_visual_event& event)
+		{
+			if (event.note_on)
+			{
+				auto& notes = falling_notes[event.key];
+				if (!notes)
+					notes = std::make_unique<note_list>();
+
+				buffered_note& note = notes->emplace_back(
+					event.time_us, ~0ULL, event.track_id);
+				try
+				{
+					pending[event.key].push(event.track_id, &note);
+				}
+				catch (...)
+				{
+					notes->pop_back();
+					if (notes->empty())
+						notes.reset();
+					throw;
+				}
+				return;
+			}
+
+			buffered_note* note = pending[event.key].find_and_remove(event.track_id);
+			if (note)
+				note->end_time_us = event.time_us;
+		}
+
+		// Drain only the boundary visible at entry. A continuously producing parser
+		// therefore cannot monopolize one render frame.
+		SIMPLE_PLAYER_FORCE_NO_INLINE void drain_queued_events()
+		{
+			size_t remaining = queued_events.approximate_size();
+			while (remaining-- != 0 && !queued_events.empty())
+			{
+				const queued_visual_event event = queued_events.front();
+				queued_events.pop();
+				apply_visual_event(event);
+			}
+		}
+
+		// Push a note_on event to the visual consumer.
+		// Called from parser thread only - no locking needed.
 		SIMPLE_PLAYER_FORCE_NO_INLINE void push_note_on(uint8_t key, uint64_t time_us, size_t track_index, uint8_t channel, uint8_t velocity)
 		{
 			if (key >= key_count)
 				return;
 
-			uint32_t track_id = make_color_id(track_index, channel);
-
-			// Push to falling notes queue (lock-free)
-			falling_notes[key].push({time_us, ~0ULL, track_id});
-
-			// Track as pending for note_off matching (parser-private)
-			buffered_note* note_ptr = &falling_notes[key].back();
-			pending[key].push(track_id, note_ptr);
+			(void)velocity;
+			queued_events.push({time_us, make_color_id(track_index, channel), key, true});
 		}
 
-		// Push a note_off event - finds matching pending note and sets end_time
-		// Called from parser thread only - atomic store for end_time_us
+		// Push a note_off event to the visual consumer.
+		// Called from parser thread only - no locking needed.
 		SIMPLE_PLAYER_FORCE_NO_INLINE void push_note_off(uint8_t key, uint64_t time_us, size_t track_index, uint8_t channel)
 		{
 			if (key >= key_count)
 				return;
 
-			uint32_t track_id = make_color_id(track_index, channel);
-
-			// Find matching pending note and set its end time (atomic store)
-			buffered_note* note = pending[key].find_and_remove(track_id);
-			if (note)
-				note->end_time_us.store(time_us, std::memory_order_release);
+			queued_events.push({time_us, make_color_id(track_index, channel), key, false});
 		}
 
-		// Remove notes that have fully scrolled past (end_time < cutoff)
-		// Called from render thread only - no locking needed
+		// Remove every note that has fully scrolled past, including expired notes
+		// behind an older note that is still held. Lists are ordered by start time,
+		// so no later note can be expired once start_time reaches the cutoff.
+		// Called from the visual consumer only.
 		SIMPLE_PLAYER_FORCE_NO_INLINE void cull_expired(int64_t cutoff_time_us)
 		{
+			drain_queued_events();
+			if (cutoff_time_us <= 0)
+				return;
+
+			const uint64_t cutoff = static_cast<uint64_t>(cutoff_time_us);
 			for (size_t key = 0; key < key_count; ++key)
 			{
-				auto& queue = falling_notes[key];
-				while (!queue.empty())
+				auto& notes = falling_notes[key];
+				if (!notes)
+					continue;
+
+				for (auto current = notes->begin(); current != notes->end();)
 				{
-					auto& front = queue.front();
-					// Only cull if note has ended and end is before cutoff
-					// Atomic load for end_time_us
-					uint64_t end_time = front.end_time_us.load(std::memory_order_relaxed);
-					if (end_time != ~0ULL && static_cast<int64_t>(end_time) < cutoff_time_us)
-						queue.pop();
+					if (current->start_time_us >= cutoff)
+						break;
+
+					const uint64_t end_time = current->end_time_us;
+					if (end_time != ~0ULL && end_time < cutoff)
+						current = notes->erase(current);
 					else
-						break;  // Queue is ordered by start_time, so stop if this one isn't expired
+						++current;
 				}
+
+				if (notes->empty())
+					notes.reset();
 			}
 		}
 
@@ -250,10 +295,11 @@ struct simple_player
 		// Should only be called when no concurrent access (e.g., during reset)
 		void clear()
 		{
-			for (auto& q : falling_notes)
-				q.clear();
+			queued_events.clear();
 			for (auto& p : pending)
 				p.clear();
+			for (auto& notes : falling_notes)
+				notes.reset();
 		}
 
 		// reset for new playback
@@ -264,11 +310,14 @@ struct simple_player
 			clear();
 		}
 
-		std::size_t buffered_note_count() const noexcept
+		std::size_t buffered_note_count()
 		{
+			std::lock_guard<std::mutex> lock(access_mutex);
+			drain_queued_events();
 			std::size_t result = 0;
-			for (const auto& queue : falling_notes)
-				result += queue.approximate_size();
+			for (const auto& notes : falling_notes)
+				if (notes)
+					result += notes->size();
 			return result;
 		}
 	};
@@ -470,8 +519,8 @@ struct simple_player
 
 		// Event-count throttle: caps send_buffer at dense tick clusters where
 		// the time-based throttle alone won't fire (millions of events packed
-		// into a single tick or sub-millisecond span). 1M events * 24B ~= 24MB
-		// ceiling for the lookahead buffer regardless of MIDI density.
+		// into a single tick or sub-millisecond span). The intentionally high
+		// 2^26 ceiling preserves exceptionally dense same-tick playback.
 		static constexpr size_t max_pending_events = 1u << 26;
 
 		void reset()
@@ -532,6 +581,10 @@ struct simple_player
 	};
 
 	simple_player() = default;
+	~simple_player()
+	{
+		shutdown();
+	}
 
 	void init()
 	{
@@ -903,6 +956,30 @@ struct simple_player
 
 			// If paused, unpause so threads can exit
 			state.paused.store(false, std::memory_order_release);
+		}
+	}
+
+	// The scheduler and the selected output have separate ownership.  Closing
+	// the application must retire both while the player is still intact, rather
+	// than defer SYNCore's thread joins to member/static destruction.
+	void shutdown() noexcept
+	{
+		stop();
+
+		// Stop SYNCore immediately, including during asynchronous bank startup.
+		// Its wrapper keeps senders safe while the current player run observes stop.
+		syncore.stop();
+
+		try
+		{
+			// A playback run owns this lock until its parser and sender have joined.
+			// Waiting here means close_midi_out() cannot race the last MIDI sends.
+			std::unique_lock run_lock(playback_run_mutex);
+			close_midi_out();
+		}
+		catch (...)
+		{
+			// Destruction/GUI teardown cannot throw.  SYNCore was already stopped.
 		}
 	}
 
@@ -2213,8 +2290,9 @@ struct simple_player
 			visuals.cull_expired(current_us - clamp_to_i64(data.scroll_window_us));
 
 			size_t queued_notes = 0;
-			for (const auto& queue : visuals.falling_notes)
-				queued_notes += queue.approximate_size();
+			for (const auto& notes : visuals.falling_notes)
+				if (notes)
+					queued_notes += notes->size();
 
 			const size_t fill_vert_capacity = queued_notes * 4;
 			const size_t outline_vert_capacity = queued_notes * 8;
@@ -2231,14 +2309,15 @@ struct simple_player
 			{
 				uint8_t key = data.key_n[index];
 				data.key_note_spans.clear();
+				const auto& notes = visuals.falling_notes[key];
+				if (!notes)
+					return;
 
-				for (auto it = visuals.falling_notes[key].begin();
-					it != visuals.falling_notes[key].end(); ++it)
+				for (auto it = notes->begin(); it != notes->end(); ++it)
 				{
 					auto& note = *it;
 
-					// Atomic load for end_time_us (may be updated by parser)
-					uint64_t end_time = note.end_time_us.load(std::memory_order_acquire);
+					uint64_t end_time = note.end_time_us;
 
 					int64_t start_offset = clamp_to_i64(note.start_time_us) - current_us;
 					int64_t end_offset = 0;
@@ -2843,8 +2922,9 @@ private:
 		int attempts = 0;
 		set_short_msg_noop();
 
-		if (syncore.active())
-			syncore.stop();
+		// active() remains false while SYNCore is loading/preparing, but that
+		// session still owns a delivery thread and must be stopped on close.
+		syncore.stop();
 
 		if (!hout)
 			return;

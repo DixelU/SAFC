@@ -58,8 +58,8 @@ void test_visual_storage_has_no_artificial_limit()
 		"identical notes retain separate exact visual spans");
 	visuals.push_note_off(key, 20, 0, 0);
 	visuals.push_note_off(key, 30, 0, 0);
-	check(visuals.falling_notes[key].front().end_time_us.load(
-		std::memory_order_relaxed) == 30,
+	check(visuals.buffered_note_count() == 2 && visuals.falling_notes[key] &&
+		visuals.falling_notes[key]->front().end_time_us == 30,
 		"exact visual spans retain independent note-off matching");
 	visuals.clear();
 
@@ -70,6 +70,48 @@ void test_visual_storage_has_no_artificial_limit()
 		visuals.push_note_on(key, static_cast<std::uint64_t>(index), 0, 0, 100);
 	check(visuals.buffered_note_count() == note_count,
 		"visual storage has no artificial note cap or low-detail fallback");
+}
+
+void test_held_notes_do_not_block_reclamation()
+{
+	simple_player::visuals_viewport visuals;
+	constexpr std::uint8_t first_key = 60;
+	constexpr std::size_t held_keys = 4;
+	constexpr std::size_t completed_per_key = 4096;
+
+	for (std::size_t key_offset = 0; key_offset < held_keys; ++key_offset)
+	{
+		const auto key = static_cast<std::uint8_t>(first_key + key_offset);
+		visuals.push_note_on(key, 0, 0, 0, 100);
+		for (std::size_t index = 0; index < completed_per_key; ++index)
+		{
+			const std::uint64_t start = 10 + index * 2;
+			visuals.push_note_on(key, start, 1, 0, 100);
+			visuals.push_note_off(key, start + 1, 1, 0);
+		}
+	}
+
+	const std::int64_t cutoff = 10 + completed_per_key * 2 + 2;
+	visuals.cull_expired(cutoff);
+	check(visuals.buffered_note_count() == held_keys,
+		"held notes do not pin later expired notes on the same keys");
+	for (std::size_t key_offset = 0; key_offset < held_keys; ++key_offset)
+	{
+		const auto key = static_cast<std::uint8_t>(first_key + key_offset);
+		check(visuals.falling_notes[key] &&
+			visuals.falling_notes[key]->size() == 1 &&
+			visuals.falling_notes[key]->block_count() == 1 &&
+			visuals.falling_notes[key]->front().end_time_us == ~0ULL,
+			"each held key retains only its live note and one list block");
+		visuals.push_note_off(key, static_cast<std::uint64_t>(cutoff), 0, 0);
+	}
+
+	visuals.cull_expired(cutoff + 1);
+	check(visuals.buffered_note_count() == 0,
+		"released held notes are reclaimed after crossing the cutoff");
+	for (std::size_t key_offset = 0; key_offset < held_keys; ++key_offset)
+		check(!visuals.falling_notes[first_key + key_offset],
+			"empty per-key lists release their retained block-pool storage");
 }
 
 class seek_probe_source final : public playback_event_source
@@ -204,11 +246,11 @@ void test_stop_interrupts_distant_event_wait()
 	});
 	check(waiting, "player queues a distant event before the stop test");
 	const auto stop_started = std::chrono::steady_clock::now();
-	player.stop();
+	player.shutdown();
 	playback.join();
 	const auto stop_elapsed = std::chrono::steady_clock::now() - stop_started;
 	check(stop_elapsed < std::chrono::milliseconds(250),
-		"Stop interrupts a sender waiting for a distant event");
+		"Shutdown interrupts a sender waiting for a distant event and releases the player run");
 }
 
 void test_file_player_slider_seek(const std::filesystem::path& midi_path)
@@ -465,6 +507,7 @@ int main(int argc, char** argv)
 {
 	test_text_box_layout_isolation();
 	test_visual_storage_has_no_artificial_limit();
+	test_held_notes_do_not_block_reclamation();
 	test_player_slider_seek_restart();
 	test_stop_interrupts_distant_event_wait();
 	const auto directory = std::filesystem::absolute(

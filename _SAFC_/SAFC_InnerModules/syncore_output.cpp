@@ -13,7 +13,50 @@
 struct syncore_output::impl
 {
 #ifdef SAFC_WITH_SYNCORE
-	std::unique_ptr<safsyn::WindowsSynth> synth;
+	// The player sender, device-selection code, and process shutdown can all
+	// touch this object.  Keep a shared local reference while calling into the
+	// synth so stop() can detach the current session without invalidating a
+	// concurrent sender.
+	mutable std::mutex synth_mutex;
+	std::mutex start_mutex;
+	std::shared_ptr<safsyn::WindowsSynth> synth;
+	std::uint64_t synth_generation = 0;
+
+	struct detached_synth
+	{
+		std::shared_ptr<safsyn::WindowsSynth> value;
+		std::uint64_t generation = 0;
+	};
+
+	detached_synth detach_synth() noexcept
+	{
+		std::lock_guard lock(synth_mutex);
+		active.store(false, std::memory_order_release);
+		return {std::move(synth), ++synth_generation};
+	}
+
+	bool owns_synth(const std::shared_ptr<safsyn::WindowsSynth>& candidate,
+		std::uint64_t generation) const noexcept
+	{
+		std::lock_guard lock(synth_mutex);
+		return synth == candidate && synth_generation == generation;
+	}
+
+	bool activate_synth(const std::shared_ptr<safsyn::WindowsSynth>& candidate,
+		std::uint64_t generation) noexcept
+	{
+		std::lock_guard lock(synth_mutex);
+		if (synth != candidate || synth_generation != generation)
+			return false;
+		active.store(true, std::memory_order_release);
+		return true;
+	}
+
+	bool still_idle_after(std::uint64_t generation) const noexcept
+	{
+		std::lock_guard lock(synth_mutex);
+		return !synth && synth_generation == generation;
+	}
 #endif
 	std::atomic<bool> active{false};
 	mutable std::mutex status_mutex;
@@ -77,6 +120,11 @@ bool syncore_output::available() noexcept
 bool syncore_output::start(const std::wstring& bank_path,
 	const syncore_preferences& preferences, std::string& error)
 {
+	// Serialize competing starts. stop() uses the separate session lock, so it
+	// can still cancel asynchronous bank/output initialization promptly.
+#ifdef SAFC_WITH_SYNCORE
+	std::unique_lock start_lock(impl_->start_mutex);
+#endif
 	stop();
 	error.clear();
 	syncore_runtime_status starting;
@@ -87,7 +135,7 @@ bool syncore_output::start(const std::wstring& bank_path,
 #ifdef SAFC_WITH_SYNCORE
 	try
 	{
-		impl_->synth = std::make_unique<safsyn::WindowsSynth>();
+		auto synth = std::make_shared<safsyn::WindowsSynth>();
 		safsyn::WindowsSynthOptions options;
 		options.bank_path = bank_path;
 		options.playback.sample_rate = preferences.sample_rate;
@@ -114,19 +162,38 @@ bool syncore_output::start(const std::wstring& bank_path,
 			options.playback.phase.mode = safsyn::PhaseMode::IndependentBins;
 			break;
 		}
-		impl_->synth->start(options);
+		// Publish the session only after start() has created its delivery thread.
+		// A concurrent stop either sees the whole session and cancels it, or runs
+		// before this block and is followed by a still-observable session.
+		std::uint64_t generation = 0;
+		{
+			std::lock_guard lock(impl_->synth_mutex);
+			synth->start(options);
+			generation = ++impl_->synth_generation;
+			impl_->synth = synth;
+		}
 
 		// Sound-bank loading is asynchronous. Do not let SAFC start its event
 		// clock until SYNCore can accept the initial controller/program state.
 		for (;;)
 		{
-			const auto stats = impl_->synth->stats();
+			const auto stats = synth->stats();
 			auto runtime = make_runtime_status(stats);
+			if (!impl_->owns_synth(synth, generation))
+			{
+				error = "SYNCore startup was stopped";
+				return false;
+			}
 			impl_->publish_status(runtime);
 			if (!stats.error.empty())
 			{
 				error = stats.error;
-				stop();
+				auto failed = impl_->detach_synth();
+				if (failed.value)
+				{
+					failed.value->panic();
+					failed.value->stop();
+				}
 				runtime.message = "Error";
 				runtime.error = error;
 				runtime.running = false;
@@ -136,7 +203,11 @@ bool syncore_output::start(const std::wstring& bank_path,
 			}
 			if (stats.playback.ready)
 			{
-				impl_->active.store(true, std::memory_order_release);
+				if (!impl_->activate_synth(synth, generation))
+				{
+					error = "SYNCore startup was stopped";
+					return false;
+				}
 				runtime.message = "Ready";
 				runtime.ready = true;
 				runtime.preparing = false;
@@ -147,7 +218,12 @@ bool syncore_output::start(const std::wstring& bank_path,
 			if (!stats.running)
 			{
 				error = "SYNCore stopped before its audio output became ready";
-				stop();
+				auto failed = impl_->detach_synth();
+				if (failed.value)
+				{
+					failed.value->panic();
+					failed.value->stop();
+				}
 				runtime.message = "Error";
 				runtime.error = error;
 				runtime.running = false;
@@ -197,17 +273,23 @@ bool syncore_output::start(const std::wstring& bank_path,
 
 void syncore_output::stop() noexcept
 {
-	impl_->active.store(false, std::memory_order_release);
 #ifdef SAFC_WITH_SYNCORE
-	if (impl_->synth)
+	const auto stopped = impl_->detach_synth();
+	if (stopped.value)
 	{
-		impl_->synth->panic();
-		impl_->synth->stop();
-		impl_->synth.reset();
+		stopped.value->panic();
+		stopped.value->stop();
 	}
 #endif
 	try
 	{
+		// Do not overwrite a newer start that raced a completed old stop.
+#ifdef SAFC_WITH_SYNCORE
+		if (!impl_->still_idle_after(stopped.generation))
+			return;
+#else
+		impl_->active.store(false, std::memory_order_release);
+#endif
 		syncore_runtime_status stopped;
 		stopped.message = "Stopped";
 		impl_->publish_status(std::move(stopped));
@@ -221,8 +303,14 @@ void syncore_output::stop() noexcept
 bool syncore_output::send_short_message(std::uint32_t message) noexcept
 {
 #ifdef SAFC_WITH_SYNCORE
-	return impl_->active.load(std::memory_order_acquire) && impl_->synth &&
-		impl_->synth->send_short_message(message);
+	std::shared_ptr<safsyn::WindowsSynth> synth;
+	{
+		std::lock_guard lock(impl_->synth_mutex);
+		if (!impl_->active.load(std::memory_order_acquire))
+			return false;
+		synth = impl_->synth;
+	}
+	return synth && synth->send_short_message(message);
 #else
 	(void)message;
 	return false;

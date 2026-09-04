@@ -5057,7 +5057,7 @@ void gl_close()
 	shutdown_player_video_render();
 
 	if (player)
-		player->stop();
+		player->shutdown();
 	compressed_player_cancel.store(true, std::memory_order_release);
 
 	lfont_symbols_info::destroy_font();
