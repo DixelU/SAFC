@@ -253,6 +253,19 @@ void test_stop_interrupts_distant_event_wait()
 		"Shutdown interrupts a sender waiting for a distant event and releases the player run");
 }
 
+void test_shutdown_rejects_late_playback()
+{
+	simple_player player;
+	distant_event_source source;
+	player.shutdown();
+
+	const auto started = std::chrono::steady_clock::now();
+	player.run_from_external(&source, 0.0, false);
+	const auto elapsed = std::chrono::steady_clock::now() - started;
+	check(!player.is_playing() && elapsed < std::chrono::milliseconds(50),
+		"Shutdown is terminal and rejects playback queued behind teardown");
+}
+
 void test_file_player_slider_seek(const std::filesystem::path& midi_path)
 {
 	simple_player player;
@@ -510,6 +523,7 @@ int main(int argc, char** argv)
 	test_held_notes_do_not_block_reclamation();
 	test_player_slider_seek_restart();
 	test_stop_interrupts_distant_event_wait();
+	test_shutdown_rejects_late_playback();
 	const auto directory = std::filesystem::absolute(
 		argc > 1 ? std::filesystem::path(argv[1]) :
 		std::filesystem::path("player-video-test-data"));

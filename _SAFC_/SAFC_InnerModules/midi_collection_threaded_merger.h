@@ -6,7 +6,12 @@ void throw_alert_error(std::string&& AlertText);
 void throw_alert_warning(std::string&& AlertText);
 
 #include <set>
+#include <atomic>
+#include <exception>
 #include <future>
+#include <memory>
+#include <mutex>
+#include <string>
 #include <thread>
 #include <vector>
 #include <syncstream>
@@ -143,7 +148,8 @@ struct midi_track_iterator
 	}
 };
 
-struct midi_collection_threaded_merger
+struct midi_collection_threaded_merger :
+	std::enable_shared_from_this<midi_collection_threaded_merger>
 {
 	using proc_data_ptr =
 		std::shared_ptr<single_midi_processor_2::processing_data>;
@@ -173,87 +179,150 @@ struct midi_collection_threaded_merger
 
 	~midi_collection_threaded_merger() = default;
 
-	void start_processing()
+	void start_processing() noexcept
 	{
-		std::set<std::uint32_t> group_ids;
-		for (auto& [pdata, _] : midi_processing_data_)
-			group_ids.insert(pdata->settings.details.group_id);
-
+		try
 		{
-			std::lock_guard lock(currently_processed_mutex_);
-			currently_processed_.assign(group_ids.size(), {});
-		}
+			auto lifetime = shared_from_this();
+			std::set<std::uint32_t> group_ids;
+			for (auto& [pdata, _] : midi_processing_data_)
+				group_ids.insert(pdata->settings.details.group_id);
 
-		std::uint32_t thread_index = 0;
-		for (std::uint32_t group_id : group_ids)
-		{
-			std::thread([this](
+			{
+				std::lock_guard lock(currently_processed_mutex_);
+				currently_processed_.assign(group_ids.size(), {});
+			}
+
+			std::uint32_t thread_index = 0;
+			for (std::uint32_t group_id : group_ids)
+			{
+				std::thread([this, lifetime](
 				std::vector<std::pair<proc_data_ptr, message_buffer_ptr>> data,
 				std::uint32_t id,
 				std::uint32_t idx)
 			{
-				for (auto& el : data)
+				try
 				{
-					if (el.first->settings.details.group_id != id)
-						continue;
-
+					for (auto& el : data)
 					{
-						std::lock_guard lock(currently_processed_mutex_);
-						currently_processed_[idx] = el;
-					}
+						if (el.first->settings.details.group_id != id)
+							continue;
 
-					if (single_midi_processor_lean::can_handle(el.first->settings))
-						single_midi_processor_lean::sync_processing(*el.first, *el.second);
-					else if (el.first->settings.proc_details.channel_split)
-						single_midi_processor_2::sync_processing<true>(*el.first, *el.second);
-					else
-						single_midi_processor_2::sync_processing<false>(*el.first, *el.second);
+						{
+							std::lock_guard lock(currently_processed_mutex_);
+							currently_processed_[idx] = el;
+						}
+
+						if (single_midi_processor_lean::can_handle(el.first->settings))
+							single_midi_processor_lean::sync_processing(*el.first, *el.second);
+						else if (el.first->settings.proc_details.channel_split)
+							single_midi_processor_2::sync_processing<true>(*el.first, *el.second);
+						else
+							single_midi_processor_2::sync_processing<false>(*el.first, *el.second);
+					}
 				}
-			}, midi_processing_data_, group_id, thread_index).detach();
-			++thread_index;
+				catch (...)
+				{
+					record_failure("MIDI processing", std::current_exception());
+					for (auto& el : data)
+					{
+						if (el.first->settings.details.group_id == id)
+						{
+							el.second->processing.store(false, std::memory_order_release);
+							el.second->finished.store(true, std::memory_order_release);
+						}
+					}
+				}
+				}, midi_processing_data_, group_id, thread_index).detach();
+				++thread_index;
+			}
+		}
+		catch (...)
+		{
+			record_failure("MIDI processing startup", std::current_exception());
+			mark_all_processing_finished();
 		}
 	}
 
 	bool is_smrp_complete() const
 	{
+		if (has_failed())
+			return true;
 		for (auto& [_, mbuf] : midi_processing_data_)
 			if (!mbuf->finished || mbuf->processing)
 				return false;
 		return true;
 	}
 
-	void start_ri_merge()
+	void start_ri_merge() noexcept
 	{
-		using mpd_t = decltype(midi_processing_data_);
-		mpd_t inplace_candidates, regular_candidates;
-		for (auto& el : midi_processing_data_)
+		if (has_failed())
 		{
-			if (el.first->settings.details.inplace_mergable)
-				inplace_candidates.push_back(el);
-			else
-				regular_candidates.push_back(el);
+			inplace_merge_complete.store(true, std::memory_order_release);
+			regular_merge_complete.store(true, std::memory_order_release);
+			return;
 		}
 
-		inplace_track_count = 0;
-		regular_track_count = 0;
+		bool inplace_started = false;
+		try
+		{
+			using mpd_t = decltype(midi_processing_data_);
+			mpd_t inplace_candidates, regular_candidates;
+			for (auto& el : midi_processing_data_)
+			{
+				if (el.first->settings.details.inplace_mergable)
+					inplace_candidates.push_back(el);
+				else
+					regular_candidates.push_back(el);
+			}
 
-		inplace_merge_future_ = std::async(std::launch::async,
+			inplace_track_count = 0;
+			regular_track_count = 0;
+
+			inplace_merge_future_ = std::async(std::launch::async,
 			[this, candidates = std::move(inplace_candidates)]() -> std::uint64_t
-		{
-			auto count = do_inplace_merge_impl(candidates, final_ppqn_, save_to_);
-			inplace_track_count = count;
-			inplace_merge_complete = true;
-			return count;
-		});
+			{
+				try
+				{
+					auto count = do_inplace_merge_impl(candidates, final_ppqn_, save_to_);
+					inplace_track_count.store(count, std::memory_order_release);
+					inplace_merge_complete.store(true, std::memory_order_release);
+					return count;
+				}
+				catch (...)
+				{
+					record_failure("in-place merge", std::current_exception());
+					inplace_merge_complete.store(true, std::memory_order_release);
+					return 0;
+				}
+			});
+			inplace_started = true;
 
-		regular_merge_future_ = std::async(std::launch::async,
+			regular_merge_future_ = std::async(std::launch::async,
 			[this, candidates = std::move(regular_candidates)]() -> std::uint64_t
+			{
+				try
+				{
+					auto count = do_regular_merge_impl(candidates, final_ppqn_, save_to_);
+					regular_track_count.store(count, std::memory_order_release);
+					regular_merge_complete.store(true, std::memory_order_release);
+					return count;
+				}
+				catch (...)
+				{
+					record_failure("regular merge", std::current_exception());
+					regular_merge_complete.store(true, std::memory_order_release);
+					return 0;
+				}
+			});
+		}
+		catch (...)
 		{
-			auto count = do_regular_merge_impl(candidates, final_ppqn_, save_to_);
-			regular_track_count = count;
-			regular_merge_complete = true;
-			return count;
-		});
+			record_failure("merge startup", std::current_exception());
+			if (!inplace_started)
+				inplace_merge_complete.store(true, std::memory_order_release);
+			regular_merge_complete.store(true, std::memory_order_release);
+		}
 	}
 
 	bool is_ri_merge_complete() const
@@ -261,17 +330,54 @@ struct midi_collection_threaded_merger
 		return inplace_merge_complete.load() && regular_merge_complete.load();
 	}
 
-	void start_final_merge()
+	void start_final_merge() noexcept
 	{
-		auto ii_count = inplace_merge_future_.get();
-		auto ir_count = regular_merge_future_.get();
-
-		final_merge_future_ = std::async(std::launch::async,
-			[this, ii_count, ir_count]()
+		try
 		{
-			do_final_merge_impl(save_to_, ii_count, ir_count, remnants_remove_);
-			complete = true;
-		});
+			if (has_failed() && (!inplace_merge_future_.valid() || !regular_merge_future_.valid()))
+			{
+				complete.store(true, std::memory_order_release);
+				return;
+			}
+
+			auto ii_count = inplace_merge_future_.get();
+			auto ir_count = regular_merge_future_.get();
+			if (has_failed())
+			{
+				complete.store(true, std::memory_order_release);
+				return;
+			}
+
+			final_merge_future_ = std::async(std::launch::async,
+			[this, ii_count, ir_count]()
+			{
+				try
+				{
+					do_final_merge_impl(save_to_, ii_count, ir_count, remnants_remove_);
+				}
+				catch (...)
+				{
+					record_failure("final merge", std::current_exception());
+				}
+				complete.store(true, std::memory_order_release);
+			});
+		}
+		catch (...)
+		{
+			record_failure("final merge startup", std::current_exception());
+			complete.store(true, std::memory_order_release);
+		}
+	}
+
+	bool has_failed() const noexcept
+	{
+		return failure_recorded_.load(std::memory_order_acquire);
+	}
+
+	std::string failure_message() const
+	{
+		std::lock_guard lock(failure_mutex_);
+		return failure_message_.empty() ? "MIDI merge failed" : failure_message_;
 	}
 
 	std::vector<std::pair<proc_data_ptr, message_buffer_ptr>> snapshot_currently_processed() const
@@ -307,6 +413,51 @@ private:
 	std::future<std::uint64_t> inplace_merge_future_;
 	std::future<std::uint64_t> regular_merge_future_;
 	std::future<void> final_merge_future_;
+	std::atomic_bool failure_recorded_{ false };
+	mutable std::mutex failure_mutex_;
+	std::string failure_message_;
+
+	void mark_all_processing_finished() noexcept
+	{
+		for (auto& [_, buffers] : midi_processing_data_)
+		{
+			buffers->processing.store(false, std::memory_order_release);
+			buffers->finished.store(true, std::memory_order_release);
+		}
+	}
+
+	void record_failure(const char* stage, std::exception_ptr exception) noexcept
+	{
+		try
+		{
+			std::string detail = stage;
+			detail += " failed";
+			try
+			{
+				std::rethrow_exception(exception);
+			}
+			catch (const std::exception& error)
+			{
+				detail += ": ";
+				detail += error.what();
+			}
+			catch (...)
+			{
+				detail += " with an unknown error";
+			}
+
+			std::lock_guard lock(failure_mutex_);
+			if (!failure_recorded_.load(std::memory_order_relaxed))
+			{
+				failure_message_ = std::move(detail);
+				failure_recorded_.store(true, std::memory_order_release);
+			}
+		}
+		catch (...)
+		{
+			failure_recorded_.store(true, std::memory_order_release);
+		}
+	}
 
 	static std::uint32_t read_vlv(midi_file_reader& f)
 	{

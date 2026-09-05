@@ -60,7 +60,20 @@
 
 #include <background_worker.h>
 
-using dixelu::worker_singleton;
+// GUI work must never be drained during static destruction: queued tasks can
+// reopen devices/dialogs after the main loop has ended, and long-lived watcher
+// tasks need a stop request before their worker can join. Keep that lifecycle
+// policy local to SAFC; the reusable utility intentionally drains by default.
+template<typename Tag>
+struct worker_singleton
+{
+	static dixelu::background_worker& instance()
+	{
+		static dixelu::background_worker worker(
+			dixelu::background_worker_shutdown::cancel);
+		return worker;
+	}
+};
 
 #include <boost/dll.hpp>
 #include <archive.h>
@@ -216,7 +229,8 @@ static void extract(const void* data, size_t data_size)
 class timeout_bind_status_callback : public IBindStatusCallback
 {
 public:
-	timeout_bind_status_callback(DWORD total_timeout_ms, DWORD stall_timeout_ms)
+	timeout_bind_status_callback(DWORD total_timeout_ms, DWORD stall_timeout_ms,
+		std::stop_token stop_token = {})
 		: m_ref(1)
 		, m_total_timeout_ms(total_timeout_ms)
 		, m_stall_timeout_ms(stall_timeout_ms)
@@ -224,14 +238,26 @@ public:
 		, m_last_progress_tick(GetTickCount64())
 		, m_binding(nullptr)
 		, m_stop(false)
+		, m_stop_token(stop_token)
 	{
 		m_watchdog = std::thread([this]()
 		{
 			std::unique_lock<std::mutex> lk(m_mtx);
 			while (!m_stop)
 			{
-				if (m_cv.wait_for(lk, std::chrono::milliseconds(250), [this]() { return m_stop.load(); }))
+				if (m_cv.wait_for(lk, std::chrono::milliseconds(250), [this]() {
+					return m_stop.load() || m_stop_token.stop_requested();
+				}))
+				{
+					if (m_stop.load())
+						return;
+
+					IBinding* b = m_binding;
+					if (b) b->AddRef();
+					lk.unlock();
+					if (b) { b->Abort(); b->Release(); }
 					return;
+				}
 
 				auto now = GetTickCount64();
 				bool total_expired = (now - m_start_tick) > m_total_timeout_ms;
@@ -289,6 +315,8 @@ public:
 	STDMETHODIMP OnLowResource(DWORD) override { return S_OK; }
 	STDMETHODIMP OnProgress(ULONG, ULONG, ULONG, LPCWSTR) override
 	{
+		if (m_stop_token.stop_requested())
+			return E_ABORT;
 		auto now = GetTickCount64();
 		m_last_progress_tick = now;
 		if ((now - m_start_tick) > m_total_timeout_ms)
@@ -328,12 +356,14 @@ private:
 	std::thread m_watchdog;
 	std::mutex m_mtx;
 	std::condition_variable m_cv;
+	std::stop_token m_stop_token;
 };
 
 static HRESULT url_download_to_file_with_timeout(
-	LPCWSTR url, LPCWSTR filename, DWORD total_timeout_ms, DWORD stall_timeout_ms)
+	LPCWSTR url, LPCWSTR filename, DWORD total_timeout_ms, DWORD stall_timeout_ms,
+	std::stop_token stop_token = {})
 {
-	auto* cb = new timeout_bind_status_callback(total_timeout_ms, stall_timeout_ms);
+	auto* cb = new timeout_bind_status_callback(total_timeout_ms, stall_timeout_ms, stop_token);
 	HRESULT hr = URLDownloadToFileW(NULL, url, filename, 0, cb);
 	cb->Release();
 	return hr;
@@ -411,7 +441,7 @@ struct latest_release_info
 // Returns nullopt on any network/parse failure (caller decides how loud to be).
 // NOTE: uses /tags (newest tag) to preserve existing behaviour; /releases/latest
 // would be cleaner but changes semantics, so it's left as a deliberate choice.
-static std::optional<latest_release_info> fetch_latest_release_version()
+static std::optional<latest_release_info> fetch_latest_release_version(std::stop_token stop_token = {})
 {
 	constexpr const wchar_t* tags_link = L"https://api.github.com/repos/DixelU/SAFC/tags";
 	const auto stamp = std::to_wstring(std::chrono::duration_cast<std::chrono::microseconds>(
@@ -420,7 +450,8 @@ static std::optional<latest_release_info> fetch_latest_release_version()
 
 	// if you have error here -> https://github.com/Microsoft/WSL/issues/22#issuecomment-207788173
 	HRESULT res = url_download_to_file_with_timeout(
-		tags_link, json_path.c_str(), update_timeouts::tags_total, update_timeouts::tags_stall);
+		tags_link, json_path.c_str(), update_timeouts::tags_total, update_timeouts::tags_stall,
+		stop_token);
 	if (res != S_OK)
 	{
 		_wremove(json_path.c_str());
@@ -459,7 +490,8 @@ static std::wstring self_backup_path()
 	return extract_directory(get_self_path()) + L"_s";
 }
 
-bool safc_update(const std::wstring& latest_release, std::wstring& file_location)
+bool safc_update(const std::wstring& latest_release, std::wstring& file_location,
+	std::stop_token stop_token = {})
 {
 #ifndef __X64
 	constexpr const wchar_t* archive_name = L"SAFC32.7z";
@@ -482,7 +514,13 @@ bool safc_update(const std::wstring& latest_release, std::wstring& file_location
 	std::wstring link = L"https://github.com/DixelU/SAFC/releases/download/" + latest_release + L"/" + archive_name;
 
 	HRESULT co_res = url_download_to_file_with_timeout(
-		link.c_str(), filename.c_str(), update_timeouts::archive_total, update_timeouts::archive_stall);
+		link.c_str(), filename.c_str(), update_timeouts::archive_total, update_timeouts::archive_stall,
+		stop_token);
+	if (stop_token.stop_requested())
+	{
+		_wremove(filename.c_str());
+		return false;
+	}
 
 	if (co_res == S_OK)
 	{
@@ -552,14 +590,16 @@ void safc_version_check()
 	if (!check_autoupdates)
 		return;
 
-	worker_singleton<struct version_check>::instance().push([]()
+	worker_singleton<struct version_check>::instance().push([](std::stop_token stop_token)
 	{
 		// Clean up any backup left behind by a previously interrupted update.
 		_wremove(self_backup_path().c_str());
 
 		try
 		{
-			auto latest = fetch_latest_release_version();
+			auto latest = fetch_latest_release_version(stop_token);
+			if (stop_token.stop_requested())
+				return;
 			if (!latest)
 			{
 				const auto* msg = "Most likely your internet connection is unstable\nSAFC cannot check for updates";
@@ -579,11 +619,15 @@ void safc_version_check()
 				narrow_ascii(latest->tag));
 
 			std::wstring safc_file_path;
-			if (!safc_update(latest->tag, safc_file_path) || safc_file_path.empty())
+			if (!safc_update(latest->tag, safc_file_path, stop_token) ||
+				stop_token.stop_requested() || safc_file_path.empty())
 				return;
 
 			throw_alert_warning("SAFC will restart in 3 seconds...");
-			std::this_thread::sleep_for(std::chrono::seconds(3));
+			for (int i = 0; i < 30 && !stop_token.stop_requested(); ++i)
+				std::this_thread::sleep_for(std::chrono::milliseconds(100));
+			if (stop_token.stop_requested())
+				return;
 
 			ShellExecuteW(NULL, L"open", safc_file_path.c_str(), NULL, NULL, SW_SHOWNORMAL);
 			//_wsystem((L"start \"" + executablepath + L"\"").c_str());
@@ -929,6 +973,50 @@ struct safc_data
 
 safc_data g_data;
 std::shared_ptr<midi_collection_threaded_merger> global_mctm;
+std::atomic_bool application_shutting_down{false};
+
+std::mutex file_dialog_windows_mutex;
+std::vector<HWND> file_dialog_windows;
+
+UINT_PTR CALLBACK file_dialog_hook(HWND hook_window, UINT message, WPARAM, LPARAM)
+{
+	if (message == WM_INITDIALOG)
+	{
+		HWND dialog_window = GetParent(hook_window);
+		if (!dialog_window)
+			dialog_window = hook_window;
+		SetPropW(hook_window, L"SAFC_FILE_DIALOG", dialog_window);
+		std::lock_guard lock(file_dialog_windows_mutex);
+		file_dialog_windows.push_back(dialog_window);
+	}
+	else if (message == WM_DESTROY)
+	{
+		HWND dialog_window = reinterpret_cast<HWND>(
+			GetPropW(hook_window, L"SAFC_FILE_DIALOG"));
+		RemovePropW(hook_window, L"SAFC_FILE_DIALOG");
+		std::lock_guard lock(file_dialog_windows_mutex);
+		std::erase(file_dialog_windows, dialog_window);
+	}
+	return 0;
+}
+
+void close_file_dialogs_for_shutdown()
+{
+	std::vector<HWND> windows;
+	{
+		std::lock_guard lock(file_dialog_windows_mutex);
+		windows = file_dialog_windows;
+	}
+	for (HWND window : windows)
+		if (window && IsWindow(window))
+			PostMessageW(window, WM_CLOSE, 0, 0);
+}
+
+bool gui_stop_requested(std::stop_token stop_token = {}) noexcept
+{
+	return stop_token.stop_requested() ||
+		application_shutting_down.load(std::memory_order_acquire);
+}
 
 void throw_alert_error(std::string&& AlertText)
 {
@@ -954,17 +1042,19 @@ std::vector<std::wstring> multiple_open_file_dialog(const wchar_t* Title)
 	ZeroMemory(&ofn, sizeof(ofn));
 	ZeroMemory(szFile, 50000 * sizeof(wchar_t));
 	ofn.lStructSize = sizeof(ofn);
-	ofn.hwndOwner = NULL;
+	ofn.hwndOwner = hWnd;
 	ofn.lpstrFile = szFile;
 	ofn.lpstrFile[0] = '\0';
-	ofn.nMaxFile = sizeof(szFile);
+	ofn.nMaxFile = static_cast<DWORD>(std::size(szFile));
 	ofn.lpstrFilter = L"MIDI files(*.mid)\0*.mid\0";
 	ofn.nFilterIndex = 1;
 	ofn.lpstrFileTitle = NULL;
 	ofn.lpstrTitle = Title;
 	ofn.nMaxFileTitle = 0;
 	ofn.lpstrInitialDir = NULL;
-	ofn.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST | OFN_ALLOWMULTISELECT | OFN_EXPLORER;
+	ofn.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST | OFN_ALLOWMULTISELECT |
+		OFN_EXPLORER | OFN_ENABLEHOOK;
+	ofn.lpfnHook = file_dialog_hook;
 	if (GetOpenFileName(&ofn))
 	{
 		std::wstring Link = L"", Gen = L"";
@@ -1026,7 +1116,8 @@ std::wstring playback_source_open_file_dialog()
 		L"All files\0*.*\0";
 	ofn.nFilterIndex = 1;
 	ofn.lpstrTitle = L"Open MIDI or archive";
-	ofn.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST | OFN_EXPLORER;
+	ofn.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST | OFN_EXPLORER | OFN_ENABLEHOOK;
+	ofn.lpfnHook = file_dialog_hook;
 	if (GetOpenFileName(&ofn))
 		return filename;
 	return {};
@@ -1046,7 +1137,8 @@ std::wstring syncore_bank_open_file_dialog()
 		L"SFZ banks\0*.sfz\0";
 	ofn.nFilterIndex = 1;
 	ofn.lpstrTitle = L"Choose a bank for embedded SYNCore";
-	ofn.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST | OFN_EXPLORER;
+	ofn.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST | OFN_EXPLORER | OFN_ENABLEHOOK;
+	ofn.lpfnHook = file_dialog_hook;
 	if (GetOpenFileName(&ofn))
 		return filename;
 	return {};
@@ -1059,13 +1151,15 @@ std::wstring save_open_file_dialog(const wchar_t* Title)
 	ZeroMemory(&filename, sizeof(filename));
 	ZeroMemory(&ofn, sizeof(ofn));
 	ofn.lStructSize = sizeof(ofn);
-	ofn.hwndOwner = NULL;  // If you have a merge_preview_container to center over, put its HANDLE here
+	ofn.hwndOwner = hWnd;
 	ofn.lpstrFilter = L"MIDI files(*.mid)\0*.mid\0";
 	ofn.lpstrDefExt = L"mid";
 	ofn.lpstrFile = filename;
 	ofn.nMaxFile = MAX_PATH;
 	ofn.lpstrTitle = Title;
-	ofn.Flags = OFN_PATHMUSTEXIST | OFN_EXPLORER | OFN_NOREADONLYRETURN | OFN_HIDEREADONLY;
+	ofn.Flags = OFN_PATHMUSTEXIST | OFN_EXPLORER | OFN_NOREADONLYRETURN |
+		OFN_HIDEREADONLY | OFN_ENABLEHOOK;
+	ofn.lpfnHook = file_dialog_hook;
 	ofn.nFilterIndex = 1;
 	ofn.lpstrFileTitle = NULL;
 	ofn.nMaxFileTitle = 0;
@@ -1158,8 +1252,12 @@ void add_files(const std::vector<std::wstring>& filenames)
 
 void on_add()
 {
-	worker_singleton<struct midi_file_list>::instance().push([](){
+	worker_singleton<struct midi_file_list>::instance().push([](std::stop_token stop_token){
+		if (gui_stop_requested(stop_token))
+			return;
 		std::vector<std::wstring> Filenames = multiple_open_file_dialog(L"Select midi files");
+		if (gui_stop_requested(stop_token))
+			return;
 		add_files(Filenames);
 	});
 }
@@ -1252,13 +1350,21 @@ namespace props_and_sets
 
 		smic_ptr = new single_midi_info_collector(g_data.files[current_id].filename, g_data.files[current_id].old_ppqn, g_data.files[current_id].allow_legacy_rsb_meta_interaction);
 
-		worker_singleton<struct info_collection>::instance().push([]()
+		auto collector = smic_ptr;
+		worker_singleton<struct info_collection>::instance().push([collector](std::stop_token stop_token)
 		{
+			if (gui_stop_requested(stop_token))
+				return;
+			std::stop_callback cancellation(stop_token,
+				[collector]() { collector->request_stop(); });
 			global_window_handler->main_window_id = "SMIC";
 			global_window_handler->disable_all_windows();
 
-			worker_singleton<struct info_collection_watcher>::instance().push([]()
+			worker_singleton<struct info_collection_watcher>::instance().push(
+				[collector](std::stop_token watcher_stop)
 			{
+				if (gui_stop_requested(watcher_stop))
+					return;
 				auto export_all = (*(*global_window_handler)["SMIC"])["ALL_EXP"];
 				auto export_tempo = (*(*global_window_handler)["SMIC"])["TG_EXP"];
 				auto integrate_ticks = (*(*global_window_handler)["SMIC"])["INTEGRATE_TICKS"];
@@ -1298,15 +1404,19 @@ namespace props_and_sets
 				integrate_ticks->disable();
 				integrate_time->disable();
 
-				while (!smic_ptr->finished)
+				while (!collector->finished.load(std::memory_order_acquire) &&
+					!gui_stop_requested(watcher_stop))
 				{
-					if (error_line->text != smic_ptr->error_line)
-						error_line->safe_string_replace(smic_ptr->error_line);
-					if (info_line->text != smic_ptr->log_line)
-						info_line->safe_string_replace(smic_ptr->log_line);
+					auto [error_text, log_text] = collector->status_text();
+					if (error_line->text != error_text)
+						error_line->safe_string_replace(error_text);
+					if (info_line->text != log_text)
+						info_line->safe_string_replace(log_text);
 					Sleep(10);
 				}
 
+				if (gui_stop_requested(watcher_stop))
+					return;
 				info_line->safe_string_replace("Finished");
 				export_all->enable();
 				export_tempo->enable();
@@ -1314,18 +1424,20 @@ namespace props_and_sets
 				integrate_time->enable();
 			});
 
-			smic_ptr->fetch_data();
+			collector->fetch_data();
+			if (gui_stop_requested(stop_token))
+				return;
 			auto tempo_graph = (Graphing<single_midi_info_collector::tempo_graph>*)(*(*global_window_handler)["SMIC"])["TEMPO_GRAPH"];
-			tempo_graph->graph = &(smic_ptr->tempo_map);
+			tempo_graph->graph = &(collector->tempo_map);
 			auto poly_graph = (Graphing<single_midi_info_collector::polyphony_graph>*)(*(*global_window_handler)["SMIC"])["POLY_GRAPH"];
-			poly_graph->graph = &(smic_ptr->polyphony);
+			poly_graph->graph = &(collector->polyphony);
 			auto nps_graph = (Graphing<single_midi_info_collector::notes_per_second_graph>*)(*(*global_window_handler)["SMIC"])["NPS_GRAPH"];
-			nps_graph->graph = &(smic_ptr->notes_per_second);
+			nps_graph->graph = &(collector->notes_per_second);
 			nps_graph->enabled = true;
 
 			auto midi_info = (text_box*)(*(*global_window_handler)["SMIC"])["TOTAL_INFO"];
 			midi_info->safe_string_replace(
-				"Total (real) tracks: " + std::to_string(smic_ptr->tracks.size()) + "; ... "
+				"Total (real) tracks: " + std::to_string(collector->tracks.size()) + "; ... "
 			);
 
 			global_window_handler->main_window_id = "MAIN";
@@ -2292,8 +2404,10 @@ void on_start()
 	if (g_data.files.empty())
 		return;
 
-	worker_singleton<struct merge>::instance().push([]()
+	worker_singleton<struct merge>::instance().push([](std::stop_token stop_token)
 	{
+		if (gui_stop_requested(stop_token))
+			return;
 		global_window_handler->main_window_id = "SMRP_CONTAINER";
 		global_window_handler->disable_all_windows();
 		global_window_handler->enable_window("SMRP_CONTAINER");
@@ -2341,9 +2455,10 @@ void on_start()
 			{
 				std::string SID = "SMRP_C" + std::to_string(id);
 				std::cout << SID << " Processing started" << std::endl;
-				while (!global_mctm->is_smrp_complete())
+				while (!merger_ptr->is_smrp_complete() &&
+					!application_shutting_down.load(std::memory_order_acquire))
 				{
-					global_mctm->with_currently_processed_item(id, [&](const auto& item)
+					merger_ptr->with_currently_processed_item(id, [&](const auto& item)
 					{
 						vis_ref.set_smrp(item);
 					});
@@ -2353,10 +2468,18 @@ void on_start()
 			}, global_mctm, visualiser_ref, id).detach();
 		}
 
-		worker_singleton<struct merge_ri_stage>::instance().push([safc_data_pointer = &g_data, merge_preview_container]()
+		worker_singleton<struct merge_ri_stage>::instance().push(
+			[safc_data_pointer = &g_data, merge_preview_container](std::stop_token stage_stop)
 		{
-			while (!global_mctm->is_smrp_complete())
+			while (!global_mctm->is_smrp_complete() && !gui_stop_requested(stage_stop))
 				std::this_thread::sleep_for(std::chrono::milliseconds(100));
+			if (gui_stop_requested(stage_stop))
+				return;
+			if (global_mctm->has_failed())
+			{
+				global_mctm->complete.store(true, std::memory_order_release);
+				return;
+			}
 			global_mctm->start_ri_merge();
 
 			std::cout << "SMRP: Out from sleep\n" << std::flush;
@@ -2372,10 +2495,13 @@ void on_start()
 				std::make_unique<bool_and_number_checker<decltype(global_mctm->regular_merge_complete), decltype(global_mctm->regular_track_count)>>
 					(100.f, 0.f, &system_white, &(global_mctm->regular_merge_complete), &(global_mctm->regular_track_count));
 
-			worker_singleton<struct merge_ri_stage_cleanup>::instance().push([safc_data_pointer, merge_preview_container]()
+			worker_singleton<struct merge_ri_stage_cleanup>::instance().push(
+				[safc_data_pointer, merge_preview_container](std::stop_token cleanup_stop)
 			{
-				while (!global_mctm->is_ri_merge_complete())
+				while (!global_mctm->is_ri_merge_complete() && !gui_stop_requested(cleanup_stop))
 					std::this_thread::sleep_for(std::chrono::milliseconds(33));
+				if (gui_stop_requested(cleanup_stop))
+					return;
 				global_mctm->start_final_merge();
 
 				std::cout << "RI: Out from sleep!\n";
@@ -2389,11 +2515,12 @@ void on_start()
 			});
 		});
 
-		worker_singleton<struct merge_global_cleanup>::instance().push([start_timepoint, merge_preview_container]()
+		worker_singleton<struct merge_global_cleanup>::instance().push(
+			[start_timepoint, merge_preview_container](std::stop_token cleanup_stop)
 		{
 			auto timer_ptr = (input_field*)(*merge_preview_container)["TIMER"];
 
-			while (!global_mctm->complete)
+			while (!global_mctm->complete && !gui_stop_requested(cleanup_stop))
 			{
 				auto now = std::chrono::high_resolution_clock::now();
 				auto difference = std::chrono::duration_cast<std::chrono::duration<double>>(now - start_timepoint);
@@ -2415,6 +2542,8 @@ void on_start()
 				}
 			}
 
+			if (gui_stop_requested(cleanup_stop))
+				return;
 			std::cout << "F: Out from sleep!!!\n";
 			merge_preview_container->delete_ui_element_by_name("FM");
 
@@ -2422,6 +2551,8 @@ void on_start()
 			global_window_handler->main_window_id = "MAIN";
 			//global_window_handler->disable_all_windows();
 			global_window_handler->enable_window("MAIN");
+			if (global_mctm->has_failed())
+				throw_alert_error(global_mctm->failure_message());
 			//global_mctm->ResetEverything();
 		});
 	});
@@ -2429,8 +2560,12 @@ void on_start()
 
 void on_save_to()
 {
-	worker_singleton<struct save_file_dialog>::instance().push([](){
+	worker_singleton<struct save_file_dialog>::instance().push([](std::stop_token stop_token){
+		if (gui_stop_requested(stop_token))
+			return;
 		g_data.save_path = save_open_file_dialog(L"Save final midi to...");
+		if (gui_stop_requested(stop_token))
+			return;
 		size_t Pos = g_data.save_path.rfind(L".mid");
 		if (Pos >= g_data.save_path.size() || Pos <= g_data.save_path.size() - 4)
 			g_data.save_path += L".mid";
@@ -2606,8 +2741,10 @@ void report_player_output_error()
 		throw_alert_error(std::move(detail));
 }
 
-void player_watch_func()
+void player_watch_func(std::stop_token stop_token)
 {
+	if (gui_stop_requested(stop_token))
+		return;
 	global_window_handler->enable_window("SIMPLAYER");
 	auto window = (*global_window_handler)["SIMPLAYER"];
 	auto textbox = (text_box*)(*window)["TEXT"];
@@ -2623,7 +2760,7 @@ void player_watch_func()
 	pause_button->safe_string_replace("\200");  // Play symbol (since it's paused)
 
 	auto& info = player->get_info();
-	while (true)
+	while (!gui_stop_requested(stop_token))
 	{
 		if (!window->drawable)
 		{
@@ -2642,11 +2779,14 @@ void player_watch_func()
 
 		std::this_thread::sleep_for(std::chrono::milliseconds(20));
 	}
+	if (gui_stop_requested(stop_token))
+		return;
 
 	auto& state = player->get_state();
 
 	bool was_playing = false;
-	while (was_playing <= state.playing)
+	while (!gui_stop_requested(stop_token) &&
+		(!was_playing || state.playing.load(std::memory_order_acquire)))
 	{
 		if (!window->drawable)
 		{
@@ -2732,8 +2872,10 @@ void update_device_list()
 
 void on_device_select(int device_id)
 {
-	worker_singleton<struct midi_out_selct>::instance().push([device_id]()
+	worker_singleton<struct midi_out_selct>::instance().push([device_id](std::stop_token stop_token)
 	{
+		if (gui_stop_requested(stop_token))
+			return;
 		if (!player->set_device(device_id))
 		{
 			if (player->is_playing())
@@ -2843,10 +2985,25 @@ void refresh_syncore_runtime_status()
 
 void start_syncore_status_watcher();
 
-void syncore_status_watch_func()
+void syncore_status_watch_func(std::stop_token stop_token)
 {
+	struct running_guard
+	{
+		bool active = true;
+		void clear()
+		{
+			if (active)
+				syncore_status_watcher_running.store(false, std::memory_order_release);
+			active = false;
+		}
+		~running_guard()
+		{
+			clear();
+		}
+	} guard;
+
 	unsigned inactive_ticks = 0;
-	while (inactive_ticks < 5)
+	while (inactive_ticks < 5 && !gui_stop_requested(stop_token))
 	{
 		if (syncore_settings_is_open())
 		{
@@ -2858,19 +3015,23 @@ void syncore_status_watch_func()
 		std::this_thread::sleep_for(std::chrono::milliseconds(100));
 	}
 
-	syncore_status_watcher_running.store(false, std::memory_order_release);
 	// Cover a close/reopen that lands between the last activity check and the
 	// running-flag reset.
-	if (syncore_settings_is_open())
+	guard.clear();
+	if (!gui_stop_requested(stop_token) && syncore_settings_is_open())
 		start_syncore_status_watcher();
 }
 
 void start_syncore_status_watcher()
 {
+	if (application_shutting_down.load(std::memory_order_acquire))
+		return;
 	if (syncore_status_watcher_running.exchange(true, std::memory_order_acq_rel))
 		return;
-	worker_singleton<struct syncore_status_watcher>::instance().push(
+	const auto result = worker_singleton<struct syncore_status_watcher>::instance().push(
 		syncore_status_watch_func);
+	if (result != dixelu::background_worker_submit_result::accepted)
+		syncore_status_watcher_running.store(false, std::memory_order_release);
 }
 
 void refresh_syncore_setup_controls()
@@ -2973,8 +3134,10 @@ void on_syncore_preferences_apply()
 		return;
 	}
 
-	worker_singleton<struct midi_out_selct>::instance().push([preferences]()
+	worker_singleton<struct midi_out_selct>::instance().push([preferences](std::stop_token stop_token)
 	{
+		if (gui_stop_requested(stop_token))
+			return;
 		if (!player->set_syncore_preferences(preferences))
 		{
 			throw_alert_warning("Stop playback before changing SYNCore preferences");
@@ -3005,8 +3168,11 @@ void on_syncore_bank_select()
 	if (bank_path.empty())
 		return;
 
-	worker_singleton<struct midi_out_selct>::instance().push([bank_path = std::move(bank_path)]()
+	worker_singleton<struct midi_out_selct>::instance().push(
+		[bank_path = std::move(bank_path)](std::stop_token stop_token)
 	{
+		if (gui_stop_requested(stop_token))
+			return;
 		if (!player->set_syncore_bank_path(bank_path))
 		{
 			throw_alert_warning("Stop playback before changing the SYNCore sound bank");
@@ -3044,8 +3210,10 @@ void on_syncore_use_builtin_bank()
 	if (!player || !player->syncore_available())
 		return;
 
-	worker_singleton<struct midi_out_selct>::instance().push([]()
+	worker_singleton<struct midi_out_selct>::instance().push([](std::stop_token stop_token)
 	{
+		if (gui_stop_requested(stop_token))
+			return;
 		if (!player->set_syncore_bank_path({}))
 		{
 			throw_alert_warning("Stop playback before changing the SYNCore sound bank");
@@ -3078,13 +3246,22 @@ void on_player_pause_toggle()
 			return;
 
 		worker_singleton<struct player_watcher>::instance().push(player_watch_func);
-		worker_singleton<struct player_thread>::instance().push([filename]()
+		worker_singleton<struct player_thread>::instance().push([filename](std::stop_token stop_token)
 		{
+			if (gui_stop_requested(stop_token))
+				return;
+			std::stop_callback cancellation(stop_token, []() {
+				if (player)
+					player->stop();
+			});
 			if (!player->ensure_output(saved_midi_device_name))
 			{
-				report_player_output_error();
+				if (!gui_stop_requested(stop_token))
+					report_player_output_error();
 				return;
 			}
+			if (gui_stop_requested(stop_token))
+				return;
 			player->simple_run(filename);
 		});
 		return;
@@ -3105,8 +3282,10 @@ void on_player_stop()
 {
 	player->stop();
 
-	worker_singleton<struct player_thread>::instance().push([]()
+	worker_singleton<struct player_thread>::instance().push([](std::stop_token stop_token)
 	{
+		if (gui_stop_requested(stop_token))
+			return;
 		auto window = (*global_window_handler)["SIMPLAYER"];
 		auto pause = (button*)(*window)["PAUSE"];
 		auto textbox = (text_box*)(*window)["TEXT"];
@@ -3205,8 +3384,10 @@ std::wstring current_compressed_player_filename()
 	return compressed_player_filename;
 }
 
-void compressed_player_watch_func()
+void compressed_player_watch_func(std::stop_token stop_token)
 {
+	if (gui_stop_requested(stop_token))
+		return;
 	global_window_handler->enable_window("SIMPLAYER");
 	update_device_list();
 
@@ -3214,11 +3395,11 @@ void compressed_player_watch_func()
 		pause->safe_string_replace("\200");
 
 	while (compressed_player_playback_requested.load(std::memory_order_acquire) &&
-		!player->is_playing())
+		!player->is_playing() && !gui_stop_requested(stop_token))
 		std::this_thread::sleep_for(std::chrono::milliseconds(2));
 
 	while (compressed_player_playback_requested.load(std::memory_order_acquire) &&
-		player->is_playing())
+		player->is_playing() && !gui_stop_requested(stop_token))
 	{
 		auto window = (*global_window_handler)["SIMPLAYER"];
 		if (!window->drawable)
@@ -3249,16 +3430,24 @@ void compressed_player_watch_func()
 		std::this_thread::sleep_for(std::chrono::milliseconds(20));
 	}
 
+	if (gui_stop_requested(stop_token))
+		return;
 	if (auto status = _WH_t<text_box>("SIMPLAYER", "TEXT"))
 		status->safe_string_replace("Stopped - press Play to restart the prepared archive");
 	if (auto pause = _WH_t<button>("SIMPLAYER", "PAUSE"))
 		pause->safe_string_replace("\200");
 }
 
-void play_compressed_source_in_worker(const std::shared_ptr<compressed_midi_event_source>& source)
+void play_compressed_source_in_worker(
+	const std::shared_ptr<compressed_midi_event_source>& source,
+	std::stop_token stop_token = {})
 {
-	if (!source)
+	if (!source || gui_stop_requested(stop_token))
 		return;
+	std::stop_callback cancellation(stop_token, []() {
+		if (player)
+			player->stop();
+	});
 
 	bool expected = false;
 	if (!compressed_player_playback_requested.compare_exchange_strong(
@@ -3275,9 +3464,12 @@ void play_compressed_source_in_worker(const std::shared_ptr<compressed_midi_even
 
 	if (!player->ensure_output(saved_midi_device_name))
 	{
-		report_player_output_error();
+		if (!gui_stop_requested(stop_token))
+			report_player_output_error();
 		return;
 	}
+	if (gui_stop_requested(stop_token))
+		return;
 
 	worker_singleton<struct compressed_player_watcher>::instance().push(
 		compressed_player_watch_func);
@@ -3295,7 +3487,9 @@ bool restart_selected_compressed_source()
 		return true;
 
 	worker_singleton<struct player_thread>::instance().push(
-		[source]() { play_compressed_source_in_worker(source); });
+		[source](std::stop_token stop_token) {
+			play_compressed_source_in_worker(source, stop_token);
+		});
 	return true;
 }
 
@@ -3319,7 +3513,8 @@ void open_compressed_midi_file(std::wstring filename)
 	global_window_handler->enable_window("ARCHIVE_SOURCE");
 	compressed_player_status("Opening archive pipeline...");
 
-	worker_singleton<struct player_thread>::instance().push([filename = std::move(filename)]()
+	worker_singleton<struct player_thread>::instance().push(
+		[filename = std::move(filename)](std::stop_token stop_token)
 	{
 		struct preparation_guard
 		{
@@ -3328,6 +3523,11 @@ void open_compressed_midi_file(std::wstring filename)
 				compressed_player_preparing.store(false, std::memory_order_release);
 			}
 		} guard;
+		if (gui_stop_requested(stop_token))
+			return;
+		std::stop_callback cancellation(stop_token, []() {
+			compressed_player_cancel.store(true, std::memory_order_release);
+		});
 
 		std::string error;
 		auto source = compressed_midi_event_source::open(
@@ -3342,6 +3542,8 @@ void open_compressed_midi_file(std::wstring filename)
 			compressed_player_status(error);
 			return;
 		}
+		if (gui_stop_requested(stop_token))
+			return;
 
 		{
 			std::lock_guard locker(compressed_player_source_mutex);
@@ -3356,7 +3558,7 @@ void open_compressed_midi_file(std::wstring filename)
 			source->event_count(), source->track_count(), source->archive_depth()));
 		global_window_handler->enable_window("SIMPLAYER");
 		global_window_handler->disable_window("ARCHIVE_SOURCE");
-		play_compressed_source_in_worker(source);
+		play_compressed_source_in_worker(source, stop_token);
 	});
 }
 
@@ -3375,13 +3577,23 @@ void open_regular_midi_file(std::wstring filename)
 	player->stop();
 	global_window_handler->disable_window("ARCHIVE_SOURCE");
 
-	worker_singleton<struct player_thread>::instance().push([filename = std::move(filename)]()
+	worker_singleton<struct player_thread>::instance().push(
+		[filename = std::move(filename)](std::stop_token stop_token)
 	{
+		if (gui_stop_requested(stop_token))
+			return;
+		std::stop_callback cancellation(stop_token, []() {
+			if (player)
+				player->stop();
+		});
 		if (!player->ensure_output(saved_midi_device_name))
 		{
-			report_player_output_error();
+			if (!gui_stop_requested(stop_token))
+				report_player_output_error();
 			return;
 		}
+		if (gui_stop_requested(stop_token))
+			return;
 
 		worker_singleton<struct player_watcher>::instance().push(player_watch_func);
 		player->simple_run(filename);
@@ -3516,9 +3728,13 @@ void update_editor_status_text()
 
 void on_editor_load_file()
 {
-	worker_singleton<struct editor_load>::instance().push([]()
+	worker_singleton<struct editor_load>::instance().push([](std::stop_token stop_token)
 	{
+		if (gui_stop_requested(stop_token))
+			return;
 		auto filenames = multiple_open_file_dialog(L"Select MIDI file to edit");
+		if (gui_stop_requested(stop_token))
+			return;
 		if (!filenames.empty() && !filenames[0].empty())
 		{
 			// Large files parse for a while; keep the status line moving
@@ -3555,9 +3771,13 @@ void on_editor_save_file()
 		return;
 	}
 
-	worker_singleton<struct editor_save>::instance().push([]()
+	worker_singleton<struct editor_save>::instance().push([](std::stop_token stop_token)
 	{
+		if (gui_stop_requested(stop_token))
+			return;
 		auto save_path = save_open_file_dialog(L"Save edited MIDI as...");
+		if (gui_stop_requested(stop_token))
+			return;
 		if (!save_path.empty())
 		{
 			if (editor->save_file(save_path))
@@ -3684,7 +3904,8 @@ void on_editor_play_from(bool from_view_start)
 	}
 
 	// run_from_external blocks until playback ends, keep it off the UI thread
-	worker_singleton<struct editor_playback>::instance().push([play_btn, seek_fraction]()
+	worker_singleton<struct editor_playback>::instance().push(
+		[play_btn, seek_fraction](std::stop_token stop_token)
 	{
 		struct request_guard
 		{
@@ -3693,6 +3914,12 @@ void on_editor_play_from(bool from_view_start)
 				editor_playback_requested.store(false, std::memory_order_release);
 			}
 		} guard;
+		if (gui_stop_requested(stop_token))
+			return;
+		std::stop_callback cancellation(stop_token, []() {
+			if (player)
+				player->stop();
+		});
 
 		// Stream the current in-memory state (unsaved edits included) straight
 		// into the player — no .mid written to disk, no re-parse.
@@ -3705,9 +3932,12 @@ void on_editor_play_from(bool from_view_start)
 
 		if (!player->ensure_output(saved_midi_device_name))
 		{
-			report_player_output_error();
+			if (!gui_stop_requested(stop_token))
+				report_player_output_error();
 			return;
 		}
+		if (gui_stop_requested(stop_token))
+			return;
 		editor_playback_active = true;
 		if (play_btn)
 			play_btn->safe_string_replace("Stop");
@@ -3715,7 +3945,7 @@ void on_editor_play_from(bool from_view_start)
 		// This avoids the separate polling/unpause worker and its timeout races.
 		player->run_from_external(source.get(), seek_fraction, false);
 		editor_playback_active = false;
-		if (play_btn)
+		if (play_btn && !gui_stop_requested(stop_token))
 			play_btn->safe_string_replace("Play");
 	});
 
@@ -5053,12 +5283,61 @@ void gl_init()
 
 void gl_close()
 {
+	if (application_shutting_down.exchange(true, std::memory_order_acq_rel))
+		return;
+
+	close_file_dialogs_for_shutdown();
 	settings::regestry_access.Close();
+	compressed_player_cancel.store(true, std::memory_order_release);
+	if (props_and_sets::smic_ptr)
+		props_and_sets::smic_ptr->request_stop();
+
+	// These may be inside native dialogs, network I/O, or editor file I/O. Give
+	// them cancellation before any UI object they can reference is released.
+	worker_singleton<struct version_check>::instance().shutdown(
+		dixelu::background_worker_shutdown::cancel);
+	worker_singleton<struct midi_file_list>::instance().shutdown(
+		dixelu::background_worker_shutdown::cancel);
+	worker_singleton<struct save_file_dialog>::instance().shutdown(
+		dixelu::background_worker_shutdown::cancel);
+	worker_singleton<struct editor_load>::instance().shutdown(
+		dixelu::background_worker_shutdown::cancel);
+	worker_singleton<struct editor_save>::instance().shutdown(
+		dixelu::background_worker_shutdown::cancel);
+
+	// Retire UI polling before tearing down the state it reads.
+	worker_singleton<struct syncore_status_watcher>::instance().shutdown(
+		dixelu::background_worker_shutdown::cancel);
+	worker_singleton<struct player_watcher>::instance().shutdown(
+		dixelu::background_worker_shutdown::cancel);
+	worker_singleton<struct compressed_player_watcher>::instance().shutdown(
+		dixelu::background_worker_shutdown::cancel);
+	worker_singleton<struct info_collection_watcher>::instance().shutdown(
+		dixelu::background_worker_shutdown::cancel);
+	worker_singleton<struct merge_ri_stage>::instance().shutdown(
+		dixelu::background_worker_shutdown::cancel);
+	worker_singleton<struct merge_ri_stage_cleanup>::instance().shutdown(
+		dixelu::background_worker_shutdown::cancel);
+	worker_singleton<struct merge_global_cleanup>::instance().shutdown(
+		dixelu::background_worker_shutdown::cancel);
+
 	shutdown_player_video_render();
 
 	if (player)
 		player->shutdown();
-	compressed_player_cancel.store(true, std::memory_order_release);
+
+	// Playback workers are joined after the player has received its terminal
+	// stop, so an active paused run cannot keep process teardown alive.
+	worker_singleton<struct player_thread>::instance().shutdown(
+		dixelu::background_worker_shutdown::cancel);
+	worker_singleton<struct editor_playback>::instance().shutdown(
+		dixelu::background_worker_shutdown::cancel);
+	worker_singleton<struct midi_out_selct>::instance().shutdown(
+		dixelu::background_worker_shutdown::cancel);
+	worker_singleton<struct info_collection>::instance().shutdown(
+		dixelu::background_worker_shutdown::cancel);
+	worker_singleton<struct merge>::instance().shutdown(
+		dixelu::background_worker_shutdown::cancel);
 
 	lfont_symbols_info::destroy_font();
 	if (hWnd && hDc)
@@ -5518,12 +5797,18 @@ struct safc_cli_runtime:
 
 		while (!local_mctm->is_smrp_complete())
 			std::this_thread::sleep_for(std::chrono::milliseconds(5));
+		if (local_mctm->has_failed())
+			throw std::runtime_error(local_mctm->failure_message());
 		local_mctm->start_ri_merge();
 		while (!local_mctm->is_ri_merge_complete())
 			std::this_thread::sleep_for(std::chrono::milliseconds(5));
+		if (local_mctm->has_failed())
+			throw std::runtime_error(local_mctm->failure_message());
 		local_mctm->start_final_merge();
 		while (!local_mctm->complete)
 			std::this_thread::sleep_for(std::chrono::milliseconds(5));
+		if (local_mctm->has_failed())
+			throw std::runtime_error(local_mctm->failure_message());
 	}
 };
 

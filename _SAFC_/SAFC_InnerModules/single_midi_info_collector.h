@@ -4,6 +4,9 @@
 
 #include <string>
 #include <array>
+#include <atomic>
+#include <mutex>
+#include <utility>
 
 #include "midi_file_reader.h"
 #include "../btree/btree_map.h"
@@ -134,11 +137,14 @@ struct single_midi_info_collector
 	using polyphony_graph = btree::btree_map<std::int64_t, std::int64_t>;
 	using notes_per_second_graph = btree::btree_map<std::int64_t, std::int64_t>;
 
-	bool processing, finished;
+	std::atomic_bool processing{false};
+	std::atomic_bool finished{false};
+	std::atomic_bool stop_requested{false};
 
 	std::wstring filename;
 	std::string log_line;
 	std::string error_line;
+	mutable std::mutex status_mutex;
 
 	time_graph internal_time_map;
 	tempo_graph tempo_map;
@@ -150,13 +156,35 @@ struct single_midi_info_collector
 
 	bool allow_legacy_rsb_meta_interaction;
 
-	single_midi_info_collector(std::wstring filename, std::uint16_t ppq, bool allow_legacy_rsb_meta_interaction = false) : filename(filename), log_line(" "), processing(0), finished(0), ppq(ppq), allow_legacy_rsb_meta_interaction(allow_legacy_rsb_meta_interaction)
+	single_midi_info_collector(std::wstring filename, std::uint16_t ppq, bool allow_legacy_rsb_meta_interaction = false) : filename(filename), log_line(" "), ppq(ppq), allow_legacy_rsb_meta_interaction(allow_legacy_rsb_meta_interaction)
 	{}
+
+	void request_stop() noexcept
+	{
+		stop_requested.store(true, std::memory_order_release);
+	}
+
+	std::pair<std::string, std::string> status_text() const
+	{
+		std::lock_guard lock(status_mutex);
+		return {error_line, log_line};
+	}
 
 	void fetch_data() 
 	{
+		struct completion_guard
+		{
+			single_midi_info_collector* owner;
+			~completion_guard()
+			{
+				owner->processing.store(false, std::memory_order_release);
+				owner->finished.store(true, std::memory_order_release);
+			}
+		} completion{this};
+
+		finished.store(false, std::memory_order_relaxed);
 		der_polyphony_graph poly_differences;
-		processing = true;
+		processing.store(true, std::memory_order_release);
 
 		midi_file_reader file_input(filename);
 
@@ -166,8 +194,11 @@ struct single_midi_info_collector
 		std::uint8_t IO = 0, rsb_byte = 0; // TODO: REMOVE THE DAMN IO VARIABLE
 		track_data track_data{};
 
-		error_line = " ";
-		log_line = " ";
+		{
+			std::lock_guard lock(status_mutex);
+			error_line = " ";
+			log_line = " ";
+		}
 
 		tempo_map[0] = tempo_event(0x7, 0xA1, 0x20);
 		poly_differences[-1] = note_on_off_counter();
@@ -178,21 +209,22 @@ struct single_midi_info_collector
 		ppq = static_cast<std::uint16_t>(read_midi_byte(file_input)) << 8;
 		ppq |= static_cast<std::uint16_t>(read_midi_byte(file_input));
 
-		while (file_input.good())
+		while (file_input.good() && !stop_requested.load(std::memory_order_acquire))
 		{
-			std::array<std::uint64_t, 4096> polyphony;
+			std::array<std::uint64_t, 4096> polyphony{};
 
 			current_tick = 0;
 			MTRK = 0;
 
-			while (MTRK != MTrk && file_input.good())
+			while (MTRK != MTrk && file_input.good() &&
+				!stop_requested.load(std::memory_order_relaxed))
 				MTRK = (MTRK << 8) | read_midi_byte(file_input);
 
 			for (int i = 0; i < 4; i++)
 				static_cast<void>(read_midi_byte(file_input));
 
 			IO = rsb_byte = 0;
-			while (file_input.good())
+			while (file_input.good() && !stop_requested.load(std::memory_order_relaxed))
 			{
 				track_data.MTrk_pos = file_input.position() - 8;
 				vlv = 0;
@@ -225,7 +257,10 @@ struct single_midi_info_collector
 					if (type == 0x2F)
 					{
 						tracks.push_back(track_data);
-						log_line = "Track " + std::to_string(tracks.size()) + " parsed";
+						{
+							std::lock_guard lock(status_mutex);
+							log_line = "Track " + std::to_string(tracks.size()) + " parsed";
+						}
 						break;
 					}
 					else if (type == 0x51)
@@ -238,7 +273,8 @@ struct single_midi_info_collector
 					}
 					else
 					{
-						while (meta_data_size--)
+						while (meta_data_size-- && file_input.good() &&
+							!stop_requested.load(std::memory_order_relaxed))
 							static_cast<void>(read_midi_byte(file_input));
 					}
 				}
@@ -289,7 +325,8 @@ struct single_midi_info_collector
 						meta_data_size = (meta_data_size << 7) | (IO & 0x7F);
 					} while (IO & 0x80 && !file_input.eof());
 
-					while (meta_data_size--)
+					while (meta_data_size-- && file_input.good() &&
+						!stop_requested.load(std::memory_order_relaxed))
 						static_cast<void>(read_midi_byte(file_input));
 				}
 				else 
@@ -326,19 +363,29 @@ struct single_midi_info_collector
 					}
 					else
 					{
-						error_line = "Corruption detected at: " + std::to_string(file_input.position());
+						{
+							std::lock_guard lock(status_mutex);
+							error_line = "Corruption detected at: " + std::to_string(file_input.position());
+						}
 						break;
 					}
 				}
 			}
 		}
 
+		if (stop_requested.load(std::memory_order_acquire))
+			return;
+
 		tempo_map[last_tick + 1] = tempo_map.rbegin()->second;
 		poly_differences[last_tick + 1] = 0;
 
 		std::int64_t current_poly = 0;
 		for (const auto & cur_pair : poly_differences)
+		{
+			if (stop_requested.load(std::memory_order_relaxed))
+				return;
 			polyphony[cur_pair.first] = (current_poly += cur_pair.second);
+		}
 
 		long_time time;
 		uint64_t previous_tick = 0;
@@ -347,6 +394,8 @@ struct single_midi_info_collector
 
 		for (const auto & [tick, tempo_data] : tempo_map)
 		{
+			if (stop_requested.load(std::memory_order_relaxed))
+				return;
 			auto interval_seconds_rhs = dixelu::long_uint<0>{ tick - previous_tick } * previous_tempo;
 
 			time.numerator += interval_seconds_rhs;
@@ -380,6 +429,8 @@ struct single_midi_info_collector
 
 		for (const auto& [tick, poly_diff] : poly_differences)
 		{
+			if (stop_requested.load(std::memory_order_relaxed))
+				return;
 			const auto current_time = get_time_numerator_at_tick(tick);
 
 			recent_note_hits.emplace_back(current_time, poly_diff.note_on);
@@ -397,9 +448,6 @@ struct single_midi_info_collector
 		const auto tail_tick = static_cast<std::int64_t>(last_tick) + 1;
 		if (notes_per_second.rbegin()->first < tail_tick)
 			notes_per_second[tail_tick] = notes_per_second.rbegin()->second;
-
-		finished = true;
-		processing = false;
 
 		file_input.close();
 	}

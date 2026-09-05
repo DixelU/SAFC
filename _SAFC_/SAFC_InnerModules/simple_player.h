@@ -552,14 +552,27 @@ struct simple_player
 		std::vector<track_info> tracks;
 		std::map<uint64_t, uint32_t> tempo_tmp;
 		std::vector<std::pair<uint64_t, uint64_t>> time_map_mcsecs;
-		uint64_t ticks_length;
+		uint64_t ticks_length{};
 		uint64_t total_duration_us{0};
 
-		volatile uint64_t scanned{0};
-		volatile bool open_complete{false};
-		volatile uint64_t size{0};
+		std::atomic_uint64_t scanned{0};
+		std::atomic_bool open_complete{false};
+		std::atomic_uint64_t size{0};
 
 		uint16_t ppq{0};
+
+		void reset()
+		{
+			tracks.clear();
+			tempo_tmp.clear();
+			time_map_mcsecs.clear();
+			ticks_length = 0;
+			total_duration_us = 0;
+			scanned.store(0, std::memory_order_relaxed);
+			size.store(0, std::memory_order_relaxed);
+			ppq = 0;
+			open_complete.store(false, std::memory_order_release);
+		}
 	};
 
 	struct tempo_cache
@@ -588,6 +601,7 @@ struct simple_player
 
 	void init()
 	{
+		shutdown_requested.store(false, std::memory_order_release);
 		update_devices();
 		//init_midi_out(devices.size() - 1);
 
@@ -625,8 +639,10 @@ struct simple_player
 
 	bool set_syncore_bank_path(std::wstring bank_path)
 	{
+		if (shutdown_requested.load(std::memory_order_acquire))
+			return false;
 		std::unique_lock<std::mutex> run_lock(playback_run_mutex, std::try_to_lock);
-		if (!run_lock.owns_lock())
+		if (!run_lock.owns_lock() || shutdown_requested.load(std::memory_order_acquire))
 			return false;
 
 		if (syncore_bank_path == bank_path)
@@ -648,8 +664,10 @@ struct simple_player
 
 	bool set_syncore_preferences(syncore_preferences preferences)
 	{
+		if (shutdown_requested.load(std::memory_order_acquire))
+			return false;
 		std::unique_lock<std::mutex> run_lock(playback_run_mutex, std::try_to_lock);
-		if (!run_lock.owns_lock())
+		if (!run_lock.owns_lock() || shutdown_requested.load(std::memory_order_acquire))
 			return false;
 
 		if (syncore_preferences_ == preferences)
@@ -683,6 +701,8 @@ struct simple_player
 	// Change the current device
 	bool set_device(size_t device_index)
 	{
+		if (shutdown_requested.load(std::memory_order_acquire))
+			return false;
 		// Device teardown/open and playback both mutate the output sink. Refuse a
 		// device switch while a run owns the player instead of racing its sender.
 		std::unique_lock<std::mutex> run_lock(playback_run_mutex, std::try_to_lock);
@@ -691,6 +711,8 @@ struct simple_player
 			set_last_output_error("MIDI output is busy; stop playback before changing it");
 			return false;
 		}
+		if (shutdown_requested.load(std::memory_order_acquire))
+			return false;
 
 		return set_device_locked(device_index);
 	}
@@ -733,6 +755,8 @@ struct simple_player
 	// open it, so callers must fall back to opening that current device.
 	bool ensure_output(const std::wstring& preferred_device_name)
 	{
+		if (shutdown_requested.load(std::memory_order_acquire))
+			return false;
 		if (has_output())
 			return true;
 
@@ -742,6 +766,8 @@ struct simple_player
 		// should wait for that transition instead of reporting a false no-output
 		// failure from try_to_lock.
 		std::unique_lock<std::mutex> run_lock(playback_run_mutex);
+		if (shutdown_requested.load(std::memory_order_acquire))
+			return false;
 		if (has_output())
 			return true;
 
@@ -770,12 +796,20 @@ struct simple_player
 
 	void simple_run(std::wstring filename, double start_fraction = 0.0)
 	{
+		if (shutdown_requested.load(std::memory_order_acquire))
+			return;
+
 		std::unique_lock<std::mutex> run_lock(playback_run_mutex, std::try_to_lock);
-		if (!run_lock.owns_lock())
+		if (!run_lock.owns_lock() || shutdown_requested.load(std::memory_order_acquire))
 			return;
 
 		memory_failure_reported.store(false, std::memory_order_release);
-		cancel_requested.store(false, std::memory_order_release);
+		{
+			std::lock_guard seek_lock(seek_request_mutex);
+			if (shutdown_requested.load(std::memory_order_acquire))
+				return;
+			cancel_requested.store(false, std::memory_order_release);
+		}
 
 		try
 		{
@@ -812,7 +846,7 @@ struct simple_player
 	void run_from_external(playback_event_source* src, double start_fraction = 0.0,
 		bool start_paused = true)
 	{
-		if (!src)
+		if (!src || shutdown_requested.load(std::memory_order_acquire))
 			return;
 
 		std::unique_lock<std::mutex> run_lock(playback_run_mutex, std::try_to_lock);
@@ -820,13 +854,18 @@ struct simple_player
 			return;
 
 		memory_failure_reported.store(false, std::memory_order_release);
-		cancel_requested.store(false, std::memory_order_release);
+		{
+			std::lock_guard seek_lock(seek_request_mutex);
+			if (shutdown_requested.load(std::memory_order_acquire))
+				return;
+			cancel_requested.store(false, std::memory_order_release);
+		}
 
 		try
 		{
 			// The external parser converts ticks to time itself, so info only
 			// needs the total duration for seek-fraction mapping and the UI bar.
-			info = midi_info{};
+			info.reset();
 			info.total_duration_us = src->total_duration_us();
 			info.open_complete = true;
 
@@ -964,6 +1003,7 @@ struct simple_player
 	// than defer SYNCore's thread joins to member/static destruction.
 	void shutdown() noexcept
 	{
+		shutdown_requested.store(true, std::memory_order_release);
 		stop();
 
 		// Stop SYNCore immediately, including during asynchronous bank startup.
@@ -1046,7 +1086,7 @@ struct simple_player
 		current_filename = filename;
 		// prerequisite: this is a midi file with valid header;
 		mmap = std::make_unique<dixelu::memory_mapped_file_reader>(filename);
-		info = midi_info{};
+		info.reset();
 
 		if (!mmap || !mmap->good())
 		{
@@ -3055,6 +3095,7 @@ private:
 	inline static std::atomic<HMIDIOUT> hout;
 	std::atomic<bool> memory_failure_reported{false};
 	std::atomic<bool> cancel_requested{false};
+	std::atomic<bool> shutdown_requested{false};
 
 	void(WINAPI* short_msg)(uint32_t msg) = nullptr;
 	bool(WINAPI* kdmapi_status)() = nullptr;
