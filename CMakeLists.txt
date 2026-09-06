@@ -6,12 +6,10 @@ set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
 option(SAFC_ENABLE_SYNCORE "Enable the embedded SAFSYNCore output" ON)
 option(SAFC_BUILD_APP_TESTS "Build application worker lifecycle regression tests" OFF)
+option(SAFC_BUILD_PROCESSOR_TESTS "Build streaming MIDI processor regression tests" OFF)
 option(SAFC_BUILD_VIDEO_EXPORT_TESTS "Build the Windows MP4 exporter regression test" OFF)
-if(SAFC_BUILD_APP_TESTS OR SAFC_BUILD_VIDEO_EXPORT_TESTS)
+if(SAFC_BUILD_APP_TESTS OR SAFC_BUILD_PROCESSOR_TESTS OR SAFC_BUILD_VIDEO_EXPORT_TESTS)
 	include(CTest)
-endif()
-if(SAFC_BUILD_APP_TESTS)
-	add_subdirectory(_SAFC_/tests)
 endif()
 
 include_directories(_SAFC_)
@@ -32,6 +30,10 @@ find_package(Boost REQUIRED)
 find_package(GLUT REQUIRED)
 find_package(LibArchive REQUIRED)
 find_package(zstd CONFIG REQUIRED)
+
+if(SAFC_BUILD_APP_TESTS OR SAFC_BUILD_PROCESSOR_TESTS)
+	add_subdirectory(_SAFC_/tests)
+endif()
 
 add_executable(SAFC
 	_SAFC_/SAFC_InnerModules/compressed_midi_event_source.cpp

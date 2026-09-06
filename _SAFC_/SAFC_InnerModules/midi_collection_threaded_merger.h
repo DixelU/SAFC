@@ -77,7 +77,7 @@ struct midi_track_iterator
 					size = (size << 7) | (last_byte & 0x7F);
 				} while (last_byte & 0x80);
 
-				for (std::uint32_t index = 0; index < last_byte; index++)
+				for (std::uint32_t index = 0; index < size; index++)
 					cur_position++;
 			}
 		}

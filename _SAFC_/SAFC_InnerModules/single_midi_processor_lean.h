@@ -238,7 +238,9 @@ struct single_midi_processor_lean
 		return true;
 	}
 
-	static bool process_track(
+	// Returns false only when no track was read. Faulty events end the current
+	// track at its valid prefix; the finalized track is still counted normally.
+	[[nodiscard]] static bool process_track(
 		midi_file_reader& in,
 		std::ofstream& out,
 		std::vector<base_type>& track_buffer,
@@ -301,7 +303,7 @@ struct single_midi_processor_lean
 				if (rsb_in < 0x80) [[unlikely]]
 				{
 					(*buffers.error) << log_event{log_event_type::unexpected_zero_rsb, in.position()};
-					return false;
+					break;
 				}
 
 				p1 = cmd;
@@ -475,16 +477,21 @@ struct single_midi_processor_lean
 					else
 					{
 						(*buffers.error) << log_event{log_event_type::unknown_event_type, in.position(), (uint64_t)cmd};
-						return false;
+						track_ended = true;
+						break;
 					}
 				}
 				default: {
 					(*buffers.error) << log_event{log_event_type::unknown_event_type, in.position(), (uint64_t)cmd};
-					return false;
+					track_ended = true;
+					break;
 				}
 			}
 		}
 
+		// Preserve the valid prefix even when parsing stopped at a faulty event.
+		// Always emit EOT and finalize the chunk length, including any bytes already
+		// streamed, before the caller searches for the next MTrk header.
 		writer.push(0x00);
 		writer.push(0xFF);
 		writer.push(0x2F);
@@ -520,7 +527,7 @@ struct single_midi_processor_lean
 
 		while (file_input.good() && !reached_eof)
 		{
-			process_track(
+			const bool processed = process_track(
 				file_input,
 				file_output,
 				track,
@@ -530,6 +537,8 @@ struct single_midi_processor_lean
 				tracks_written);
 
 			loggers.last_input_position = file_input.position();
+			if (!processed)
+				break;
 			(*loggers.log) << log_event{log_event_type::tracks_processed, (uint64_t)tracks_written, 1};
 		}
 
