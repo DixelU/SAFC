@@ -23,6 +23,8 @@
  */
 
 #include "JSON.h"
+#include <cstring>
+#include <cstdlib>
 
 /**
  * Blocks off the public constructor
@@ -49,7 +51,7 @@ JSONValue *JSON::Parse(const char *data)
 	size_t length = strlen(data) + 1;
 	wchar_t *w_data = (wchar_t*)malloc(length * sizeof(wchar_t));
 	
-	#if defined(WIN32) && !defined(__GNUC__)
+	#if defined(_WIN32) && !defined(__GNUC__)
 		size_t ret_value = 0;
 		if (mbstowcs_s(&ret_value, w_data, length, data, length) != 0)
 		{

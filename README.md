@@ -22,6 +22,10 @@ Clone with `--recurse-submodules`, or run `git submodule update --init --recursi
 so the shared `utility` headers and SYNCore's nested utility dependency are
 available before building.
 
+Application code is organized under [`_SAFC_/app`](./_SAFC_/app/README.md), with
+separate modules for processing, playback, editing, UI, settings, and runtime
+startup. `_SAFC_.cpp` is the entry point.
+
 ## Embedded SYNCore output
 
 The CMake build includes [SAFSYNCore](https://github.com/DixelU/SAFSYNCore) as

@@ -7,7 +7,7 @@
 #include "../WinRegWrappers.h"
 #include "header_utils.h"
 
-void set_is_fonted_var(bool val)
+inline void set_is_fonted_var(bool val)
 {
 	bool rk_op = false;
 	WinReg::RegKey rk;

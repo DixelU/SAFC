@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
     <Filter Include="Исходные файлы">
@@ -24,6 +24,15 @@
     </Filter>
     <Filter Include="Исходные файлы\SYNCore">
       <UniqueIdentifier>{C075E463-8286-4FAB-864D-43E62523B211}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Исходные файлы\Application">
+      <UniqueIdentifier>{E511FAEF-0C97-44A5-B017-83482BF96D79}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Файлы заголовков\Application">
+      <UniqueIdentifier>{38B44C2B-47A4-4E3E-8BCF-23B46104828C}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Исходные файлы\JSON">
+      <UniqueIdentifier>{4A320E7D-814E-4C09-8EAB-C8F380C2B269}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
   <ItemGroup>
@@ -246,5 +255,106 @@
     <Image Include="_SAFC_.ico">
       <Filter>Файлы ресурсов</Filter>
     </Image>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="app\app_state.h">
+      <Filter>Файлы заголовков\Application</Filter>
+    </ClInclude>
+    <ClInclude Include="app\app_workers.h">
+      <Filter>Файлы заголовков\Application</Filter>
+    </ClInclude>
+    <ClInclude Include="app\dialogs.h">
+      <Filter>Файлы заголовков\Application</Filter>
+    </ClInclude>
+    <ClInclude Include="app\editor.h">
+      <Filter>Файлы заголовков\Application</Filter>
+    </ClInclude>
+    <ClInclude Include="app\file_actions.h">
+      <Filter>Файлы заголовков\Application</Filter>
+    </ClInclude>
+    <ClInclude Include="app\file_properties.h">
+      <Filter>Файлы заголовков\Application</Filter>
+    </ClInclude>
+    <ClInclude Include="app\merger.h">
+      <Filter>Файлы заголовков\Application</Filter>
+    </ClInclude>
+    <ClInclude Include="app\playback_source.h">
+      <Filter>Файлы заголовков\Application</Filter>
+    </ClInclude>
+    <ClInclude Include="app\player_controls.h">
+      <Filter>Файлы заголовков\Application</Filter>
+    </ClInclude>
+    <ClInclude Include="app\runtime.h">
+      <Filter>Файлы заголовков\Application</Filter>
+    </ClInclude>
+    <ClInclude Include="app\settings.h">
+      <Filter>Файлы заголовков\Application</Filter>
+    </ClInclude>
+    <ClInclude Include="app\syncore_settings.h">
+      <Filter>Файлы заголовков\Application</Filter>
+    </ClInclude>
+    <ClInclude Include="app\ui.h">
+      <Filter>Файлы заголовков\Application</Filter>
+    </ClInclude>
+    <ClInclude Include="app\update.h">
+      <Filter>Файлы заголовков\Application</Filter>
+    </ClInclude>
+    <ClInclude Include="app\window_layout.h">
+      <Filter>Файлы заголовков\Application</Filter>
+    </ClInclude>
+    <ClCompile Include="JSON\JSON.cpp">
+      <Filter>Исходные файлы\JSON</Filter>
+    </ClCompile>
+    <ClCompile Include="JSON\JSONValue.cpp">
+      <Filter>Исходные файлы\JSON</Filter>
+    </ClCompile>
+    <ClCompile Include="app\app_state.cpp">
+      <Filter>Исходные файлы\Application</Filter>
+    </ClCompile>
+    <ClCompile Include="app\cli_runtime.cpp">
+      <Filter>Исходные файлы\Application</Filter>
+    </ClCompile>
+    <ClCompile Include="app\dialogs.cpp">
+      <Filter>Исходные файлы\Application</Filter>
+    </ClCompile>
+    <ClCompile Include="app\editor.cpp">
+      <Filter>Исходные файлы\Application</Filter>
+    </ClCompile>
+    <ClCompile Include="app\file_actions.cpp">
+      <Filter>Исходные файлы\Application</Filter>
+    </ClCompile>
+    <ClCompile Include="app\file_properties.cpp">
+      <Filter>Исходные файлы\Application</Filter>
+    </ClCompile>
+    <ClCompile Include="app\gui_runtime.cpp">
+      <Filter>Исходные файлы\Application</Filter>
+    </ClCompile>
+    <ClCompile Include="app\merger.cpp">
+      <Filter>Исходные файлы\Application</Filter>
+    </ClCompile>
+    <ClCompile Include="app\midi_analysis.cpp">
+      <Filter>Исходные файлы\Application</Filter>
+    </ClCompile>
+    <ClCompile Include="app\playback_source.cpp">
+      <Filter>Исходные файлы\Application</Filter>
+    </ClCompile>
+    <ClCompile Include="app\player_controls.cpp">
+      <Filter>Исходные файлы\Application</Filter>
+    </ClCompile>
+    <ClCompile Include="app\settings.cpp">
+      <Filter>Исходные файлы\Application</Filter>
+    </ClCompile>
+    <ClCompile Include="app\syncore_settings.cpp">
+      <Filter>Исходные файлы\Application</Filter>
+    </ClCompile>
+    <ClCompile Include="app\ui.cpp">
+      <Filter>Исходные файлы\Application</Filter>
+    </ClCompile>
+    <ClCompile Include="app\update.cpp">
+      <Filter>Исходные файлы\Application</Filter>
+    </ClCompile>
+    <ClCompile Include="app\window_layout.cpp">
+      <Filter>Исходные файлы\Application</Filter>
+    </ClCompile>
   </ItemGroup>
 </Project>

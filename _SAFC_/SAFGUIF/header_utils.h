@@ -5,6 +5,7 @@
 #include <GL/freeglut.h>
 
 #include <string>
+#include <memory>
 #include <vector>
 #include <Windows.h>
 
@@ -95,7 +96,7 @@ inline std::shared_ptr<simple_player> player;
 inline std::shared_ptr<midi_editor> editor;
 
 void absolute_to_actual_coords(int ix, int iy, float& x, float& y);
-void inline rotate_view(float& x, float& y);
+void rotate_view(float& x, float& y);
 
 inline int collect_time_data()
 {

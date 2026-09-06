@@ -23,6 +23,7 @@
 #include "../SAFC_InnerModules/compressed_midi_event_source.h"
 #include "../SAFC_InnerModules/simple_player.h"
 #include "../SAFC_InnerModules/simple_player_video_export.h"
+#include "../app/playback_source.h"
 #include "player_video_render_ui.h"
 #include "simple_player_viewer.h"
 
@@ -33,9 +34,6 @@
 #endif
 
 extern syncore_preferences saved_syncore_preferences;
-extern std::atomic<bool> compressed_player_source_selected;
-std::shared_ptr<compressed_midi_event_source> current_compressed_player_source();
-std::wstring current_compressed_player_filename();
 
 namespace
 {

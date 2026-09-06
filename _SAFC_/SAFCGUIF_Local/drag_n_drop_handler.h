@@ -126,6 +126,6 @@ struct drag_n_drop_handler : IDropTarget
 	}
 };
 
-drag_n_drop_handler global_drag_and_drop_handler;
+inline drag_n_drop_handler global_drag_and_drop_handler;
 
 #endif // !SAFGUIF_L_DND

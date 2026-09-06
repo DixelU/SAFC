@@ -3,6 +3,7 @@
 #define SAFGUIF_CHARMAP
 
 #include <unordered_map>
+#include <array>
 #include <fstream>
 
 #include "header_utils.h"
@@ -118,6 +119,6 @@ constexpr std::array<const char*, 256> get_legacy_draw_map()
 	return legacy_draw_map;
 }
 
-constexpr std::array<const char*, 256> legacy_draw_map = get_legacy_draw_map();
+inline constexpr std::array<const char*, 256> legacy_draw_map = get_legacy_draw_map();
 
 #endif

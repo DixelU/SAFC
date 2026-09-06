@@ -5,9 +5,13 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
 option(SAFC_ENABLE_SYNCORE "Enable the embedded SAFSYNCore output" ON)
+option(SAFC_BUILD_APP_TESTS "Build application worker lifecycle regression tests" OFF)
 option(SAFC_BUILD_VIDEO_EXPORT_TESTS "Build the Windows MP4 exporter regression test" OFF)
-if(SAFC_BUILD_VIDEO_EXPORT_TESTS)
+if(SAFC_BUILD_APP_TESTS OR SAFC_BUILD_VIDEO_EXPORT_TESTS)
 	include(CTest)
+endif()
+if(SAFC_BUILD_APP_TESTS)
+	add_subdirectory(_SAFC_/tests)
 endif()
 
 include_directories(_SAFC_)
@@ -36,6 +40,24 @@ add_executable(SAFC
 	_SAFC_/SAFC_InnerModules/simple_player_video_export.cpp
 	_SAFC_/SAFCGUIF_Local/midi_editor_tools_ui.cpp
 	_SAFC_/SAFCGUIF_Local/player_video_render_ui.cpp
+	_SAFC_/JSON/JSON.cpp
+	_SAFC_/JSON/JSONValue.cpp
+	_SAFC_/app/app_state.cpp
+	_SAFC_/app/cli_runtime.cpp
+	_SAFC_/app/dialogs.cpp
+	_SAFC_/app/editor.cpp
+	_SAFC_/app/file_actions.cpp
+	_SAFC_/app/file_properties.cpp
+	_SAFC_/app/gui_runtime.cpp
+	_SAFC_/app/merger.cpp
+	_SAFC_/app/midi_analysis.cpp
+	_SAFC_/app/playback_source.cpp
+	_SAFC_/app/player_controls.cpp
+	_SAFC_/app/settings.cpp
+	_SAFC_/app/syncore_settings.cpp
+	_SAFC_/app/ui.cpp
+	_SAFC_/app/update.cpp
+	_SAFC_/app/window_layout.cpp
 	_SAFC_/_SAFC_.cpp)
 target_link_libraries(SAFC PRIVATE Boost::headers GLUT::GLUT
 	LibArchive::LibArchive zstd::libzstd)

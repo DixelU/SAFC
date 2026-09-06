@@ -2,6 +2,9 @@
 #ifndef SAFGUIF_STL
 #define SAFGUIF_STL
 
+#include <iostream>
+#include <optional>
+
 #include <memory>
 
 #include "header_utils.h"

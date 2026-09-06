@@ -356,6 +356,21 @@
     <ClInclude Include="SAFGUIF\textbox.h" />
     <ClInclude Include="SAFGUIF\wheel_variable_changer.h" />
     <ClInclude Include="SAFGUIF\windows_handler.h" />
+    <ClInclude Include="app\app_state.h" />
+    <ClInclude Include="app\app_workers.h" />
+    <ClInclude Include="app\dialogs.h" />
+    <ClInclude Include="app\editor.h" />
+    <ClInclude Include="app\file_actions.h" />
+    <ClInclude Include="app\file_properties.h" />
+    <ClInclude Include="app\merger.h" />
+    <ClInclude Include="app\playback_source.h" />
+    <ClInclude Include="app\player_controls.h" />
+    <ClInclude Include="app\runtime.h" />
+    <ClInclude Include="app\settings.h" />
+    <ClInclude Include="app\syncore_settings.h" />
+    <ClInclude Include="app\ui.h" />
+    <ClInclude Include="app\update.h" />
+    <ClInclude Include="app\window_layout.h" />
     <ClInclude Include="WinRegWrappers.h" />
   </ItemGroup>
   <ItemGroup>
@@ -365,6 +380,24 @@
 	<ClCompile Include="SAFC_InnerModules\midi_editor_tools.cpp" />
 	<ClCompile Include="SAFC_InnerModules\simple_player_video_export.cpp" />
 	<ClCompile Include="SAFC_InnerModules\syncore_output.cpp" />
+    <ClCompile Include="JSON\JSON.cpp" />
+    <ClCompile Include="JSON\JSONValue.cpp" />
+    <ClCompile Include="app\app_state.cpp" />
+    <ClCompile Include="app\cli_runtime.cpp" />
+    <ClCompile Include="app\dialogs.cpp" />
+    <ClCompile Include="app\editor.cpp" />
+    <ClCompile Include="app\file_actions.cpp" />
+    <ClCompile Include="app\file_properties.cpp" />
+    <ClCompile Include="app\gui_runtime.cpp" />
+    <ClCompile Include="app\merger.cpp" />
+    <ClCompile Include="app\midi_analysis.cpp" />
+    <ClCompile Include="app\playback_source.cpp" />
+    <ClCompile Include="app\player_controls.cpp" />
+    <ClCompile Include="app\settings.cpp" />
+    <ClCompile Include="app\syncore_settings.cpp" />
+    <ClCompile Include="app\ui.cpp" />
+    <ClCompile Include="app\update.cpp" />
+    <ClCompile Include="app\window_layout.cpp" />
     <ClCompile Include="_SAFC_.cpp" />
   </ItemGroup>
   <ItemGroup Condition="'$(SYNCoreEnabled)'=='true'">

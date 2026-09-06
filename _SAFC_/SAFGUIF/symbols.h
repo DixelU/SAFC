@@ -2,6 +2,8 @@
 #ifndef SAFGUIF_SYMBOLS
 #define SAFGUIF_SYMBOLS
 
+#include <algorithm>
+
 #include "header_utils.h"
 #include "charmap.h"
 
@@ -283,7 +285,7 @@ inline void call_list_on_string(const std::string& S)
 	}
 }
 
-const _MAT2 MT = { {0, 1}, {0, 0}, {0, 0}, {0, 1} };
+inline const _MAT2 MT = { {0, 1}, {0, 0}, {0, 0}, {0, 1} };
 
 }
 
