@@ -59,7 +59,9 @@ struct simple_player
 		buffered_note() : start_time_us(0), end_time_us(~0ULL), track_id(0) {}
 
 		buffered_note(uint64_t start, uint64_t end, uint32_t track)
-			: start_time_us(start), end_time_us(end), track_id(track) {}
+			: start_time_us(start), end_time_us(end), track_id(track)
+		{
+		}
 	};
 
 	// Visuals viewport: manages notes display and keyboard state
@@ -453,7 +455,7 @@ struct simple_player
 			while (true)
 			{
 				size_t smallest = i;
-				size_t left  = 2 * i + 1;
+				size_t left = 2 * i + 1;
 				size_t right = 2 * i + 2;
 				if (left  < n && data[smallest] > data[left])  smallest = left;
 				if (right < n && data[smallest] > data[right]) smallest = right;
@@ -823,15 +825,15 @@ struct simple_player
 			{
 				throw_alert_error("Playback failed");
 				mmap.reset();
-			return;
-		}
+				return;
+			}
 
 			start_fraction = std::clamp(start_fraction, 0.0, 1.0);
-		playback_thread(static_cast<uint64_t>(start_fraction * info.total_duration_us));
+			playback_thread(static_cast<uint64_t>(start_fraction * info.total_duration_us));
 
-		// Release the mapping so the caller can delete or replace the file.
-		// info.tracks' pointers into it stay dead until the next open().
-		mmap.reset();
+			// Release the mapping so the caller can delete or replace the file.
+			// info.tracks' pointers into it stay dead until the next open().
+			mmap.reset();
 		}
 		catch (const std::bad_alloc&)
 		{
@@ -1115,7 +1117,7 @@ struct simple_player
 			if (cancel_requested.load(std::memory_order_acquire))
 				return false;
 
-			if(!read_through_one_track(ptr, end))
+			if (!read_through_one_track(ptr, end))
 				return false;
 
 			info.scanned = ptr - begin;
@@ -1375,7 +1377,7 @@ struct simple_player
 
 					switch (command >> 4)
 					{
-					case 0x8: // note off
+						case 0x8: // note off
 						{
 							data2 = get_value_and_increment(track.position, track.end);
 							uint8_t channel = command & 0x0F;
@@ -1389,7 +1391,7 @@ struct simple_player
 							}
 							break;
 						}
-					case 0x9: // note on
+						case 0x9: // note on
 						{
 							data2 = get_value_and_increment(track.position, track.end);
 							uint8_t channel = command & 0x0F;
@@ -1830,7 +1832,8 @@ struct simple_player
 
 				try
 				{
-					parser_thread = std::thread([this, skip_to_us, pause_after_seek]() {
+					parser_thread = std::thread([this, skip_to_us, pause_after_seek]()
+					{
 						try
 						{
 							if (external_source)
@@ -1909,7 +1912,7 @@ struct simple_player
 		//std::unordered_map<uint32_t, uint32_t> track_colors;
 
 		// Scratch buffers for batched note rendering (reused each frame)
-		struct note_vert  { float x, y; };
+		struct note_vert { float x, y; };
 		struct note_color { uint8_t r, g, b, a; };
 
 		struct note_span
@@ -2055,7 +2058,7 @@ struct simple_player
 			fixed_quad(left, right, top - rail * 0.45f, top, {154, 36, 42}, 255, 255, 255, 255);
 		}
 
-		void draw_keyboard(const color (&key_colors)[128])
+		void draw_keyboard(const color(&key_colors)[128])
 		{
 			for (size_t i = 0; i < 128; ++i)
 			{
@@ -2067,7 +2070,8 @@ struct simple_player
 				{
 					auto& vertex = keyboard_vertices[v];
 					const auto tone = keyboard_tones[v];
-					auto shade = [tone](uint8_t channel) {
+					auto shade = [tone](uint8_t channel)
+					{
 						return uint8_t(std::min(255, (channel * tone.gain + 127) / 255 + tone.bias));
 					};
 					vertex.r = shade(c.r); vertex.g = shade(c.g); vertex.b = shade(c.b);
@@ -2112,7 +2116,7 @@ struct simple_player
 			constexpr float sharp_ratio = static_cast<float>(total) / 128.f;
 			const float black_half_width = white_width * sharp_ratio * 0.5f + black_margins;
 
-			quad_geometry* first = keyboard, *last = keyboard + 127;
+			quad_geometry* first = keyboard, * last = keyboard + 127;
 			uint32_t white_keys_seen = 0;
 
 			for (uint8_t key = 0; key < 128; key++)
@@ -2210,10 +2214,10 @@ struct simple_player
 		// later kept end_ys in that block. Zero-height entries are always kept
 		// and do not contribute to run_max. Survivors are written toward the
 		// tail of the vector, then compacted to the front.
-		const std::size_t size	= note_spans.size();
-		std::size_t	write	= size;
+		const std::size_t size = note_spans.size();
+		std::size_t	write = size;
 		float		run_max = -std::numeric_limits<float>::infinity();
-		float		prev_a	= std::numeric_limits<float>::infinity();
+		float		prev_a = std::numeric_limits<float>::infinity();
 
 		for (std::size_t k = size; k-- > 0; )
 		{
@@ -2383,7 +2387,7 @@ struct simple_player
 						note.track_id,
 						rotate(0xFF7F008F, note.track_id),
 						begin_y <= 0 && end_y >= 0
-					});
+						});
 				}
 
 				if (data.key_note_spans.empty())
@@ -2475,7 +2479,7 @@ struct simple_player
 			for (int index = 0; index < total_white; ++index)
 				batch_notes_for_index(index);
 
-			white_fill_verts    = static_cast<GLsizei>(data.note_verts.size());
+			white_fill_verts = static_cast<GLsizei>(data.note_verts.size());
 			white_outline_verts = static_cast<GLsizei>(data.outline_verts.size());
 			for (int index = total_white; index < 128; ++index)
 				batch_notes_for_index(index);
@@ -2493,7 +2497,7 @@ struct simple_player
 
 		if (!data.note_verts.empty())
 		{
-			const GLsizei total_fill    = static_cast<GLsizei>(data.note_verts.size());
+			const GLsizei total_fill = static_cast<GLsizei>(data.note_verts.size());
 			const GLsizei total_outline = static_cast<GLsizei>(data.outline_verts.size());
 
 			glVertexPointer(2, GL_FLOAT, 0, data.note_verts.data());
@@ -2772,9 +2776,10 @@ private:
 			info.time_map_mcsecs.begin(),
 			info.time_map_mcsecs.end(),
 			tick,
-			[](tick_type t, const std::pair<uint64_t, uint64_t>& entry) {
-				return t < entry.first;
-			}
+			[](tick_type t, const std::pair<uint64_t, uint64_t>& entry)
+		{
+			return t < entry.first;
+		}
 		);
 
 		if (it == info.time_map_mcsecs.begin())
@@ -2990,7 +2995,7 @@ private:
 	void init_midi_out(size_t device)
 	{
 		static std::set<std::wstring> kdmapi_allowed
-			{ L"OmniMIDI", L"K[q093jfpowe" };
+		{L"OmniMIDI", L"K[q093jfpowe"};
 
 		auto hout_copy = hout.load();
 		if (hout_copy || syncore.active())

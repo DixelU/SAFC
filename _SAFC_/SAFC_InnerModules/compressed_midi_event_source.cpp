@@ -23,423 +23,427 @@
 
 namespace
 {
-	constexpr std::size_t archive_input_buffer_size = 1u << 16;
-	constexpr std::uint32_t maximum_archive_depth = 16;
-	constexpr std::uint64_t decoded_page_memory_budget = 128ull << 20;
+constexpr std::size_t archive_input_buffer_size = 1u << 16;
+constexpr std::uint32_t maximum_archive_depth = 16;
+constexpr std::uint64_t decoded_page_memory_budget = 128ull << 20;
 
-	class sequential_stream
+class sequential_stream
+{
+public:
+	virtual ~sequential_stream() = default;
+	virtual std::size_t read(std::uint8_t* destination, std::size_t size) = 0;
+	virtual bool can_seek() const { return false; }
+	virtual std::int64_t seek(std::int64_t, int)
 	{
-	public:
-		virtual ~sequential_stream() = default;
-		virtual std::size_t read(std::uint8_t* destination, std::size_t size) = 0;
-		virtual bool can_seek() const { return false; }
-		virtual std::int64_t seek(std::int64_t, int)
-		{
-			throw std::runtime_error("The archive input is not seekable");
-		}
-	};
+		throw std::runtime_error("The archive input is not seekable");
+	}
+};
 
-	class file_stream final : public sequential_stream
+class file_stream final : public sequential_stream
+{
+public:
+	explicit file_stream(const std::wstring& filename)
+		: input_(std::filesystem::path(filename), std::ios::binary)
 	{
-	public:
-		explicit file_stream(const std::wstring& filename)
-			: input_(std::filesystem::path(filename), std::ios::binary)
-		{
-			if (!input_)
-				throw std::runtime_error("Unable to open the compressed MIDI file");
-		}
+		if (!input_)
+			throw std::runtime_error("Unable to open the compressed MIDI file");
+	}
 
-		std::size_t read(std::uint8_t* destination, std::size_t size) override
-		{
-			input_.read(reinterpret_cast<char*>(destination), static_cast<std::streamsize>(size));
-			const auto count = input_.gcount();
-			if (count < 0 || (!input_ && !input_.eof()))
-				throw std::runtime_error("Failed while reading the compressed MIDI file");
-			return static_cast<std::size_t>(count);
-		}
+	std::size_t read(std::uint8_t* destination, std::size_t size) override
+	{
+		input_.read(reinterpret_cast<char*>(destination), static_cast<std::streamsize>(size));
+		const auto count = input_.gcount();
+		if (count < 0 || (!input_ && !input_.eof()))
+			throw std::runtime_error("Failed while reading the compressed MIDI file");
+		return static_cast<std::size_t>(count);
+	}
 
-		bool can_seek() const override { return true; }
+	bool can_seek() const override { return true; }
 
-		std::int64_t seek(std::int64_t offset, int whence) override
+	std::int64_t seek(std::int64_t offset, int whence) override
+	{
+		std::ios_base::seekdir direction;
+		switch (whence)
 		{
-			std::ios_base::seekdir direction;
-			switch (whence)
-			{
 			case SEEK_SET: direction = std::ios::beg; break;
 			case SEEK_CUR: direction = std::ios::cur; break;
 			case SEEK_END: direction = std::ios::end; break;
 			default: throw std::runtime_error("Invalid archive seek origin");
-			}
-
-			input_.clear();
-			input_.seekg(static_cast<std::streamoff>(offset), direction);
-			if (!input_)
-				throw std::runtime_error("Unable to seek in the archive input");
-			const auto position = input_.tellg();
-			if (position < 0)
-				throw std::runtime_error("Unable to determine the archive input position");
-			return static_cast<std::int64_t>(position);
 		}
 
-	private:
-		std::ifstream input_;
-	};
+		input_.clear();
+		input_.seekg(static_cast<std::streamoff>(offset), direction);
+		if (!input_)
+			throw std::runtime_error("Unable to seek in the archive input");
+		const auto position = input_.tellg();
+		if (position < 0)
+			throw std::runtime_error("Unable to determine the archive input position");
+		return static_cast<std::int64_t>(position);
+	}
 
-	class prefix_stream final : public sequential_stream
+private:
+	std::ifstream input_;
+};
+
+class prefix_stream final : public sequential_stream
+{
+public:
+	prefix_stream(std::unique_ptr<sequential_stream> input, std::vector<std::uint8_t> prefix)
+		: input_(std::move(input)), prefix_(std::move(prefix))
 	{
-	public:
-		prefix_stream(std::unique_ptr<sequential_stream> input, std::vector<std::uint8_t> prefix)
-			: input_(std::move(input)), prefix_(std::move(prefix)) {}
+	}
 
-		std::size_t read(std::uint8_t* destination, std::size_t size) override
-		{
-			std::size_t written = 0;
-			if (prefix_position_ < prefix_.size())
-			{
-				const auto available = prefix_.size() - prefix_position_;
-				const auto copied = (std::min)(available, size);
-				std::memcpy(destination, prefix_.data() + prefix_position_, copied);
-				prefix_position_ += copied;
-				written += copied;
-			}
-
-			if (written < size)
-				written += input_->read(destination + written, size - written);
-			return written;
-		}
-
-	private:
-		std::unique_ptr<sequential_stream> input_;
-		std::vector<std::uint8_t> prefix_;
-		std::size_t prefix_position_ = 0;
-	};
-
-	class archive_entry_stream final : public sequential_stream
+	std::size_t read(std::uint8_t* destination, std::size_t size) override
 	{
-	public:
-		archive_entry_stream(std::unique_ptr<sequential_stream> input,
-			const compressed_midi_event_source::progress_callback& progress,
-			std::uint32_t depth)
-			: input_(std::move(input)), progress_(progress), depth_(depth)
+		std::size_t written = 0;
+		if (prefix_position_ < prefix_.size())
 		{
-			archive_ = archive_read_new();
-			if (!archive_)
-				throw std::bad_alloc();
+			const auto available = prefix_.size() - prefix_position_;
+			const auto copied = (std::min)(available, size);
+			std::memcpy(destination, prefix_.data() + prefix_position_, copied);
+			prefix_position_ += copied;
+			written += copied;
+		}
 
-			archive_read_support_filter_all(archive_);
-			archive_read_support_format_all(archive_);
-			// XZ/GZip/BZip2 files are filters around one otherwise "raw" entry.
-			archive_read_support_format_raw(archive_);
-			if (input_->can_seek())
-				archive_read_set_seek_callback(archive_, &seek_callback);
+		if (written < size)
+			written += input_->read(destination + written, size - written);
+		return written;
+	}
 
-			const int opened = archive_read_open2(
-				archive_, this, nullptr, &read_callback, &skip_callback, nullptr);
-			if (opened != ARCHIVE_OK)
-				fail("Unable to open archive layer");
+private:
+	std::unique_ptr<sequential_stream> input_;
+	std::vector<std::uint8_t> prefix_;
+	std::size_t prefix_position_ = 0;
+};
 
-			archive_entry* entry = nullptr;
-			for (;;)
+class archive_entry_stream final : public sequential_stream
+{
+public:
+	archive_entry_stream(std::unique_ptr<sequential_stream> input,
+		const compressed_midi_event_source::progress_callback& progress,
+		std::uint32_t depth)
+		: input_(std::move(input)), progress_(progress), depth_(depth)
+	{
+		archive_ = archive_read_new();
+		if (!archive_)
+			throw std::bad_alloc();
+
+		archive_read_support_filter_all(archive_);
+		archive_read_support_format_all(archive_);
+		// XZ/GZip/BZip2 files are filters around one otherwise "raw" entry.
+		archive_read_support_format_raw(archive_);
+		if (input_->can_seek())
+			archive_read_set_seek_callback(archive_, &seek_callback);
+
+		const int opened = archive_read_open2(
+			archive_, this, nullptr, &read_callback, &skip_callback, nullptr);
+		if (opened != ARCHIVE_OK)
+			fail("Unable to open archive layer");
+
+		archive_entry* entry = nullptr;
+		for (;;)
+		{
+			const int result = archive_read_next_header(archive_, &entry);
+			if (result == ARCHIVE_EOF)
+				fail("Archive contains no playable file entry");
+			if (result < ARCHIVE_WARN)
+				fail("Unable to read archive entry");
+			if (archive_entry_filetype(entry) == AE_IFREG)
 			{
-				const int result = archive_read_next_header(archive_, &entry);
-				if (result == ARCHIVE_EOF)
-					fail("Archive contains no playable file entry");
-				if (result < ARCHIVE_WARN)
-					fail("Unable to read archive entry");
-				if (archive_entry_filetype(entry) == AE_IFREG)
-				{
-					const bool raw_stream =
-						(archive_format(archive_) & ARCHIVE_FORMAT_BASE_MASK) == ARCHIVE_FORMAT_RAW;
-					const char* path = archive_entry_pathname(entry);
-					if (raw_stream || is_supported_entry_name(path))
-						break;
-				}
-				archive_read_data_skip(archive_);
+				const bool raw_stream =
+					(archive_format(archive_) & ARCHIVE_FORMAT_BASE_MASK) == ARCHIVE_FORMAT_RAW;
+				const char* path = archive_entry_pathname(entry);
+				if (raw_stream || is_supported_entry_name(path))
+					break;
 			}
-
-			if (progress_)
-			{
-				std::string message = "Opened archive layer " +
-					std::to_string(depth_) + "-" +
-					std::to_string(depth_ + decoded_layer_count() - 1);
-				if (const char* path = archive_entry_pathname(entry); path && *path)
-					message += ": " + std::string(path);
-				progress_(message);
-			}
+			archive_read_data_skip(archive_);
 		}
 
-		~archive_entry_stream() override
+		if (progress_)
 		{
-			if (archive_)
-			{
-				archive_read_close(archive_);
-				archive_read_free(archive_);
-			}
+			std::string message = "Opened archive layer " +
+				std::to_string(depth_) + "-" +
+				std::to_string(depth_ + decoded_layer_count() - 1);
+			if (const char* path = archive_entry_pathname(entry); path && *path)
+				message += ": " + std::string(path);
+			progress_(message);
 		}
+	}
 
-		std::size_t read(std::uint8_t* destination, std::size_t size) override
+	~archive_entry_stream() override
+	{
+		if (archive_)
 		{
-			const auto result = archive_read_data(archive_, destination, size);
-			if (result < 0)
-				fail("Unable to decompress archive entry");
-			return static_cast<std::size_t>(result);
+			archive_read_close(archive_);
+			archive_read_free(archive_);
 		}
+	}
 
-		std::uint32_t decoded_layer_count() const
-		{
-			const auto filters = (std::max)(archive_filter_count(archive_) - 1, 0);
-			const bool archive_container =
-				(archive_format(archive_) & ARCHIVE_FORMAT_BASE_MASK) != ARCHIVE_FORMAT_RAW;
-			return (std::max)(1u,
-				static_cast<std::uint32_t>(filters) + (archive_container ? 1u : 0u));
-		}
+	std::size_t read(std::uint8_t* destination, std::size_t size) override
+	{
+		const auto result = archive_read_data(archive_, destination, size);
+		if (result < 0)
+			fail("Unable to decompress archive entry");
+		return static_cast<std::size_t>(result);
+	}
 
-	private:
-		static bool is_supported_entry_name(const char* path)
+	std::uint32_t decoded_layer_count() const
+	{
+		const auto filters = (std::max)(archive_filter_count(archive_) - 1, 0);
+		const bool archive_container =
+			(archive_format(archive_) & ARCHIVE_FORMAT_BASE_MASK) != ARCHIVE_FORMAT_RAW;
+		return (std::max)(1u,
+			static_cast<std::uint32_t>(filters) + (archive_container ? 1u : 0u));
+	}
+
+private:
+	static bool is_supported_entry_name(const char* path)
+	{
+		if (!path || !*path)
+			return true;
+		std::string lower(path);
+		std::transform(lower.begin(), lower.end(), lower.begin(),
+			[](unsigned char value) { return static_cast<char>(std::tolower(value)); });
+		for (const char* suffix :
+			{".mid", ".midi", ".xz", ".zip", ".7z", ".gz", ".bz2", ".lzma"})
 		{
-			if (!path || !*path)
+			const std::string_view ending(suffix);
+			if (lower.size() >= ending.size() &&
+				lower.compare(
+					lower.size() - ending.size(), ending.size(),
+					ending.data(), ending.size()) == 0)
 				return true;
-			std::string lower(path);
-			std::transform(lower.begin(), lower.end(), lower.begin(),
-				[](unsigned char value) { return static_cast<char>(std::tolower(value)); });
-			for (const char* suffix :
-				{".mid", ".midi", ".xz", ".zip", ".7z", ".gz", ".bz2", ".lzma"})
-			{
-				const std::string_view ending(suffix);
-				if (lower.size() >= ending.size() &&
-					lower.compare(
-						lower.size() - ending.size(), ending.size(),
-						ending.data(), ending.size()) == 0)
-					return true;
-			}
-			return false;
 		}
-
-		[[noreturn]] void fail(const char* prefix)
-		{
-			std::string message(prefix);
-			if (!callback_error_.empty())
-				message += ": " + callback_error_;
-			else if (archive_ && archive_error_string(archive_))
-				message += ": " + std::string(archive_error_string(archive_));
-			throw std::runtime_error(message);
-		}
-
-		static la_ssize_t read_callback(archive*, void* client, const void** buffer)
-		{
-			auto* self = static_cast<archive_entry_stream*>(client);
-			try
-			{
-				const auto count = self->input_->read(
-					self->input_buffer_.data(), self->input_buffer_.size());
-				*buffer = self->input_buffer_.data();
-				return static_cast<la_ssize_t>(count);
-			}
-			catch (const std::exception& e)
-			{
-				self->callback_error_ = e.what();
-				return ARCHIVE_FATAL;
-			}
-		}
-
-		static la_int64_t skip_callback(archive*, void* client, la_int64_t request)
-		{
-			auto* self = static_cast<archive_entry_stream*>(client);
-			try
-			{
-				la_int64_t skipped = 0;
-				while (skipped < request)
-				{
-					const auto amount = static_cast<std::size_t>((std::min)(
-						request - skipped,
-						static_cast<la_int64_t>(self->input_buffer_.size())));
-					const auto count = self->input_->read(self->input_buffer_.data(), amount);
-					if (count == 0)
-						break;
-					skipped += static_cast<la_int64_t>(count);
-				}
-				return skipped;
-			}
-			catch (const std::exception& e)
-			{
-				self->callback_error_ = e.what();
-				return ARCHIVE_FATAL;
-			}
-		}
-
-		static la_int64_t seek_callback(
-			archive*, void* client, la_int64_t offset, int whence)
-		{
-			auto* self = static_cast<archive_entry_stream*>(client);
-			try
-			{
-				return static_cast<la_int64_t>(self->input_->seek(offset, whence));
-			}
-			catch (const std::exception& e)
-			{
-				self->callback_error_ = e.what();
-				return ARCHIVE_FATAL;
-			}
-		}
-
-		std::unique_ptr<sequential_stream> input_;
-		compressed_midi_event_source::progress_callback progress_;
-		std::uint32_t depth_ = 0;
-		archive* archive_ = nullptr;
-		std::array<std::uint8_t, archive_input_buffer_size> input_buffer_{};
-		std::string callback_error_;
-	};
-
-	enum class stream_kind
-	{
-		midi,
-		archive,
-		unknown
-	};
-
-	stream_kind detect_stream_kind(const std::vector<std::uint8_t>& prefix)
-	{
-		if (prefix.size() >= 4 && std::memcmp(prefix.data(), "MThd", 4) == 0)
-			return stream_kind::midi;
-
-		static constexpr std::array<std::uint8_t, 6> xz_magic
-			{0xFD, 0x37, 0x7A, 0x58, 0x5A, 0x00};
-		static constexpr std::array<std::uint8_t, 6> seven_zip_magic
-			{0x37, 0x7A, 0xBC, 0xAF, 0x27, 0x1C};
-		static constexpr std::array<std::uint8_t, 3> gzip_magic
-			{0x1F, 0x8B, 0x08};
-		static constexpr std::array<std::uint8_t, 3> bzip_magic
-			{'B', 'Z', 'h'};
-
-		if (prefix.size() >= xz_magic.size() &&
-			std::equal(xz_magic.begin(), xz_magic.end(), prefix.begin()))
-			return stream_kind::archive;
-		if (prefix.size() >= seven_zip_magic.size() &&
-			std::equal(seven_zip_magic.begin(), seven_zip_magic.end(), prefix.begin()))
-			return stream_kind::archive;
-		if (prefix.size() >= gzip_magic.size() &&
-			std::equal(gzip_magic.begin(), gzip_magic.end(), prefix.begin()))
-			return stream_kind::archive;
-		if (prefix.size() >= bzip_magic.size() &&
-			std::equal(bzip_magic.begin(), bzip_magic.end(), prefix.begin()))
-			return stream_kind::archive;
-		if (prefix.size() >= 4 && prefix[0] == 'P' && prefix[1] == 'K' &&
-			((prefix[2] == 3 && prefix[3] == 4) ||
-			 (prefix[2] == 5 && prefix[3] == 6) ||
-			 (prefix[2] == 7 && prefix[3] == 8)))
-			return stream_kind::archive;
-
-		return stream_kind::unknown;
+		return false;
 	}
 
-	bool is_seven_zip_stream(const std::vector<std::uint8_t>& prefix)
+	[[noreturn]] void fail(const char* prefix)
 	{
-		static constexpr std::array<std::uint8_t, 6> seven_zip_magic
-			{0x37, 0x7A, 0xBC, 0xAF, 0x27, 0x1C};
-		return prefix.size() >= seven_zip_magic.size() &&
-			std::equal(seven_zip_magic.begin(), seven_zip_magic.end(), prefix.begin());
+		std::string message(prefix);
+		if (!callback_error_.empty())
+			message += ": " + callback_error_;
+		else if (archive_ && archive_error_string(archive_))
+			message += ": " + std::string(archive_error_string(archive_));
+		throw std::runtime_error(message);
 	}
 
-	std::vector<std::uint8_t> read_prefix(sequential_stream& input, std::size_t maximum)
+	static la_ssize_t read_callback(archive*, void* client, const void** buffer)
 	{
-		std::vector<std::uint8_t> prefix(maximum);
+		auto* self = static_cast<archive_entry_stream*>(client);
+		try
+		{
+			const auto count = self->input_->read(
+				self->input_buffer_.data(), self->input_buffer_.size());
+			*buffer = self->input_buffer_.data();
+			return static_cast<la_ssize_t>(count);
+		}
+		catch (const std::exception& e)
+		{
+			self->callback_error_ = e.what();
+			return ARCHIVE_FATAL;
+		}
+	}
+
+	static la_int64_t skip_callback(archive*, void* client, la_int64_t request)
+	{
+		auto* self = static_cast<archive_entry_stream*>(client);
+		try
+		{
+			la_int64_t skipped = 0;
+			while (skipped < request)
+			{
+				const auto amount = static_cast<std::size_t>((std::min)(
+					request - skipped,
+					static_cast<la_int64_t>(self->input_buffer_.size())));
+				const auto count = self->input_->read(self->input_buffer_.data(), amount);
+				if (count == 0)
+					break;
+				skipped += static_cast<la_int64_t>(count);
+			}
+			return skipped;
+		}
+		catch (const std::exception& e)
+		{
+			self->callback_error_ = e.what();
+			return ARCHIVE_FATAL;
+		}
+	}
+
+	static la_int64_t seek_callback(
+		archive*, void* client, la_int64_t offset, int whence)
+	{
+		auto* self = static_cast<archive_entry_stream*>(client);
+		try
+		{
+			return static_cast<la_int64_t>(self->input_->seek(offset, whence));
+		}
+		catch (const std::exception& e)
+		{
+			self->callback_error_ = e.what();
+			return ARCHIVE_FATAL;
+		}
+	}
+
+	std::unique_ptr<sequential_stream> input_;
+	compressed_midi_event_source::progress_callback progress_;
+	std::uint32_t depth_ = 0;
+	archive* archive_ = nullptr;
+	std::array<std::uint8_t, archive_input_buffer_size> input_buffer_{};
+	std::string callback_error_;
+};
+
+enum class stream_kind
+{
+	midi,
+	archive,
+	unknown
+};
+
+stream_kind detect_stream_kind(const std::vector<std::uint8_t>& prefix)
+{
+	if (prefix.size() >= 4 && std::memcmp(prefix.data(), "MThd", 4) == 0)
+		return stream_kind::midi;
+
+	static constexpr std::array<std::uint8_t, 6> xz_magic
+	{0xFD, 0x37, 0x7A, 0x58, 0x5A, 0x00};
+	static constexpr std::array<std::uint8_t, 6> seven_zip_magic
+	{0x37, 0x7A, 0xBC, 0xAF, 0x27, 0x1C};
+	static constexpr std::array<std::uint8_t, 3> gzip_magic
+	{0x1F, 0x8B, 0x08};
+	static constexpr std::array<std::uint8_t, 3> bzip_magic
+	{'B', 'Z', 'h'};
+
+	if (prefix.size() >= xz_magic.size() &&
+		std::equal(xz_magic.begin(), xz_magic.end(), prefix.begin()))
+		return stream_kind::archive;
+	if (prefix.size() >= seven_zip_magic.size() &&
+		std::equal(seven_zip_magic.begin(), seven_zip_magic.end(), prefix.begin()))
+		return stream_kind::archive;
+	if (prefix.size() >= gzip_magic.size() &&
+		std::equal(gzip_magic.begin(), gzip_magic.end(), prefix.begin()))
+		return stream_kind::archive;
+	if (prefix.size() >= bzip_magic.size() &&
+		std::equal(bzip_magic.begin(), bzip_magic.end(), prefix.begin()))
+		return stream_kind::archive;
+	if (prefix.size() >= 4 && prefix[0] == 'P' && prefix[1] == 'K' &&
+		((prefix[2] == 3 && prefix[3] == 4) ||
+			(prefix[2] == 5 && prefix[3] == 6) ||
+			(prefix[2] == 7 && prefix[3] == 8)))
+		return stream_kind::archive;
+
+	return stream_kind::unknown;
+}
+
+bool is_seven_zip_stream(const std::vector<std::uint8_t>& prefix)
+{
+	static constexpr std::array<std::uint8_t, 6> seven_zip_magic
+	{0x37, 0x7A, 0xBC, 0xAF, 0x27, 0x1C};
+	return prefix.size() >= seven_zip_magic.size() &&
+		std::equal(seven_zip_magic.begin(), seven_zip_magic.end(), prefix.begin());
+}
+
+std::vector<std::uint8_t> read_prefix(sequential_stream& input, std::size_t maximum)
+{
+	std::vector<std::uint8_t> prefix(maximum);
+	std::size_t count = 0;
+	while (count < maximum)
+	{
+		const auto received = input.read(prefix.data() + count, maximum - count);
+		if (received == 0)
+			break;
+		count += received;
+	}
+	prefix.resize(count);
+	return prefix;
+}
+
+class midi_stream_reader
+{
+public:
+	midi_stream_reader(
+		std::unique_ptr<sequential_stream> input,
+		const std::atomic<bool>* cancel_requested)
+		: input_(std::move(input)), cancel_requested_(cancel_requested)
+	{
+	}
+
+	void read_exact(void* destination, std::size_t size)
+	{
+		auto* bytes = static_cast<std::uint8_t*>(destination);
 		std::size_t count = 0;
-		while (count < maximum)
+		while (count < size)
 		{
-			const auto received = input.read(prefix.data() + count, maximum - count);
+			const auto received = input_->read(bytes + count, size - count);
 			if (received == 0)
-				break;
+				throw std::runtime_error("Unexpected end of decompressed MIDI stream");
 			count += received;
+			consumed_ += received;
 		}
-		prefix.resize(count);
-		return prefix;
 	}
 
-	class midi_stream_reader
+	std::uint8_t byte()
 	{
-	public:
-		midi_stream_reader(
-			std::unique_ptr<sequential_stream> input,
-			const std::atomic<bool>* cancel_requested)
-			: input_(std::move(input)), cancel_requested_(cancel_requested) {}
+		std::uint8_t value = 0;
+		read_exact(&value, 1);
+		return value;
+	}
 
-		void read_exact(void* destination, std::size_t size)
+	void skip(std::uint64_t count)
+	{
+		std::array<std::uint8_t, 1u << 15> scratch{};
+		while (count > 0)
 		{
-			auto* bytes = static_cast<std::uint8_t*>(destination);
-			std::size_t count = 0;
-			while (count < size)
-			{
-				const auto received = input_->read(bytes + count, size - count);
-				if (received == 0)
-					throw std::runtime_error("Unexpected end of decompressed MIDI stream");
-				count += received;
-				consumed_ += received;
-			}
+			if (cancel_requested_ &&
+				cancel_requested_->load(std::memory_order_acquire))
+				throw std::runtime_error("Compressed MIDI preparation was cancelled");
+			const auto amount = static_cast<std::size_t>((std::min<std::uint64_t>)(
+				count, scratch.size()));
+			read_exact(scratch.data(), amount);
+			count -= amount;
 		}
-
-		std::uint8_t byte()
-		{
-			std::uint8_t value = 0;
-			read_exact(&value, 1);
-			return value;
-		}
-
-		void skip(std::uint64_t count)
-		{
-			std::array<std::uint8_t, 1u << 15> scratch{};
-			while (count > 0)
-			{
-				if (cancel_requested_ &&
-					cancel_requested_->load(std::memory_order_acquire))
-					throw std::runtime_error("Compressed MIDI preparation was cancelled");
-				const auto amount = static_cast<std::size_t>((std::min<std::uint64_t>)(
-					count, scratch.size()));
-				read_exact(scratch.data(), amount);
-				count -= amount;
-			}
-		}
-
-		std::uint64_t consumed() const { return consumed_; }
-
-	private:
-		std::unique_ptr<sequential_stream> input_;
-		const std::atomic<bool>* cancel_requested_ = nullptr;
-		std::uint64_t consumed_ = 0;
-	};
-
-	std::uint16_t read_be16(const std::uint8_t* data)
-	{
-		return static_cast<std::uint16_t>((data[0] << 8) | data[1]);
 	}
 
-	std::uint32_t read_be32(const std::uint8_t* data)
-	{
-		return (static_cast<std::uint32_t>(data[0]) << 24) |
-			(static_cast<std::uint32_t>(data[1]) << 16) |
-			(static_cast<std::uint32_t>(data[2]) << 8) |
-			static_cast<std::uint32_t>(data[3]);
-	}
+	std::uint64_t consumed() const { return consumed_; }
 
-	std::uint64_t saturating_add(std::uint64_t left, std::uint64_t right)
-	{
-		if (right > (std::numeric_limits<std::uint64_t>::max)() - left)
-			return (std::numeric_limits<std::uint64_t>::max)();
-		return left + right;
-	}
+private:
+	std::unique_ptr<sequential_stream> input_;
+	const std::atomic<bool>* cancel_requested_ = nullptr;
+	std::uint64_t consumed_ = 0;
+};
 
-	std::uint64_t saturating_mul_div(
-		std::uint64_t value, std::uint64_t multiplier, std::uint64_t divisor)
-	{
-		if (divisor == 0)
-			return (std::numeric_limits<std::uint64_t>::max)();
-		const auto quotient = value / divisor;
-		const auto remainder = value % divisor;
-		if (multiplier != 0 && quotient > (std::numeric_limits<std::uint64_t>::max)() / multiplier)
-			return (std::numeric_limits<std::uint64_t>::max)();
-		const auto whole = quotient * multiplier;
-		const auto fraction = (remainder * multiplier) / divisor;
-		return saturating_add(whole, fraction);
-	}
+std::uint16_t read_be16(const std::uint8_t* data)
+{
+	return static_cast<std::uint16_t>((data[0] << 8) | data[1]);
+}
+
+std::uint32_t read_be32(const std::uint8_t* data)
+{
+	return (static_cast<std::uint32_t>(data[0]) << 24) |
+		(static_cast<std::uint32_t>(data[1]) << 16) |
+		(static_cast<std::uint32_t>(data[2]) << 8) |
+		static_cast<std::uint32_t>(data[3]);
+}
+
+std::uint64_t saturating_add(std::uint64_t left, std::uint64_t right)
+{
+	if (right > (std::numeric_limits<std::uint64_t>::max)() - left)
+		return (std::numeric_limits<std::uint64_t>::max)();
+	return left + right;
+}
+
+std::uint64_t saturating_mul_div(
+	std::uint64_t value, std::uint64_t multiplier, std::uint64_t divisor)
+{
+	if (divisor == 0)
+		return (std::numeric_limits<std::uint64_t>::max)();
+	const auto quotient = value / divisor;
+	const auto remainder = value % divisor;
+	if (multiplier != 0 && quotient > (std::numeric_limits<std::uint64_t>::max)() / multiplier)
+		return (std::numeric_limits<std::uint64_t>::max)();
+	const auto whole = quotient * multiplier;
+	const auto fraction = (remainder * multiplier) / divisor;
+	return saturating_add(whole, fraction);
+}
 }
 
 struct compressed_midi_event_source::impl
@@ -530,10 +534,10 @@ struct compressed_midi_event_source::impl
 
 	explicit impl(const impl& source)
 		: files(source.files), cache_path(source.cache_path), tracks(source.tracks),
-		  tempo_segments(source.tempo_segments), maximum_tick(source.maximum_tick),
-		  total_duration(source.total_duration), events_total(source.events_total),
-		  events_per_page(source.events_per_page),
-		  track_count_value(source.track_count_value), ppq(source.ppq), depth(source.depth)
+		tempo_segments(source.tempo_segments), maximum_tick(source.maximum_tick),
+		total_duration(source.total_duration), events_total(source.events_total),
+		events_per_page(source.events_per_page),
+		track_count_value(source.track_count_value), ppq(source.ppq), depth(source.depth)
 	{
 		cache_reader.open(cache_path, std::ios::binary);
 		if (!cache_reader)
@@ -630,7 +634,9 @@ struct compressed_midi_event_source::impl
 	{
 	public:
 		limited_track_reader(midi_stream_reader& reader, std::uint64_t remaining)
-			: reader_(reader), remaining_(remaining) {}
+			: reader_(reader), remaining_(remaining)
+		{
+		}
 
 		std::uint8_t byte()
 		{
@@ -879,9 +885,9 @@ struct compressed_midi_event_source::impl
 		auto found = std::upper_bound(
 			tempo_segments.begin(), tempo_segments.end(), tick,
 			[](std::uint64_t value, const tempo_segment& segment)
-			{
-				return value < segment.tick;
-			});
+		{
+			return value < segment.tick;
+		});
 		if (found != tempo_segments.begin())
 			--found;
 		return saturating_add(found->time_us,
@@ -1003,7 +1009,9 @@ struct compressed_midi_event_source::impl
 };
 
 compressed_midi_event_source::compressed_midi_event_source(std::unique_ptr<impl> implementation)
-	: impl_(std::move(implementation)) {}
+	: impl_(std::move(implementation))
+{
+}
 
 compressed_midi_event_source::~compressed_midi_event_source() = default;
 
