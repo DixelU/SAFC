@@ -21,7 +21,7 @@ struct simple_player_video_settings
 	// Media Foundation resamples that PCM for the AAC encoder when necessary.
 	std::uint32_t audio_sample_rate = 48000;
 	double tail_seconds = 2.0;
-	double visible_seconds = 4.2;
+	double visible_seconds = 0.25;
 	// Matches simple_player::draw_data: 0 = Naive OR, 1 = R/t OR, 0xFF = overlaps drawn.
 	std::uint8_t remove_overlaps = 0;
 };

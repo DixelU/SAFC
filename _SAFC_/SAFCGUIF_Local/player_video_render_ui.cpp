@@ -419,9 +419,9 @@ void refresh_controls()
 	if (auto field = render_ui<input_field>("AUDIO_RATE"))
 		field->safe_string_replace(std::to_string(draft_settings.audio_sample_rate));
 	if (auto field = render_ui<input_field>("TAIL_SECONDS"))
-		field->safe_string_replace(one_decimal(draft_settings.tail_seconds));
+		field->safe_string_replace(std::to_string(draft_settings.tail_seconds));
 	if (auto field = render_ui<input_field>("VISIBLE_SECONDS"))
-		field->safe_string_replace(one_decimal(draft_settings.visible_seconds));
+		field->safe_string_replace(std::to_string(draft_settings.visible_seconds));
 	if (auto summary = render_ui<text_box>("SYNCORE_SUMMARY"))
 		summary->safe_string_replace(syncore_summary());
 	status(render_running.load(std::memory_order_acquire) ? "Rendering..." : "Ready");
@@ -460,7 +460,7 @@ bool read_controls(simple_player_video_settings& settings)
 		settings.tail_seconds = std::stod(
 			render_ui<input_field>("TAIL_SECONDS")->get_current_input("2.0"));
 		settings.visible_seconds = std::stod(
-			render_ui<input_field>("VISIBLE_SECONDS")->get_current_input("4.2"));
+			render_ui<input_field>("VISIBLE_SECONDS")->get_current_input("0.25"));
 	}
 	catch (...)
 	{
@@ -733,14 +733,14 @@ void load_player_video_render_settings()
 		try
 		{
 			const auto value = std::stod(registry.GetStringValue(L"PLAYER_RENDER_TAIL_SECONDS"));
-			if (value >= 0.0 && value <= 60.0)
+			if (value > 0. && value <= 60.0)
 				saved_settings.tail_seconds = value;
 		}
 		catch (...) {}
 		try
 		{
 			const auto value = std::stod(registry.GetStringValue(L"PLAYER_RENDER_VISIBLE_SECONDS"));
-			if (value >= 0.25 && value <= 60.0)
+			if (value > 0. && value <= 60.0)
 				saved_settings.visible_seconds = value;
 		}
 		catch (...) {}
@@ -792,7 +792,7 @@ void initialize_player_video_render_window(
 		input_field::Type::NaturalNumbers, 4);
 	add_field("FPS", "FPS", "60", -125, -60, -12,
 		input_field::Type::NaturalNumbers, 3);
-	add_field("VISIBLE_SECONDS", "Visible sec", "4.2", -125, -60, -29,
+	add_field("VISIBLE_SECONDS", "Visible sec", "0.25", -125, -60, -29,
 		input_field::Type::FP_PositiveNumbers, 5);
 	add_field("VIDEO_KBPS", "Video kbps", "12000", 45, 110, 22,
 		input_field::Type::NaturalNumbers, 6);

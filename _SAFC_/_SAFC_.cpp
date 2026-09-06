@@ -4421,10 +4421,10 @@ void apply_simplayer_maximised_layout()
 	pause_btn->safe_change_position(-half_w + 10, row1_y);
 	stop_btn->safe_change_position(-half_w + 25, row1_y);
 	vls->safe_change_position(-half_w + 75, row1_y);
-	render_btn->safe_change_position(-half_w + 155, row1_y);
 	text->safe_change_position(0, row1_y - 20);
 	buf_sw->safe_change_position(half_w - 50, row1_y);
 
+	render_btn->safe_change_position(half_w - 70, row2_y + 10);
 	max_btn->safe_change_position(half_w - 30, row2_y + 10);
 	dev_list->safe_change_position(-half_w + 60, row2_y + 15);
 
@@ -4921,10 +4921,6 @@ void init(bool reinitialise_font = true)
 	(*window)["TEXT"] = new text_box("TIME", legacy_white, 0, 130 + moveable_window::window_header_size, 50, 175, 10, 0xFFFFFF1A, 0, 0, _Align(center | top), text_box::VerticalOverflow::cut);
 	(*window)["PAUSE"] = new button("\202", legacy_white, on_player_pause_toggle, -190, 180 - moveable_window::window_header_size, 10, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr);
 	(*window)["STOP"] = new button("\201", legacy_white, on_player_stop, -175, 180 - moveable_window::window_header_size, 10, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr);
-	(*window)["RENDER_VIDEO"] = new button("Render...", system_white,
-		open_player_video_render_settings, -62.5, 180 - moveable_window::window_header_size,
-		55, 10, 1, 0x7F3FFF3F, 0x7F3FFFFF, 0xFFFFFFFF,
-		0x7F3FFFFF, 0xFFFFFFFF, nullptr, "Render this MIDI as an MP4");
 
 	auto player_view = new player_viewer(0, -20);
 	(*window)["VIEW_LEN_SLIDER"] = new slider(slider::Orientation::horizontal, -130, 180 - moveable_window::window_header_size, 65, 14, 23, log2f(player_view->data->scroll_window_us), on_view_length_change, 0x808080FF, 0xFFFFFFFF, 0xAACFFFFF, 0x007FFFFF, 0x808080FF, 10, 4);
@@ -4948,7 +4944,14 @@ void init(bool reinitialise_font = true)
 	playback_seek_slider->fire_on_release = true;
 	(*window)["SEEK_TO"] = playback_seek_slider;
 
-	(*window)["MAXIMISE"] = new button("Maximise", system_white, switch_maximise, 175, 165 - moveable_window::window_header_size, 40, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0x007FFFFF, 0xFFFFFFFF, nullptr);
+	(*window)["RENDER_VIDEO"] = new button("Render", system_white,
+		open_player_video_render_settings, 135, 165 - moveable_window::window_header_size,
+		40, 10, 1, 0x7F3FFF3F, 0x7F3FFFFF, 0xFFFFFFFF,
+		0x7F3FFFFF, 0xFFFFFFFF, nullptr);
+	(*window)["MAXIMISE"] = new button("Maximise", system_white,
+		switch_maximise, 175, 165 - moveable_window::window_header_size,
+		40, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 
+		0x007FFFFF, 0xFFFFFFFF, nullptr);
 
 	(*window)["VIEW"] = player_view;
 
