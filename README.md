@@ -49,6 +49,14 @@ output gain, and the limiter. These preferences and the bank path are restored
 on the next run. Player playback, editor playback, and editor note audition all
 share the selected output. MP4 export uses the same SYNCore bank and synthesis
 preferences; its separate AAC rate controls only the encoded audio stream.
+MP4 export also uses the player's overlap removal mode (Overlaps drawn, Naive OR,
+or R/t OR). The mode is captured when rendering starts and applies to both the
+render preview and the exported video.
+
+Embedded file playback waits for MIDI queue capacity so dense bursts preserve
+held notes and later controller automation. Sustained overload can delay playback;
+Stop and Pause interrupt capacity waits. Natural completion releases the notes
+and lets their decay finish.
 
 ## SAST Tools 
 

@@ -13,6 +13,8 @@ enum class syncore_phase_mode : std::uint32_t
 	independent_bins,
 };
 
+enum class syncore_send_result { queued, full, unavailable };
+
 struct syncore_preferences
 {
 	std::uint32_t sample_rate = 48000;
@@ -55,6 +57,7 @@ public:
 		std::string& error);
 	void stop() noexcept;
 	bool send_short_message(std::uint32_t message) noexcept;
+	syncore_send_result try_send_short_message(std::uint32_t message) noexcept;
 	bool active() const noexcept;
 	syncore_runtime_status status() const;
 

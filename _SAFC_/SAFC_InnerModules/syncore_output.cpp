@@ -322,6 +322,29 @@ bool syncore_output::active() const noexcept
 	return impl_->active.load(std::memory_order_acquire);
 }
 
+syncore_send_result syncore_output::try_send_short_message(std::uint32_t message) noexcept
+{
+#ifdef SAFC_WITH_SYNCORE
+	std::shared_ptr<safsyn::WindowsSynth> synth;
+	{
+		std::lock_guard lock(impl_->synth_mutex);
+		if (!impl_->active.load(std::memory_order_acquire))
+			return syncore_send_result::unavailable;
+		synth = impl_->synth;
+	}
+	if (synth)
+		switch (synth->try_send_short_message(message))
+		{
+		case safsyn::MidiEnqueueResult::Queued: return syncore_send_result::queued;
+		case safsyn::MidiEnqueueResult::Full: return syncore_send_result::full;
+		case safsyn::MidiEnqueueResult::Unavailable: break;
+		}
+#else
+	(void)message;
+#endif
+	return syncore_send_result::unavailable;
+}
+
 syncore_runtime_status syncore_output::status() const
 {
 	auto result = impl_->status();

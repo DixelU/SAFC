@@ -24,6 +24,7 @@
 #include "../SAFC_InnerModules/simple_player.h"
 #include "../SAFC_InnerModules/simple_player_video_export.h"
 #include "player_video_render_ui.h"
+#include "simple_player_viewer.h"
 
 #include <background_worker.h>
 
@@ -651,6 +652,13 @@ void start_render()
 	status("Starting render...");
 	const auto bank_path = saved_syncore_bank_path;
 	const auto synth_preferences = saved_syncore_preferences;
+	// Snapshot the player's current mode for both the preview and exported frames.
+	if (auto window = (*global_window_handler)["SIMPLAYER"])
+	{
+		handleable_ui_part* part = (*window)["VIEW"];
+		if (auto view = dynamic_cast<player_viewer*>(part); view && view->data)
+			settings.remove_overlaps = view->data->remove_overlaps;
+	}
 	const auto accepted = worker_singleton<struct player_video_render_worker>::instance().push(
 		[filename, output_path, bank_path, synth_preferences, settings,
 			audio_events, visual_events](std::stop_token stop_token)

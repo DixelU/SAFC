@@ -1664,8 +1664,8 @@ struct simple_player
 				if (!state.send_buffer.empty())
 				{
 					auto& ev = state.send_buffer.front();
-					if (ev.short_msg != 0)
-						send_output_message(ev.short_msg);
+					if (ev.short_msg != 0 && !send_playback_message(ev.short_msg))
+						continue;
 					state.send_buffer.pop();
 					continue;
 				}
@@ -1753,8 +1753,8 @@ struct simple_player
 				continue;
 
 			// send the event
-			if (ev.short_msg != 0) [[likely]]
-				send_output_message(ev.short_msg);
+			if (ev.short_msg != 0 && !send_playback_message(ev.short_msg))
+				continue;
 
 			state.send_buffer.pop();
 		}
@@ -1894,7 +1894,17 @@ struct simple_player
 			handle_memory_failure(true);
 		}
 
-		all_notes_off();
+		if (syncore.active() && !state.stop_requested.load(std::memory_order_acquire))
+		{
+			// Natural EOF releases notes behind the queued ending automation.
+			// Panic/CC120 would cut off the piano's remaining release tail.
+			for (uint8_t channel = 0; channel < 16; ++channel)
+				if (!send_playback_message(make_smsg(0xB0 | channel, 64)) ||
+					!send_playback_message(make_smsg(0xB0 | channel, 123)))
+					break;
+		}
+		else
+			all_notes_off();
 		state.playing.store(false, std::memory_order_release);
 	}
 
@@ -3055,6 +3065,33 @@ private:
 		send_output_message(make_smsg(0xB0 | channel, 120));
 		send_output_message(make_smsg(0xB0 | channel, 121));
 		send_output_message(make_smsg(0xB0 | channel, 123));
+	}
+
+	bool send_playback_message(uint32_t message)
+	{
+		if (!syncore.active())
+			return send_output_message(message);
+		// A file sender can wait for capacity. Dropping a dense burst through
+		// the live-input API triggers panic recovery and erases held carriers.
+		while (!state.stop_requested.load(std::memory_order_acquire))
+		{
+			if (!state.seeking_ff.load(std::memory_order_acquire) &&
+				state.paused.load(std::memory_order_acquire))
+				return false;
+			switch (syncore.try_send_short_message(message))
+			{
+			case syncore_send_result::queued:
+				return true;
+			case syncore_send_result::unavailable:
+				set_last_output_error("SYNCore stopped while sending MIDI");
+				state.stop_requested.store(true, std::memory_order_release);
+				return false;
+			case syncore_send_result::full:
+				std::this_thread::sleep_for(std::chrono::milliseconds(1));
+				break;
+			}
+		}
+		return false;
 	}
 
 	bool send_output_message(uint32_t message) noexcept

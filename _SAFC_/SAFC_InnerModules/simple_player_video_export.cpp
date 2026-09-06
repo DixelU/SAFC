@@ -355,6 +355,7 @@ void configure_draw_data(simple_player::draw_data& data,
 	constexpr float black_relative_height = 22.5f / 40.0f;
 
 	data.enable_simulated_lag = false;
+	data.remove_overlaps = settings.remove_overlaps;
 	data.scroll_window_us = seconds_to_us(settings.visible_seconds);
 	data.reinit(virtual_width, notes_height, keyboard_height,
 		keyboard_height * black_relative_height, 0.0f);
