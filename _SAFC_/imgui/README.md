@@ -1,250 +1,252 @@
-# SAFC ImGui migration
+# SAFC with Dear ImGui
 
-This directory is the first executable slice of an ImGui frontend: MIDI playback,
-output selection, SYNCore settings, and the existing piano visualization. It is
-an optional `SAFCImGui` target. The existing SAFC executable remains the complete
-application while the other workflows migrate.
+The default CMake application now uses Dear ImGui for the complete SAFC workspace:
+project processing and merging, playback, the MIDI editor, analysis, transform
+maps, SYNCore settings, and MP4 rendering. `SAFC.exe` is the primary executable;
+`SAFCImGui.exe` runs the identical frontend at the former preview target path.
 
-![The running ImGui slice, paused after a tested seek](preview.png)
+![The SAFC project workspace](workspace.png)
 
-The intended destination replaces SAFGUIF's retained widget tree and event
-dispatch with Dear ImGui windows and standard controls. Here, **native widgets**
-means Dear ImGui's own buttons, inputs, sliders, tables, and popups. Windows file
-dialogs remain native OS dialogs.
+Folded headers, inset panels, partial outlines, and the three-spoke close symbol
+remain part of the window design. Ordinary controls are Dear ImGui buttons,
+inputs, sliders, tables, lists, checkboxes, and popups. Windows file pickers remain
+native OS dialogs. Specialized editors and plots use ImDrawList canvases; the
+existing falling-note player renderer is presented through an OpenGL framebuffer
+texture. No SAFGUIF widget tree or GLUT event loop is used by the new application.
 
-## What the first slice implements
+## Workflows
 
-- Folded headers, inset panel waists, deliberately interrupted outlines, dark
-  panels, and the three-spoke close symbol, drawn with public ImGui APIs.
-- Movable and resizable panels with native ImGui content clipping, scrolling,
-  focus, text editing, keyboard navigation, checkboxes, combos, and sliders.
-- Open or drop a regular `.mid`/`.midi`; open prepares a paused session. Play
-  starts it, Pause holds it, Stop retires it, and Play after stopping reopens and
-  starts it in one click.
-- A timeline slider that submits a seek when editing finishes.
-- Existing MIDI outputs and embedded SYNCore, with SF2/SFZ or built-in sine,
-  sample rate, buffer, cohort limit, thread count, gain, limiter, and phase mode.
-  **Apply to next playback** commits the draft to the session.
-- An owned playback service and worker. Workers publish data and never touch
-  ImGui objects. Output preparation and MIDI parsing run off the UI thread.
-- The existing piano renderer draws into a framebuffer texture. ImGui owns that
-  texture item's clipping and overlap with other windows.
+Use the workspace navigation to open or hide panels. Hiding a panel leaves its
+document and running job alive. Drag folded captions to move panels and corners
+to resize them; **Reset layout** restores the initial arrangement.
 
-Settings and layout are session-only in this preview. The registry settings in
-the complete application are not imported or overwritten. Archive playback,
-merging, file processing, the editor, analysis tools, and MP4 export still use
-the complete application. Closing a panel hides it; the navigation buttons
-reopen it. Closing the application shuts down playback and its audio output.
+- **Project:** add MIDI files with the picker or drag and drop, select several
+  files with Ctrl, and edit per-file or global PPQN, tempo, offset, selection,
+  processing groups, event filters, channel splitting, track collapse, running
+  status, and related processor settings. Selected files can receive copied
+  processing settings. The project retains stable file identities when other
+  entries are removed. Merge progress and cancellation are part of the same
+  workspace.
+- **Transform maps:** edit cut/transpose, velocity, and 14-bit pitch-bend maps
+  using native numeric controls and editable canvases. Copy/paste and map reset
+  operate on the corresponding map type. Processing jobs receive their own map
+  copies so later UI edits cannot change an in-flight merge.
+- **Player:** use normal MIDI files or compressed/nested archive sources; choose
+  a member when an archive contains several candidates. Select a MIDI device or
+  embedded SYNCore, play, pause, stop, seek, adjust the logarithmic visible-time
+  range, and choose simulated lag or the existing overlap modes.
+- **MIDI editor:** load/save/export MIDI, select tracks and draw channels, rename
+  tracks, draw/erase/move/resize/stretch notes, edit velocity and controllers,
+  copy/paste/duplicate, quantize, and undo/redo. Chopper, Flip, Claw, and LFO retain
+  Preview/Accept/Cancel transactions. Editor playback streams a snapshot of
+  unsaved edits into the shared player; its independent reader factory also
+  supports MP4 export without an intermediate MIDI save.
+- **Analysis:** inspect tempo, polyphony, and notes per second; zoom and pan in
+  ticks or seconds, query exact values, and convert between tick and time.
+  Collected timing can be applied to the corresponding project MIDI. Export
+  combined CSV/ATRAW data, tempo CSV, or notes-per-second CSV. Dense graph display
+  uses bounded envelopes while exact queries and exports retain source data.
+- **Video render:** configure dimensions, frame rate, visible time, tail,
+  H.264 video bitrate, AAC bitrate/rate, and SYNCore settings. Audio and video
+  render on owned workers with progress, preview frames, and cancellation.
+  Regular files, selected archive members, and editor snapshots use independent
+  audio/video readers.
+- **Settings:** apply processing defaults, choose appearance and interface scale,
+  configure SYNCore, and explicitly save preferences. **Project / releases** opens
+  the releases page; it replaces the former in-app executable updater.
+
+![The native ImGui MIDI editor](editor.png)
+
+### Editor input
+
+The default tool draws on empty space and moves existing notes. Drag a note's
+right edge to resize; hold Ctrl on that edge to stretch the selection. Shift-drag
+adds a selection rectangle, and Shift+Alt removes notes from the selection.
+Right-click erases an active-track note or switches to a visible ghost track.
+The separate Select and Erase tools are also available.
+
+Middle-drag pans time. The wheel zooms around the pointer; Shift+wheel scrolls
+time. The wheel over the keyboard zooms pitch, and right-dragging the keyboard
+scrolls pitch. Alt bypasses snap for supported note gestures. The controller
+lane paints with left-drag and creates a ramp with right-drag. Its targets are
+velocity, pitch bend, pan, channel volume, and tempo; LFO targets the first four.
+The tempo lane has an adjustable logarithmic range covering MIDI's full tempo
+limits, plus exact tick/BPM entry for inserting tempo points.
+
+| Shortcut | Action |
+| --- | --- |
+| Ctrl+Z / Ctrl+Y or Ctrl+Shift+Z | Undo / redo |
+| Ctrl+C / X / V / B | Copy / cut / paste / duplicate |
+| Ctrl+A / Ctrl+D | Select active track / deselect |
+| Shift+C / Alt+C | Select draw channel / assign it to selection |
+| Arrow keys | Move by grid step or semitone |
+| Ctrl+Up / Ctrl+Down | Transpose by an octave |
+| Delete / Q | Delete selection / quantize |
+| Space | Play from the visible start, or stop current playback |
+| Ctrl+O / Ctrl+S | Open / save as |
+| Alt+U / Y / W / O | Chopper / Flip / Claw / LFO |
+| Alt+V / Esc | Toggle ghost tracks / cancel a gesture |
+
+A completed tool preview becomes one undo entry only after Accept. Cancel restores
+its original notes, selection, and modified state. Note and controller gestures
+commit on release. Save writes to a temporary sibling and replaces the selected
+output only after successful export; a failed replacement keeps the old output
+and leaves the document marked modified. Export MIDI leaves the modified flag
+unchanged. Choose an output different from the currently memory-mapped source.
+
+![MIDI analysis in folded ImGui panels](analysis.png)
 
 ## Build and run
 
-Use the existing Windows C++23/static-CRT toolchain and vcpkg dependencies. The
-additional packages are `glfw3` and `imgui` with `glfw-binding` and
-`opengl3-binding`. This slice was developed against the locally installed
-Dear ImGui **1.91.9** and GLFW **3.4**; it does not download dependencies at build
-time or require an ImGui fork.
+The frontend currently requires Windows, a C++23-capable MSVC toolchain, and an
+OpenGL 3.3 compatibility context. Initialize the submodules and use the static CRT
+vcpkg triplet. The additional frontend dependencies are `glfw3` and `imgui` with
+`glfw-binding` and `opengl3-binding`; the complete dependency list remains in the
+repository's `dependencies.txt`. The implementation uses the installed standard
+Dear ImGui 1.91.9 and GLFW 3.4 APIs, without a docking fork.
 
-Run from an x64 Visual Studio developer shell:
+From an x64 Visual Studio developer shell:
 
 ```powershell
+git submodule update --init --recursive
 cmake -S . -B build/imgui -G Ninja `
   -DCMAKE_BUILD_TYPE=Release `
   -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake `
   -DVCPKG_TARGET_TRIPLET=x64-windows-static `
-  -DSAFC_BUILD_IMGUI_PREVIEW=ON -DBUILD_TESTING=ON
-cmake --build build/imgui --target SAFCImGui
-& ./build/imgui/_SAFC_/imgui/SAFCImGui.exe
+  -DSAFC_BUILD_IMGUI=ON -DBUILD_TESTING=ON
+cmake --build build/imgui --target SAFC SAFCImGui
+& ./build/imgui/SAFC.exe
 ```
 
-The `_SAFC_` CMake entry point supports the same option. The maintained legacy
-Visual Studio project does not acquire preview sources or ImGui dependencies.
-Configure `SAFC_ENABLE_SYNCORE=OFF` for a MIDI-device-only preview.
+`SAFC_BUILD_IMGUI` defaults to `ON`. `SAFC_BUILD_IMGUI_PREVIEW=ON` remains an
+accepted enabling alias for old build scripts. The `_SAFC_` CMake entry point
+supports the same options. `SAFC_ENABLE_SYNCORE=OFF` builds with external MIDI
+output and disables functionality that requires embedded synthesis.
 
-An optional filename argument opens a regular MIDI. The test mode is hidden and
-silent, produces a screenshot, and exits on a bounded timeout:
+The former interface is an optional compatibility target:
 
 ```powershell
-ctest --test-dir build/imgui -R safc-imgui-smoke --output-on-failure
+cmake -S . -B build/legacy -G Ninja `
+  -DCMAKE_BUILD_TYPE=Release `
+  -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake `
+  -DVCPKG_TARGET_TRIPLET=x64-windows-static `
+  -DSAFC_BUILD_IMGUI=OFF -DSAFC_BUILD_LEGACY_GUI=ON
+cmake --build build/legacy --target SAFCLegacy
 ```
 
-`--smoke <capture.bmp>` also writes `imgui-smoke.mid` beside the capture. Its
-transport checks use a silent output sink, not a physical audio device.
+The checked-in Visual Studio solution remains the classic SAFGUIF application;
+use CMake for the ImGui frontend. Both frontend executables share the same entry
+object and application library rather than maintaining separate implementations.
 
-## Ownership and module boundaries
+### JSON command line
 
-The recent `app/` translation-unit split is useful, but it has not yet separated
-UI ownership from application data. `app/app_state.h` imports the GUI umbrella,
-and `SAFGUIF/header_utils.h` still defines shared player/editor, window, font,
-and preference globals. Many worker callbacks find a widget by string ID and
-change it directly. Replacing widget constructors alone would retain that
-coupling.
+Passing a JSON configuration runs the processing workflow without creating the
+GUI. The same applies through either executable name:
 
-The destination should be explicit ownership with focused service references:
-
-```text
-Application
-  ProjectSession       files, processing options, merge defaults
-  PlaybackSession      player, selected source/output, playback worker
-  EditorSession        document, edit history, live playback source
-  JobServices          analysis / merge / export requests and results
-  PreferencesStore     durable defaults and registry migration
-  WorkspaceUi          open panels, selection, drafts, canvas gestures
-  PlatformRuntime      HWND / GL context / input / dialogs / frame loop
-
-Panel -> typed service command -> worker-owned request
-Panel <- immutable result or synchronized status snapshot
+```powershell
+& ./build/imgui/SAFC.exe ./merge.json
+& ./build/imgui/SAFC.exe --help
 ```
 
-The application is a composition root, not another globally accessible
-mega-structure. Panel functions receive the particular session or view state
-they need. CLI processing uses project/settings/job services without creating
-ImGui, a platform window, or a registry-dependent UI singleton.
+```json
+{
+  "global_ppq_override": 960,
+  "save_to": "C:\\MIDIs\\merged.mid",
+  "files": [
+    {
+      "filename": "C:\\MIDIs\\input.mid",
+      "offset": 0,
+      "selection_start": 0,
+      "selection_length": -1,
+      "piano_only": true
+    }
+  ]
+}
+```
 
-Rules for each migrated workflow:
+Relative paths resolve from the current working directory. `--help` describes
+all supported settings and ranges. Inputs and overrides are validated before a
+merge starts, signed 64-bit per-file tick values retain their integer precision,
+and output cannot replace an input MIDI. Normal CLI runs read saved defaults and
+do not write preferences. A MIDI filename argument opens the interactive
+workspace; the normal picker and drop path add MIDIs to the project.
 
-1. UI state belongs to the UI thread. Widgets bind to typed values, never serve
-   as the authoritative store for a setting or result.
-2. Use stable `FileId`/`JobId`/document identities rather than vector indices or
-   window-name strings. Completed work carries its identity/generation, so an
-   old result cannot update a newly selected file.
-3. Apply submits a validated value copy. Tool Preview/Cancel/Accept preserve
-   their existing transaction semantics. A worker receives immutable processing
-   settings, including copies of mutable key/volume/pitch maps.
-4. Status is polled once per UI frame. Replace watcher threads that update
-   labels, lists, and sliders with synchronized snapshots/results.
-5. Every asynchronous job has one owner, cancellation, and a terminal join.
-   Shutdown cancels jobs, stops the synth/player, joins workers, and only then
-   releases UI and graphics resources. Hiding a panel is separate from job
-   cancellation.
+## State, workers, and persistence
 
-The first `playback_session` proves this shape without importing `app_state.h`.
-It keeps request values on the UI thread, captures them before worker dispatch,
-sets busy before launch, and rejects replacement until the old run retires.
-Stop retires the output on an owned shutdown worker, so cancellation also reaches
-synth preparation and does not depend on frame polling. It preserves
-`simple_player::shutdown()` before joining a paused run. Shared playback-clock
-reads/writes are synchronized; the clock lock does not span rendering, output
-delivery, sleeps, or bulk buffer cleanup.
-The core still transitively includes `SAFGUIF/header_utils.h`; extracting
-portability helpers, graphics declarations, and diagnostic sinks is part of
-the final dependency removal. This preview does not claim that SAFGUIF has
-already been deleted.
+The frontend composition root in `main.cpp` owns sessions and passes focused
+references into panels. UI state is typed data, rather than being recovered from
+a global window-handler map. `platform_dialogs.h` carries callbacks bound to the
+native owner window, keeping platform handles out of panel models.
 
-## Preserve the visual identity
-
-The reference's identity is window geometry and layering: the raised central
-header fold, chamfered shoulders, inset vertical panels, interrupted side
-outlines, translucent border passes, slate-blue header, dark body, and compact
-three-spoke close mark. These come from
-[`moveable_fui_window.h`](../SAFGUIF/moveable_fui_window.h), particularly its
-`draw()` implementation. Spacing, fonts, control labels, and grouping can evolve.
-
-[`folded_theme.cpp`](folded_theme.cpp) recreates those decorations. The helper
-uses one native ImGui parent plus a content child. A small caption drag target
-and close button sit above the content. It is a skin and window helper, not a
-replacement widget framework. Call `end_folded_window()` even when begin returns
-false. Inside begin, the current window is the **content child**; use the helper's
-parent-geometry accessors if parent coordinates are needed.
-
-ImGui windows retain rectangular input bounds. The small visual cutouts do not
-pass clicks through to another window as SAFGUIF's polygon hit test can. This
-does not change the visible silhouette, but it is an explicit interaction
-difference. Exact polygon click-through would require a separately justified
-input solution. Header collapse and persistent layout are also outside this
-first slice.
-
-Use stock controls for generic interaction. Keep dedicated canvases for the
-piano roll, editable maps, and graphs. They should receive local coordinates
-from a focused/hovered ImGui item and respect capture while a text field is
-being edited. Reusing the piano OpenGL renderer avoids replacing dense MIDI
-rendering with one ImGui widget per note.
-
-## Backend decision
-
-This slice uses the existing installed GLFW platform backend and OpenGL 3
-renderer backend with an **OpenGL 3.3 compatibility context**. Compatibility is
-required by SAFC's retained fixed-function piano drawing. The new controls use
-the standard ImGui OpenGL renderer. No GLUT event loop or SAFGUIF window handler
-runs in the preview; GLUT remains a transitive core-header/build dependency.
-
-Official Dear ImGui documentation separates platform and renderer backends and
-recommends reusing the supplied implementations. It explicitly discourages GLUT
-for a new integration. The Win32 platform backend is also a reasonable final
-Windows-only choice; the preview's panel/service code does not depend on GLFW.
-See [upstream backend guidance](https://github.com/ocornut/imgui/blob/master/docs/BACKENDS.md).
-
-Docking and multiple OS viewports are separate future choices. The current
-floating panels preserve the familiar presentation without making either a
-prerequisite. Docking can change folded headers into tabs; multiple viewports
-also need GL-context and DPI validation. See
-[upstream docking setup](https://github.com/ocornut/imgui/wiki/Getting-Started#additional-code-to-enable-docking)
-and [multi-viewports](https://github.com/ocornut/imgui/wiki/Multi-Viewports).
-
-## Remaining migration, in dependency order
-
-The current source constructs 21 logical windows (including conditional SYNCore
-and framework alerts/prompts), 20 with folded chrome. Source inventory:
-
-| Workflow | Existing implementation | Migration |
-| --- | --- | --- |
-| Main file list, utilities, per-file and other settings | `app/ui.cpp`, `file_actions.cpp`, `file_properties.cpp` | Native table with stable selection IDs; typed drafts and project commands |
-| App settings and SYNCore | `app/settings.cpp`, `syncore_settings.cpp` | Shared validated preferences model and durable store; then replace registry callbacks |
-| Player and archive source | `app/player_controls.cpp`, `playback_source.cpp` | Extend PlaybackSession to compressed sources, progress/cancel, output restore, and source ownership |
-| Merge/progress container | `app/merger.cpp`, `midi_processor_visualiser.h` | Job-owned requests/progress; remove detached threads retaining widget references |
-| Analysis and graphs | `app/midi_analysis.cpp`, `graphing.h` | Analysis job snapshots, canvas selection, time maps and exports |
-| Cut/transpose and volume/pitch maps | `cut_and_transpose_piano.h`, `volume_graph.h` | Native controls around domain canvases; retain editing and copy/paste semantics |
-| MP4 export | `player_video_render_ui.cpp` | Export draft/command, existing exporter, progress snapshots and preview texture |
-| MIDI editor and its lanes | `app/editor.cpp`, `midi_editor_viewer.h` | Separate document/session from viewport/gesture state; port rendering and input together |
-| Chopper, Flip, Claw, LFO | `midi_editor_tools_ui.cpp` | Native controls preserving preview rollback and single accept commit |
-| Alerts, prompts, support | `windows_handler.h`, `app/ui.cpp` | Typed notifications/modal state; native ImGui popups |
-
-Suggested mergeable stages:
-
-1. **Playback and visual identity** — this slice; validate the look, window/input
-   behavior, core timing, and teardown on real hardware and representative MIDI.
-2. **Project and preferences** — extract pure project/defaults models and durable
-   preference storage, migrate the file list and form screens. Preserve CLI
-   behavior and existing registry keys. This provides the real application shell.
-3. **Jobs and domain tools** — migrate merge, analysis, maps, and alerts with
-   owned jobs. Eliminate GUI polling workers and detached widget-reference work.
-4. **Complete playback/export** — archives, editor playback handoff, MP4 render
-   draft/progress/preview, device restoration and output preparation UX.
-5. **Editor** — port its piano roll, track/channel selection, controller lanes,
-   keyboard gestures, undo/redo and tool preview transactions. This is the largest
-   interaction migration; validate it independently from ordinary forms.
-6. **Retire SAFGUIF** — move the chosen frontend into the normal entry point,
-   remove old UI construction/lookup/event code and obsolete globals, extract
-   remaining core portability/diagnostic/GL dependencies, remove GLUT when no
-   remaining core or renderer requires it, and align all maintained build files.
-
-Completion means all supported workflows have parity, not merely that the old
-include directory can be removed. Each stage should build and remain useful;
-temporary adapters must have a named removal stage.
-
-## Validation boundaries
-
-Validated on 2026-09-07:
-
-| Check | Result |
+| Owner | State and responsibilities |
 | --- | --- |
-| Root CMake entry, x64 Release, ImGui + SYNCore | Build passed; hidden smoke passed (3.88 s) |
-| Alternate `_SAFC_` CMake entry, ImGui without SYNCore | Build passed; hidden smoke passed (3.95 s) |
-| Existing SAFC executable | Release build passed |
-| Existing video-export regression | Passed (2.81 s) |
-| Captured UI | Visually inspected; folds, partial outlines, controls, piano texture, move/resize layout |
+| `project_session` | File identities, processing options, defaults, immutable merge snapshots, load/merge jobs |
+| `playback_session` | MIDI player, selected output/source, synthesis settings, playback/cancellation workers |
+| `editor_panel::impl` | MIDI document and history, canvas gestures, tool transactions, serialized load/save/preview jobs |
+| `analysis_panel::impl` | Analysis and export jobs, published result, plots and exact queries |
+| `video_export_panel::impl` | Offline renderer, captured settings, progress, cancellation, UI-context preview texture |
+| `mapping_panel` | Typed map editors, gestures, clipboard values |
+| `preferences_store` | Import and explicit persistence of application defaults |
 
-The SYNCore-disabled smoke intentionally skips its settings-checkbox assertion.
+Workers receive owned requests, publish data or synchronized snapshots, and never
+call ImGui or look up GUI objects. Completion is consumed on the UI thread,
+including while an editor panel is hidden. Shutdown cancels and joins workers,
+stops playback and the synth in their required order, and releases preview/GL
+resources before destroying the graphics context.
 
-The smoke run exercises hidden real GL rendering, a native checkbox click,
-caption dragging and resizing, silent regular-MIDI open/play/pause/seek/stop/reopen, cancellation
-immediately after dispatch, and shutdown during paused playback. It writes a
-rendered BMP for visual inspection and rejects GL errors.
+The shared processor/player/editor domain is retained. `app/project_model.*`
+contains project data and processing conversion; `SAFC_InnerModules/core_support.h`
+provides the core helpers and diagnostics that previously arrived through the
+SAFGUIF umbrella. The new `safc_imgui_core` target does not link the legacy widget
+implementation or GLUT. The optional legacy target still uses its existing app
+and SAFGUIF modules.
 
-It does not validate physical MIDI/WASAPI output, SF2/SFZ loading or startup
-cancellation latency on user assets,
-multi-monitor DPI changes, native file dialog/drag-and-drop interaction, or
-representative dense MIDI performance. These are explicit remaining acceptance
-checks. Existing player/export regressions should continue to run when shared
-playback code changes. Full migration additionally needs editor gesture/history,
-tool rollback, map editing, job cancellation, source routing, and CLI/persistence
-parity checks.
+Common application and SYNCore preferences are imported from
+`HKCU\Software\SAFC`. They are written only through explicit **Apply and save**
+or **Save preferences** actions. Window positions and sizes use Dear ImGui's
+separate `%LOCALAPPDATA%\SAFC\imgui.ini` file. Smoke and regression modes do not
+change registry preferences or the user's saved workspace layout.
+
+Merges use an owned settings snapshot and a unique sibling work directory. Only
+a completed output replaces the chosen destination; cancellation, input errors,
+and write failures preserve the previous destination. When **Remove intermediate
+files** is disabled, the processed files are retained in a reported
+`<output>.parts-<id>` directory. Their names include the input index, original
+filename, and editable intermediate suffix. Other runs clean up their work files.
+The saved preferences also import the existing player render settings.
+
+## Validation and current boundaries
+
+Build the default test targets, then run:
+
+```powershell
+cmake --build build/imgui
+ctest --test-dir build/imgui -R '^safc-imgui-' --output-on-failure
+```
+
+| CTest name | Coverage |
+| --- | --- |
+| `safc-imgui-smoke` | Hidden OpenGL workspace, transport/input and screenshot capture |
+| `safc-imgui-workflows` | Project/editor/analysis workflow integration and workspace capture |
+| `safc-imgui-editor` | Owned load, note/controller gestures, tools, save/reload, destination preservation, real ImGui mouse/keyboard events and silent playback |
+| `safc-imgui-analysis` | Tempo integration, graph peaks, exact CSV/ATRAW exports, native map rendering, cancellation and invalid input |
+| `safc-imgui-playback` | External sources, nested/archive member selection, cancellation, replay and actual short sine-based MP4 rendering |
+| `safc-imgui-cli` | JSON validation, integer precision, input identity and processing output |
+
+The hidden capture modes are `--smoke <capture.bmp>` and
+`--workflow-smoke <capture.bmp>`. Fixtures and generated outputs stay beside the
+test captures or in the test output directories. Transport tests explicitly use
+a silent output; MP4 regressions synthesize their own short sine audio offline.
+These checks do not establish audible quality on physical MIDI devices, every
+SF2/SFZ bank, or sustained performance on the user's dense MIDI collections.
+
+The editor retains the existing domain's format-1 save reconstruction and
+255-processed-track limit. Captured non-note events are retained, but original
+binary event layout/running-status formatting is not preserved. SMPTE division
+is not represented as native SMPTE editor timing. Loading, tool transforms,
+playback snapshot creation, and saving can still require substantial memory for
+large scores; the UI's viewport queries avoid copying the entire score every
+frame, but are not a guarantee for arbitrary black-MIDI density. MIDI source
+replacement during editor Save is deliberately rejected while that source is
+memory mapped. MP4 export remains dependent on Windows Media Foundation and an
+available OpenGL compatibility renderer.

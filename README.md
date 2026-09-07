@@ -22,9 +22,14 @@ Clone with `--recurse-submodules`, or run `git submodule update --init --recursi
 so the shared `utility` headers and SYNCore's nested utility dependency are
 available before building.
 
-Application code is organized under [`_SAFC_/app`](./_SAFC_/app/README.md), with
-separate modules for processing, playback, editing, UI, settings, and runtime
-startup. `_SAFC_.cpp` is the entry point.
+The default CMake application now uses a complete [Dear ImGui workspace](./_SAFC_/imgui/README.md)
+for processing, playback, editing, analysis, transform maps, and video export,
+while retaining SAFC's folded panels and partial outlines. `SAFC` is the primary
+target; `SAFCImGui` remains an equivalent executable for preview-era scripts.
+Shared domain code and the classic UI modules are organized under
+[`_SAFC_/app`](./_SAFC_/app/README.md). The checked-in Visual Studio solution still
+builds the classic interface; CMake can also build it with
+`SAFC_BUILD_LEGACY_GUI=ON` as `SAFCLegacy`.
 
 ## Embedded SYNCore output
 
@@ -37,7 +42,7 @@ git submodule update --init --recursive
 cmake -S _SAFC_ -B build -DSAFC_ENABLE_SYNCORE=ON \
   -DCMAKE_TOOLCHAIN_FILE=<vcpkg>/scripts/buildsystems/vcpkg.cmake \
   -DVCPKG_TARGET_TRIPLET=x64-windows-static
-cmake --build build --config Release --target _SAFC_
+cmake --build build --config Release --target SAFC
 ```
 
 `SAFC_ENABLE_SYNCORE` defaults to `ON`; set it to `OFF` for the traditional

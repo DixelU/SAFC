@@ -383,6 +383,7 @@
     <ClCompile Include="JSON\JSON.cpp" />
     <ClCompile Include="JSON\JSONValue.cpp" />
     <ClCompile Include="app\app_state.cpp" />
+    <ClCompile Include="app\project_model.cpp" />
     <ClCompile Include="app\cli_runtime.cpp" />
     <ClCompile Include="app\dialogs.cpp" />
     <ClCompile Include="app\editor.cpp" />

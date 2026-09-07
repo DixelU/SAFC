@@ -12,7 +12,7 @@ void add_files(const std::vector<std::wstring>& filenames)
 		if (filenames[i].empty())
 			continue;
 
-		g_data.files.push_back(file_settings(filenames[i]));
+		g_data.files.push_back(file_settings(filenames[i], default_bool_settings));
 
 		auto& lastFile = g_data.files.back();
 		if (lastFile.is_midi)
@@ -198,4 +198,3 @@ void on_rem_all_modules()
 	on_rem_vol_maps();
 	on_rem_cats();
 }
-

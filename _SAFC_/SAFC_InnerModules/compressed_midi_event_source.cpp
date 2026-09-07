@@ -121,52 +121,64 @@ class archive_entry_stream final : public sequential_stream
 public:
 	archive_entry_stream(std::unique_ptr<sequential_stream> input,
 		const compressed_midi_event_source::progress_callback& progress,
-		std::uint32_t depth)
-		: input_(std::move(input)), progress_(progress), depth_(depth)
+		std::uint32_t depth,
+		const compressed_midi_event_source::member_selector& select_member,
+		const std::atomic<bool>* cancel_requested)
+		: input_(std::move(input)), progress_(progress), depth_(depth),
+		  cancel_requested_(cancel_requested)
 	{
-		archive_ = archive_read_new();
-		if (!archive_)
-			throw std::bad_alloc();
-
-		archive_read_support_filter_all(archive_);
-		archive_read_support_format_all(archive_);
-		// XZ/GZip/BZip2 files are filters around one otherwise "raw" entry.
-		archive_read_support_format_raw(archive_);
-		if (input_->can_seek())
-			archive_read_set_seek_callback(archive_, &seek_callback);
-
-		const int opened = archive_read_open2(
-			archive_, this, nullptr, &read_callback, &skip_callback, nullptr);
-		if (opened != ARCHIVE_OK)
-			fail("Unable to open archive layer");
-
-		archive_entry* entry = nullptr;
-		for (;;)
+		try
 		{
-			const int result = archive_read_next_header(archive_, &entry);
-			if (result == ARCHIVE_EOF)
+			open_archive();
+			auto* entry = next_candidate();
+			if (!entry)
 				fail("Archive contains no playable file entry");
-			if (result < ARCHIVE_WARN)
-				fail("Unable to read archive entry");
-			if (archive_entry_filetype(entry) == AE_IFREG)
+			const bool raw =
+				(archive_format(archive_) & ARCHIVE_FORMAT_BASE_MASK) == ARCHIVE_FORMAT_RAW;
+			if (select_member && !raw)
 			{
-				const bool raw_stream =
-					(archive_format(archive_) & ARCHIVE_FORMAT_BASE_MASK) == ARCHIVE_FORMAT_RAW;
-				const char* path = archive_entry_pathname(entry);
-				if (raw_stream || is_supported_entry_name(path))
-					break;
+				std::vector<std::string> candidates;
+				do
+				{
+					const auto* name = archive_entry_pathname_utf8(entry);
+					if (!name) name = archive_entry_pathname(entry);
+					candidates.emplace_back(name && *name ? name : "(unnamed entry)");
+					if (progress_ && (candidates.size() == 1 || candidates.size() % 64 == 0))
+						progress_("Inspecting archive layer " + std::to_string(depth_) +
+							": " + std::to_string(candidates.size()) + " playable entries");
+					if (candidates.size() > 100000)
+						fail("Archive contains too many playable entries");
+				} while ((entry = next_candidate()) != nullptr);
+				const auto selected = candidates.size() == 1 ? 0 : select_member(candidates, depth_);
+				check_cancelled();
+				if (selected >= candidates.size())
+					throw std::runtime_error("Compressed MIDI preparation was cancelled");
+				archive_read_free(archive_);
+				archive_ = nullptr;
+				input_->seek(0, SEEK_SET);
+				open_archive();
+				for (std::size_t i = 0; i <= selected; ++i)
+				{
+					entry = next_candidate();
+					if (!entry) fail("Selected archive entry is no longer available");
+				}
 			}
-			archive_read_data_skip(archive_);
-		}
 
-		if (progress_)
+			if (progress_)
+			{
+				std::string message = "Opened archive layer " +
+					std::to_string(depth_) + "-" +
+					std::to_string(depth_ + decoded_layer_count() - 1);
+				if (const char* path = archive_entry_pathname(entry); path && *path)
+					message += ": " + std::string(path);
+				progress_(message);
+			}
+		}
+		catch (...)
 		{
-			std::string message = "Opened archive layer " +
-				std::to_string(depth_) + "-" +
-				std::to_string(depth_ + decoded_layer_count() - 1);
-			if (const char* path = archive_entry_pathname(entry); path && *path)
-				message += ": " + std::string(path);
-			progress_(message);
+			if (archive_) archive_read_free(archive_);
+			archive_ = nullptr;
+			throw;
 		}
 	}
 
@@ -197,6 +209,46 @@ public:
 	}
 
 private:
+	void check_cancelled() const
+	{
+		if (cancel_requested_ && cancel_requested_->load(std::memory_order_acquire))
+			throw std::runtime_error("Compressed MIDI preparation was cancelled");
+	}
+
+	void open_archive()
+	{
+		archive_ = archive_read_new();
+		if (!archive_) throw std::bad_alloc();
+		archive_read_support_filter_all(archive_);
+		archive_read_support_format_all(archive_);
+		archive_read_support_format_raw(archive_);
+		if (input_->can_seek())
+			archive_read_set_seek_callback(archive_, &seek_callback);
+		if (archive_read_open2(archive_, this, nullptr, &read_callback,
+			&skip_callback, nullptr) != ARCHIVE_OK)
+			fail("Unable to open archive layer");
+	}
+
+	archive_entry* next_candidate()
+	{
+		for (;;)
+		{
+			check_cancelled();
+			archive_entry* entry = nullptr;
+			const int result = archive_read_next_header(archive_, &entry);
+			if (result == ARCHIVE_EOF) return nullptr;
+			if (result < ARCHIVE_WARN) fail("Unable to read archive entry");
+			if (archive_entry_filetype(entry) == AE_IFREG)
+			{
+				const bool raw = (archive_format(archive_) & ARCHIVE_FORMAT_BASE_MASK) == ARCHIVE_FORMAT_RAW;
+				if (raw || is_supported_entry_name(archive_entry_pathname(entry)))
+					return entry;
+			}
+			if (archive_read_data_skip(archive_) < ARCHIVE_WARN)
+				fail("Unable to skip archive entry");
+		}
+	}
+
 	static bool is_supported_entry_name(const char* path)
 	{
 		if (!path || !*path)
@@ -232,6 +284,7 @@ private:
 		auto* self = static_cast<archive_entry_stream*>(client);
 		try
 		{
+			self->check_cancelled();
 			const auto count = self->input_->read(
 				self->input_buffer_.data(), self->input_buffer_.size());
 			*buffer = self->input_buffer_.data();
@@ -252,6 +305,7 @@ private:
 			la_int64_t skipped = 0;
 			while (skipped < request)
 			{
+				self->check_cancelled();
 				const auto amount = static_cast<std::size_t>((std::min)(
 					request - skipped,
 					static_cast<la_int64_t>(self->input_buffer_.size())));
@@ -287,6 +341,7 @@ private:
 	std::unique_ptr<sequential_stream> input_;
 	compressed_midi_event_source::progress_callback progress_;
 	std::uint32_t depth_ = 0;
+	const std::atomic<bool>* cancel_requested_ = nullptr;
 	archive* archive_ = nullptr;
 	std::array<std::uint8_t, archive_input_buffer_size> input_buffer_{};
 	std::string callback_error_;
@@ -515,8 +570,8 @@ struct compressed_midi_event_source::impl
 		std::uint32_t tempo = 500000;
 	};
 
-	explicit impl(progress_callback callback, const std::atomic<bool>* cancellation)
-		: progress(std::move(callback)), cancel_requested(cancellation)
+	explicit impl(progress_callback callback, const std::atomic<bool>* cancellation, member_selector selector)
+		: progress(std::move(callback)), select_member(std::move(selector)), cancel_requested(cancellation)
 	{
 		files = std::make_shared<temporary_files>();
 		wchar_t temporary_directory[MAX_PATH + 1]{};
@@ -578,7 +633,7 @@ struct compressed_midi_event_source::impl
 		if (!output)
 			throw std::runtime_error("Unable to open the seekable nested-archive cache");
 
-		report("Caching compressed inner 7z layer for random access");
+		report("Caching compressed inner archive for random access");
 		std::array<std::uint8_t, archive_input_buffer_size> buffer{};
 		for (;;)
 		{
@@ -618,11 +673,11 @@ struct compressed_midi_event_source::impl
 				throw std::runtime_error("The selected file does not contain a recognised MIDI/archive stream");
 			if (depth >= maximum_archive_depth)
 				throw std::runtime_error("Archive nesting exceeds the safety limit of 16 layers");
-			if (seven_zip && !input->can_seek())
+			if ((seven_zip || select_member) && !input->can_seek())
 				input = materialize_seekable_archive(std::move(input));
 
 			auto archive_stream = std::make_unique<archive_entry_stream>(
-				std::move(input), progress, depth + 1);
+				std::move(input), progress, depth + 1, select_member, cancel_requested);
 			depth += archive_stream->decoded_layer_count();
 			if (depth > maximum_archive_depth)
 				throw std::runtime_error("Archive nesting exceeds the safety limit of 16 layers");
@@ -989,6 +1044,7 @@ struct compressed_midi_event_source::impl
 	}
 
 	progress_callback progress;
+	member_selector select_member;
 	const std::atomic<bool>* cancel_requested = nullptr;
 	std::shared_ptr<temporary_files> files;
 	std::wstring cache_path;
@@ -1019,11 +1075,12 @@ std::shared_ptr<compressed_midi_event_source> compressed_midi_event_source::open
 	const std::wstring& filename,
 	progress_callback progress,
 	const std::atomic<bool>* cancel_requested,
-	std::string& error)
+	std::string& error,
+	member_selector select_member)
 {
 	try
 	{
-		auto implementation = std::make_unique<impl>(std::move(progress), cancel_requested);
+		auto implementation = std::make_unique<impl>(std::move(progress), cancel_requested, std::move(select_member));
 		auto stream = implementation->unwrap(filename);
 		implementation->parse_midi(std::move(stream));
 		implementation->build_tempo_map();

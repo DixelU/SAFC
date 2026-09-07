@@ -9,6 +9,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <vector>
 
 /**
  * Playback source for a MIDI hidden behind one or more archive/compression
@@ -29,6 +30,11 @@ class compressed_midi_event_source final : public playback_event_source
 {
 public:
 	using progress_callback = std::function<void(const std::string&)>;
+	// Called on the preparation worker only when a container has multiple
+	// playable entries. Return an entry index, or size() to cancel. Each nested
+	// container is selected independently; existing callers keep first-entry behavior.
+	using member_selector = std::function<std::size_t(
+		const std::vector<std::string>&, std::uint32_t)>;
 
 	/**
 	 * Prepare an archive (or a plain MIDI, useful for equivalence testing).
@@ -38,7 +44,8 @@ public:
 		const std::wstring& filename,
 		progress_callback progress,
 		const std::atomic<bool>* cancel_requested,
-		std::string& error);
+		std::string& error,
+		member_selector select_member = {});
 
 	~compressed_midi_event_source() override;
 

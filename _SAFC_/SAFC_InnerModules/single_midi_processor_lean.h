@@ -10,7 +10,7 @@
 #include <memory>
 
 #include "midi_file_reader.h"
-#include "../SAFGUIF/header_utils.h"
+#include "core_support.h"
 
 #include "single_midi_processor_2.h"
 
@@ -49,9 +49,15 @@ struct single_midi_processor_lean
 		std::uint64_t flushed = 0;
 		std::ofstream::pos_type mtrk_start;
 		bool header_written = false;
+		const std::atomic_bool* cancellation = nullptr;
 
-		track_writer(std::vector<base_type>& buf, std::ofstream& os)
-			: buffer(buf), out(os), mtrk_start(os.tellp()) {}
+		track_writer(std::vector<base_type>& buf, std::ofstream& os, const std::atomic_bool* cancel = nullptr)
+			: buffer(buf), out(os), mtrk_start(os.tellp()), cancellation(cancel) {}
+
+		void check_cancelled() const
+		{
+			if (cancellation && cancellation->load(std::memory_order_relaxed)) throw midi_processing_cancelled{};
+		}
 
 		FORCEDINLINE void push(base_type b)
 		{
@@ -62,6 +68,7 @@ struct single_midi_processor_lean
 
 		void commit_buffer()
 		{
+			check_cancelled();
 			if (!header_written)
 			{
 				base_type hdr[8] = { 'M','T','r','k', 0, 0, 0, 0 };
@@ -192,6 +199,7 @@ struct single_midi_processor_lean
 		{
 			while (delta > deltatime_limit) [[unlikely]]
 			{
+				w.check_cancelled();
 				push_vlv(deltatime_limit, w);
 				w.push(0xFF);
 				w.push(0x7F);
@@ -268,7 +276,7 @@ struct single_midi_processor_lean
 			return false;
 		}
 
-		track_writer writer(track_buffer, out);
+		track_writer writer(track_buffer, out, &buffers.cancel_requested);
 
 		tick_type current_tick = 0;
 		tick_type previous_tick = 0;
@@ -506,13 +514,18 @@ struct single_midi_processor_lean
 
 	static void sync_processing(processing_data& data, message_buffers& loggers)
 	{
+		message_buffers::processing_guard completion{loggers};
+		loggers.check_cancelled();
 		loggers.processing = true;
 
 		std::vector<base_type> track(track_writer::capacity); // 1 MiB fixed buffer
 
 		midi_file_reader file_input(data.filename);
-		std::ofstream file_output(data.filename + data.postfix,
+		file_input.set_cancellation(&loggers.cancel_requested);
+		if (!file_input.is_open() || file_input.size() < 14) throw std::runtime_error("Cannot read MIDI input");
+		std::ofstream file_output(data.output_path(),
 			std::ios::binary | std::ios::out);
+		file_output.exceptions(std::ios::failbit | std::ios::badbit);
 
 		for (int i = 0; i < 12 && file_input.good(); ++i)
 			file_output.put(read_midi_byte(file_input));
@@ -527,6 +540,7 @@ struct single_midi_processor_lean
 
 		while (file_input.good() && !reached_eof)
 		{
+			loggers.check_cancelled();
 			const bool processed = process_track(
 				file_input,
 				file_output,
@@ -542,10 +556,12 @@ struct single_midi_processor_lean
 			(*loggers.log) << log_event{log_event_type::tracks_processed, (uint64_t)tracks_written, 1};
 		}
 
+		if (file_input.failed()) throw std::runtime_error("MIDI input read failed");
 		file_input.close();
 		file_output.seekp(10, std::ios::beg);
 		file_output.put(char(tracks_written >> 8));
 		file_output.put(char(tracks_written & 0xFF));
+		file_output.flush();
 		file_output.close();
 
 		data.tracks_count = tracks_written;

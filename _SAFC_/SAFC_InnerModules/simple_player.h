@@ -3,6 +3,8 @@
 #define SAFC_SIMPLE_PLAYER
 
 #include "Windows.h"
+#include <GL/gl.h>
+#include "core_support.h"
 
 #include <vector>
 #include <string>

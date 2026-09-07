@@ -17,7 +17,7 @@
 #include <syncstream>
 
 #include "midi_file_reader.h"
-#include "../SAFGUIF/header_utils.h"
+#include "core_support.h"
 #include <function_ref.h>
 #include <polyline_converter.h>
 #include "cut_and_transpose.h"
@@ -275,6 +275,22 @@ struct single_midi_processor_2
 		std::atomic_uint64_t last_input_position;
 		std::atomic_bool processing;
 		std::atomic_bool finished;
+		std::atomic_bool cancel_requested{false};
+
+		void check_cancelled() const
+		{
+			if (cancel_requested.load(std::memory_order_relaxed)) throw midi_processing_cancelled{};
+		}
+
+		struct processing_guard
+		{
+			message_buffers& buffers;
+			~processing_guard()
+			{
+				buffers.processing.store(false, std::memory_order_release);
+				buffers.finished.store(true, std::memory_order_release);
+			}
+		};
 
 		using logger_t = singleline_logger;
 
@@ -400,6 +416,13 @@ struct single_midi_processor_2
 		settings_obj settings;
 		std::wstring filename;
 		std::wstring postfix;
+		// New frontends can keep intermediate files in a job-owned directory.
+		// An empty override preserves the legacy filename+postfix convention.
+		std::wstring output_filename;
+		std::wstring output_path() const
+		{
+			return output_filename.empty() ? filename + postfix : output_filename;
+		}
 
 		std::string appearance_filename;
 		std::atomic_uint64_t tracks_count;
@@ -409,13 +432,25 @@ struct single_midi_processor_2
 		std::vector<base_type>& vec,
 		const std::vector<base_type>::iterator& beg, 
 		const std::vector<base_type>::iterator& end, 
-		std::ostream& out) {
-		out.write(((char*)vec.data()) + (beg - vec.begin()), end - beg);
+		std::ostream& out, const std::atomic_bool* cancel = nullptr) {
+		if (beg == end) return;
+		const auto* bytes = reinterpret_cast<const char*>(vec.data()) + (beg - vec.begin());
+		auto size = end - beg;
+		if (!cancel) { out.write(bytes, size); return; }
+		while (size > 0)
+		{
+			if (cancel->load(std::memory_order_relaxed)) throw midi_processing_cancelled{};
+			const auto count = (std::min)(size, static_cast<decltype(size)>(1 << 20));
+			out.write(bytes, count);
+			bytes += count;
+			size -= count;
+		}
 	}
 
-	FORCEDINLINE static void ostream_write(std::vector<base_type>& vec, std::ostream& out)
+	FORCEDINLINE static void ostream_write(std::vector<base_type>& vec, std::ostream& out,
+		const std::atomic_bool* cancel = nullptr)
 	{
-		out.write(((char*)vec.data()), vec.size());
+		ostream_write(vec, vec.begin(), vec.end(), out, cancel);
 	}
 
 	FORCEDINLINE static uint8_t push_vlv(uint32_t value, std::vector<base_type>& vec)
@@ -669,7 +704,7 @@ struct single_midi_processor_2
 			return false;
 
 		const auto back_note_event_inserter =
-		[](decltype(current_polyphony)& current_polyphony, 
+		[&buffers](decltype(current_polyphony)& current_polyphony,
 			decltype(current_tick)& current_tick, 
 			decltype(data_buffer)& data_buffer) {
 			for (size_t idx = 0; idx < current_polyphony.size(); idx++)
@@ -680,6 +715,7 @@ struct single_midi_processor_2
 
 				while (cur_note_stack.size())
 				{
+					buffers.check_cancelled();
 					auto note_ref_idx = cur_note_stack.back();
 
 					const auto current_index = data_buffer.size();
@@ -964,6 +1000,7 @@ struct single_midi_processor_2
 
 		while (i < size)
 		{
+			buffers.check_cancelled();
 			std::size_t di = 0;
 
 			if (i + 8 >= size) [[unlikely]]
@@ -1035,6 +1072,7 @@ struct single_midi_processor_2
 
 		while (i < size)
 		{
+			buffers.check_cancelled();
 			metasize_type di = 0;
 
 			if (i + 8 >= size) // [[unlikely]]
@@ -1056,7 +1094,13 @@ struct single_midi_processor_2
 
 		(*buffers.log) << log_event{log_event_type::sorting_buffer, data_pointers.size()};
 
-		std::sort(data_pointers.begin(), data_pointers.end());
+		std::size_t comparisons = 0;
+		std::sort(data_pointers.begin(), data_pointers.end(),
+			[&buffers, &comparisons](const auto& a, const auto& b)
+			{
+				if ((++comparisons & 4095) == 0) buffers.check_cancelled();
+				return a < b;
+			});
 
 		(*buffers.log) << log_event{log_event_type::copying_buffer, data_pointers.size()};
 
@@ -1064,6 +1108,7 @@ struct single_midi_processor_2
 		sorted_data_buffer.reserve(data_buffer.size());
 		for (auto& el : data_pointers)
 		{
+			buffers.check_cancelled();
 			copy_back(
 				sorted_data_buffer,
 				data_buffer.begin() + el.pointer,
@@ -1640,7 +1685,7 @@ struct single_midi_processor_2
 		{
 			data.reserve(size);
 		}
-		inline void dump(std::ostream& out, bool disallow_empty_tracks)
+		inline void dump(std::ostream& out, bool disallow_empty_tracks, const std::atomic_bool* cancel = nullptr)
 		{
 			if (disallow_empty_tracks && data.empty())
 				return;
@@ -1664,7 +1709,7 @@ struct single_midi_processor_2
 			header[7] = (size_plus_ending) & 0xFF;
 
 			out.write((const char*) &header[0], sizeof(header));
-			ostream_write(data, out);
+			ostream_write(data, out, cancel);
 			if (fill_empty_track_with_at_least_one_event && data.empty())
 				out.write((const char*)&placeholder[0], sizeof(placeholder));
 			out.write((const char*)&ending[0], sizeof(ending));
@@ -1707,10 +1752,10 @@ struct single_midi_processor_2
 				channel = last_channel;
 			return data[channel].get_tick(channel);
 		}
-		inline void dump(std::ostream& out, bool disallow_empty_tracks)
+		inline void dump(std::ostream& out, bool disallow_empty_tracks, const std::atomic_bool* cancel = nullptr)
 		{
 			for (auto& singleData : data)
-				singleData.dump(out, disallow_empty_tracks);
+				singleData.dump(out, disallow_empty_tracks, cancel);
 		}
 		inline void reserve(uint64_t size)
 		{
@@ -1857,6 +1902,7 @@ struct single_midi_processor_2
 
 		while (i < size)
 		{
+			buffers.check_cancelled();
 			std::size_t di = 0;
 
 			if (i + 8 >= size) [[unlikely]]
@@ -1892,6 +1938,7 @@ struct single_midi_processor_2
 				{
 					while (delta > deltatime_standard_limit) [[unlikely]]
 					{
+						buffers.check_cancelled();
 						auto current_delta = (std::min<decltype(delta)>)(deltatime_standard_limit, delta);
 
 						push_vlv_s(current_delta, track_data);
@@ -1968,6 +2015,8 @@ struct single_midi_processor_2
 	template<bool channels_split>
 	static void sync_processing(processing_data& data, message_buffers& loggers)
 	{
+		message_buffers::processing_guard completion{loggers};
+		loggers.check_cancelled();
 		loggers.processing = true;
 
 		std::vector<std::vector<tick_type>> polyphony_stacks(4096);
@@ -1985,7 +2034,10 @@ struct single_midi_processor_2
 		auto filter_iters = make_filter_bounding_iters(filter_bundle.second);
 
 		midi_file_reader file_input(data.filename);
-		std::ofstream file_output(data.filename + data.postfix, std::ios::binary | std::ios::out);
+		file_input.set_cancellation(&loggers.cancel_requested);
+		if (!file_input.is_open() || file_input.size() < 14) throw std::runtime_error("Cannot read MIDI input");
+		std::ofstream file_output(data.output_path(), std::ios::binary | std::ios::out);
+		file_output.exceptions(std::ios::failbit | std::ios::badbit);
 
 		for (int i = 0; i < 12 && file_input.good(); i++)
 			file_output.put(read_midi_byte(file_input));
@@ -2000,6 +2052,7 @@ struct single_midi_processor_2
 
 		while (file_input.good())
 		{
+			loggers.check_cancelled();
 			if(!data.settings.proc_details.whole_midi_collapse)
 				track_buffers.data_buffer.clear();
 
@@ -2062,7 +2115,7 @@ struct single_midi_processor_2
 			if (data_buffer_is_dumpable)
 			{
 				track_counter += current_count;
-				write_buffer.dump(file_output, data.settings.proc_details.remove_empty_tracks);
+				write_buffer.dump(file_output, data.settings.proc_details.remove_empty_tracks, &loggers.cancel_requested);
 				write_buffer.clear();
 			}
 
@@ -2070,10 +2123,12 @@ struct single_midi_processor_2
 			(*loggers.log) << log_event{log_event_type::tracks_processed, (uint64_t)track_counter, (uint64_t)current_count};
 		}
 
+		if (file_input.failed()) throw std::runtime_error("MIDI input read failed");
 		file_input.close();
 		file_output.seekp(10, std::ios::beg);
 		file_output.put(track_counter >> 8);
 		file_output.put(track_counter & 0xFF);
+		file_output.flush();
 		file_output.close();
 
 		data.tracks_count = track_counter;

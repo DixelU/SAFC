@@ -3157,6 +3157,14 @@ public:
 	bool is_file_loaded() const { return is_loaded; }
 	bool is_modified() const { return is_dirty; }
 
+	// An owner that writes to a temporary file may clear the dirty flag only
+	// after it successfully installs that file as the user's destination.
+	void mark_saved()
+	{
+		std::lock_guard<std::recursive_mutex> lock(editor_mutex);
+		is_dirty = false;
+	}
+
 	std::vector<piano_note> get_all_notes() const
 	{
 		std::lock_guard<std::recursive_mutex> lock(editor_mutex);

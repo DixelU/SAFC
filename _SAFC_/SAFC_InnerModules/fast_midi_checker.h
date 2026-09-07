@@ -5,6 +5,7 @@
 #include <fstream>
 #include <string>
 #include <filesystem>
+#include "core_support.h"
 
 struct fast_midi_checker
 {
@@ -61,4 +62,4 @@ struct fast_midi_checker
 	}
 };
 
-#endif 
+#endif

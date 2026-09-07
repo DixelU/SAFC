@@ -1,1 +1,1 @@
-boost:x86-windows-static boost:x64-windows-static freeglut:x86-windows-static freeglut:x64-windows-static libarchive:x86-windows-static libarchive:x64-windows-static
+boost:x86-windows-static boost:x64-windows-static freeglut:x86-windows-static freeglut:x64-windows-static libarchive:x86-windows-static libarchive:x64-windows-static zstd:x86-windows-static zstd:x64-windows-static glfw3:x86-windows-static glfw3:x64-windows-static imgui[glfw-binding,opengl3-binding]:x86-windows-static imgui[glfw-binding,opengl3-binding]:x64-windows-static

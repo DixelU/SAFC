@@ -13,6 +13,12 @@
 
 #include "folded_theme.h"
 #include "playback_session.h"
+#include "project_panel.h"
+#include "editor_panel.h"
+#include "analysis_panel.h"
+#include "video_export_panel.h"
+#include "preferences.h"
+#include "cli.h"
 
 #include <algorithm>
 #include <array>
@@ -51,20 +57,48 @@ std::wstring wide(const char* text)
     return result;
 }
 
-std::wstring choose_file(GLFWwindow* window, bool bank)
+std::vector<std::wstring> file_dialog(GLFWwindow* window, const wchar_t* filter,
+    bool save = false, const std::wstring& initial = {}, const wchar_t* extension = nullptr, bool multiple = false)
 {
-    std::array<wchar_t, 32768> path{};
+    std::vector<wchar_t> path(262144);
+    if (!initial.empty()) wcsncpy_s(path.data(), path.size(), initial.c_str(), _TRUNCATE);
     OPENFILENAMEW dialog{sizeof(dialog)};
     dialog.hwndOwner = glfwGetWin32Window(window);
     dialog.lpstrFile = path.data();
     dialog.nMaxFile = static_cast<DWORD>(path.size());
-    dialog.lpstrFilter = bank ? L"Sound banks (*.sf2;*.sfz)\0*.sf2;*.sfz\0\0" : L"MIDI files (*.mid;*.midi)\0*.mid;*.midi\0\0";
-    dialog.lpstrTitle = bank ? L"Choose SYNCore sound bank" : L"Open MIDI";
-    dialog.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
-    if (GetOpenFileNameW(&dialog)) return path.data();
+    dialog.lpstrFilter = filter;
+    dialog.lpstrDefExt = extension;
+    dialog.Flags = OFN_EXPLORER | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR |
+        (save ? OFN_OVERWRITEPROMPT : OFN_FILEMUSTEXIST) | (multiple ? OFN_ALLOWMULTISELECT : 0);
+    if (save ? GetSaveFileNameW(&dialog) : GetOpenFileNameW(&dialog))
+    {
+        std::vector<std::wstring> result;
+        const std::filesystem::path first(path.data());
+        const auto* next = path.data() + wcslen(path.data()) + 1;
+        if (!multiple || !*next) result.push_back(first.wstring());
+        else while (*next) { result.push_back((first / next).wstring()); next += wcslen(next) + 1; }
+        return result;
+    }
     if (const auto error = CommDlgExtendedError())
         throw std::runtime_error("File dialog failed: " + std::to_string(error));
     return {};
+}
+
+ui::native_dialogs make_dialogs(GLFWwindow* window)
+{
+    constexpr auto midi = L"MIDI files (*.mid;*.midi)\0*.mid;*.midi\0\0";
+    constexpr auto any = L"MIDI and archives\0*.mid;*.midi;*.zip;*.7z;*.rar;*.gz;*.bz2;*.xz;*.zst;*.tar\0All files\0*.*\0\0";
+    constexpr auto bank = L"Sound banks (*.sf2;*.sfz)\0*.sf2;*.sfz\0\0";
+    auto one = [](std::vector<std::wstring> paths) { return paths.empty() ? std::wstring{} : paths.front(); };
+    ui::native_dialogs d;
+    d.open_midi = [=] { return one(file_dialog(window, midi)); };
+    d.open_any = [=] { return one(file_dialog(window, any)); };
+    d.open_bank = [=] { return one(file_dialog(window, bank)); };
+    d.add_midis = [=] { return file_dialog(window, midi, false, {}, nullptr, true); };
+    d.save_midi = [=](const std::wstring& name) { return one(file_dialog(window, midi, true, name, L"mid")); };
+    d.save_video = [=](const std::wstring& name) { return one(file_dialog(window, L"MPEG-4 video (*.mp4)\0*.mp4\0\0", true, name, L"mp4")); };
+    d.save_data = [=](const std::wstring& name) { return one(file_dialog(window, L"Analysis data\0*.csv;*.atraw\0All files\0*.*\0\0", true, name)); };
+    return d;
 }
 
 // Only the retained piano renderer needs a compatibility context. Its output is
@@ -153,7 +187,15 @@ public:
 
 struct workspace
 {
+    ui::native_dialogs dialogs;
+    ui::preferences_store preferences_store;
+    ui::application_preferences preferences;
     ui::playback_session playback;
+    ui::project_session project;
+    ui::analysis_panel analysis;
+    ui::editor_panel editor;
+    ui::video_export_panel video;
+    ui::project_panel project_view;
     std::wstring file, bank;
     std::string notice;
     syncore_preferences draft;
@@ -161,18 +203,56 @@ struct workspace
     float seek_position{};
     bool seek_editing{}, player_open = true, synth_open = true, reset_layout = true;
     bool focus_player{}, focus_synth{};
+    bool project_open = true, editor_open = false, analysis_open = false, video_open = false, settings_open = false;
+    bool simulate_lag = false, exit_prompt = false, exiting = false;
+    int overlap_mode = 0;
+    bool test_mode = false;
     ImVec2 player_position{}, player_size{}, limiter_center{};
+
+    workspace(ui::native_dialogs d, bool test)
+        : dialogs(std::move(d)), analysis(dialogs), editor(playback, dialogs), video(playback, dialogs),
+          project_view(project, analysis, dialogs), test_mode(test)
+    {
+        if (!test) preferences = preferences_store.load();
+        project.set_defaults(preferences);
+        bank = preferences.sound_bank; draft = preferences.synth;
+        playback.configure_synth(bank, draft);
+        video.set_settings(preferences.video);
+        const auto names = playback.device_names();
+        for (size_t i = 0; i < names.size(); ++i) if (names[i] == utf8(preferences.midi_device)) playback.select_device(i);
+        project_view.play = [this](std::wstring path) { open_file(std::move(path)); };
+        project_view.edit = [this](std::wstring path) { editor.open_file(std::move(path)); editor_open = true; ImGui::SetWindowFocus("MIDI editor"); };
+        project_view.show_analysis = [this] { analysis_open = true; ImGui::SetWindowFocus("MIDI analysis"); };
+        if (test) project_open = false;
+        else { player_open = synth_open = false; reset_layout = false; }
+    }
+
+    void save_preferences()
+    {
+        const auto& p = draft;
+        if (p.sample_rate < 8000 || p.sample_rate > 192000 || p.buffer_frames < 256 || p.buffer_frames > 1048576 ||
+            p.maximum_cohorts < 1 || p.maximum_cohorts > 1048576 || p.render_threads > 64 ||
+            !std::isfinite(p.output_gain_db) || p.output_gain_db < -60 || p.output_gain_db > 12)
+            throw std::runtime_error("Correct the SYNCore settings before saving preferences.");
+        preferences.sound_bank = bank; preferences.synth = draft;
+        preferences.video = video.settings();
+        if (!playback.snapshot().busy) playback.configure_synth(bank, draft);
+        const auto names = playback.device_names();
+        const auto selected = playback.selected_device();
+        if (selected < names.size()) preferences.midi_device = wide(names[selected].c_str());
+        project.set_defaults(preferences);
+        if (!test_mode) preferences_store.save(preferences);
+        notice = "Preferences saved.";
+    }
+
+    void shutdown()
+    {
+        video.shutdown(); editor.shutdown(); analysis.shutdown(); project.shutdown(); playback.shutdown();
+    }
 
     void open_file(std::wstring path, bool silent = false, bool start_paused = true)
     {
         if (path.empty()) return;
-        auto extension = std::filesystem::path(path).extension().wstring();
-        std::transform(extension.begin(), extension.end(), extension.begin(), [](wchar_t c) { return static_cast<wchar_t>(towlower(c)); });
-        if (extension != L".mid" && extension != L".midi")
-        {
-            notice = "This preview opens .mid and .midi files. Archive playback is available in SAFC.";
-            return;
-        }
         if (playback.open(path, silent, start_paused)) { file = std::move(path); notice.clear(); player_open = true; focus_player = true; }
         else notice = "Stop the current session before opening another MIDI.";
     }
@@ -180,26 +260,44 @@ struct workspace
 
 void render_workspace(workspace& app, piano_texture& piano, GLFWwindow* window)
 {
+    app.editor.poll();
     auto status = app.playback.snapshot();
     const auto display = ImGui::GetIO().DisplaySize;
     const float scale = ImGui::GetFontSize() / 17.f;
     auto* background = ImGui::GetBackgroundDrawList();
-    background->AddRectFilledMultiColor({0, 0}, display, IM_COL32(30, 42, 56, 255), IM_COL32(17, 47, 68, 255), IM_COL32(8, 25, 42, 255), IM_COL32(26, 33, 44, 255));
+    if (app.preferences.background == 1)
+        background->AddRectFilledMultiColor({0, 0}, display, IM_COL32(151, 111, 63, 255), IM_COL32(0, 120, 246, 255), IM_COL32(0, 120, 246, 255), IM_COL32(255, 135, 0, 255));
+    else background->AddRectFilledMultiColor({0, 0}, display, IM_COL32(30, 42, 56, 255), IM_COL32(17, 47, 68, 255), IM_COL32(8, 25, 42, 255), IM_COL32(26, 33, 44, 255));
     background->AddLine({0, 3}, {display.x * 0.29f, 3}, IM_COL32(242, 152, 49, 255), 3.f);
     background->AddLine({display.x * 0.29f, 3}, {display.x * 0.29f + 9, 12}, IM_COL32(242, 152, 49, 255), 3.f);
     background->AddText({24 * scale, 27 * scale}, IM_COL32(224, 239, 247, 255), "SAFC   /   MIDI WORKSTATION");
 
-    ImGui::SetNextWindowPos({display.x - 370 * scale, 19 * scale});
-    ImGui::SetNextWindowSize({354 * scale, 42 * scale});
+    ImGui::SetNextWindowPos({24 * scale, 48 * scale});
+    ImGui::SetNextWindowSize({display.x - 48 * scale, 32 * scale});
     ImGui::PushStyleVar(ImGuiStyleVar_WindowMinSize, {0, 0});
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, {0, 0});
     ImGui::Begin("Workspace navigation", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings);
     ImGui::PopStyleVar(2);
+    if (ImGui::Button("Project")) { app.project_open = true; ImGui::SetWindowFocus("SAFC project"); }
+    ImGui::SameLine();
+    if (ImGui::Button("Editor")) { app.editor_open = true; ImGui::SetWindowFocus("MIDI editor"); }
+    ImGui::SameLine();
+    if (ImGui::Button("Analysis")) { app.analysis_open = true; ImGui::SetWindowFocus("MIDI analysis"); }
+    ImGui::SameLine();
     if (ImGui::Button("Player")) { app.player_open = true; app.focus_player = true; }
     ImGui::SameLine();
     if (ImGui::Button("SYNCore")) { app.synth_open = true; app.focus_synth = true; }
     ImGui::SameLine();
-    if (ImGui::Button("Reset layout")) { app.reset_layout = true; app.player_open = app.synth_open = true; }
+    if (ImGui::Button("Video export")) { app.video_open = true; ImGui::SetWindowFocus("Player video render"); }
+    ImGui::SameLine();
+    if (ImGui::Button("Settings")) { app.settings_open = true; ImGui::SetWindowFocus("Application settings"); }
+    ImGui::SameLine();
+    if (ImGui::Button("Reset layout"))
+    {
+        app.reset_layout = true; app.player_open = app.synth_open = true;
+        ImGui::SetWindowPos("SAFC project", {24, 86}); ImGui::SetWindowSize("SAFC project", {1010, 700});
+        ImGui::SetWindowPos("MIDI editor", {80, 86}); ImGui::SetWindowSize("MIDI editor", {1180, 700});
+    }
     ImGui::End();
 
     const float gap = 22 * scale, top = 82 * scale;
@@ -209,10 +307,11 @@ void render_workspace(workspace& app, piano_texture& piano, GLFWwindow* window)
     const float left_width = split ? std::clamp(available * .67f, 450.f * scale, available - 330.f * scale) : display.x - 2 * gap;
     if (app.player_open)
     {
-        if (app.reset_layout)
+        if (app.reset_layout || !app.test_mode)
         {
-            ImGui::SetNextWindowPos({gap, top});
-            ImGui::SetNextWindowSize({left_width, std::max(420.f * scale, display.y - top - 54 * scale)});
+            const auto condition = app.reset_layout ? ImGuiCond_Always : ImGuiCond_FirstUseEver;
+            ImGui::SetNextWindowPos({gap, top}, condition);
+            ImGui::SetNextWindowSize({left_width, std::max(420.f * scale, display.y - top - 54 * scale)}, condition);
         }
         ImGui::SetNextWindowSizeConstraints({430 * scale, 340 * scale}, {FLT_MAX, FLT_MAX});
         if (app.focus_player) { ImGui::SetNextWindowFocus(); app.focus_player = false; }
@@ -222,18 +321,22 @@ void render_workspace(workspace& app, piano_texture& piano, GLFWwindow* window)
             ImGui::BeginDisabled(status.busy);
             if (ImGui::Button("Open MIDI..."))
             {
-                try { app.open_file(choose_file(window, false)); }
+                try { app.open_file(app.dialogs.open_any()); }
                 catch (const std::exception& error) { app.notice = error.what(); }
             }
             ImGui::EndDisabled();
             ImGui::SameLine();
-            ImGui::TextDisabled("%s", app.file.empty() ? "Drop a MIDI here to begin" : utf8(std::filesystem::path(app.file).filename().wstring()).c_str());
+            const auto playback_path = app.playback.current_path();
+            const std::string source_label = playback_path.empty()
+                ? (app.playback.current_source() ? "Editor snapshot" : "Open a MIDI or archive to begin")
+                : utf8(std::filesystem::path(playback_path).filename().wstring());
+            ImGui::TextDisabled("%s", source_label.c_str());
             ImGui::Spacing();
-            ImGui::BeginDisabled(app.file.empty() || status.stopping || (status.busy && !status.playing));
+            ImGui::BeginDisabled((app.file.empty() && !app.playback.current_source()) || status.stopping || (status.busy && !status.playing));
             if (ImGui::Button(status.playing && !status.paused ? "Pause" : "Play", {82 * scale, 0}))
             {
                 if (status.busy) app.playback.toggle_pause();
-                else app.open_file(app.file, false, false);
+                else if (!app.playback.restart()) app.open_file(app.file, false, false);
             }
             ImGui::EndDisabled();
             ImGui::SameLine();
@@ -259,7 +362,14 @@ void render_workspace(workspace& app, piano_texture& piano, GLFWwindow* window)
             size.x = std::max(1.f, size.x);
             ImGui::Image(piano.render(app.playback, size, app.visible_seconds), size, {0, 1}, {1, 0});
             ImGui::SetNextItemWidth(190 * scale);
-            ImGui::SliderFloat("Visible seconds", &app.visible_seconds, 0.25f, 5.f, "%.2f s", ImGuiSliderFlags_Logarithmic);
+            float viewport_power = std::log2(app.visible_seconds * 1000000.f);
+            char viewport_label[64]; snprintf(viewport_label, sizeof(viewport_label), "%.6g s", app.visible_seconds);
+            if (ImGui::SliderFloat("Visible seconds", &viewport_power, 0.f, 30.f, viewport_label)) app.visible_seconds = std::exp2(viewport_power) / 1000000.f;
+            ImGui::SameLine();
+            bool visuals_changed = ImGui::Checkbox("Simulate lag", &app.simulate_lag);
+            ImGui::SameLine(); ImGui::SetNextItemWidth(120 * scale);
+            visuals_changed |= ImGui::Combo("Overlap", &app.overlap_mode, "Naive removal\0Realtime removal\0Draw all\0");
+            if (visuals_changed) app.playback.set_visual_options(app.simulate_lag, static_cast<std::uint8_t>(app.overlap_mode));
             if (!status.error.empty()) ImGui::TextWrapped("%s", status.error.c_str());
             else if (!app.notice.empty()) ImGui::TextWrapped("%s", app.notice.c_str());
             else ImGui::TextDisabled("%s", status.message.c_str());
@@ -269,10 +379,11 @@ void render_workspace(workspace& app, piano_texture& piano, GLFWwindow* window)
 
     if (app.synth_open)
     {
-        if (app.reset_layout)
+        if (app.reset_layout || !app.test_mode)
         {
-            ImGui::SetNextWindowPos({split ? 2 * gap + left_width : gap, top});
-            ImGui::SetNextWindowSize({split ? available - left_width : display.x - 2 * gap, std::max(420.f * scale, display.y - top - 54 * scale)});
+            const auto condition = app.reset_layout ? ImGuiCond_Always : ImGuiCond_FirstUseEver;
+            ImGui::SetNextWindowPos({split ? 2 * gap + left_width : gap, top}, condition);
+            ImGui::SetNextWindowSize({split ? available - left_width : display.x - 2 * gap, std::max(420.f * scale, display.y - top - 54 * scale)}, condition);
         }
         ImGui::SetNextWindowSizeConstraints({330 * scale, 410 * scale}, {FLT_MAX, FLT_MAX});
         if (app.focus_synth) { ImGui::SetNextWindowFocus(); app.focus_synth = false; }
@@ -295,7 +406,7 @@ void render_workspace(workspace& app, piano_texture& piano, GLFWwindow* window)
             ImGui::TextWrapped("%s", app.bank.empty() ? "Built-in sine" : utf8(std::filesystem::path(app.bank).filename().wstring()).c_str());
             if (ImGui::Button("Choose SF2 / SFZ..."))
             {
-                try { if (auto path = choose_file(window, true); !path.empty()) app.bank = std::move(path); }
+                try { if (auto path = app.dialogs.open_bank(); !path.empty()) app.bank = std::move(path); }
                 catch (const std::exception& error) { app.notice = error.what(); }
             }
             ImGui::SameLine();
@@ -341,13 +452,69 @@ void render_workspace(workspace& app, piano_texture& piano, GLFWwindow* window)
             ImGui::EndDisabled();
             ImGui::Spacing();
             ImGui::TextWrapped("Stop playback before changing output settings.");
-            ImGui::TextDisabled("Settings are kept for this session.");
+            if (ImGui::Button("Save preferences"))
+            { try { app.save_preferences(); } catch (const std::exception& e) { app.notice = e.what(); } }
+            if (!app.notice.empty()) ImGui::TextWrapped("%s", app.notice.c_str());
             if (!app.playback.syncore_available()) ImGui::TextWrapped("This build does not include SYNCore.");
         }
         ui::end_folded_window();
     }
     app.reset_layout = false;
-    background->AddText({24 * scale, display.y - 29 * scale}, IM_COL32(136, 166, 187, 255), "ImGui preview  /  MIDI playback + SYNCore   |   Drag headers to move panels; drag corners to resize.");
+    if (app.project_open) app.project_view.draw(&app.project_open); else app.project.poll();
+    if (app.editor_open) app.editor.draw(&app.editor_open);
+    if (app.analysis_open) app.analysis.draw(&app.analysis_open);
+    if (app.video_open) app.video.draw(&app.video_open);
+    if (status.waiting_for_member)
+    {
+        ImGui::SetNextWindowSize({650, 390}, ImGuiCond_FirstUseEver);
+        bool choose_open = true;
+        if (ui::begin_folded_window("Choose archive member", &choose_open))
+        {
+            ImGui::Text("Archive layer %u", status.archive_layer);
+            ImGui::TextWrapped("Choose the MIDI or nested archive to open:");
+            for (size_t i = 0; i < status.archive_members.size(); ++i)
+            { ImGui::PushID(static_cast<int>(i)); if (ImGui::Selectable(status.archive_members[i].c_str())) app.playback.choose_archive_member(i); ImGui::PopID(); }
+            if (ImGui::Button("Cancel")) app.playback.stop();
+        }
+        ui::end_folded_window();
+        if (!choose_open) app.playback.stop();
+    }
+    if (app.settings_open)
+    {
+        ImGui::SetNextWindowSize({530, 700}, ImGuiCond_FirstUseEver);
+        if (ui::begin_folded_window("Application settings", &app.settings_open))
+        {
+            ImGui::SeparatorText("Defaults for new MIDIs");
+            ui::draw_processing_flags(app.preferences.processing_flags);
+            ImGui::Checkbox("Split by channel", &app.preferences.split_channels);
+            ImGui::Checkbox("Collapse tracks", &app.preferences.collapse_tracks);
+            ImGui::Checkbox("Apply offset after PPQN", &app.preferences.apply_offset_after);
+            ImGui::Checkbox("In-place merge", &app.preferences.inplace_merge);
+            ImGui::Checkbox("Running-status compression", &app.preferences.rsb_compression);
+            ImGui::Checkbox("Allow SysEx", &app.preferences.allow_sysex);
+            int threads = app.preferences.processing_threads;
+            if (ImGui::SliderInt("Processing threads", &threads, 1, 64)) app.preferences.processing_threads = static_cast<std::uint16_t>(threads);
+            ImGui::SeparatorText("Appearance");
+            ImGui::Combo("Background", &app.preferences.background, "Dark blue\0Classic amber / blue\0");
+            if (ImGui::SliderFloat("Interface scale", &app.preferences.ui_scale, .8f, 1.75f, "%.2f"))
+                ImGui::GetIO().FontGlobalScale = app.preferences.ui_scale;
+            ImGui::TextWrapped("Window positions and sizes are saved automatically. Hold Ctrl to select several project files.");
+            try
+            {
+                if (ImGui::Button("Apply and save")) app.save_preferences();
+                ImGui::SameLine(); ImGui::BeginDisabled(app.project.merging());
+                if (ImGui::Button("Apply defaults to all MIDIs")) app.project.set_defaults(app.preferences, true);
+                ImGui::EndDisabled();
+            }
+            catch (const std::exception& e) { app.notice = e.what(); }
+            ImGui::TextWrapped("%s", app.notice.c_str());
+            ImGui::SeparatorText("SAFC");
+            ImGui::TextWrapped("MIDI processing, editing, analysis, playback and video export. Dear ImGui frontend with the original folded panel design.");
+            if (ImGui::Button("Project / releases")) ShellExecuteW(glfwGetWin32Window(window), L"open", L"https://github.com/DixelU/SAFC/releases", nullptr, nullptr, SW_SHOWNORMAL);
+        }
+        ui::end_folded_window();
+    }
+    background->AddText({24 * scale, display.y - 29 * scale}, IM_COL32(136, 166, 187, 255), "SAFC  /  ImGui   |   Drag headers to move panels; drag corners to resize.");
 }
 
 void write_capture(const std::filesystem::path& path, int w, int h)
@@ -470,7 +637,7 @@ public:
     }
 };
 
-int run(bool smoke, const std::filesystem::path& capture_path, const std::wstring& initial_file)
+int run(bool smoke, bool workflows, const std::filesystem::path& capture_path, const std::wstring& initial_file)
 {
     glfwSetErrorCallback([](int code, const char* text) { std::cerr << "GLFW " << code << ": " << text << '\n'; });
     if (!glfwInit()) throw std::runtime_error("GLFW initialization failed");
@@ -480,7 +647,7 @@ int run(bool smoke, const std::filesystem::path& capture_path, const std::wstrin
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_COMPAT_PROFILE);
     glfwWindowHint(GLFW_SCALE_TO_MONITOR, smoke ? GLFW_FALSE : GLFW_TRUE);
     glfwWindowHint(GLFW_VISIBLE, smoke ? GLFW_FALSE : GLFW_TRUE);
-    auto* window = glfwCreateWindow(1400, 850, "SAFC - ImGui preview", nullptr, nullptr);
+    auto* window = glfwCreateWindow(1400, 850, "SAFC", nullptr, nullptr);
     if (!window) throw std::runtime_error("OpenGL 3.3 compatibility context creation failed");
     struct window_guard { GLFWwindow* w; ~window_guard() { glfwDestroyWindow(w); } } window_lifetime{window};
     glfwSetWindowSizeLimits(window, 1000, 650, GLFW_DONT_CARE, GLFW_DONT_CARE);
@@ -491,7 +658,20 @@ int run(bool smoke, const std::filesystem::path& capture_path, const std::wstrin
     struct imgui_guard { ~imgui_guard() { ImGui::DestroyContext(); } } imgui_lifetime;
     auto& io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
-    io.IniFilename = nullptr; // Session layout only, until shared settings ownership migrates.
+    std::string layout_path;
+    io.IniFilename = nullptr;
+    if (!smoke)
+    {
+        wchar_t local_app_data[32768]{};
+        const auto count = GetEnvironmentVariableW(L"LOCALAPPDATA", local_app_data, 32768);
+        if (count && count < 32768)
+        {
+            const auto directory = std::filesystem::path(local_app_data) / "SAFC";
+            std::filesystem::create_directories(directory);
+            layout_path = utf8((directory / "imgui.ini").wstring());
+            io.IniFilename = layout_path.c_str();
+        }
+    }
     float scale_x{}, scale_y{};
     glfwGetWindowContentScale(window, &scale_x, &scale_y);
     const float scale = smoke ? 1.f : std::clamp(scale_x, 1.f, 2.f);
@@ -505,19 +685,51 @@ int run(bool smoke, const std::filesystem::path& capture_path, const std::wstrin
     struct platform_guard { ~platform_guard() { ImGui_ImplGlfw_Shutdown(); } } platform_lifetime;
     if (!ImGui_ImplOpenGL3_Init("#version 330")) throw std::runtime_error("ImGui OpenGL backend failed");
     struct renderer_guard { ~renderer_guard() { ImGui_ImplOpenGL3_Shutdown(); } } renderer_lifetime;
-    workspace app;
+    workspace app(make_dialogs(window), smoke);
+    io.FontGlobalScale = app.preferences.ui_scale;
     piano_texture piano;
     glfwSetWindowUserPointer(window, &app);
     glfwSetDropCallback(window, [](GLFWwindow* w, int count, const char** paths)
     {
         auto& app = *static_cast<workspace*>(glfwGetWindowUserPointer(w));
-        try { if (count) app.open_file(wide(paths[0])); }
+        try
+        {
+            std::vector<std::wstring> midis;
+            for (int i = 0; i < count; ++i)
+            {
+                auto path = wide(paths[i]);
+                auto extension = std::filesystem::path(path).extension().wstring();
+                std::transform(extension.begin(), extension.end(), extension.begin(), towlower);
+                if (extension == L".mid" || extension == L".midi") midis.push_back(std::move(path));
+                else if (i == 0) app.open_file(std::move(path));
+            }
+            if (!midis.empty()) { app.project.add_files(std::move(midis)); app.project_open = true; }
+        }
         catch (const std::exception& error) { app.notice = error.what(); }
     });
-    if (!initial_file.empty()) app.open_file(initial_file);
+    if (!initial_file.empty())
+    {
+        auto extension = std::filesystem::path(initial_file).extension().wstring();
+        std::transform(extension.begin(), extension.end(), extension.begin(), towlower);
+        if (extension == L".mid" || extension == L".midi") app.project.add_files({initial_file});
+        app.open_file(initial_file);
+    }
     std::unique_ptr<smoke_run> test;
-    if (smoke) test = std::make_unique<smoke_run>(capture_path);
-    while (!glfwWindowShouldClose(window))
+    if (smoke && !workflows) test = std::make_unique<smoke_run>(capture_path);
+    int workflow_frame = 0;
+    if (workflows)
+    {
+        const auto directory = std::filesystem::absolute(capture_path).parent_path();
+        std::filesystem::create_directories(directory);
+        std::string report;
+        if (!app.project.run_smoke(directory.wstring(), report)) throw std::runtime_error(report);
+        std::cout << "PASS: " << report << '\n';
+        if (!app.editor.run_smoke(directory.wstring(), report)) throw std::runtime_error(report);
+        std::cout << "PASS: " << report << '\n';
+        app.analysis.open_file((directory / "editor-output.mid").wstring());
+        app.project_open = true; app.player_open = app.synth_open = false;
+    }
+    while (!app.exiting)
     {
         glfwPollEvents();
         int width{}, height{};
@@ -527,7 +739,21 @@ int run(bool smoke, const std::filesystem::path& capture_path, const std::wstrin
         ImGui_ImplGlfw_NewFrame();
         if (smoke) io.ConfigFlags |= ImGuiConfigFlags_NoMouseCursorChange;
         ImGui::NewFrame();
+        if (glfwWindowShouldClose(window))
+        {
+            glfwSetWindowShouldClose(window, GLFW_FALSE);
+            if (app.editor.has_unsaved_changes() || app.editor.busy() || app.project.merging() || app.video.snapshot().busy)
+                ImGui::OpenPopup("Close SAFC?");
+            else app.exiting = true;
+        }
         render_workspace(app, piano, window);
+        if (ImGui::BeginPopupModal("Close SAFC?", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+        {
+            ImGui::TextUnformatted("Close SAFC, discard unsaved editor changes and cancel running jobs?");
+            if (ImGui::Button("Close SAFC")) { app.exiting = true; ImGui::CloseCurrentPopup(); }
+            ImGui::SameLine(); if (ImGui::Button("Keep working")) ImGui::CloseCurrentPopup();
+            ImGui::EndPopup();
+        }
         ImGui::Render();
         glViewport(0, 0, width, height);
         glClearColor(.02f, .03f, .05f, 1);
@@ -536,14 +762,39 @@ int run(bool smoke, const std::filesystem::path& capture_path, const std::wstrin
         if (smoke)
         {
             if (const auto error = glGetError()) throw std::runtime_error("OpenGL error " + std::to_string(error));
-            test->tick(app);
-            if (test->capture) { write_capture(capture_path, width, height); test->capture = false; }
-            if (test->done) break;
+            if (test)
+            {
+                test->tick(app);
+                if (test->capture) { write_capture(capture_path, width, height); test->capture = false; }
+                if (test->done) break;
+            }
+            else if (workflows)
+            {
+                ++workflow_frame;
+                if (workflow_frame == 3)
+                {
+                    write_capture(capture_path, width, height);
+                    app.project_open = false; app.editor_open = true;
+                }
+                if (workflow_frame == 6)
+                {
+                    write_capture(capture_path.parent_path() / "editor-workflow.bmp", width, height);
+                    app.editor_open = false; app.analysis_open = true;
+                }
+                if (workflow_frame >= 9 && !app.analysis.busy())
+                {
+                    if (!app.analysis.result()) throw std::runtime_error(app.analysis.status());
+                    write_capture(capture_path.parent_path() / "analysis-workflow.bmp", width, height);
+                    std::cout << "PASS: complete project/editor/analysis workspace GL composition\n";
+                    break;
+                }
+                if (workflow_frame > 3000) throw std::runtime_error("Workflow analysis timeout");
+            }
         }
         glfwSwapBuffers(window);
         if (smoke) std::this_thread::sleep_for(std::chrono::milliseconds(8));
     }
-    app.playback.shutdown();
+    app.shutdown();
     return 0;
 }
 } // namespace
@@ -555,15 +806,30 @@ int main()
     if (!argv) return 1;
     struct arguments_guard { wchar_t** p; ~arguments_guard() { LocalFree(p); } } arguments{argv};
     const bool smoke = argc >= 2 && std::wstring(argv[1]) == L"--smoke";
+    const bool workflows = argc >= 2 && std::wstring(argv[1]) == L"--workflow-smoke";
+    bool cli = false;
     try
     {
-        if (smoke && argc != 3) throw std::runtime_error("Usage: SAFCImGui --smoke <capture.bmp>");
-        return run(smoke, smoke ? std::filesystem::path(argv[2]) : std::filesystem::path{}, !smoke && argc > 1 ? argv[1] : L"");
+        if ((smoke || workflows) && argc != 3) throw std::runtime_error("Usage: SAFCImGui --smoke|--workflow-smoke <capture.bmp>");
+        if (!smoke && !workflows && argc > 1)
+        {
+            const std::wstring argument = argv[1];
+            auto extension = std::filesystem::path(argument).extension().wstring();
+            std::transform(extension.begin(), extension.end(), extension.begin(), towlower);
+            cli = extension == L".json" || argument == L"--help" || argument == L"/?" || argument == L"-?" || argument == L"/help";
+            if (cli) return ui::run_cli(argument);
+        }
+        if (!smoke && !workflows)
+        {
+            DWORD processes[2]{};
+            if (GetConsoleProcessList(processes, 2) == 1) ShowWindow(GetConsoleWindow(), SW_HIDE);
+        }
+        return run(smoke || workflows, workflows, smoke || workflows ? std::filesystem::path(argv[2]) : std::filesystem::path{}, !smoke && !workflows && argc > 1 ? argv[1] : L"");
     }
     catch (const std::exception& error)
     {
         std::cerr << error.what() << '\n';
-        if (!smoke) MessageBoxA(nullptr, error.what(), "SAFC ImGui preview", MB_OK | MB_ICONERROR);
+        if (!smoke && !workflows && !cli) MessageBoxA(nullptr, error.what(), "SAFC", MB_OK | MB_ICONERROR);
         return 1;
     }
 }

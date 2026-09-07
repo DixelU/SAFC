@@ -8,6 +8,8 @@ void throw_alert_warning(std::string&& AlertText);
 #include <set>
 #include <atomic>
 #include <exception>
+#include <cerrno>
+#include <system_error>
 #include <future>
 #include <memory>
 #include <mutex>
@@ -28,10 +30,11 @@ struct midi_track_iterator
 	std::int64_t cur_tick = 0;
 	std::array<std::int64_t, 4096> held{};
 	bool processing = true;
+	const std::atomic_bool* cancellation = nullptr;
 
-	explicit midi_track_iterator(const std::vector<std::uint8_t>& vec) :
+	explicit midi_track_iterator(const std::vector<std::uint8_t>& vec, const std::atomic_bool* cancel = nullptr) :
 		track_data(vec.data()),
-		track_size(vec.size())
+		track_size(vec.size()), cancellation(cancel)
 	{}
 
 	std::int64_t polyphony() const
@@ -44,6 +47,7 @@ struct midi_track_iterator
 
 	void advance_single_event()
 	{
+		if (cancellation && cancellation->load(std::memory_order_relaxed)) throw midi_processing_cancelled{};
 		if (!processing || cur_position >= (std::int64_t)track_size)
 		{
 			processing = false;
@@ -135,6 +139,7 @@ struct midi_track_iterator
 			std::int64_t key = held[i];
 			while (key)
 			{
+				if (cancellation && cancellation->load(std::memory_order_relaxed)) throw midi_processing_cancelled{};
 				out.push_back((0x10 * output_noteon_wall) | (i & 0xF) | 0x80);
 				out.push_back(i >> 4);
 				out.push_back(1);
@@ -177,13 +182,39 @@ struct midi_collection_threaded_merger :
 				d, std::make_shared<message_buffer_ptr::element_type>(is_console_oriented));
 	}
 
-	~midi_collection_threaded_merger() = default;
+	~midi_collection_threaded_merger()
+	{
+		request_cancel();
+		wait_processing();
+		if (inplace_merge_future_.valid()) inplace_merge_future_.wait();
+		if (regular_merge_future_.valid()) regular_merge_future_.wait();
+		if (final_merge_future_.valid()) final_merge_future_.wait();
+	}
+
+	void request_cancel() noexcept
+	{
+		cancellation_requested_.store(true, std::memory_order_release);
+		for (auto& [_, buffers] : midi_processing_data_)
+			buffers->cancel_requested.store(true, std::memory_order_release);
+	}
+
+	bool cancelled() const noexcept
+	{
+		return cancellation_requested_.load(std::memory_order_acquire);
+	}
+
+	void wait_processing()
+	{
+		for (auto& worker : processing_workers_)
+			if (worker.joinable()) worker.join();
+		processing_workers_.clear();
+	}
 
 	void start_processing() noexcept
 	{
+		if (cancelled()) { mark_all_processing_finished(); return; }
 		try
 		{
-			auto lifetime = shared_from_this();
 			std::set<std::uint32_t> group_ids;
 			for (auto& [pdata, _] : midi_processing_data_)
 				group_ids.insert(pdata->settings.details.group_id);
@@ -196,7 +227,7 @@ struct midi_collection_threaded_merger :
 			std::uint32_t thread_index = 0;
 			for (std::uint32_t group_id : group_ids)
 			{
-				std::thread([this, lifetime](
+				processing_workers_.emplace_back([this](
 				std::vector<std::pair<proc_data_ptr, message_buffer_ptr>> data,
 				std::uint32_t id,
 				std::uint32_t idx)
@@ -205,6 +236,7 @@ struct midi_collection_threaded_merger :
 				{
 					for (auto& el : data)
 					{
+						el.second->check_cancelled();
 						if (el.first->settings.details.group_id != id)
 							continue;
 
@@ -233,7 +265,7 @@ struct midi_collection_threaded_merger :
 						}
 					}
 				}
-				}, midi_processing_data_, group_id, thread_index).detach();
+				}, midi_processing_data_, group_id, thread_index);
 				++thread_index;
 			}
 		}
@@ -246,7 +278,7 @@ struct midi_collection_threaded_merger :
 
 	bool is_smrp_complete() const
 	{
-		if (has_failed())
+		if (has_failed() || cancelled())
 			return true;
 		for (auto& [_, mbuf] : midi_processing_data_)
 			if (!mbuf->finished || mbuf->processing)
@@ -256,7 +288,7 @@ struct midi_collection_threaded_merger :
 
 	void start_ri_merge() noexcept
 	{
-		if (has_failed())
+		if (has_failed() || cancelled())
 		{
 			inplace_merge_complete.store(true, std::memory_order_release);
 			regular_merge_complete.store(true, std::memory_order_release);
@@ -332,6 +364,7 @@ struct midi_collection_threaded_merger :
 
 	void start_final_merge() noexcept
 	{
+		if (cancelled()) { complete.store(true, std::memory_order_release); return; }
 		try
 		{
 			if (has_failed() && (!inplace_merge_future_.valid() || !regular_merge_future_.valid()))
@@ -413,7 +446,9 @@ private:
 	std::future<std::uint64_t> inplace_merge_future_;
 	std::future<std::uint64_t> regular_merge_future_;
 	std::future<void> final_merge_future_;
+	std::vector<std::thread> processing_workers_;
 	std::atomic_bool failure_recorded_{ false };
+	std::atomic_bool cancellation_requested_{ false };
 	mutable std::mutex failure_mutex_;
 	std::string failure_message_;
 
@@ -428,6 +463,7 @@ private:
 
 	void record_failure(const char* stage, std::exception_ptr exception) noexcept
 	{
+		if (cancelled()) return;
 		try
 		{
 			std::string detail = stage;
@@ -459,6 +495,19 @@ private:
 		}
 	}
 
+	static void replace_intermediate(const std::wstring& source, const std::wstring& destination)
+	{
+		if (_wremove(destination.c_str()) != 0 && errno != ENOENT)
+			throw std::system_error(errno, std::generic_category(), "Cannot replace intermediate MIDI output");
+		if (_wrename(source.c_str(), destination.c_str()) != 0)
+			throw std::system_error(errno, std::generic_category(), "Cannot move intermediate MIDI output");
+	}
+
+	void check_cancelled() const
+	{
+		if (cancelled()) throw midi_processing_cancelled{};
+	}
+
 	static std::uint32_t read_vlv(midi_file_reader& f)
 	{
 		std::uint32_t result = 0;
@@ -471,7 +520,7 @@ private:
 		return result;
 	}
 
-	static std::uint64_t do_inplace_merge_impl(
+	std::uint64_t do_inplace_merge_impl(
 		const std::vector<std::pair<proc_data_ptr, message_buffer_ptr>>& candidates,
 		std::uint16_t ppqn,
 		const std::wstring& save_to)
@@ -486,12 +535,15 @@ private:
 		for (auto& [pdata, _] : candidates)
 		{
 			auto& s = streams.emplace_back(std::make_unique<midi_file_reader>(
-				pdata->filename + pdata->postfix));
+				pdata->output_path()));
+			s->set_cancellation(&cancellation_requested_);
+			if (!s->is_open() || s->size() < 14) throw std::runtime_error("Cannot read processed MIDI for in-place merge");
 			for (int i = 0; i < 14; i++)
 				static_cast<void>(read_midi_byte(*s));
 		}
 
 		std::ofstream out(save_to + L".I.mid", std::ios::binary | std::ios::out);
+		out.exceptions(std::ios::failbit | std::ios::badbit);
 		out << "MThd" << '\0' << '\0' << '\0' << (char)6 << '\0' << (char)1;
 		out.put(0); out.put(0); // track count placeholder, updated at the end
 		out.put((char)(ppqn >> 8));
@@ -504,6 +556,7 @@ private:
 		bool active_stream = true;
 		while (active_stream)
 		{
+			check_cancelled();
 			for (std::size_t i = 0; i < streams.size(); i++)
 			{
 				auto& reader = *streams[i];
@@ -530,6 +583,7 @@ private:
 
 			while (active_track)
 			{
+				check_cancelled();
 				active_track = false;
 				active_stream = false;
 
@@ -547,6 +601,7 @@ private:
 
 					while (delta_time == 0)
 					{
+						check_cancelled();
 						std::uint8_t event_type = read_midi_byte(reader);
 						auto delta_len = single_midi_processor_2::push_vlv(in_track_delta, track);
 						in_track_delta = 0;
@@ -676,7 +731,7 @@ private:
 			{
 				std::int64_t total_shift = split_edge;
 				std::int64_t prev_edge = 0;
-				midi_track_iterator dti(track);
+				midi_track_iterator dti(track, &cancellation_requested_);
 				front_edge.clear();
 
 				while (dti.advance_to_position(total_shift))
@@ -696,11 +751,11 @@ private:
 					out.put((char)(total_size >> 8));
 					out.put((char)total_size);
 
-					single_midi_processor_2::ostream_write(front_edge, out);
+					single_midi_processor_2::ostream_write(front_edge, out, &cancellation_requested_);
 					single_midi_processor_2::ostream_write(track,
-						track.begin() + prev_edge, track.begin() + dti.cur_position, out);
+						track.begin() + prev_edge, track.begin() + dti.cur_position, out, &cancellation_requested_);
 					single_midi_processor_2::ostream_write(back_edge,
-						back_edge.begin(), back_edge.end(), out);
+						back_edge.begin(), back_edge.end(), out, &cancellation_requested_);
 
 					out.put(0);
 					out.put((char)0xFF);
@@ -720,9 +775,9 @@ private:
 				out.put((char)(total_size >> 8));
 				out.put((char)total_size);
 
-				single_midi_processor_2::ostream_write(front_edge, out);
+				single_midi_processor_2::ostream_write(front_edge, out, &cancellation_requested_);
 				single_midi_processor_2::ostream_write(track,
-					track.begin() + prev_edge, track.end(), out);
+					track.begin() + prev_edge, track.end(), out, &cancellation_requested_);
 
 				front_edge.clear();
 				back_edge.clear();
@@ -735,7 +790,7 @@ private:
 				out.put((char)(track.size() >> 16));
 				out.put((char)(track.size() >> 8));
 				out.put((char)track.size());
-				single_midi_processor_2::ostream_write(track, out);
+				single_midi_processor_2::ostream_write(track, out, &cancellation_requested_);
 				++track_count;
 			}
 
@@ -744,21 +799,23 @@ private:
 
 		for (std::size_t i = 0; i < streams.size(); i++)
 		{
+			if (streams[i]->failed()) throw std::runtime_error("In-place merge input read failed");
 			streams[i]->close();
 			if (candidates[i].first->settings.proc_details.remove_remnants)
-				_wremove((candidates[i].first->filename + candidates[i].first->postfix).c_str());
+				_wremove((candidates[i].first->output_path()).c_str());
 		}
 
 		out.seekp(10, std::ios::beg);
 		out.put((char)(track_count >> 8));
 		out.put((char)(track_count & 0xFF));
+		out.flush();
 		out.close();
 
 		std::osyncstream(std::cout) << "Inplace: finished\n";
 		return track_count;
 	}
 
-	static std::uint64_t do_regular_merge_impl(
+	std::uint64_t do_regular_merge_impl(
 		const std::vector<std::pair<proc_data_ptr, message_buffer_ptr>>& candidates,
 		std::uint16_t ppqn,
 		const std::wstring& save_to)
@@ -772,9 +829,23 @@ private:
 		if (candidates.size() == 1)
 		{
 			auto& pd = *candidates.front().first;
-			std::wstring src = pd.filename + pd.postfix;
-			_wremove(save_path.c_str());
-			_wrename(src.c_str(), save_path.c_str());
+			std::wstring src = pd.output_path();
+			check_cancelled();
+			if (pd.settings.proc_details.remove_remnants)
+				replace_intermediate(src, save_path);
+			else
+			{
+				midi_file_reader retained_input(src);
+				retained_input.set_cancellation(&cancellation_requested_);
+				if (!retained_input.is_open() || retained_input.size() < 14)
+					throw std::runtime_error("Cannot read retained processed MIDI");
+				std::ofstream copied_output(save_path, std::ios::binary | std::ios::out);
+				copied_output.exceptions(std::ios::failbit | std::ios::badbit);
+				retained_input.copy_to(copied_output);
+				if (retained_input.failed()) throw std::runtime_error("Retained processed MIDI read failed");
+				copied_output.flush();
+				copied_output.close();
+			}
 			return pd.tracks_count.load();
 		}
 
@@ -782,6 +853,7 @@ private:
 		auto buffer = std::make_unique<std::uint8_t[]>(buffer_size);
 
 		std::ofstream out(save_path, std::ios::binary | std::ios::out);
+		out.exceptions(std::ios::failbit | std::ios::badbit);
 		out.rdbuf()->pubsetbuf((char*)buffer.get(), buffer_size);
 
 		out << "MThd" << '\0' << '\0' << '\0' << (char)6 << '\0' << (char)1;
@@ -790,17 +862,21 @@ private:
 		out.put((char)ppqn);
 
 		midi_file_reader file_input(
-			candidates.front().first->filename + candidates.front().first->postfix);
+			candidates.front().first->output_path());
+		file_input.set_cancellation(&cancellation_requested_);
 
 		for (auto it = candidates.begin(); it != candidates.end(); ++it)
 		{
+			check_cancelled();
 			auto& pd = *it->first;
-			std::wstring src = pd.filename + pd.postfix;
+			std::wstring src = pd.output_path();
 			if (it != candidates.begin())
 				file_input.reopen(src);
+			if (!file_input.is_open() || file_input.size() < 14) throw std::runtime_error("Cannot read processed MIDI for regular merge");
 			for (int i = 0; i < 14; i++)
 				static_cast<void>(read_midi_byte(file_input));
 			file_input.copy_to(out);
+			if (file_input.failed()) throw std::runtime_error("Regular merge input read failed");
 			track_count += pd.tracks_count;
 			if (pd.settings.proc_details.remove_remnants)
 				_wremove(src.c_str());
@@ -815,7 +891,7 @@ private:
 		return track_count;
 	}
 
-	static void do_final_merge_impl(
+	void do_final_merge_impl(
 		const std::wstring& save_to,
 		std::uint64_t ii_count,
 		std::uint64_t ir_count,
@@ -826,24 +902,21 @@ private:
 
 		auto im = std::make_unique<midi_file_reader>(inplace_path);
 		auto rm = std::make_unique<midi_file_reader>(regular_path);
+		im->set_cancellation(&cancellation_requested_);
+		rm->set_cancellation(&cancellation_requested_);
+		check_cancelled();
 
 		bool im_good = !im->eof();
 		bool rm_good = !rm->eof();
 
+		if ((ii_count && !im_good) || (ir_count && !rm_good) || (!im_good && !rm_good))
+			throw std::runtime_error("A completed merge stage has no readable MIDI output");
 		if (!im_good || !rm_good)
 		{
 			im->close();
 			rm->close();
-
-			auto r_del = _wremove(save_to.c_str());
-			auto r_i   = _wrename(inplace_path.c_str(), save_to.c_str());
-			auto r_r   = _wrename(regular_path.c_str(), save_to.c_str()); // one of these will not work
-
-			std::osyncstream(std::cout)
-				<< "S2 status: " << r_del
-				<< "\nI status: " << r_i
-				<< "\nR status: " << r_r << '\n';
-			std::osyncstream(std::cout) << "Escaped last stage\n";
+			check_cancelled();
+			replace_intermediate(im_good ? inplace_path : regular_path, save_to);
 			return;
 		}
 
@@ -857,6 +930,7 @@ private:
 		}
 
 		std::ofstream out(save_to, std::ios::binary | std::ios::out);
+		out.exceptions(std::ios::failbit | std::ios::badbit);
 		out << "MThd";
 		out.put(0); out.put(0); out.put(0); out.put(6);
 		out.put(0); out.put(1);
@@ -874,6 +948,9 @@ private:
 
 		im->copy_to(out);
 		rm->copy_to(out);
+		if (im->failed() || rm->failed()) throw std::runtime_error("Final merge input read failed");
+		out.flush();
+		out.close();
 
 		im->close();
 		rm->close();
