@@ -906,8 +906,10 @@ private:
 		rm->set_cancellation(&cancellation_requested_);
 		check_cancelled();
 
-		bool im_good = !im->eof();
-		bool rm_good = !rm->eof();
+		// A missing intermediate file is not at EOF: it was never opened.
+		// Require readable input before copying its header, including the PPQ.
+		bool im_good = im->good();
+		bool rm_good = rm->good();
 
 		if ((ii_count && !im_good) || (ir_count && !rm_good) || (!im_good && !rm_good))
 			throw std::runtime_error("A completed merge stage has no readable MIDI output");
