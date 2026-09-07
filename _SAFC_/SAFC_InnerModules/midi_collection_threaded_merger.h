@@ -827,8 +827,10 @@ private:
 		auto im = std::make_unique<midi_file_reader>(inplace_path);
 		auto rm = std::make_unique<midi_file_reader>(regular_path);
 
-		bool im_good = !im->eof();
-		bool rm_good = !rm->eof();
+		// A missing intermediate file is not at EOF: it was never opened.
+		// Require readable input before copying its header, including the PPQ.
+		bool im_good = im->good();
+		bool rm_good = rm->good();
 
 		if (!im_good || !rm_good)
 		{

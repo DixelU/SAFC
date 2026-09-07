@@ -184,7 +184,7 @@ void init(bool reinitialise_font)
 
 	window = new moveable_fui_window("Cut and Transpose.", system_white, -200, 50, 400, 100, 300, 2.5f, 15, 15, 2.5f, BACKGROUND_OPQ, HEADER, BORDER);
 	(*window)["CAT_ITSELF"] = new cut_and_transpose_piano(0, 20 - moveable_window::window_header_size, 1, 10, nullptr);
-	(*window)["CAT_SET_DEFAULT"] = new button("reset", system_white, props_and_sets::cut_and_transpose::on_reset, -150, -10 - moveable_window::window_header_size, 40, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, nullptr, " ");
+	(*window)["CAT_SET_DEFAULT"] = new button("Reset", system_white, props_and_sets::cut_and_transpose::on_reset, -150, -10 - moveable_window::window_header_size, 40, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, nullptr, " ");
 	(*window)["CAT_+128"] = new button("0-127 -> 128-255", system_white, props_and_sets::cut_and_transpose::on_0_127_to_128_255, -85, -10 - moveable_window::window_header_size, 80, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, nullptr, " ");
 	(*window)["CAT_CDT128"] = new button("Cut down to 128", system_white, props_and_sets::cut_and_transpose::on_cdt128, 0, -10 - moveable_window::window_header_size, 80, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, nullptr, " ");
 	(*window)["CAT_COPY"] = new button("Copy", system_white, props_and_sets::cut_and_transpose::on_copy, 65, -10 - moveable_window::window_header_size, 40, 10, 1, 0x007FFF3F, 0x007FFFFF, 0xFFFFFFFF, 0xFF7F003F, 0xFF7F00FF, nullptr, " ");
