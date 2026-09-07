@@ -10,6 +10,8 @@ find_package(OpenGL REQUIRED)
 
 add_library(safc_imgui_core STATIC
 	folded_theme.cpp
+	window_icon.cpp
+	update_service.cpp
 	playback_session.cpp
 	video_export_panel.cpp
 	editor_panel.cpp
@@ -35,7 +37,7 @@ target_link_libraries(safc_imgui_core PUBLIC
 	imgui::imgui glfw OpenGL::GL
 	Boost::headers zstd::libzstd
 	LibArchive::LibArchive comdlg32 shell32 ole32 winmm advapi32
-	mfplat mfreadwrite mfuuid mf propsys)
+	mfplat mfreadwrite mfuuid mf propsys winhttp version)
 # Compile the frontend entry point and existing icon/version resource once.
 # SAFC is the default application; SAFCImGui retains the preview target and path
 # for existing users, scripts, and captures. Both execute the identical frontend.
@@ -59,6 +61,19 @@ if(TARGET safsyn-windows)
 endif()
 
 if(BUILD_TESTING)
+	add_executable(safc-imgui-update-tests ../tests/imgui_update_tests.cpp ../_SAFC_.rc)
+	target_link_libraries(safc-imgui-update-tests PRIVATE safc_imgui_core)
+	add_test(NAME safc-imgui-update COMMAND safc-imgui-update-tests)
+	set_tests_properties(safc-imgui-update PROPERTIES TIMEOUT 60)
+	add_executable(safc-imgui-update-preferences-tests ../tests/imgui_update_preferences_tests.cpp)
+	target_link_libraries(safc-imgui-update-preferences-tests PRIVATE safc_imgui_core)
+	add_test(NAME safc-imgui-update-preferences COMMAND safc-imgui-update-preferences-tests)
+	set_tests_properties(safc-imgui-update-preferences PROPERTIES TIMEOUT 30)
+	add_executable(safc-imgui-window-icon-tests ../tests/imgui_window_icon_tests.cpp ../_SAFC_.rc)
+	target_link_libraries(safc-imgui-window-icon-tests PRIVATE safc_imgui_core)
+	add_dependencies(safc-imgui-window-icon-tests SAFC SAFCImGui)
+	add_test(NAME safc-imgui-window-icon COMMAND safc-imgui-window-icon-tests "$<TARGET_FILE:SAFC>" "$<TARGET_FILE:SAFCImGui>")
+	set_tests_properties(safc-imgui-window-icon PROPERTIES TIMEOUT 30)
 	add_executable(safc-imgui-key-map-tests ../tests/imgui_key_map_tests.cpp)
 	target_link_libraries(safc-imgui-key-map-tests PRIVATE safc_imgui_core)
 	add_test(NAME safc-imgui-key-map COMMAND safc-imgui-key-map-tests)

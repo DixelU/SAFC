@@ -13,6 +13,7 @@ struct application_preferences
     std::uint16_t processing_threads = 1;
     bool split_channels = false, collapse_tracks = false, apply_offset_after = true;
     bool inplace_merge = false, rsb_compression = false, allow_sysex = false;
+    bool automatic_updates = true;
     int background = 0;
     float ui_scale = 1.f;
     std::wstring midi_device, sound_bank;
@@ -25,5 +26,6 @@ class preferences_store
 public:
     application_preferences load() const;
     void save(const application_preferences&) const;
+    void save_update_preference(bool enabled) const;
 };
 }

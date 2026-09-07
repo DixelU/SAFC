@@ -55,8 +55,12 @@ to resize them; **Reset layout** restores the initial arrangement.
   Regular files, selected archive members, and editor snapshots use independent
   audio/video readers.
 - **Settings:** apply processing defaults, choose appearance and interface scale,
-  configure SYNCore, and explicitly save preferences. **Project / releases** opens
-  the releases page; it replaces the former in-app executable updater.
+  configure SYNCore, and explicitly save preferences. Automatic updates check
+  published stable releases and download a newer version in the background.
+  A prepared update installs when SAFC closes normally; **Restart to update**
+  follows the normal unsaved-editor/running-job confirmation. **Check for updates**
+  also works when automatic downloads are disabled. **Project / releases** opens
+  the release notes and manual downloads.
 
 ![The native ImGui MIDI editor](editor.png)
 
@@ -190,6 +194,7 @@ native owner window, keeping platform handles out of panel models.
 | `video_export_panel::impl` | Offline renderer, captured settings, progress, cancellation, UI-context preview texture |
 | `mapping_panel` | Typed map editors, gestures, clipboard values |
 | `preferences_store` | Import and explicit persistence of application defaults |
+| `update_service` | Version/release checks, cancellable download, validated staging and replacement on normal exit |
 
 Workers receive owned requests, publish data or synchronized snapshots, and never
 call ImGui or look up GUI objects. Completion is consumed on the UI thread,
@@ -205,8 +210,10 @@ implementation or GLUT. The optional legacy target still uses its existing app
 and SAFGUIF modules.
 
 Common application and SYNCore preferences are imported from
-`HKCU\Software\SAFC`. They are written only through explicit **Apply and save**
-or **Save preferences** actions. Window positions and sizes use Dear ImGui's
+`HKCU\Software\SAFC`. They are written through explicit **Apply and save**
+or **Save preferences** actions. **Download updates automatically** is saved
+immediately to the existing `AUTOUPDATECHECK` value, preserving legacy opt-outs.
+Window positions and sizes use Dear ImGui's
 separate `%LOCALAPPDATA%\SAFC\imgui.ini` file. Smoke and regression modes do not
 change registry preferences or the user's saved workspace layout.
 
@@ -217,6 +224,12 @@ files** is disabled, the processed files are retained in a reported
 `<output>.parts-<id>` directory. Their names include the input index, original
 filename, and editable intermediate suffix. Other runs clean up their work files.
 The saved preferences also import the existing player render settings.
+
+The executable embeds its icon and version resources, and applies the embedded
+icon to the native window/taskbar. The updater compares the embedded product
+version with the latest published stable release and selects the matching
+`SAFC64.7z` or `SAFC32.7z` asset. See [RELEASING.md](RELEASING.md) for packaging
+and the compatibility requirements for delivering 2.0 to existing installations.
 
 ## Validation and current boundaries
 
@@ -239,6 +252,9 @@ ctest --test-dir build/imgui -R '^safc-imgui-' --output-on-failure
 | `safc-imgui-key-map` | Shifted output piano, octave alignment, fixed source keys, cut highlighting, extreme transpositions and native bank-aware cut dragging |
 | `safc-imgui-playback` | External sources, nested/archive member selection, cancellation, replay and actual short sine-based MP4 rendering |
 | `safc-imgui-cli` | JSON validation, integer precision, input identity and processing output |
+| `safc-imgui-update` | Stable release/architecture selection, bounded extraction, offline staging, cancellation, replacement of a running local fixture, rollback and backup retention |
+| `safc-imgui-update-preferences` | Legacy update opt-out import and persistence in an isolated temporary registry subtree |
+| `safc-imgui-window-icon` | Embedded resources in both executables and matching native large/small icon pixels |
 
 ID regressions use the same counter as Dear ImGui's runtime conflict warning;
 rendering geometry alone does not detect these conflicts. Keep diagnostic
@@ -252,6 +268,11 @@ test captures or in the test output directories. Transport tests explicitly use
 a silent output; MP4 regressions synthesize their own short sine audio offline.
 These checks do not establish audible quality on physical MIDI devices, every
 SF2/SFZ bank, or sustained performance on the user's dense MIDI collections.
+Updater regressions use local executable copies and an injected transport; they
+never install a downloaded release. `safc-imgui-update-tests --check-live` exercises
+the production HTTPS metadata request without downloading or running an asset.
+The preference regression redirects HKCU only inside its test process and cleans
+up its private volatile subtree, leaving the real SAFC preferences untouched.
 
 The editor retains the existing domain's format-1 save reconstruction and
 255-processed-track limit. Captured non-note events are retained, but original

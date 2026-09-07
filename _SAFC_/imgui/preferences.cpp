@@ -30,6 +30,7 @@ application_preferences preferences_store::load() const
     number(L"AS_INPLACE_FLAG", p.inplace_merge);
     number(L"RSB_COMPRESS", p.rsb_compression);
     number(L"ALLOW_SYSEX", p.allow_sysex);
+    number(L"AUTOUPDATECHECK", p.automatic_updates);
     number(L"AS_BCKGID", p.background);
     text(L"MIDI_DEVICE_NAME", p.midi_device);
     text(L"SYNCORE_BANK_PATH", p.sound_bank);
@@ -72,6 +73,7 @@ void preferences_store::save(const application_preferences& p) const
     key.SetDwordValue(L"AS_INPLACE_FLAG", p.inplace_merge);
     key.SetDwordValue(L"RSB_COMPRESS", p.rsb_compression);
     key.SetDwordValue(L"ALLOW_SYSEX", p.allow_sysex);
+    key.SetDwordValue(L"AUTOUPDATECHECK", p.automatic_updates);
     key.SetDwordValue(L"AS_BCKGID", p.background);
     key.SetStringValue(L"IMGUI_UI_SCALE", std::to_wstring(p.ui_scale));
     key.SetStringValue(L"MIDI_DEVICE_NAME", p.midi_device);
@@ -91,5 +93,12 @@ void preferences_store::save(const application_preferences& p) const
     key.SetDwordValue(L"PLAYER_RENDER_AUDIO_RATE", p.video.audio_sample_rate);
     key.SetStringValue(L"PLAYER_RENDER_TAIL_SECONDS", std::to_wstring(p.video.tail_seconds));
     key.SetStringValue(L"PLAYER_RENDER_VISIBLE_SECONDS", std::to_wstring(p.video.visible_seconds));
+}
+
+void preferences_store::save_update_preference(bool enabled) const
+{
+    WinReg::RegKey key;
+    key.Create(HKEY_CURRENT_USER, L"Software\\SAFC\\");
+    key.SetDwordValue(L"AUTOUPDATECHECK", enabled);
 }
 }

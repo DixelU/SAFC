@@ -20,6 +20,8 @@
 #include "preferences.h"
 #include "cli.h"
 #include "widgets.h"
+#include "window_icon.h"
+#include "update_service.h"
 
 #include <algorithm>
 #include <array>
@@ -191,6 +193,7 @@ struct workspace
     ui::native_dialogs dialogs;
     ui::preferences_store preferences_store;
     ui::application_preferences preferences;
+    ui::update_service updates;
     ui::playback_session playback;
     ui::project_session project;
     ui::analysis_panel analysis;
@@ -206,6 +209,7 @@ struct workspace
     bool focus_player{}, focus_synth{};
     bool project_open = true, editor_open = false, analysis_open = false, video_open = false, settings_open = false;
     bool simulate_lag = false, exit_prompt = false, exiting = false;
+    bool restart_after_update = false;
     int overlap_mode = 0;
     bool test_mode = false;
     ImVec2 player_position{}, player_size{}, limiter_center{};
@@ -226,6 +230,7 @@ struct workspace
         project_view.show_analysis = [this] { analysis_open = true; ImGui::SetWindowFocus("MIDI analysis"); };
         if (test) project_open = false;
         else { player_open = synth_open = false; reset_layout = false; }
+        if (!test && preferences.automatic_updates) updates.check();
     }
 
     void save_preferences()
@@ -249,6 +254,7 @@ struct workspace
     void shutdown()
     {
         video.shutdown(); editor.shutdown(); analysis.shutdown(); project.shutdown(); playback.shutdown();
+        updates.shutdown();
     }
 
     void open_file(std::wstring path, bool silent = false, bool start_paused = true)
@@ -298,6 +304,11 @@ void render_workspace(workspace& app, piano_texture& piano, GLFWwindow* window)
         app.reset_layout = true; app.player_open = app.synth_open = true;
         ImGui::SetWindowPos("SAFC project", {24, 86}); ImGui::SetWindowSize("SAFC project", {1010, 700});
         ImGui::SetWindowPos("MIDI editor", {80, 86}); ImGui::SetWindowSize("MIDI editor", {1180, 700});
+    }
+    if (app.updates.snapshot().phase == ui::update_phase::ready)
+    {
+        ImGui::SameLine();
+        if (ImGui::Button("Update ready")) { app.settings_open = true; ImGui::SetWindowFocus("Application settings"); }
     }
     ImGui::End();
 
@@ -489,6 +500,37 @@ void render_workspace(workspace& app, piano_texture& piano, GLFWwindow* window)
         ImGui::SetNextWindowSize({530, 700}, ImGuiCond_FirstUseEver);
         if (ui::begin_folded_window("Application settings", &app.settings_open))
         {
+            ImGui::SeparatorText("Updates");
+            const auto update = app.updates.snapshot();
+            ImGui::Text("Installed version: %s", update.current_version.c_str());
+            if (ImGui::Checkbox("Download updates automatically", &app.preferences.automatic_updates))
+            {
+                if (!app.preferences.automatic_updates) app.updates.cancel();
+                else if (!app.test_mode) app.updates.check();
+                try { if (!app.test_mode) app.preferences_store.save_update_preference(app.preferences.automatic_updates); }
+                catch (const std::exception& e) { app.notice = e.what(); }
+            }
+            const bool updating = update.phase == ui::update_phase::checking || update.phase == ui::update_phase::downloading;
+            ImGui::BeginDisabled(updating || update.phase == ui::update_phase::ready || app.test_mode);
+            if (ImGui::Button("Check for updates")) app.updates.check();
+            ImGui::EndDisabled();
+            if (updating || update.phase == ui::update_phase::ready)
+            {
+                ImGui::SameLine();
+                if (ImGui::Button("Cancel update")) app.updates.cancel();
+            }
+            ImGui::TextWrapped("%s", update.message.c_str());
+            if (update.phase == ui::update_phase::downloading)
+                ImGui::ProgressBar(update.progress, {-1, 0});
+            if (update.phase == ui::update_phase::ready)
+            {
+                ImGui::TextWrapped("The update will install when SAFC closes. Your current session can continue.");
+                if (ImGui::Button("Restart to update"))
+                {
+                    app.restart_after_update = true;
+                    glfwSetWindowShouldClose(window, GLFW_TRUE);
+                }
+            }
             ImGui::SeparatorText("Defaults for new MIDIs");
             ui::draw_processing_flags(app.preferences.processing_flags);
             ImGui::Checkbox("Split by channel", &app.preferences.split_channels);
@@ -642,7 +684,8 @@ public:
     }
 };
 
-int run(bool smoke, bool workflows, const std::filesystem::path& capture_path, const std::wstring& initial_file)
+int run(bool smoke, bool workflows, const std::filesystem::path& capture_path,
+    const std::wstring& initial_file, std::filesystem::path& restart_path)
 {
     glfwSetErrorCallback([](int code, const char* text) { std::cerr << "GLFW " << code << ": " << text << '\n'; });
     if (!glfwInit()) throw std::runtime_error("GLFW initialization failed");
@@ -652,9 +695,11 @@ int run(bool smoke, bool workflows, const std::filesystem::path& capture_path, c
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_COMPAT_PROFILE);
     glfwWindowHint(GLFW_SCALE_TO_MONITOR, smoke ? GLFW_FALSE : GLFW_TRUE);
     glfwWindowHint(GLFW_VISIBLE, smoke ? GLFW_FALSE : GLFW_TRUE);
+    ui::window_icon application_icon;
     auto* window = glfwCreateWindow(1400, 850, "SAFC", nullptr, nullptr);
     if (!window) throw std::runtime_error("OpenGL 3.3 compatibility context creation failed");
     struct window_guard { GLFWwindow* w; ~window_guard() { glfwDestroyWindow(w); } } window_lifetime{window};
+    if (!application_icon.apply(window)) std::cerr << "Unable to load the embedded SAFC window icon\n";
     glfwSetWindowSizeLimits(window, 1000, 650, GLFW_DONT_CARE, GLFW_DONT_CARE);
     glfwMakeContextCurrent(window);
     glfwSwapInterval(smoke ? 0 : 1);
@@ -756,7 +801,7 @@ int run(bool smoke, bool workflows, const std::filesystem::path& capture_path, c
         {
             ImGui::TextUnformatted("Close SAFC, discard unsaved editor changes and cancel running jobs?");
             if (ImGui::Button("Close SAFC")) { app.exiting = true; ImGui::CloseCurrentPopup(); }
-            ImGui::SameLine(); if (ImGui::Button("Keep working")) ImGui::CloseCurrentPopup();
+            ImGui::SameLine(); if (ImGui::Button("Keep working")) { app.restart_after_update = false; ImGui::CloseCurrentPopup(); }
             ImGui::EndPopup();
         }
         ImGui::Render();
@@ -800,6 +845,14 @@ int run(bool smoke, bool workflows, const std::filesystem::path& capture_path, c
         if (smoke) std::this_thread::sleep_for(std::chrono::milliseconds(8));
     }
     app.shutdown();
+    if (!smoke)
+    {
+        std::string update_error;
+        const bool installed = app.updates.install_pending(update_error);
+        if (!update_error.empty()) MessageBoxA(glfwGetWin32Window(window), update_error.c_str(), "SAFC update", MB_OK | MB_ICONWARNING);
+        if (installed && app.restart_after_update)
+            restart_path = app.updates.executable_path();
+    }
     return 0;
 }
 } // namespace
@@ -829,7 +882,19 @@ int main()
             DWORD processes[2]{};
             if (GetConsoleProcessList(processes, 2) == 1) ShowWindow(GetConsoleWindow(), SW_HIDE);
         }
-        return run(smoke || workflows, workflows, smoke || workflows ? std::filesystem::path(argv[2]) : std::filesystem::path{}, !smoke && !workflows && argc > 1 ? argv[1] : L"");
+        std::filesystem::path restart_path;
+        const int result = run(smoke || workflows, workflows,
+            smoke || workflows ? std::filesystem::path(argv[2]) : std::filesystem::path{},
+            !smoke && !workflows && argc > 1 ? argv[1] : L"", restart_path);
+        // The old window/backend lifetimes and imgui.ini save finish before
+        // a replacement instance can read or write the same layout file.
+        if (!restart_path.empty())
+        {
+            const auto directory = restart_path.parent_path();
+            const auto launched = reinterpret_cast<INT_PTR>(ShellExecuteW(nullptr, L"open", restart_path.c_str(), nullptr, directory.c_str(), SW_SHOWNORMAL));
+            if (launched <= 32) MessageBoxW(nullptr, L"The update was installed. Start SAFC again to continue.", L"SAFC update", MB_OK | MB_ICONINFORMATION);
+        }
+        return result;
     }
     catch (const std::exception& error)
     {
