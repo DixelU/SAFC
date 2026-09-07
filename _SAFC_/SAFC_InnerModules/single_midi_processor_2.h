@@ -1295,7 +1295,9 @@ struct single_midi_processor_2
 			return true;
 		};
 
-		auto key_transform = [ filtering = settings.filter, cat = settings.key_converter, vm = settings.volume_map ]
+		auto key_transform = [ filtering = settings.filter,
+			cat = settings.key_converter ? settings.key_converter->bake() : cut_and_transpose(0, 255, 0).bake(),
+			vm = settings.volume_map ]
 		(const data_iterator& begin, const data_iterator& end, const data_iterator& cur, single_track_data& std_ref) -> bool
 		{
 			auto& tick = get_value<tick_type>(cur, tick_position);
@@ -1311,23 +1313,20 @@ struct single_midi_processor_2
 				return false;
 			}
 
-			if (cat) [[unlikely]]
+			auto& key = get_value<base_type>(cur, event_param1);
+			const auto mapped_key = cat[key];
+
+			if (mapped_key == cut_and_transpose::rejected)
 			{
-				auto& key = get_value<base_type>(cur, event_param1);
-				auto optkey = (*cat).process(key);
+				auto& reference_event_pair = get_value<tick_type>(cur, event_param3);
+				auto& reference_event_tick = get_value<tick_type>(begin, reference_event_pair);
 
-				if (!optkey)
-				{
-					auto& reference_event_pair = get_value<tick_type>(cur, event_param3);
-					auto& reference_event_tick = get_value<tick_type>(begin, reference_event_pair);
-
-					reference_event_tick = disable_tick;
-					tick = disable_tick;
-					return false;
-				}
-
-				key = *optkey;
+				reference_event_tick = disable_tick;
+				tick = disable_tick;
+				return false;
 			}
+
+			key = static_cast<base_type>(mapped_key);
 
 			if (vm && (type & 0x10)) [[unlikely]] // only for note-on events
 			{
