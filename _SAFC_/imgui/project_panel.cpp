@@ -1,6 +1,7 @@
 #include "project_panel.h"
 #include "analysis_panel.h"
 #include "folded_theme.h"
+#include "widgets.h"
 #include <imgui.h>
 #include <array>
 #include <cfloat>
@@ -171,7 +172,7 @@ void project_panel::draw(bool* open)
                 {
                     auto& f = project_.data.files[i]; const auto id = project_.id_at(i);
                     ImGui::PushID(static_cast<int>(id)); ImGui::TableNextRow(); ImGui::TableNextColumn();
-                    if (ImGui::Selectable(f.appearance_filename.c_str(), selected_.contains(id), ImGuiSelectableFlags_SpanAllColumns))
+                    if (literal_selectable("##file", f.appearance_filename, selected_.contains(id), ImGuiSelectableFlags_SpanAllColumns))
                     {
                         if (!ImGui::GetIO().KeyCtrl) selected_.clear();
                         if (selected_.contains(id)) selected_.erase(id); else selected_.insert(id);
@@ -186,7 +187,13 @@ void project_panel::draw(bool* open)
             }
             ImGui::TableNextColumn(); ImGui::BeginChild("Properties", {0, body_height});
             ImGui::BeginDisabled(busy);
-            if (auto* f = project_.find(focused_)) properties(*f); else ImGui::TextWrapped("Select a MIDI to edit processing settings, maps, and timing.");
+            if (auto* f = project_.find(focused_))
+            {
+                ImGui::PushID(static_cast<int>(focused_));
+                properties(*f);
+                ImGui::PopID();
+            }
+            else ImGui::TextWrapped("Select a MIDI to edit processing settings, maps, and timing.");
             ImGui::EndDisabled(); ImGui::EndChild(); ImGui::EndTable();
         }
         ImGui::BeginDisabled(busy);

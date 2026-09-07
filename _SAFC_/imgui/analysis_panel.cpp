@@ -297,13 +297,13 @@ struct analysis_panel::impl
     }
 
     template<class Graph>
-    void plot(const char* label, const std::vector<analysis_point>& points, const Graph& exact,
+    void plot(const char* id, const char* label, const std::vector<analysis_point>& points, const Graph& exact,
         ImU32 color, const analysis_result& data)
     {
         ImGui::TextUnformatted(label);
         const ImVec2 origin = ImGui::GetCursorScreenPos();
         const ImVec2 size(std::max(180.f, ImGui::GetContentRegionAvail().x), 135);
-        ImGui::InvisibleButton(label, size, ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonMiddle);
+        ImGui::InvisibleButton(id, size, ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonMiddle);
         auto* draw = ImGui::GetWindowDrawList();
         const ImVec2 corner(origin.x + size.x, origin.y + size.y);
         draw->AddRectFilled(origin, corner, IM_COL32(7, 19, 30, 255));
@@ -532,9 +532,9 @@ void analysis_panel::draw(bool* open)
     impl_->view_start = std::isfinite(impl_->view_start) ? std::max(0., impl_->view_start) : 0;
     impl_->view_end = std::isfinite(impl_->view_end) ? std::max(impl_->view_start + .000001, impl_->view_end) : impl_->view_start + 1;
     ImGui::TextDisabled("Wheel: zoom at cursor | middle-drag: pan | click: select tick (exact values in tooltip)");
-    if (impl_->show_tempo) impl_->plot("Tempo (BPM)", data->tempo_plot, data->source->tempo_map, IM_COL32(230, 123, 143, 255), *data);
-    if (impl_->show_poly) impl_->plot("Polyphony", data->polyphony_plot, data->source->polyphony, IM_COL32(98, 209, 191, 255), *data);
-    if (impl_->show_nps) impl_->plot("Notes per second", data->nps_plot, data->source->notes_per_second, IM_COL32(232, 198, 99, 255), *data);
+    if (impl_->show_tempo) impl_->plot("##tempo-plot", "Tempo (BPM)", data->tempo_plot, data->source->tempo_map, IM_COL32(230, 123, 143, 255), *data);
+    if (impl_->show_poly) impl_->plot("##polyphony-plot", "Polyphony", data->polyphony_plot, data->source->polyphony, IM_COL32(98, 209, 191, 255), *data);
+    if (impl_->show_nps) impl_->plot("##nps-plot", "Notes per second", data->nps_plot, data->source->notes_per_second, IM_COL32(232, 198, 99, 255), *data);
     ImGui::Text("Selected tick: %lld | Time: %.6f s", static_cast<long long>(impl_->selected_tick), data->ticks_to_seconds(impl_->selected_tick));
 
     ImGui::SeparatorText("Tick / time conversion");

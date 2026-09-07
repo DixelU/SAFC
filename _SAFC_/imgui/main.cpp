@@ -19,6 +19,7 @@
 #include "video_export_panel.h"
 #include "preferences.h"
 #include "cli.h"
+#include "widgets.h"
 
 #include <algorithm>
 #include <array>
@@ -394,10 +395,14 @@ void render_workspace(workspace& app, piano_texture& piano, GLFWwindow* window)
             const auto selected = app.playback.selected_device();
             ImGui::BeginDisabled(status.busy);
             ImGui::SetNextItemWidth(-1);
-            if (ImGui::BeginCombo("##output", selected < names.size() ? names[selected].c_str() : "No output available"))
+            if (ui::begin_literal_combo("##output", selected < names.size() ? names[selected].c_str() : "No output available"))
             {
                 for (size_t i = 0; i < names.size(); ++i)
-                    if (ImGui::Selectable(names[i].c_str(), i == selected)) app.playback.select_device(i);
+                {
+                    ImGui::PushID(static_cast<int>(i));
+                    if (ui::literal_selectable("##device", names[i], i == selected)) app.playback.select_device(i);
+                    ImGui::PopID();
+                }
                 ImGui::EndCombo();
             }
             ImGui::Spacing();
@@ -473,7 +478,7 @@ void render_workspace(workspace& app, piano_texture& piano, GLFWwindow* window)
             ImGui::Text("Archive layer %u", status.archive_layer);
             ImGui::TextWrapped("Choose the MIDI or nested archive to open:");
             for (size_t i = 0; i < status.archive_members.size(); ++i)
-            { ImGui::PushID(static_cast<int>(i)); if (ImGui::Selectable(status.archive_members[i].c_str())) app.playback.choose_archive_member(i); ImGui::PopID(); }
+            { ImGui::PushID(static_cast<int>(i)); if (ui::literal_selectable("##member", status.archive_members[i])) app.playback.choose_archive_member(i); ImGui::PopID(); }
             if (ImGui::Button("Cancel")) app.playback.stop();
         }
         ui::end_folded_window();

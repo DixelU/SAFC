@@ -25,6 +25,58 @@ std::string key_name(int key)
     return std::string(names[key % 12]) + std::to_string(key / 12 - 1);
 }
 
+void draw_key_strip(ImDrawList& draw, ImVec2 origin, ImVec2 size,
+    const ::cut_and_transpose& map, int bank, bool output)
+{
+    const ImVec2 far(origin.x + size.x, origin.y + size.y);
+    draw.AddRectFilled(origin, far, IM_COL32(6, 19, 30, 255));
+    draw.PushClipRect(origin, far, true);
+    for (int key = 0; key < 256; ++key)
+    {
+        // The output piano slides over the fixed input coordinate system:
+        // output key k sits directly above source key k - transpose.
+        const int source = output ? key - map.transpose_val : key;
+        const float x = origin.x + size.x * (source - bank * 128) / 128.f;
+        const float next = x + size.x / 128.f;
+        if (next <= origin.x || x >= far.x) continue;
+        const bool included = source >= 0 && source <= 255
+            && map.process(static_cast<std::uint8_t>(source)).has_value();
+        const ImU32 white = included ? IM_COL32(207, 225, 233, 255) : IM_COL32(61, 74, 83, 255);
+        const ImU32 black = included ? IM_COL32(16, 33, 48, 255) : IM_COL32(23, 32, 42, 255);
+        draw.AddRectFilled(ImVec2(x, origin.y), ImVec2(next, far.y), white);
+        if (black_key(key))
+        {
+            const float top = output ? origin.y + size.y * .45f : origin.y;
+            const float bottom = output ? far.y : origin.y + size.y * .55f;
+            draw.AddRectFilled(ImVec2(x, top), ImVec2(next, bottom), black);
+        }
+        if (included)
+        {
+            const float y = output ? far.y - 4.f : origin.y;
+            draw.AddRectFilled(ImVec2(x, y), ImVec2(next, y + 4.f), accent);
+        }
+    }
+    // Draw dividers and labels after the fills so later keys cannot cover the
+    // octave number, and fractional key widths keep consistent separators.
+    for (int key = 0; key <= 256; ++key)
+    {
+        const int source = output ? key - map.transpose_val : key;
+        const float x = origin.x + size.x * (source - bank * 128) / 128.f;
+        if (x < origin.x || x > far.x) continue;
+        draw.AddLine(ImVec2(x, origin.y), ImVec2(x, far.y), IM_COL32(6, 19, 30, 200));
+    }
+    if (size.x > 650) for (int key = 0; key < 256; key += 12)
+    {
+        const int source = output ? key - map.transpose_val : key;
+        const float x = origin.x + size.x * (source - bank * 128) / 128.f;
+        if (x < origin.x || x >= far.x) continue;
+        draw.AddText(ImVec2(x + 1, output ? origin.y + 4 : far.y - ImGui::GetTextLineHeight() - 4),
+            IM_COL32(53, 112, 151, 255), key_name(key).c_str());
+    }
+    draw.PopClipRect();
+    draw.AddRect(origin, far, IM_COL32(53, 112, 151, 255));
+}
+
 template<class Curve>
 void identity(Curve& curve, int maximum)
 {
@@ -60,7 +112,7 @@ void simplify(Curve& curve)
 
 void mapping_panel::draw_key_map(const char* label, std::shared_ptr<::cut_and_transpose>& map, bool* open)
 {
-    ImGui::SetNextWindowSize(ImVec2(860, 420), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(860, 540), ImGuiCond_FirstUseEver);
     if (!begin_folded_window("Cut & transpose", open)) { end_folded_window(); return; }
     ImGui::TextUnformatted(label);
     bool enabled = bool(map);
@@ -96,26 +148,15 @@ void mapping_panel::draw_key_map(const char* label, std::shared_ptr<::cut_and_tr
     for (int bank = 0; bank < banks; ++bank)
     {
         ImGui::PushID(bank);
+        ImGui::Text("Output (%+d semitones)", int(map->transpose_val));
+        const ImVec2 size(std::max(200.f, ImGui::GetContentRegionAvail().x), 66.f);
+        const ImVec2 output_origin = ImGui::GetCursorScreenPos();
+        ImGui::Dummy(size);
+        draw_key_strip(*ImGui::GetWindowDrawList(), output_origin, size, *map, bank, true);
         ImGui::Text("Input %d..%d", bank * 128, bank * 128 + 127);
         const ImVec2 origin = ImGui::GetCursorScreenPos();
-        const ImVec2 size(std::max(200.f, ImGui::GetContentRegionAvail().x), 74.f);
         ImGui::InvisibleButton("key_keyboard", size, ImGuiButtonFlags_MouseButtonLeft);
-        auto* draw = ImGui::GetWindowDrawList();
-        for (int i = 0; i < 128; ++i)
-        {
-            const int key = bank * 128 + i;
-            const auto result = map->process(static_cast<std::uint8_t>(key));
-            const bool included = result.has_value();
-            const float x = origin.x + size.x * i / 128.f;
-            const float next = origin.x + size.x * (i + 1) / 128.f;
-            const ImU32 color = black_key(key)
-                ? (included ? IM_COL32(16, 33, 48, 255) : IM_COL32(23, 32, 42, 255))
-                : (included ? IM_COL32(207, 225, 233, 255) : IM_COL32(61, 74, 83, 255));
-            draw->AddRectFilled(ImVec2(x, origin.y), ImVec2(next - .5f, origin.y + size.y), color);
-            if (included) draw->AddRectFilled(ImVec2(x, origin.y + size.y - 5), ImVec2(next, origin.y + size.y), accent);
-            if (key % 12 == 0 && size.x > 650)
-                draw->AddText(ImVec2(x + 1, origin.y + 48), IM_COL32(53, 112, 151, 255), key_name(key).c_str());
-        }
+        draw_key_strip(*ImGui::GetWindowDrawList(), origin, size, *map, bank, false);
         if (ImGui::IsItemHovered() || ImGui::IsItemActive())
         {
             const int key = bank * 128 + std::clamp(int((ImGui::GetIO().MousePos.x - origin.x) / size.x * 128), 0, 127);
@@ -208,7 +249,11 @@ void mapping_panel::draw_curve(const char* title, const char* label, std::shared
     }
     ImGui::RadioButton("Single point", &state.mode, 0); ImGui::SameLine();
     ImGui::RadioButton("Two-point segment", &state.mode, 1); ImGui::SameLine();
-    if (state.first_x >= 0 && ImGui::SmallButton("Cancel segment")) state.first_x = -1;
+    // Reserve the same toolbar row while a segment starts, completes or cancels.
+    // Omitting this item leaves SameLine active for the instructions below.
+    ImGui::BeginDisabled(state.first_x < 0);
+    if (ImGui::SmallButton("Cancel segment")) state.first_x = -1;
+    ImGui::EndDisabled();
     ImGui::TextDisabled("Click or drag to add points; segment mode replaces the interval. Right-click deletes the nearest point.");
 
     const auto origin = ImGui::GetCursorScreenPos();

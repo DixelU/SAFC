@@ -31,6 +31,9 @@ to resize them; **Reset layout** restores the initial arrangement.
   using native numeric controls and editable canvases. Copy/paste and map reset
   operate on the corresponding map type. Processing jobs receive their own map
   copies so later UI edits cannot change an in-flight merge.
+  Cut/transpose shows the shifted output piano above the fixed input piano;
+  vertically aligned keys show each source-to-output mapping. Drag the lower
+  piano to set the input cut range.
 - **Player:** use normal MIDI files or compressed/nested archive sources; choose
   a member when an archive contains several candidates. Select a MIDI device or
   embedded SYNCore, play, pause, stop, seek, adjust the logarithmic visible-time
@@ -228,10 +231,20 @@ ctest --test-dir build/imgui -R '^safc-imgui-' --output-on-failure
 | --- | --- |
 | `safc-imgui-smoke` | Hidden OpenGL workspace, transport/input and screenshot capture |
 | `safc-imgui-workflows` | Project/editor/analysis workflow integration and workspace capture |
-| `safc-imgui-editor` | Owned load, note/controller gestures, tools, save/reload, destination preservation, real ImGui mouse/keyboard events and silent playback |
-| `safc-imgui-analysis` | Tempo integration, graph peaks, exact CSV/ATRAW exports, native map rendering, cancellation and invalid input |
+| `safc-imgui-editor` | Owned load, note/controller gestures, tools, save/reload, destination preservation, real ImGui input, stable track IDs, expanded tool/combo ID checks and silent playback |
+| `safc-imgui-analysis` | Tempo integration, graph peaks, exact CSV/ATRAW exports, native map rendering, graph/checkbox ID isolation and clicks, cancellation and invalid input |
+| `safc-imgui-widget-ids` | Conflict-detector negative control, duplicate names, literal `##`/`###` labels, multiline rows, native selection and per-file property IDs |
+| `safc-imgui-mapping-ids` | All map windows, extended keyboard banks, numeric step buttons, expanded points, segment mode and disabled branches |
+| `safc-imgui-mapping-layout` | Fixed canvas bounds through native segment start, completion, cancellation and restart for velocity and pitch maps |
+| `safc-imgui-key-map` | Shifted output piano, octave alignment, fixed source keys, cut highlighting, extreme transpositions and native bank-aware cut dragging |
 | `safc-imgui-playback` | External sources, nested/archive member selection, cancellation, replay and actual short sine-based MP4 rendering |
 | `safc-imgui-cli` | JSON validation, integer precision, input identity and processing output |
+
+ID regressions use the same counter as Dear ImGui's runtime conflict warning;
+rendering geometry alone does not detect these conflicts. Keep diagnostic
+highlighting enabled. Scope repeated controls with stable model IDs, and use
+`widgets.h` for selectable user text so names are not parsed as ImGui labels.
+Canvases use explicit hidden IDs independent of their visible captions.
 
 The hidden capture modes are `--smoke <capture.bmp>` and
 `--workflow-smoke <capture.bmp>`. Fixtures and generated outputs stay beside the

@@ -1,6 +1,7 @@
 #include "analysis_panel.h"
 #include "mapping_panel.h"
 #include "folded_theme.h"
+#include "../tests/imgui_id_audit.h"
 
 #include <chrono>
 #include <cmath>
@@ -9,6 +10,8 @@
 #include <iostream>
 #include <stdexcept>
 #include <thread>
+
+namespace imgui_test = safc::imgui_test;
 
 namespace
 {
@@ -153,6 +156,57 @@ int main(int argc, char** argv)
                 for (const auto& vertex : list->VtxBuffer)
                     require(std::isfinite(vertex.pos.x) && std::isfinite(vertex.pos.y), "A graph produced non-finite geometry.");
         }
+        // Match ImGui's runtime diagnostic, including items that are only
+        // counted after an ID was hovered in the previous frame. Rendering
+        // geometry alone did not catch the old Polyphony checkbox/plot alias.
+        ImGui::SetWindowSize("MIDI analysis", {910, 1100});
+        auto draw_analysis = [&] { panel.draw(&opened); };
+        auto frame_analysis = [&] { ImGui::NewFrame(); draw_analysis(); ImGui::Render(); };
+        frame_analysis(); frame_analysis();
+        ImGuiWindow* content = nullptr;
+        for (auto* window : ImGui::GetCurrentContext()->Windows)
+            if (window->ParentWindow && std::string_view(window->ParentWindow->Name) == "MIDI analysis"
+                && std::string_view(window->Name).find("##folded-content") != std::string_view::npos) content = window;
+        require(content != nullptr, "Analysis content window was not submitted.");
+        constexpr const char* controls[] = {"Tempo", "Polyphony", "Notes/sec", "Seconds on horizontal axis",
+            "Auto vertical scale", "From", "To", "Fit all", "Ticks", "Seconds", "Delimiter", "Format",
+            "Ticks -> time", "Time -> ticks", "Export tempo CSV", "Export combined data", "Export notes/sec CSV",
+            "##tempo-plot", "##polyphony-plot", "##nps-plot"};
+        for (const auto* label : controls)
+            require(imgui_test::probe_item_id(content->GetID(label), draw_analysis) == 1,
+                (std::string("Analysis item has a missing or conflicting ID: ") + label).c_str());
+
+        ImGui::ActivateItemByID(content->GetID("Auto vertical scale")); frame_analysis();
+        require(imgui_test::probe_item_id(content->GetID("Maximum"), draw_analysis) == 1,
+            "Manual graph maximum has a missing or conflicting ID.");
+        ImGui::ActivateItemByID(content->GetID("Auto vertical scale")); frame_analysis();
+
+        auto hover = [&](ImGuiID id)
+        {
+            // Sweep native hit targets rather than hard-coding font-dependent
+            // checkbox positions. Only pointer motion is submitted here.
+            for (float y = content->InnerClipRect.Min.y + 4; y < content->InnerClipRect.Max.y; y += 8)
+                for (float x = content->InnerClipRect.Min.x + 4; x < content->InnerClipRect.Max.x; x += 16)
+                {
+                    io.AddMousePosEvent(x, y); frame_analysis();
+                    if (ImGui::GetHoveredID() == id) return;
+                }
+            throw std::runtime_error("Could not find the analysis item's native hit target.");
+        };
+        const auto checkbox = content->GetID("Polyphony"), plot = content->GetID("##polyphony-plot");
+        require(checkbox != plot, "Polyphony graph aliases its visibility checkbox.");
+        hover(plot);
+        io.AddMouseButtonEvent(0, true); frame_analysis();
+        require(ImGui::GetActiveID() == plot, "Clicking the graph activated the checkbox.");
+        io.AddMouseButtonEvent(0, false); frame_analysis();
+        require(imgui_test::probe_item_id(plot, draw_analysis) == 1, "Clicking the graph hid it.");
+        hover(checkbox);
+        io.AddMouseButtonEvent(0, true); frame_analysis();
+        io.AddMouseButtonEvent(0, false); frame_analysis();
+        require(imgui_test::probe_item_id(plot, draw_analysis) == 0, "Checkbox did not hide its graph.");
+        io.AddMouseButtonEvent(0, true); frame_analysis();
+        io.AddMouseButtonEvent(0, false); frame_analysis();
+        require(imgui_test::probe_item_id(plot, draw_analysis) == 1, "Checkbox did not restore its graph.");
         ImGui::DestroyContext();
         require(keys->process(127).value_or(0) == 127, "Rendering unexpectedly changed key transform.");
         require(volume->evaluate_as<std::uint8_t>(127).value_or(0) == 127, "Rendering unexpectedly changed volume map.");

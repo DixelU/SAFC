@@ -3,6 +3,7 @@
 
 #include "editor_panel.h"
 #include "folded_theme.h"
+#include "widgets.h"
 #include "playback_session.h"
 #include "../SAFC_InnerModules/midi_editor.h"
 
@@ -560,7 +561,7 @@ struct editor_panel::impl
         {
             ImGui::PushID(int(id));
             const auto text = document->get_track_label(id);
-            if (ImGui::Selectable(text.c_str(), id == active)) { finish_gesture(false); document->set_active_track(id); }
+            if (literal_selectable("##track", text, id == active)) { finish_gesture(false); document->set_active_track(id); }
             ImGui::PopID();
         }
         ImGui::EndChild();

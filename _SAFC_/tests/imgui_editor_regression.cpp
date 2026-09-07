@@ -4,15 +4,18 @@
 #include "../imgui/editor_panel.h"
 #include "../imgui/playback_session.h"
 #include "../imgui/folded_theme.h"
+#include "imgui_id_audit.h"
 #include "../SAFC_InnerModules/midi_editor.h"
 
 #include <imgui.h>
 #include <imgui_internal.h>
 #include <chrono>
+#include <cstring>
 #include <filesystem>
 #include <iostream>
 #include <stdexcept>
 #include <thread>
+#include <vector>
 
 namespace
 {
@@ -152,11 +155,126 @@ int main()
         key(ImGuiKey_Z, true);
         saved = save();
         require(saved->get_note_count() == initial_count + 1, "Native delete undo did not restore the note.");
+
+        // Track metadata is user data, including literal ImGui label delimiters.
+        // Renaming a track must not alter its selectable ID or alias another row.
+        const auto named_fixture = directory / L"editor-named-tracks.mid";
+        const auto renamed_fixture = directory / L"editor-renamed-tracks.mid";
+        saved->set_track_name(0, "A##B###same");
+        saved->set_track_name(1, "C##D###same");
+        require(saved->save_file(named_fixture.wstring()), "Could not write track-label fixture.");
+        saved->set_track_name(0, "Renamed##A###other");
+        saved->set_track_name(1, "Renamed##B###other");
+        require(saved->save_file(renamed_fixture.wstring()), "Could not write renamed track-label fixture.");
         saved.reset();
+        auto load_fixture = [&](const std::filesystem::path& path)
+        {
+            editor.open_file(path.wstring());
+            const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+            while (editor.busy() && std::chrono::steady_clock::now() < deadline)
+            { std::this_thread::sleep_for(std::chrono::milliseconds(2)); frame(); }
+            frame(); frame();
+            require(!editor.busy(), "Track-label fixture load timed out.");
+        };
+        auto hover_track = [&](int track_id)
+        {
+            ImGuiWindow* list = nullptr;
+            for (auto* window : ImGui::GetCurrentContext()->Windows)
+                if (std::strstr(window->Name, "Track list")) list = window;
+            require(list != nullptr, "Editor track list child window is absent.");
+            const auto at = list->DC.CursorStartPos;
+            io.AddMousePosEvent(at.x + 20.f,
+                at.y + ImGui::GetTextLineHeightWithSpacing() * track_id + ImGui::GetTextLineHeight() * .5f);
+            frame(); frame();
+            const auto row_seed = ImHashData(&track_id, sizeof(track_id), list->ID);
+            const auto expected = ImHashStr("##track", 0, row_seed);
+            require(ImGui::GetHoveredID() == expected, "Track name leaked into its selectable ID.");
+            require(ImGui::GetCurrentContext()->HoveredIdPreviousFrameItemCount == 1,
+                "Track rows submitted conflicting ImGui IDs.");
+            return expected;
+        };
+        load_fixture(named_fixture);
+        const auto first_track = hover_track(0), second_track = hover_track(1);
+        require(first_track != second_track, "Track names with matching ### suffixes aliased each other.");
+        io.AddMouseButtonEvent(0, true); frame();
+        io.AddMouseButtonEvent(0, false); frame();
+        require(ImGui::GetCurrentContext()->NavId == second_track, "Native track-row selection targeted the wrong item.");
+        load_fixture(renamed_fixture);
+        require(hover_track(0) == first_track && hover_track(1) == second_track,
+            "Track-row IDs changed when MIDI track names changed.");
+
+        auto content_window = [](const char* title)
+        {
+            const auto* parent = ImGui::FindWindowByName(title);
+            for (auto* window : ImGui::GetCurrentContext()->Windows)
+                if (window->ParentWindow == parent && std::strstr(window->Name, "##folded-content")) return window;
+            throw std::runtime_error(std::string("Missing folded content: ") + title);
+        };
+        auto probe = [&](ImGuiID id, const char* label)
+        {
+            require(safc::imgui_test::probe_item_id(id, [&] { editor.draw(&visible); }) == 1,
+                (std::string("Editor widget ID was missing or conflicted: ") + label).c_str());
+        };
+        auto audit_combo = [&](ImGuiWindow* content, const char* label, const std::vector<const char*>& options, int choice)
+        {
+            probe(content->GetID(label), label);
+            ImGui::ActivateItemByID(content->GetID(label));
+            frame(); frame();
+            require(!ImGui::GetCurrentContext()->OpenPopupStack.empty(), "Native editor combo did not open.");
+            auto* popup = ImGui::GetCurrentContext()->OpenPopupStack.back().Window;
+            require(popup != nullptr, "Native editor combo has no popup window.");
+            ImGuiID selected = 0;
+            for (int i = 0; i < int(options.size()); ++i)
+            {
+                const auto id = ImHashStr(options[i], 0, popup->GetID(i));
+                probe(id, options[i]);
+                if (i == choice) selected = id;
+            }
+            ImGui::ActivateItemByID(selected);
+            frame(); frame();
+            require(ImGui::GetCurrentContext()->OpenPopupStack.empty(), "Native combo selection did not close its popup.");
+        };
+        struct tool_case { ImGuiKey shortcut; const char* title; std::vector<const char*> controls; };
+        const std::vector<tool_case> tools = {
+            {ImGuiKey_U, "Chopper", {"Slices / beat", "Time multiplier", "Gap (%)", "Align pattern to score grid"}},
+            {ImGuiKey_Y, "Flip score", {"Horizontal", "Preserve start-time pattern", "Vertical"}},
+            {ImGuiKey_W, "Claw machine", {"Period (beats)", "Remove every", "Time distortion", "Remove short notes", "Stretch to original length"}},
+            {ImGuiKey_O, "LFO", {"Center", "Range", "Cycles", "Phase (degrees)", "Shape"}}
+        };
+        for (const auto& tool : tools)
+        {
+            hover_track(0);
+            io.AddMouseButtonEvent(0, true); frame();
+            io.AddMouseButtonEvent(0, false); frame();
+            io.AddKeyEvent(ImGuiMod_Alt, true);
+            key(tool.shortcut, false);
+            io.AddKeyEvent(ImGuiMod_Alt, false); frame();
+            const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+            while (editor.busy() && std::chrono::steady_clock::now() < deadline)
+            { std::this_thread::sleep_for(std::chrono::milliseconds(2)); frame(); }
+            frame();
+            require(!editor.busy(), "Editor tool preview timed out.");
+            ImGui::SetWindowSize(tool.title, ImVec2(560, 650));
+            frame(); frame();
+            auto* content = content_window(tool.title);
+            for (const char* label : tool.controls) probe(content->GetID(label), label);
+            probe(content->GetID("Accept"), "Accept");
+            probe(content->GetID("Cancel"), "Cancel");
+            if (tool.shortcut == ImGuiKey_O)
+                audit_combo(content, "Shape", {"Sine", "Triangle", "Square"}, 0);
+            ImGui::ActivateItemByID(content->GetID("Cancel"));
+            frame(); frame();
+        }
+        auto* editor_content = content_window("MIDI editor");
+        audit_combo(editor_content, "Tool", {"Draw / move", "Select", "Erase"}, 0);
+        audit_combo(editor_content, "Snap", {"1/4", "1/8", "1/16", "1/32", "1/64", "Off"}, 2);
+        audit_combo(editor_content, "Lane", {"Velocity", "Pitch bend", "Pan", "Volume", "Tempo"}, 4);
+        for (const char* label : {"BPM min", "BPM max", "20-400 BPM", "At tick", "BPM", "Insert tempo"})
+            probe(editor_content->GetID(label), label);
 
         editor.shutdown();
         playback.shutdown();
-        std::cout << "Native ImGui draw, move, keyboard undo/redo/delete, atomic Save and silent transport passed.\n";
+        std::cout << "Native ImGui draw, move, keyboard undo/redo/delete, atomic Save, stable track IDs, four tool ID audits and silent transport passed.\n";
         return 0;
     }
     catch (const std::exception& error)
