@@ -1531,10 +1531,12 @@ struct single_midi_processor_2
 			uint64_t a_d = (rhs->first == lhs->first) ? 1 : rhs->first - lhs->first; // denominator
 			// a_d >= a_n >= 0;
 
-			auto time_numerator =
-				uint256_t(a_n) * uint256_t(rhs->second.numerator) +
-				uint256_t(a_d - a_n) * uint256_t(lhs->second.numerator);
-			auto time_denominator = a_d * target_tempo_val;
+			uint256_t time_numerator =
+				uint256_t(
+					uint128_t(a_n) * uint128_t(rhs->second.numerator) +
+					uint128_t(a_d - a_n) * uint128_t(lhs->second.numerator)
+				);
+			auto time_denominator = uint256_t(a_d) * target_tempo_val;
 
 			auto new_tick = (time_numerator * new_ppqn) / (time_denominator * old_ppqn);
 			tick = new_tick[0];
