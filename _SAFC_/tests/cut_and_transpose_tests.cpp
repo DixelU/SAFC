@@ -60,7 +60,7 @@ void test_lookup_table()
     }
 }
 
-void check_note_pair(const processor::filters_multimap& filters,
+void check_note_pair(const processor::filter_table& filters,
     std::uint8_t key, cut_and_transpose::result_type expected)
 {
     const auto event_size = processor::expected_size(std::uint8_t(0x90));
@@ -77,7 +77,7 @@ void check_note_pair(const processor::filters_multimap& filters,
 
     processor::single_track_data track;
     processor::message_buffers logs;
-    check(processor::process_buffer(events, processor::make_filter_bounding_iters(filters), track, logs),
+    check(processor::process_buffer(events, filters, track, logs),
         "note pair processing must succeed");
     for (int index = 0; index < 2; ++index)
     {
@@ -116,14 +116,16 @@ void test_processing_snapshot()
 
     settings.key_converter.reset();
     auto disabled = processor::filters_constructor(settings);
-    check(disabled.second.count(0x90) == 0 && disabled.second.count(0x80) == 0,
-        "no note filters are needed when cut/transpose and volume mapping are disabled");
+    check(disabled.second[0x9].size() == disabled.second[0].size()
+        && disabled.second[0x8].size() == disabled.second[0].size(),
+        "only common filters are needed when cut/transpose and volume mapping are disabled");
     check_note_pair(disabled.second, 255, 255);
 
     // Exercise the identity table while the note filter is enabled only for volume.
     const dixelu::polyline_converter<double, double> volume{{0, 0}, {255, 255}};
-    settings.volume_map = std::make_shared<dixelu::byte_polyline_lookup_table>(
-        volume, dixelu::polyline_extrapolation::linear);
+    settings.volume_map = std::make_shared<const processor::volume_lookup_table>(
+        processor::bake_volume_map(dixelu::byte_polyline_lookup_table(
+            volume, dixelu::polyline_extrapolation::linear)));
     auto volume_only = processor::filters_constructor(settings);
     check_note_pair(volume_only.second, 0, 0);
     check_note_pair(volume_only.second, 255, 255);

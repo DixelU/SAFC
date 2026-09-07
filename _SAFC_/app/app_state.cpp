@@ -81,12 +81,13 @@ std::shared_ptr<single_midi_processor_2::processing_data> file_settings::build_s
 	smrp_data->postfix = w_file_name_postfix;
 
 	if (volume_map)
-		settings.volume_map = std::make_shared<dixelu::byte_polyline_lookup_table>(
-			*volume_map, dixelu::polyline_extrapolation::linear);
+		settings.volume_map = std::make_shared<const single_midi_processor_2::volume_lookup_table>(
+			single_midi_processor_2::bake_volume_map(dixelu::byte_polyline_lookup_table(
+				*volume_map, dixelu::polyline_extrapolation::linear)));
 	if (pitch_bend_map)
-		settings.pitch_map = std::make_shared<dixelu::midi14_polyline_lookup_table>(
-			dixelu::make_midi14_polyline_lookup_table(
-				*pitch_bend_map, dixelu::polyline_extrapolation::linear));
+		settings.pitch_map = std::make_shared<const single_midi_processor_2::pitch_lookup_table>(
+			single_midi_processor_2::bake_pitch_map(dixelu::make_midi14_polyline_lookup_table(
+				*pitch_bend_map, dixelu::polyline_extrapolation::linear)));
 
 	settings.key_converter = key_map;
 	settings.new_ppqn = new_ppqn;

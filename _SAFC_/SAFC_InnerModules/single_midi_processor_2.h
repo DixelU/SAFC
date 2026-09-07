@@ -194,6 +194,22 @@ struct single_midi_processor_2
 	using sgsize_type = std::int32_t;
 	using sgtick_type = std::int64_t;
 	using ppq_type = std::uint16_t;
+	using volume_lookup_table = std::array<std::uint8_t, 256>;
+	using pitch_lookup_table = std::array<std::uint16_t, 1U << 14U>;
+
+	[[nodiscard]] static volume_lookup_table bake_volume_map(const dixelu::byte_polyline_lookup_table& map)
+	{
+		volume_lookup_table result{};
+		for (std::size_t value = 0; value < result.size(); ++value)
+			result[value] = map[value].value_or(static_cast<std::uint8_t>(value));
+		return result;
+	}
+
+	[[nodiscard]] static pitch_lookup_table bake_pitch_map(const dixelu::midi14_polyline_lookup_table& map)
+	{
+		// Preserve the existing fallback, including its subsequent 14-bit masking.
+		return map.materialize(0x4000);
+	}
 
 	inline static constexpr std::size_t tick_position = 0;
 	inline static constexpr std::size_t event_type = 8;
@@ -388,8 +404,8 @@ struct single_midi_processor_2
 		bool enable_imp_events_filter = false;
 		important_filter_settings imp_events_filter;
 
-		std::shared_ptr<dixelu::byte_polyline_lookup_table> volume_map;
-		std::shared_ptr<dixelu::midi14_polyline_lookup_table> pitch_map;
+		std::shared_ptr<const volume_lookup_table> volume_map;
+		std::shared_ptr<const pitch_lookup_table> pitch_map;
 		std::shared_ptr<cut_and_transpose> key_converter;
 		details_data details;
 		processing_details proc_details;
@@ -935,19 +951,13 @@ struct single_midi_processor_2
 		return (hi * to / from) * radix + (lo * to / from);
 	}
 
-	using filters_multimap = std::multimap<base_type, event_transforming_filter>;
-	using filters_iterators = std::pair<filters_multimap::const_iterator, filters_multimap::const_iterator>;
-	inline static std::array<filters_iterators, 16> make_filter_bounding_iters(const filters_multimap& map)
-	{
-		std::array<filters_iterators, 16> iters;
-		for (int i = 0; i < 16; ++i)
-			iters[i] = map.equal_range(i << 4);
-		return iters;
-	}
+	using filter_list = std::vector<event_transforming_filter>;
+	// Each event class owns a contiguous pipeline: common filters, then class filters.
+	using filter_table = std::array<filter_list, 16>;
 
 	inline static bool process_buffer(
 		std::vector<base_type>& data_buffer,
-		const std::array<filters_iterators, 16>& filters,
+		const filter_table& filters,
 		single_track_data& std_ref,
 		message_buffers& buffers)
 	{
@@ -975,24 +985,9 @@ struct single_midi_processor_2
 			auto type = get_value<base_type>(data_buffer, i + event_type);
 			auto channellless_type = type >> 4;
 			di = expected_size(db_current);
-			bool isActive = true;
-
-			//todo: move "equal range" outside of the loop
-			{
-				auto& [begin, end] = filters[0];
-				auto beg_copy = begin;
-
-				for (; isActive && beg_copy != end; ++beg_copy) // hot smh
-					isActive &= (beg_copy->second)(db_begin, db_end, db_current, std_ref); // hot smh
-			}
-
-			{
-				auto& [begin, end] = filters[channellless_type];
-				auto beg_copy = begin;
-
-				for (; isActive && beg_copy != end; ++beg_copy) // hot smh
-					isActive &= (beg_copy->second)(db_begin, db_end, db_current, std_ref); // hot smh
-			}
+			for (const auto& filter : filters[channellless_type])
+				if (!filter(db_begin, db_end, db_current, std_ref))
+					break;
 
 			db_current += di;
 			i += di;
@@ -1079,7 +1074,7 @@ struct single_midi_processor_2
 	inline static auto
 		filters_constructor(const settings_obj& settings)
 	{
-		std::multimap<base_type, event_transforming_filter> filters;
+		filter_table filters;
 
 		auto selection_filter = [&selection_data = settings.selection_data, &filter = settings.filter]
 		(const data_iterator& begin, const data_iterator& end, const data_iterator& cur, single_track_data& std_ref) -> bool
@@ -1286,7 +1281,7 @@ struct single_midi_processor_2
 				auto& msb = get_value<base_type>(cur, event_param2);
 
 				std::uint16_t pitch = ((msb & 0x7F) << 7) | (lsb & 0x7F);
-				pitch = pm->at(pitch).value_or(0x4000);
+				pitch = (*pm)[pitch];
 
 				msb = (pitch >> 7) & 0x7F;
 				lsb = (pitch & 0x7F);
@@ -1331,7 +1326,7 @@ struct single_midi_processor_2
 			if (vm && (type & 0x10)) [[unlikely]] // only for note-on events
 			{
 				auto& velocity = get_value<base_type>(cur, event_param2);
-				velocity = (*vm)[velocity].value_or(velocity);
+				velocity = (*vm)[velocity];
 
 				if (!velocity)
 				{
@@ -1452,57 +1447,32 @@ struct single_midi_processor_2
 		{
 			auto& type = get_value<base_type>(cur, event_type);
 
-			if ((type & 0xF0) == 0x80)
-			{
-				type = 0x90 | (type & 0x0F);
-
-				auto& velocity = get_value<base_type>(cur, event_param2);
-				velocity = 0;
-			}
+			// This filter is appended only to the note-off (0x8) pipeline.
+			type |= 0x10;
+			get_value<base_type>(cur, event_param2) = 0;
 
 			return true;
 		};
 
-		auto important_events_checker = [filter = settings.imp_events_filter]
+		std::array<bool, 16> important_event_classes;
+		important_event_classes.fill(settings.imp_events_filter.pass_other);
+		important_event_classes[0x8] = important_event_classes[0x9] = settings.imp_events_filter.pass_notes;
+		important_event_classes[0xC] = settings.imp_events_filter.pass_instument_cnage;
+		important_event_classes[0xE] = settings.imp_events_filter.pass_pitch;
+		std::array<bool, 256> important_meta_types;
+		important_meta_types.fill(settings.imp_events_filter.pass_other);
+		important_meta_types[0x51] = settings.imp_events_filter.pass_tempo || settings.imp_events_filter.pass_other;
+
+		auto important_events_checker = [important_event_classes, important_meta_types]
 		(const data_iterator& begin, const data_iterator& end, const data_iterator& cur, single_track_data& std_ref) -> bool
 		{
-			auto tick = get_value<tick_type>(cur, tick_position);
+			if (std_ref.has_important_events)
+				return true;
 
 			const auto& type = get_value<base_type>(cur, event_type);
-			const auto channelless_type = type >> 4;
-
-			// Check if this is an important event based on filter settings
-			bool is_important = false;
-
-			switch (channelless_type) 
-			{
-				case 0x8: case 0x9: // Note on/off
-					is_important = filter.pass_notes;
-					break;
-				case 0xC:
-					is_important = filter.pass_instument_cnage;
-					break;
-				//case 0xA: case 0xB: case 0xD: // Program change, channel pressure
-				//	is_important = filter.pass_other;
-				//	break;
-				case 0xE: // Aftertouch, controller, pitch bend
-					is_important = filter.pass_pitch;
-					break;
-				case 0xF: // Meta/Sysex
-					if (type == 0xFF) 
-					{
-						auto meta_type = get_value<base_type>(cur, event_param1);
-						is_important = (meta_type == 0x51 && filter.pass_tempo) || filter.pass_other;
-					}
-					else 
-						is_important = filter.pass_other;
-					break;
-				default:
-					is_important = filter.pass_other;
-			}
-
-			if (is_important)
-				std_ref.has_important_events = true;
+			std_ref.has_important_events = type == 0xFF
+				? important_meta_types[get_value<base_type>(cur, event_param1)]
+				: important_event_classes[type >> 4];
 
 			return true;
 		};
@@ -1567,40 +1537,44 @@ struct single_midi_processor_2
 			std::move(important_events_checker),
 			std::move(flatten_transform));
 
-		filters.emplace(0, event_transforming_filter{std::get<0>(*storage)});
-		
-		filters.emplace(0, event_transforming_filter{std::get<6>(*storage)});
+		filter_list common_filters{std::get<0>(*storage), std::get<6>(*storage)};
 		if (settings.flatten)
-			filters.emplace(0, event_transforming_filter{std::get<9>(*storage)});
+			common_filters.emplace_back(std::get<9>(*storage));
 
 		if (settings.enable_imp_events_filter)
-			filters.emplace(0, event_transforming_filter{std::get<8>(*storage)});
+			common_filters.emplace_back(std::get<8>(*storage));
+
+		for (auto& pipeline : filters)
+		{
+			pipeline.reserve(common_filters.size() + 2);
+			pipeline.insert(pipeline.end(), common_filters.begin(), common_filters.end());
+		}
 		
 		if (settings.key_converter || settings.volume_map || !settings.filter.pass_notes)
 		{
-			filters.emplace(0x80, event_transforming_filter{std::get<3>(*storage)});
-			filters.emplace(0x90, event_transforming_filter{std::get<3>(*storage)});
+			filters[0x8].emplace_back(std::get<3>(*storage));
+			filters[0x9].emplace_back(std::get<3>(*storage));
 		}
 
 		if (settings.legacy.rsb_compression)
-			filters.emplace(0x80, event_transforming_filter{std::get<7>(*storage)});
+			filters[0x8].emplace_back(std::get<7>(*storage));
 
 		if (!settings.filter.pass_other)
 		{
-			filters.emplace(0xA0, event_transforming_filter{std::get<5>(*storage)});
-			filters.emplace(0xB0, event_transforming_filter{std::get<5>(*storage)});
+			filters[0xA].emplace_back(std::get<5>(*storage));
+			filters[0xB].emplace_back(std::get<5>(*storage));
 		}
 
 		if (!settings.filter.pass_other || settings.filter.piano_only)
 		{
-			filters.emplace(0xC0, event_transforming_filter{std::get<1>(*storage)});
-			filters.emplace(0xD0, event_transforming_filter{std::get<5>(*storage)});
+			filters[0xC].emplace_back(std::get<1>(*storage));
+			filters[0xD].emplace_back(std::get<5>(*storage));
 		}
 
 		if (settings.pitch_map || !settings.filter.pass_pitch)
-			filters.emplace(0xE0, event_transforming_filter{std::get<2>(*storage)});
+			filters[0xE].emplace_back(std::get<2>(*storage));
 
-		filters.emplace(0xF0, event_transforming_filter{std::get<4>(*storage)});
+		filters[0xF].emplace_back(std::get<4>(*storage));
 
 		return std::pair{std::move(storage), std::move(filters)};
 	}
@@ -1983,7 +1957,6 @@ struct single_midi_processor_2
 		track_buffers.meta_buffer.reserve(1ull << 10);
 
 		auto filter_bundle = filters_constructor(data.settings);
-		auto filter_iters = make_filter_bounding_iters(filter_bundle.second);
 
 		midi_file_reader file_input(data.filename);
 		std::ofstream file_output(data.filename + data.postfix, std::ios::binary | std::ios::out);
@@ -2022,7 +1995,7 @@ struct single_midi_processor_2
 			if (buffer_should_be_processed)
 			{
 				bool successful_processing =
-					process_buffer(track_buffers.data_buffer, filter_iters, track_processing_data, loggers);
+					process_buffer(track_buffers.data_buffer, filter_bundle.second, track_processing_data, loggers);
 
 				if (!successful_processing)
 					(*loggers.error) << log_event{log_event_type::processing_failed};

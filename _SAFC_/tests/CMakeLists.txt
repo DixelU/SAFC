@@ -18,6 +18,18 @@ if(SAFC_BUILD_APP_TESTS)
 endif()
 
 if(SAFC_BUILD_PROCESSOR_TESTS)
+    add_executable(safc-midi-filter-tests single_midi_processor_filters_tests.cpp)
+    target_include_directories(safc-midi-filter-tests PRIVATE
+        "${CMAKE_CURRENT_LIST_DIR}/../../utility/include")
+    target_compile_features(safc-midi-filter-tests PRIVATE cxx_std_23)
+    target_link_libraries(safc-midi-filter-tests PRIVATE
+        Boost::headers GLUT::GLUT Threads::Threads)
+    if(MSVC)
+        target_compile_options(safc-midi-filter-tests PRIVATE /permissive /EHsc)
+    endif()
+    add_test(NAME safc-midi-filters COMMAND safc-midi-filter-tests)
+    set_tests_properties(safc-midi-filters PROPERTIES TIMEOUT 30)
+
     add_executable(safc-cut-and-transpose-tests cut_and_transpose_tests.cpp)
     target_include_directories(safc-cut-and-transpose-tests PRIVATE
         "${CMAKE_CURRENT_LIST_DIR}/../../utility/include")
