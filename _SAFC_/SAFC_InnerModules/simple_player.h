@@ -528,7 +528,6 @@ struct simple_player
 		void reset()
 		{
 			current_time_us = 0;
-			start_offset_us = 0;
 			active_tracks = 0;
 			playing = false;
 			stop_requested = false;
@@ -719,6 +718,20 @@ struct simple_player
 		return set_device_locked(device_index);
 	}
 
+	// A deliberate no-op sink for transport validation without a physical or
+	// synthesized audio device. Only an idle player may change its output.
+	bool use_silent_output()
+	{
+		if (shutdown_requested.load(std::memory_order_acquire))
+			return false;
+		std::unique_lock<std::mutex> run_lock(playback_run_mutex, std::try_to_lock);
+		if (!run_lock.owns_lock() || shutdown_requested.load(std::memory_order_acquire))
+			return false;
+		close_midi_out();
+		set_last_output_error({});
+		return true;
+	}
+
 	// Whether a MIDI out sink is ready for immediate messages
 	bool has_output() const
 	{
@@ -796,7 +809,7 @@ struct simple_player
 	// Callback for when device changes (for UI updates)
 	void(*on_device_changed)(size_t device_index) = nullptr;
 
-	void simple_run(std::wstring filename, double start_fraction = 0.0)
+	void simple_run(std::wstring filename, double start_fraction = 0.0, bool start_paused = true)
 	{
 		if (shutdown_requested.load(std::memory_order_acquire))
 			return;
@@ -829,7 +842,7 @@ struct simple_player
 			}
 
 			start_fraction = std::clamp(start_fraction, 0.0, 1.0);
-			playback_thread(static_cast<uint64_t>(start_fraction * info.total_duration_us));
+			playback_thread(static_cast<uint64_t>(start_fraction * info.total_duration_us), start_paused);
 
 			// Release the mapping so the caller can delete or replace the file.
 			// info.tracks' pointers into it stay dead until the next open().
@@ -1061,8 +1074,11 @@ struct simple_player
 		if (state.playing.load(std::memory_order_acquire) &&
 			!state.paused.load(std::memory_order_acquire))
 		{
-			const auto audio_floor = state.start_offset_us;
-			const auto timeline_position = current_visual_position_us();
+			const auto clock = read_playback_clock();
+			const auto audio_floor = clock.start_offset_us;
+			const auto elapsed = std::chrono::steady_clock::now() - clock.start_time;
+			const auto timeline_position = clamp_to_i64(audio_floor) +
+				std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count();
 			const auto floor_i64 = clamp_to_i64(audio_floor);
 			if (timeline_position <= floor_i64)
 				return audio_floor;
@@ -1170,7 +1186,7 @@ struct simple_player
 		cancel_requested.store(false, std::memory_order_release);
 		memory_failure_reported.store(false, std::memory_order_release);
 
-		state.reset();
+		reset_playback_state();
 		source.rewind();
 		offline_visual.source = &source;
 		offline_visual.has_next_event = source.next(offline_visual.next_event);
@@ -1725,16 +1741,16 @@ struct simple_player
 				state.sender_position_us.store(ev.time_us, std::memory_order_release);
 			}
 
-			const uint64_t target_us = ev.time_us > state.start_offset_us
-				? ev.time_us - state.start_offset_us : 0;
-			const int64_t target_elapsed_us = clamp_to_i64(target_us);
-
 			// Wait in bounded slices so Stop, Pause, and a new seek remain
 			// responsive even when the next event is seconds or hours away.
 			while (!state.stop_requested &&
 				!state.paused.load(std::memory_order_acquire))
 			{
-				auto elapsed = std::chrono::steady_clock::now() - state.start_time;
+				const auto clock = read_playback_clock();
+				const uint64_t target_us = ev.time_us > clock.start_offset_us
+					? ev.time_us - clock.start_offset_us : 0;
+				const int64_t target_elapsed_us = clamp_to_i64(target_us);
+				auto elapsed = std::chrono::steady_clock::now() - clock.start_time;
 				cached_elapsed_us = std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count();
 				if (cached_elapsed_us >= target_elapsed_us)
 					break;
@@ -1764,13 +1780,11 @@ struct simple_player
 	{
 		try
 		{
-			state.reset();
-			state.start_time = std::chrono::steady_clock::now();
+			reset_playback_state();
 
 			// Publish fast-forward BEFORE playing, so a waiter that observes
 			// is_playing() never sees the brief pre-fast-forward window as "done".
 			state.seeking_ff.store(initial_skip_to_us > 0, std::memory_order_release);
-			state.playing.store(true, std::memory_order_release);
 
 			// The normal player starts paused so a synth can be selected. Editor
 			// playback prepares its output first and requests immediate playback.
@@ -1780,6 +1794,9 @@ struct simple_player
 				std::memory_order_release);
 			if (!start_paused && initial_skip_to_us == 0)
 				set_playback_clock_from_pending_lead(0);
+			// Publish readiness only after the initial pause/clock state is set;
+			// otherwise an immediate Play click could be overwritten here.
+			state.playing.store(true, std::memory_order_release);
 
 			uint64_t skip_to_us = initial_skip_to_us;
 			bool pause_after_seek = initial_skip_to_us > 0 && start_paused;
@@ -2543,6 +2560,9 @@ private:
 	// close the scheduling window before a worker starts. This mutex makes a
 	// second run fail closed instead of corrupting the shared state.
 	std::mutex playback_run_mutex;
+	// Resume, seek completion, UI telemetry, and the sender share this pair.
+	// Copy under the mutex; never hold it while sending MIDI, sleeping, or drawing.
+	mutable std::mutex playback_clock_mutex;
 	mutable std::mutex seek_request_mutex;
 	mutable std::mutex output_error_mutex;
 	std::string last_output_error;
@@ -2560,13 +2580,34 @@ private:
 			static_cast<int64_t>(value);
 	}
 
+	struct playback_clock_snapshot
+	{
+		uint64_t start_offset_us;
+		std::chrono::steady_clock::time_point start_time;
+	};
+
+	playback_clock_snapshot read_playback_clock() const
+	{
+		std::lock_guard clock_lock(playback_clock_mutex);
+		return {state.start_offset_us, state.start_time};
+	}
+
+	void reset_playback_state()
+	{
+		// Clearing a dense MIDI can release large buffers and wait on the
+		// visual consumer. Keep that work outside the short clock critical section.
+		state.reset();
+		set_playback_clock(0, 0);
+	}
+
 	int64_t current_visual_position_us() const
 	{
 		if (state.playing.load(std::memory_order_acquire) &&
 			!state.paused.load(std::memory_order_acquire))
 		{
-			const auto elapsed = std::chrono::steady_clock::now() - state.start_time;
-			return clamp_to_i64(state.start_offset_us) +
+			const auto clock = read_playback_clock();
+			const auto elapsed = std::chrono::steady_clock::now() - clock.start_time;
+			return clamp_to_i64(clock.start_offset_us) +
 				std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count();
 		}
 		if (state.paused.load(std::memory_order_acquire))
@@ -2588,6 +2629,7 @@ private:
 
 	void set_playback_clock(uint64_t start_offset_us, uint64_t lead_in_us)
 	{
+		std::lock_guard clock_lock(playback_clock_mutex);
 		state.start_offset_us = start_offset_us;
 		state.start_time = std::chrono::steady_clock::now() +
 			std::chrono::microseconds(clamp_to_i64(lead_in_us));
@@ -2602,7 +2644,6 @@ private:
 	void complete_fast_forward(uint64_t position_us, bool pause_after_seek,
 		seek_note_tracker* held_notes = nullptr)
 	{
-		state.start_offset_us = position_us;
 		state.current_time_us = position_us;
 		state.sender_position_us.store(position_us, std::memory_order_release);
 		state.parsed_up_to_us.store(position_us, std::memory_order_release);
@@ -2611,6 +2652,7 @@ private:
 		// click waiting on fast-forward then cannot race this re-pause.
 		if (pause_after_seek)
 		{
+			set_playback_clock(position_us, 0);
 			state.pause_position_us.store(position_us, std::memory_order_release);
 			state.paused.store(true, std::memory_order_release);
 		}
