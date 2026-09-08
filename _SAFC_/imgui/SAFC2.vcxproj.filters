@@ -1,0 +1,266 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="Current" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="ImGui frontend">
+      <UniqueIdentifier>{66E4FA3D-AB34-4864-8E34-1149DB576712}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Processing and playback">
+      <UniqueIdentifier>{5315873A-AD90-4113-8813-68A00E417512}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Shared application">
+      <UniqueIdentifier>{4BA05EB5-B2DF-4F83-AF19-F5ECC9A7013A}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="JSON">
+      <UniqueIdentifier>{1249C680-E68E-4278-9C35-38F3895DA7AC}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="SYNCore">
+      <UniqueIdentifier>{DBE6248E-7A55-4277-ACD0-A8E8AC3DDFB1}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Resources">
+      <UniqueIdentifier>{D8DCA110-5DC7-4C70-977B-7E53F841E143}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="main.cpp">
+      <Filter>ImGui frontend</Filter>
+    </ClCompile>
+    <ClCompile Include="folded_theme.cpp">
+      <Filter>ImGui frontend</Filter>
+    </ClCompile>
+    <ClCompile Include="window_icon.cpp">
+      <Filter>ImGui frontend</Filter>
+    </ClCompile>
+    <ClCompile Include="update_service.cpp">
+      <Filter>ImGui frontend</Filter>
+    </ClCompile>
+    <ClCompile Include="playback_session.cpp">
+      <Filter>ImGui frontend</Filter>
+    </ClCompile>
+    <ClCompile Include="video_export_panel.cpp">
+      <Filter>ImGui frontend</Filter>
+    </ClCompile>
+    <ClCompile Include="editor_panel.cpp">
+      <Filter>ImGui frontend</Filter>
+    </ClCompile>
+    <ClCompile Include="analysis_panel.cpp">
+      <Filter>ImGui frontend</Filter>
+    </ClCompile>
+    <ClCompile Include="mapping_panel.cpp">
+      <Filter>ImGui frontend</Filter>
+    </ClCompile>
+    <ClCompile Include="preferences.cpp">
+      <Filter>ImGui frontend</Filter>
+    </ClCompile>
+    <ClCompile Include="project_session.cpp">
+      <Filter>ImGui frontend</Filter>
+    </ClCompile>
+    <ClCompile Include="project_panel.cpp">
+      <Filter>ImGui frontend</Filter>
+    </ClCompile>
+    <ClCompile Include="cli.cpp">
+      <Filter>ImGui frontend</Filter>
+    </ClCompile>
+    <ClCompile Include="..\JSON\JSON.cpp">
+      <Filter>JSON</Filter>
+    </ClCompile>
+    <ClCompile Include="..\JSON\JSONValue.cpp">
+      <Filter>JSON</Filter>
+    </ClCompile>
+    <ClCompile Include="..\app\project_model.cpp">
+      <Filter>Shared application</Filter>
+    </ClCompile>
+    <ClCompile Include="..\SAFC_InnerModules\midi_editor_tools.cpp">
+      <Filter>Processing and playback</Filter>
+    </ClCompile>
+    <ClCompile Include="..\SAFC_InnerModules\compressed_midi_event_source.cpp">
+      <Filter>Processing and playback</Filter>
+    </ClCompile>
+    <ClCompile Include="..\SAFC_InnerModules\simple_player_video_export.cpp">
+      <Filter>Processing and playback</Filter>
+    </ClCompile>
+    <ClCompile Include="..\SAFC_InnerModules\syncore_output.cpp">
+      <Filter>Processing and playback</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\SYNCore\SAFSYN\core.cpp">
+      <Filter>SYNCore</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\SYNCore\SAFSYN\cohort_engine.cpp">
+      <Filter>SYNCore</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\SYNCore\SAFSYN\engine.cpp">
+      <Filter>SYNCore</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\SYNCore\SAFSYN\mastering.cpp">
+      <Filter>SYNCore</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\SYNCore\SAFSYN\phase.cpp">
+      <Filter>SYNCore</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\SYNCore\SAFSYN\playback.cpp">
+      <Filter>SYNCore</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\SYNCore\SAFSYN\smf.cpp">
+      <Filter>SYNCore</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\SYNCore\SAFSYN\smf_renderer.cpp">
+      <Filter>SYNCore</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\SYNCore\SAFSYN\wav_writer.cpp">
+      <Filter>SYNCore</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\SYNCore\SAFSYN\windows_synth.cpp">
+      <Filter>SYNCore</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="analysis_panel.h">
+      <Filter>ImGui frontend</Filter>
+    </ClInclude>
+    <ClInclude Include="cli.h">
+      <Filter>ImGui frontend</Filter>
+    </ClInclude>
+    <ClInclude Include="editor_panel.h">
+      <Filter>ImGui frontend</Filter>
+    </ClInclude>
+    <ClInclude Include="folded_theme.h">
+      <Filter>ImGui frontend</Filter>
+    </ClInclude>
+    <ClInclude Include="mapping_panel.h">
+      <Filter>ImGui frontend</Filter>
+    </ClInclude>
+    <ClInclude Include="platform_dialogs.h">
+      <Filter>ImGui frontend</Filter>
+    </ClInclude>
+    <ClInclude Include="playback_session.h">
+      <Filter>ImGui frontend</Filter>
+    </ClInclude>
+    <ClInclude Include="preferences.h">
+      <Filter>ImGui frontend</Filter>
+    </ClInclude>
+    <ClInclude Include="project_panel.h">
+      <Filter>ImGui frontend</Filter>
+    </ClInclude>
+    <ClInclude Include="project_session.h">
+      <Filter>ImGui frontend</Filter>
+    </ClInclude>
+    <ClInclude Include="update_service.h">
+      <Filter>ImGui frontend</Filter>
+    </ClInclude>
+    <ClInclude Include="video_export_panel.h">
+      <Filter>ImGui frontend</Filter>
+    </ClInclude>
+    <ClInclude Include="widgets.h">
+      <Filter>ImGui frontend</Filter>
+    </ClInclude>
+    <ClInclude Include="window_icon.h">
+      <Filter>ImGui frontend</Filter>
+    </ClInclude>
+    <ClInclude Include="..\app\project_model.h">
+      <Filter>Shared application</Filter>
+    </ClInclude>
+    <ClInclude Include="..\app\app_workers.h">
+      <Filter>Shared application</Filter>
+    </ClInclude>
+    <ClInclude Include="..\JSON\JSON.h">
+      <Filter>JSON</Filter>
+    </ClInclude>
+    <ClInclude Include="..\JSON\JSONValue.h">
+      <Filter>JSON</Filter>
+    </ClInclude>
+    <ClInclude Include="..\consts.h">
+      <Filter>Resources</Filter>
+    </ClInclude>
+    <ClInclude Include="..\resource.h">
+      <Filter>Resources</Filter>
+    </ClInclude>
+    <ClInclude Include="..\WinRegWrappers.h">
+      <Filter>Resources</Filter>
+    </ClInclude>
+    <ClInclude Include="..\SAFC_InnerModules\bool_settings.h">
+      <Filter>Processing and playback</Filter>
+    </ClInclude>
+    <ClInclude Include="..\SAFC_InnerModules\compressed_midi_event_source.h">
+      <Filter>Processing and playback</Filter>
+    </ClInclude>
+    <ClInclude Include="..\SAFC_InnerModules\core_support.h">
+      <Filter>Processing and playback</Filter>
+    </ClInclude>
+    <ClInclude Include="..\SAFC_InnerModules\cut_and_transpose.h">
+      <Filter>Processing and playback</Filter>
+    </ClInclude>
+    <ClInclude Include="..\SAFC_InnerModules\fast_midi_checker.h">
+      <Filter>Processing and playback</Filter>
+    </ClInclude>
+    <ClInclude Include="..\SAFC_InnerModules\midi_collection_threaded_merger.h">
+      <Filter>Processing and playback</Filter>
+    </ClInclude>
+    <ClInclude Include="..\SAFC_InnerModules\midi_editor.h">
+      <Filter>Processing and playback</Filter>
+    </ClInclude>
+    <ClInclude Include="..\SAFC_InnerModules\midi_editor_integration.h">
+      <Filter>Processing and playback</Filter>
+    </ClInclude>
+    <ClInclude Include="..\SAFC_InnerModules\midi_file_reader.h">
+      <Filter>Processing and playback</Filter>
+    </ClInclude>
+    <ClInclude Include="..\SAFC_InnerModules\playback_event_source.h">
+      <Filter>Processing and playback</Filter>
+    </ClInclude>
+    <ClInclude Include="..\SAFC_InnerModules\simple_player.h">
+      <Filter>Processing and playback</Filter>
+    </ClInclude>
+    <ClInclude Include="..\SAFC_InnerModules\simple_player_video_export.h">
+      <Filter>Processing and playback</Filter>
+    </ClInclude>
+    <ClInclude Include="..\SAFC_InnerModules\single_midi_info_collector.h">
+      <Filter>Processing and playback</Filter>
+    </ClInclude>
+    <ClInclude Include="..\SAFC_InnerModules\single_midi_processor_2.h">
+      <Filter>Processing and playback</Filter>
+    </ClInclude>
+    <ClInclude Include="..\SAFC_InnerModules\single_midi_processor_lean.h">
+      <Filter>Processing and playback</Filter>
+    </ClInclude>
+    <ClInclude Include="..\SAFC_InnerModules\syncore_output.h">
+      <Filter>Processing and playback</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\SYNCore\SAFSYN\cohort_engine.h">
+      <Filter>SYNCore</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\SYNCore\SAFSYN\core.h">
+      <Filter>SYNCore</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\SYNCore\SAFSYN\mastering.h">
+      <Filter>SYNCore</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\SYNCore\SAFSYN\phase.h">
+      <Filter>SYNCore</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\SYNCore\SAFSYN\playback.h">
+      <Filter>SYNCore</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\SYNCore\SAFSYN\playback_queue.h">
+      <Filter>SYNCore</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\SYNCore\SAFSYN\smf.h">
+      <Filter>SYNCore</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\SYNCore\SAFSYN\smf_renderer.h">
+      <Filter>SYNCore</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\SYNCore\SAFSYN\wav_writer.h">
+      <Filter>SYNCore</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\SYNCore\SAFSYN\windows_synth.h">
+      <Filter>SYNCore</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="..\_SAFC_.rc">
+      <Filter>Resources</Filter>
+    </ResourceCompile>
+    <Image Include="..\_SAFC_.ico">
+      <Filter>Resources</Filter>
+    </Image>
+  </ItemGroup>
+</Project>

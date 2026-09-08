@@ -46,11 +46,15 @@ versions. Existing clients still use the tag feed until they have upgraded.
 3. Initialize nested submodules and install the dependencies from
    `../../dependencies.txt`, using `x64-windows-static` and
    `x86-windows-static` in separate build directories.
-4. Configure the ImGui application with CMake, build Release `SAFC`, and run its
-   tests for each architecture. Use an x64 developer environment for the x64
-   Ninja build and an x86 developer environment for the x86 Ninja build; do not
-   reuse a CMake cache across architectures. The checked-in Visual Studio
-   solution builds the classic UI and is not the ImGui release build.
+4. Build the ImGui application for each architecture. With MSBuild, use
+   `MSBuild.exe SAFC2.sln /t:SAFC2 /m /p:Configuration=Release /p:Platform=x64`
+   and repeat with `/p:Platform=x86`. The release executables are
+   `build/msbuild/x64/Release/SAFC2/SAFC.exe` and
+   `build/msbuild/Win32/Release/SAFC2/SAFC.exe`. Alternatively, configure CMake
+   and build Release `SAFC`; use the matching developer environment for each
+   Ninja architecture and do not reuse caches across architectures. Run the
+   CMake regression tests and the resulting release executable's `--smoke` and
+   `--workflow-smoke` checks. The original `_SAFC_.sln` builds the classic UI.
 5. Check ordinary startup, playback, editor changes/save, archive loading,
    processing, video export, shutdown, and update staging in the release builds.
    Test startup from a shortcut with a different working directory as well.

@@ -16,7 +16,7 @@ Has partially been migrated to github wiki - https://github.com/DixelU/SAFC/wiki
 ## Other stuff
 There's discord server, where SAF apps (SAFC included) were publishing all that time since July/August of 2018: https://discord.gg/CsgEW4P
 
-You can compile it fairly easily using MSVC 2022 + vcpkg [(dependencies list)](https://github.com/DixelU/SAFC/blob/develop/dependencies.txt) :)
+You can compile it using MSVC + vcpkg ([dependencies list](./dependencies.txt)).
 
 Clone with `--recurse-submodules`, or run `git submodule update --init --recursive`,
 so the shared `utility` headers and SYNCore's nested utility dependency are
@@ -27,9 +27,35 @@ for processing, playback, editing, analysis, transform maps, and video export,
 while retaining SAFC's folded panels and partial outlines. `SAFC` is the primary
 target; `SAFCImGui` remains an equivalent executable for preview-era scripts.
 Shared domain code and the classic UI modules are organized under
-[`_SAFC_/app`](./_SAFC_/app/README.md). The checked-in Visual Studio solution still
-builds the classic interface; CMake can also build it with
+[`_SAFC_/app`](./_SAFC_/app/README.md). [SAFC2.sln](./SAFC2.sln) builds both
+interfaces through native Visual C++ projects. The original `_SAFC_.sln` builds
+the classic interface; CMake can also build it with
 `SAFC_BUILD_LEGACY_GUI=ON` as `SAFCLegacy`.
+
+## Visual Studio / MSBuild
+
+Open `SAFC2.sln` in Visual Studio 2026 with the C++ desktop workload, v145
+toolset, and Windows SDK 10.0.26100.0. Install the static vcpkg packages in
+`dependencies.txt` and enable MSBuild integration with `vcpkg integrate install`.
+The solution contains `SAFC2` (Dear ImGui) and `SAFCLegacy` (SAFGUIF), with
+Debug/Release configurations for x64 and x86. CMake is not required for this path.
+
+From a Visual Studio developer shell at the repository root:
+
+```powershell
+MSBuild.exe SAFC2.sln /m /p:Configuration=Release /p:Platform=x64
+```
+
+Both projects retain the executable name `SAFC.exe`, in separate directories:
+
+- ImGui: `build/msbuild/x64/Release/SAFC2/SAFC.exe`
+- Classic: `build/msbuild/x64/Release/SAFCLegacy/SAFC.exe`
+
+Use `/p:Platform=x86` for 32-bit builds (the output directory is `Win32`), or
+`/p:Configuration=Debug` for Debug. Add `/t:SAFC2` or `/t:SAFCLegacy` to build
+one frontend. In Visual Studio, set `SAFC2` as the startup project to run the
+new interface. Both executables embed `_SAFC_/_SAFC_.rc`, including its version
+and icon. The original `_SAFC_.sln` retains its existing output directories.
 
 ## Embedded SYNCore output
 

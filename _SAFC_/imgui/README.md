@@ -141,9 +141,28 @@ cmake -S . -B build/legacy -G Ninja `
 cmake --build build/legacy --target SAFCLegacy
 ```
 
-The checked-in Visual Studio solution remains the classic SAFGUIF application;
-use CMake for the ImGui frontend. Both frontend executables share the same entry
-object and application library rather than maintaining separate implementations.
+Alternatively, open the repository's `SAFC2.sln` in Visual Studio 2026, or build
+it directly with MSBuild after enabling vcpkg integration (`vcpkg integrate install`):
+
+```powershell
+MSBuild.exe SAFC2.sln /m /p:Configuration=Release /p:Platform=x64
+```
+
+Its native `SAFC2` project builds this frontend with the same application and
+SYNCore sources as CMake. `SAFCLegacy` builds the former interface. Outputs are
+`build/msbuild/x64/Release/SAFC2/SAFC.exe` and
+`build/msbuild/x64/Release/SAFCLegacy/SAFC.exe`; intermediates are separate too.
+Debug/Release and x64/x86 are available (x86 maps to the `Win32` project platform
+and output directory). Both configurations use matching static CRT/dependency
+libraries. Both projects use v145; the legacy project requires Windows SDK
+10.0.26100.0, while `SAFC2` selects the latest installed Windows 10 SDK. Add `/t:SAFC2` to
+build only the new application. Both frontends embed the existing icon/version
+resource; the new executable also assigns its embedded icon to the native window.
+
+The original `_SAFC_.sln` remains available for the classic application. The
+CMake `SAFC` and `SAFCImGui` executables continue to share one entry object and
+application library. MSBuild compiles those same source files directly; no CMake
+generation step is required.
 
 ### JSON command line
 

@@ -1,0 +1,278 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" ToolsVersion="Current" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|Win32">
+      <Configuration>Debug</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|Win32">
+      <Configuration>Release</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <VCProjectVersion>18.0</VCProjectVersion>
+    <ProjectGuid>{FE407EF7-9492-4EDD-99B6-576AC7B5D2A9}</ProjectGuid>
+    <Keyword>Win32Proj</Keyword>
+    <RootNamespace>SAFC2</RootNamespace>
+    <ProjectName>SAFC2</ProjectName>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+    <SAFCRepositoryRoot>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..\..\'))</SAFCRepositoryRoot>
+    <SAFCEnableSYNCore Condition="'$(SAFCEnableSYNCore)' == ''">true</SAFCEnableSYNCore>
+    <VcpkgTriplet Condition="'$(Platform)' == 'Win32'">x86-windows-static</VcpkgTriplet>
+    <VcpkgTriplet Condition="'$(Platform)' == 'x64'">x64-windows-static</VcpkgTriplet>
+    <VcpkgConfiguration>$(Configuration)</VcpkgConfiguration>
+    <VcpkgUseStatic>true</VcpkgUseStatic>
+    <VcpkgUseMD>false</VcpkgUseMD>
+    <VcpkgEnableManifest>false</VcpkgEnableManifest>
+    <!-- Explicit dependencies avoid linking every unrelated installed package. -->
+    <VcpkgAutoLink>false</VcpkgAutoLink>
+    <VcpkgApplocalDeps>false</VcpkgApplocalDeps>
+    <VcpkgRoot Condition="'$(VcpkgRoot)' == '' and '$(VCPKG_ROOT)' != ''">$(VCPKG_ROOT)</VcpkgRoot>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <PlatformToolset>v145</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+    <UseDebugLibraries Condition="'$(Configuration)' == 'Debug'">true</UseDebugLibraries>
+    <UseDebugLibraries Condition="'$(Configuration)' == 'Release'">false</UseDebugLibraries>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings" />
+  <ImportGroup Label="Shared" />
+  <ImportGroup Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="Exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+    <!-- Supports VCPKG_ROOT or /p:VcpkgRoot even without user-wide integration. -->
+    <Import Project="$(VcpkgRoot)\scripts\buildsystems\msbuild\vcpkg.props" Condition="'$(VcpkgPropsImported)' != 'true' and Exists('$(VcpkgRoot)\scripts\buildsystems\msbuild\vcpkg.props')" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup>
+    <OutDir>$(SAFCRepositoryRoot)build\msbuild\$(Platform)\$(Configuration)\SAFC2\</OutDir>
+    <IntDir>$(SAFCRepositoryRoot)build\msbuild\$(Platform)\$(Configuration)\obj\SAFC2\</IntDir>
+    <TargetName>SAFC</TargetName>
+    <LinkIncremental>false</LinkIncremental>
+    <LocalDebuggerWorkingDirectory>$(OutDir)</LocalDebuggerWorkingDirectory>
+    <SAFC2VcpkgLibraries Condition="'$(Configuration)' == 'Debug'">imguid.lib;glfw3.lib;archive.lib;zstd.lib;zlibd.lib;bz2d.lib;lz4d.lib;lzma.lib;libcrypto.lib</SAFC2VcpkgLibraries>
+    <SAFC2VcpkgLibraries Condition="'$(Configuration)' == 'Release'">imgui.lib;glfw3.lib;archive.lib;zstd.lib;zlib.lib;bz2.lib;lz4.lib;lzma.lib;libcrypto.lib</SAFC2VcpkgLibraries>
+    <SYNCorePreprocessorDefinitions Condition="'$(SAFCEnableSYNCore)' == 'true'">SAFC_WITH_SYNCORE=1;</SYNCorePreprocessorDefinitions>
+  </PropertyGroup>
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <!-- MSVC's C++23 spelling used by the equivalent CMake target. -->
+      <LanguageStandard>stdcpplatest</LanguageStandard>
+      <ConformanceMode>false</ConformanceMode>
+      <ExceptionHandling>Sync</ExceptionHandling>
+      <WarningLevel>Level3</WarningLevel>
+      <AdditionalOptions>/bigobj %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalIncludeDirectories>$(SAFCRepositoryRoot)_SAFC_;$(SAFCRepositoryRoot)_SAFC_\JSON;$(SAFCRepositoryRoot)utility;$(SAFCRepositoryRoot)utility\include;$(SAFCRepositoryRoot)SYNCore\SAFSYN;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>WIN32;_WINDOWS;_CONSOLE;UNICODE;_UNICODE;LIBARCHIVE_STATIC;BOOST_ALL_NO_LIB;$(SYNCorePreprocessorDefinitions)%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+    </ClCompile>
+    <Link>
+      <SubSystem>Console</SubSystem>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <LargeAddressAware>true</LargeAddressAware>
+      <!-- Mirrors safc_imgui_core, LibArchive's static dependencies, and SYNCore. -->
+      <AdditionalDependencies>$(SAFC2VcpkgLibraries);opengl32.lib;xmllite.lib;crypt32.lib;ws2_32.lib;comdlg32.lib;shell32.lib;ole32.lib;winmm.lib;advapi32.lib;mfplat.lib;mfreadwrite.lib;mfuuid.lib;mf.lib;propsys.lib;winhttp.lib;version.lib;uuid.lib;avrt.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+    <ResourceCompile>
+      <AdditionalIncludeDirectories>$(SAFCRepositoryRoot)_SAFC_;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>UNICODE;_UNICODE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ResourceCompile>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)' == 'Debug'">
+    <ClCompile>
+      <Optimization>Disabled</Optimization>
+      <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
+      <PreprocessorDefinitions>_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
+    </ClCompile>
+    <ResourceCompile>
+      <PreprocessorDefinitions>_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ResourceCompile>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)' == 'Release'">
+    <ClCompile>
+      <Optimization>MaxSpeed</Optimization>
+      <InlineFunctionExpansion>AnySuitable</InlineFunctionExpansion>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+      <PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <Link>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClCompile Include="main.cpp" />
+    <ClCompile Include="folded_theme.cpp" />
+    <ClCompile Include="window_icon.cpp" />
+    <ClCompile Include="update_service.cpp" />
+    <ClCompile Include="playback_session.cpp" />
+    <ClCompile Include="video_export_panel.cpp" />
+    <ClCompile Include="editor_panel.cpp" />
+    <ClCompile Include="analysis_panel.cpp" />
+    <ClCompile Include="mapping_panel.cpp" />
+    <ClCompile Include="preferences.cpp" />
+    <ClCompile Include="project_session.cpp" />
+    <ClCompile Include="project_panel.cpp" />
+    <ClCompile Include="cli.cpp" />
+    <ClCompile Include="..\JSON\JSON.cpp" />
+    <ClCompile Include="..\JSON\JSONValue.cpp" />
+    <ClCompile Include="..\app\project_model.cpp" />
+    <ClCompile Include="..\SAFC_InnerModules\midi_editor_tools.cpp" />
+    <ClCompile Include="..\SAFC_InnerModules\compressed_midi_event_source.cpp" />
+    <ClCompile Include="..\SAFC_InnerModules\simple_player_video_export.cpp" />
+    <ClCompile Include="..\SAFC_InnerModules\syncore_output.cpp" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(SAFCEnableSYNCore)' == 'true'">
+    <ClCompile Include="..\..\SYNCore\SAFSYN\core.cpp">
+      <ConformanceMode>true</ConformanceMode>
+      <WarningLevel>Level4</WarningLevel>
+      <PreprocessorDefinitions>_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(SAFCRepositoryRoot)SYNCore\third_party\utility\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <ClCompile Include="..\..\SYNCore\SAFSYN\cohort_engine.cpp">
+      <ConformanceMode>true</ConformanceMode>
+      <WarningLevel>Level4</WarningLevel>
+      <PreprocessorDefinitions>_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(SAFCRepositoryRoot)SYNCore\third_party\utility\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <ClCompile Include="..\..\SYNCore\SAFSYN\engine.cpp">
+      <ConformanceMode>true</ConformanceMode>
+      <WarningLevel>Level4</WarningLevel>
+      <PreprocessorDefinitions>_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(SAFCRepositoryRoot)SYNCore\third_party\utility\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <ClCompile Include="..\..\SYNCore\SAFSYN\mastering.cpp">
+      <ConformanceMode>true</ConformanceMode>
+      <WarningLevel>Level4</WarningLevel>
+      <PreprocessorDefinitions>_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(SAFCRepositoryRoot)SYNCore\third_party\utility\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <ClCompile Include="..\..\SYNCore\SAFSYN\phase.cpp">
+      <ConformanceMode>true</ConformanceMode>
+      <WarningLevel>Level4</WarningLevel>
+      <PreprocessorDefinitions>_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(SAFCRepositoryRoot)SYNCore\third_party\utility\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <ClCompile Include="..\..\SYNCore\SAFSYN\playback.cpp">
+      <ConformanceMode>true</ConformanceMode>
+      <WarningLevel>Level4</WarningLevel>
+      <PreprocessorDefinitions>_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(SAFCRepositoryRoot)SYNCore\third_party\utility\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <ClCompile Include="..\..\SYNCore\SAFSYN\smf.cpp">
+      <ConformanceMode>true</ConformanceMode>
+      <WarningLevel>Level4</WarningLevel>
+      <PreprocessorDefinitions>_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(SAFCRepositoryRoot)SYNCore\third_party\utility\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <ClCompile Include="..\..\SYNCore\SAFSYN\smf_renderer.cpp">
+      <ConformanceMode>true</ConformanceMode>
+      <WarningLevel>Level4</WarningLevel>
+      <PreprocessorDefinitions>_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(SAFCRepositoryRoot)SYNCore\third_party\utility\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <ClCompile Include="..\..\SYNCore\SAFSYN\wav_writer.cpp">
+      <ConformanceMode>true</ConformanceMode>
+      <WarningLevel>Level4</WarningLevel>
+      <PreprocessorDefinitions>_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(SAFCRepositoryRoot)SYNCore\third_party\utility\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <ClCompile Include="..\..\SYNCore\SAFSYN\windows_synth.cpp">
+      <ConformanceMode>true</ConformanceMode>
+      <WarningLevel>Level4</WarningLevel>
+      <PreprocessorDefinitions>_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(SAFCRepositoryRoot)SYNCore\third_party\utility\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="analysis_panel.h" />
+    <ClInclude Include="cli.h" />
+    <ClInclude Include="editor_panel.h" />
+    <ClInclude Include="folded_theme.h" />
+    <ClInclude Include="mapping_panel.h" />
+    <ClInclude Include="platform_dialogs.h" />
+    <ClInclude Include="playback_session.h" />
+    <ClInclude Include="preferences.h" />
+    <ClInclude Include="project_panel.h" />
+    <ClInclude Include="project_session.h" />
+    <ClInclude Include="update_service.h" />
+    <ClInclude Include="video_export_panel.h" />
+    <ClInclude Include="widgets.h" />
+    <ClInclude Include="window_icon.h" />
+    <ClInclude Include="..\app\project_model.h" />
+    <ClInclude Include="..\app\app_workers.h" />
+    <ClInclude Include="..\JSON\JSON.h" />
+    <ClInclude Include="..\JSON\JSONValue.h" />
+    <ClInclude Include="..\consts.h" />
+    <ClInclude Include="..\resource.h" />
+    <ClInclude Include="..\WinRegWrappers.h" />
+    <ClInclude Include="..\SAFC_InnerModules\bool_settings.h" />
+    <ClInclude Include="..\SAFC_InnerModules\compressed_midi_event_source.h" />
+    <ClInclude Include="..\SAFC_InnerModules\core_support.h" />
+    <ClInclude Include="..\SAFC_InnerModules\cut_and_transpose.h" />
+    <ClInclude Include="..\SAFC_InnerModules\fast_midi_checker.h" />
+    <ClInclude Include="..\SAFC_InnerModules\midi_collection_threaded_merger.h" />
+    <ClInclude Include="..\SAFC_InnerModules\midi_editor.h" />
+    <ClInclude Include="..\SAFC_InnerModules\midi_editor_integration.h" />
+    <ClInclude Include="..\SAFC_InnerModules\midi_file_reader.h" />
+    <ClInclude Include="..\SAFC_InnerModules\playback_event_source.h" />
+    <ClInclude Include="..\SAFC_InnerModules\simple_player.h" />
+    <ClInclude Include="..\SAFC_InnerModules\simple_player_video_export.h" />
+    <ClInclude Include="..\SAFC_InnerModules\single_midi_info_collector.h" />
+    <ClInclude Include="..\SAFC_InnerModules\single_midi_processor_2.h" />
+    <ClInclude Include="..\SAFC_InnerModules\single_midi_processor_lean.h" />
+    <ClInclude Include="..\SAFC_InnerModules\syncore_output.h" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(SAFCEnableSYNCore)' == 'true'">
+    <ClInclude Include="..\..\SYNCore\SAFSYN\cohort_engine.h" />
+    <ClInclude Include="..\..\SYNCore\SAFSYN\core.h" />
+    <ClInclude Include="..\..\SYNCore\SAFSYN\mastering.h" />
+    <ClInclude Include="..\..\SYNCore\SAFSYN\phase.h" />
+    <ClInclude Include="..\..\SYNCore\SAFSYN\playback.h" />
+    <ClInclude Include="..\..\SYNCore\SAFSYN\playback_queue.h" />
+    <ClInclude Include="..\..\SYNCore\SAFSYN\smf.h" />
+    <ClInclude Include="..\..\SYNCore\SAFSYN\smf_renderer.h" />
+    <ClInclude Include="..\..\SYNCore\SAFSYN\wav_writer.h" />
+    <ClInclude Include="..\..\SYNCore\SAFSYN\windows_synth.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="..\_SAFC_.rc" />
+    <Image Include="..\_SAFC_.ico" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets">
+    <Import Project="$(VcpkgRoot)\scripts\buildsystems\msbuild\vcpkg.targets" Condition="'$(_ZVcpkgCurrentInstalledDir)' == '' and Exists('$(VcpkgRoot)\scripts\buildsystems\msbuild\vcpkg.targets')" />
+  </ImportGroup>
+  <Target Name="SAFC2CheckDependencies" BeforeTargets="PrepareForBuild">
+    <Error Condition="'$(VcpkgPropsImported)' != 'true' or '$(_ZVcpkgCurrentInstalledDir)' == '' or '$(VcpkgEnabled)' == 'false'"
+           Text="SAFC2 requires vcpkg MSBuild integration. Run vcpkg integrate install, set VCPKG_ROOT, or pass /p:VcpkgRoot=the-vcpkg-directory." />
+    <Error Condition="!Exists('$(SAFCRepositoryRoot)utility\include\buffered_block_list.h')"
+           Text="SAFC2 is missing the utility submodule. Run git submodule update --init --recursive." />
+    <Error Condition="'$(SAFCEnableSYNCore)' == 'true' and (!Exists('$(SAFCRepositoryRoot)SYNCore\SAFSYN\windows_synth.cpp') or !Exists('$(SAFCRepositoryRoot)SYNCore\third_party\utility\include\long_uint.h'))"
+           Text="SAFC2 is missing SYNCore or its utility submodule. Run git submodule update --init --recursive, or build without embedded audio using /p:SAFCEnableSYNCore=false." />
+    <ItemGroup>
+      <_SAFC2RequiredHeader Include="imgui.h;imgui_impl_glfw.h;imgui_impl_opengl3.h;GLFW\glfw3.h;archive.h;zstd.h;boost\container\deque.hpp" />
+      <_SAFC2RequiredLibrary Include="$(SAFC2VcpkgLibraries)" />
+    </ItemGroup>
+    <Error Condition="!Exists('$(_ZVcpkgCurrentInstalledDir)include\%(_SAFC2RequiredHeader.Identity)')"
+           Text="Missing vcpkg header %(_SAFC2RequiredHeader.Identity) for $(VcpkgTriplet). Install imgui[glfw-binding,opengl3-binding], glfw3, libarchive, zstd and boost-container for this static triplet." />
+    <Error Condition="!Exists('$(_ZVcpkgCurrentInstalledDir)$(_ZVcpkgConfigSubdir)lib\%(_SAFC2RequiredLibrary.Identity)')"
+           Text="Missing vcpkg library %(_SAFC2RequiredLibrary.Identity) for $(VcpkgTriplet) $(Configuration). Install the matching static Debug and Release dependency libraries." />
+  </Target>
+</Project>
