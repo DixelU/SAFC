@@ -270,6 +270,137 @@ void test_importance_tables()
     check(track.has_important_events && processor::get_value<processor::tick_type>(events, 0) == processor::disable_tick,
         "importance classification must retain its position before class-specific rejection");
 }
+
+void test_selection_timing()
+{
+    for (const auto ppqn : {240, 480, 960})
+        for (const int offset : {-10, 0, 100})
+            for (const bool after : {false, true})
+                for (const bool compression : {false, true})
+                {
+                    auto settings = make_settings();
+                    settings.selection_data = processor::settings_obj::selection(10, 10);
+                    settings.new_ppqn = ppqn;
+                    settings.offset = offset;
+                    settings.proc_details.apply_offset_after = after;
+                    settings.legacy.rsb_compression = compression;
+                    const auto transform = [&](processor::tick_type tick) {
+                        return after ? std::int64_t(tick * ppqn / 480) + offset
+                            : (std::int64_t(tick) + offset) * ppqn / 480;
+                    };
+                    // Keep both transformed endpoints nonnegative for this test.
+                    if (transform(10) < 0)
+                        continue;
+                    auto bundle = processor::filters_constructor(settings);
+                    for (const int start : {0, 10, 15, 19})
+                    {
+                        auto events = make_note_pair();
+                        const auto off = events.begin() + processor::expected_size(std::uint8_t(0x90));
+                        processor::get_value<processor::tick_type>(events, 0) = start;
+                        processor::get_value<processor::tick_type>(off, 0) = 30;
+                        process(events, bundle.second);
+                        check(processor::get_value<processor::tick_type>(events, 0) == transform(std::max(start, 10))
+                            && processor::get_value<processor::tick_type>(off, 0) == transform(19),
+                            "selection must retain both clipped endpoints regardless of offset or PPQ conversion");
+                    }
+                }
+}
+
+void test_selection_sort_order()
+{
+    auto settings = make_settings();
+    settings.selection_data = processor::settings_obj::selection(10, 10);
+    auto bundle = processor::filters_constructor(settings);
+    bytes events;
+    // Selection collapses all these pairs onto tick 19. An unstable tick-only
+    // sort can emit a note-off before its own note-on, leaving the note hanging.
+    for (int source_track = 0; source_track < 2; ++source_track)
+        for (int endpoint = 0; endpoint < 2; ++endpoint)
+            for (int key = 0; key < 64; ++key)
+            {
+                auto event = make_event((endpoint ? 0x80 : 0x90) | source_track, key);
+                processor::get_value<processor::tick_type>(event, 0) = endpoint ? 30 : (source_track ? 15 : 19);
+                processor::get_value<processor::tick_type>(event, processor::event_param3)
+                    = (source_track * 128 + (1 - endpoint) * 64 + key) * event.size();
+                events.insert(events.end(), event.begin(), event.end());
+            }
+    process(events, bundle.second);
+    bytes expected;
+    const auto event_size = processor::expected_size(std::uint8_t(0x90));
+    for (const int tick : {15, 19})
+        for (auto event = events.begin(); event != events.end(); event += event_size)
+            if (processor::get_value<processor::tick_type>(event, 0) == tick)
+                expected.insert(expected.end(), event, event + event_size);
+    processor::single_track_data track;
+    processor::message_buffers logs;
+    check(processor::sort_buffer(events, track, logs), "selected events must sort successfully");
+    check(events == expected, "events at the same selected tick must retain source order, including note-on before note-off");
+}
+
+void test_selection_flattening()
+{
+    auto settings = make_settings();
+    settings.selection_data = processor::settings_obj::selection(10, 10);
+    settings.flatten = true;
+    // A constant 1,000,000 us/quarter tempo flattened to 500,000 doubles ticks.
+    settings.original_time_map[0] = {0, 480000000};
+    settings.original_time_map[100] = {100000000, 480000000};
+    auto bundle = processor::filters_constructor(settings);
+    auto events = make_note_pair();
+    const auto off = events.begin() + processor::expected_size(std::uint8_t(0x90));
+    processor::get_value<processor::tick_type>(events, 0) = 15;
+    processor::get_value<processor::tick_type>(off, 0) = 30;
+    process(events, bundle.second);
+    check(processor::get_value<processor::tick_type>(events, 0) == 30
+        && processor::get_value<processor::tick_type>(off, 0) == 38,
+        "selection must retain a cut note-off after its note-on has been tempo-flattened");
+}
+
+void test_selection_rejected_notes()
+{
+    for (int rejection = 0; rejection < 3; ++rejection)
+    {
+        auto settings = make_settings();
+        settings.selection_data = processor::settings_obj::selection(10, 10);
+        if (rejection == 0)
+            settings.filter.pass_notes = false;
+        else if (rejection == 1)
+            settings.key_converter = std::make_shared<cut_and_transpose>(0, 59, 0);
+        else
+        {
+            auto volume = std::make_shared<processor::volume_lookup_table>();
+            volume->fill(0);
+            settings.volume_map = volume;
+        }
+        auto bundle = processor::filters_constructor(settings);
+        for (const int start : {0, 10, 15, 20})
+        {
+            auto events = make_note_pair();
+            const auto off = events.begin() + processor::expected_size(std::uint8_t(0x90));
+            processor::get_value<processor::tick_type>(events, 0) = start;
+            processor::get_value<processor::tick_type>(off, 0) = 30;
+            process(events, bundle.second);
+            check(processor::get_value<processor::tick_type>(events, 0) == processor::disable_tick
+                && processor::get_value<processor::tick_type>(off, 0) == processor::disable_tick,
+                "selection must not retain either endpoint of a rejected note");
+        }
+    }
+}
+
+void test_empty_selection()
+{
+    auto settings = make_settings();
+    settings.selection_data = processor::settings_obj::selection(10, 0);
+    auto bundle = processor::filters_constructor(settings);
+    auto events = make_note_pair();
+    const auto off = events.begin() + processor::expected_size(std::uint8_t(0x90));
+    processor::get_value<processor::tick_type>(events, 0) = 0;
+    processor::get_value<processor::tick_type>(off, 0) = 30;
+    process(events, bundle.second);
+    check(processor::get_value<processor::tick_type>(events, 0) == processor::disable_tick
+        && processor::get_value<processor::tick_type>(off, 0) == processor::disable_tick,
+        "an empty selection must reject spanning notes instead of placing note-off before note-on");
+}
 }
 
 int main()
@@ -281,7 +412,12 @@ int main()
         test_note_off_compression();
         test_filter_order_and_lifetime();
         test_importance_tables();
-        std::cout << "PASS: resolved maps, note-off compression, filter ordering, and important-event classification\n";
+        test_selection_sort_order();
+        test_selection_timing();
+        test_selection_flattening();
+        test_selection_rejected_notes();
+        test_empty_selection();
+        std::cout << "PASS: resolved maps, compression, filter ordering, event importance, and selection boundaries\n";
     }
     catch (const std::exception& error)
     {

@@ -1011,7 +1011,9 @@ struct single_midi_processor_2
 
 			bool operator<(const data& op) const
 			{
-				return tick < op.tick;
+				// Cuts and PPQ conversion can put both ends of a note on one
+				// tick. Preserve source order so its note-off cannot move first.
+				return tick < op.tick || (tick == op.tick && pointer < op.pointer);
 			}
 		};
 #pragma pack(pop)
@@ -1080,7 +1082,12 @@ struct single_midi_processor_2
 		(const data_iterator& begin, const data_iterator& end, const data_iterator& cur, single_track_data& std_ref) -> bool
 		{
 			auto& tick = get_value<tick_type>(cur, tick_position);
-			
+			if (selection_data.begin >= selection_data.end) [[unlikely]]
+			{
+				tick = disable_tick;
+				return false;
+			}
+
 			bool before_selection = tick < selection_data.begin;
 			bool after_selection = tick >= selection_data.end;
 
@@ -1099,7 +1106,10 @@ struct single_midi_processor_2
 			case 0x80:
 			{
 				if (!filter.pass_notes) [[unlikely]]
-					break;
+				{
+					tick = disable_tick;
+					return false;
+				}
 
 				bool is_note_on = channelless_type & 0x10;
 
@@ -1110,7 +1120,10 @@ struct single_midi_processor_2
 						reference_event_tick >= selection_data.begin && 
 						reference_event_tick != disable_tick)
 					) ||
-					(!is_note_on && after_selection && (reference_event_tick < selection_data.end));
+					// The paired note-on has already passed selection and may now
+					// have an offset/PPQ/flattened tick. Only its enabled state is
+					// meaningful here; comparing it to a source tick can drop the pair.
+					(!is_note_on && after_selection && (reference_event_tick != disable_tick));
 
 				if (!trim_condition)
 				{
