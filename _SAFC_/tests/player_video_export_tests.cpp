@@ -428,6 +428,11 @@ struct progress_capture
 	std::uint64_t maximum_active_cohorts = 0;
 	std::uint64_t maximum_reported_peak_cohorts = 0;
 	bool cancel_after_video_frame = false;
+	bool cancel_during_preparation = false;
+	bool saw_preparation_start = false;
+	bool saw_preparation_complete = false;
+	bool saw_rendering_after_preparation = false;
+	bool preparation_status_valid = true;
 	bool saw_accelerated_video = false;
 	bool saw_software_video = false;
 	bool saw_framebuffer_video = false;
@@ -440,6 +445,20 @@ bool capture_progress(const simple_player_video_progress& progress,
 {
 	auto& capture = *static_cast<progress_capture*>(user_data);
 	++capture.calls;
+	if (progress.audio_preparing && progress.preparation_total != 0)
+	{
+		capture.saw_preparation_start |= progress.preparation_completed == 0;
+		capture.saw_preparation_complete |=
+			progress.preparation_completed == progress.preparation_total;
+		capture.preparation_status_valid &=
+			progress.preparation_completed <= progress.preparation_total &&
+			progress.stage.find("Prerendering sample variants ") != std::string::npos;
+		if (capture.cancel_during_preparation)
+			return false;
+	}
+	else if (capture.saw_preparation_complete &&
+		progress.stage.find("Rendering audio") != std::string::npos)
+		capture.saw_rendering_after_preparation = true;
 	capture.maximum_active_cohorts = (std::max)(
 		capture.maximum_active_cohorts, progress.active_cohorts);
 	capture.maximum_reported_peak_cohorts = (std::max)(
@@ -614,6 +633,7 @@ int main(int argc, char** argv)
 		progress_capture progress;
 		auto mux_preferences = preferences;
 		mux_preferences.limiter_enabled = true;
+		mux_preferences.phase_mode = syncore_phase_mode::analytic;
 		auto mux_settings = test_settings(44100, 96);
 		mux_settings.width = 640;
 		mux_settings.height = 360;
@@ -630,6 +650,9 @@ int main(int argc, char** argv)
 			(progress.saw_framebuffer_video || progress.saw_backbuffer_video) &&
 			progress.saw_non_background_preview,
 			"SMPTE timing, SYNCore-to-AAC resampling, bounded progress, and muxed streams render together");
+		check(progress.saw_preparation_start && progress.saw_preparation_complete &&
+			progress.saw_rendering_after_preparation && progress.preparation_status_valid,
+			"sample preparation counts reach the export UI from zero through completion and then rendering");
 		std::cout << "SMPTE video path: " <<
 			(progress.saw_accelerated_video ? "accelerated OpenGL" :
 				"software OpenGL fallback") <<
@@ -660,6 +683,21 @@ int main(int argc, char** argv)
 			result.audio_frames == 1'584'000 && elapsed < std::chrono::seconds(60),
 			"sustained timestamp-ordered audio/video muxing does not stall");
 		std::cout << "Sustained 33-second mux render: " << elapsed_milliseconds << " ms\n";
+	}
+
+	{
+		const auto output = directory / "preparation-cancel.mp4";
+		write_bytes(output, sentinel);
+		progress_capture progress;
+		progress.cancel_during_preparation = true;
+		auto phase_preferences = preferences;
+		phase_preferences.phase_mode = syncore_phase_mode::analytic;
+		std::atomic_bool cancel{false};
+		const auto result = render_simple_player_video(midi_path.wstring(), output.wstring(),
+			{}, phase_preferences, test_settings(), &cancel, capture_progress, &progress);
+		check(progress.saw_preparation_start && result.cancelled && !cancel.load() &&
+			read_bytes(output) == sentinel && no_partial_outputs(directory, output),
+			"cancelling at known preparation progress preserves the destination and caller state");
 	}
 
 	{

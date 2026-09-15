@@ -13,13 +13,13 @@ static const char* syncore_phase_mode_name(syncore_phase_mode mode)
 {
 	switch (mode)
 	{
-		case syncore_phase_mode::coherent: return "Coherent";
+		case syncore_phase_mode::coherent: return "Direct sampling";
 		case syncore_phase_mode::random_polarity: return "Random polarity";
 		case syncore_phase_mode::analytic: return "Analytic";
 		case syncore_phase_mode::smooth_field: return "Smooth field";
 		case syncore_phase_mode::independent_bins: return "Independent bins";
 	}
-	return "Coherent";
+	return "Direct sampling";
 }
 
 static std::string syncore_bank_display_name()

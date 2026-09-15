@@ -32,6 +32,9 @@ struct simple_player_video_progress
 	std::uint64_t total_frames = 0;
 	std::uint64_t completed_audio_frames = 0;
 	std::uint64_t total_audio_frames = 0;
+	std::uint64_t preparation_completed = 0;
+	std::uint64_t preparation_total = 0;
+	bool audio_preparing = false;
 	std::uint64_t completed_events = 0;
 	std::uint64_t total_events = 0;
 	std::uint64_t active_voices = 0;

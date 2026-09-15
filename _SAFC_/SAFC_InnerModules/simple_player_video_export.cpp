@@ -1106,6 +1106,9 @@ struct export_progress_state
 	std::atomic<std::uint64_t> total_frames{0};
 	std::atomic<std::uint64_t> completed_audio_frames{0};
 	std::atomic<std::uint64_t> total_audio_frames{0};
+	std::atomic<std::uint64_t> preparation_completed{0};
+	std::atomic<std::uint64_t> preparation_total{0};
+	std::atomic_bool audio_preparing{false};
 	std::atomic<std::uint64_t> completed_events{0};
 	std::atomic<std::uint64_t> total_events{0};
 	std::atomic<std::uint64_t> active_voices{0};
@@ -1157,6 +1160,10 @@ void atomic_max(std::atomic<std::uint64_t>& destination, std::uint64_t value)
 void publish_audio_progress(export_progress_state& state,
 	const safsyn::SmfRenderProgress& progress, std::uint64_t lead_in_frames)
 {
+	state.preparation_total.store(progress.preparation.total, std::memory_order_relaxed);
+	state.preparation_completed.store(progress.preparation.completed, std::memory_order_relaxed);
+	state.audio_preparing.store(progress.stage == safsyn::SmfRenderProgressStage::Preparing,
+		std::memory_order_release);
 	state.completed_audio_frames.store(lead_in_frames + progress.frames_rendered,
 		std::memory_order_relaxed);
 	state.completed_events.store(progress.scheduled_events, std::memory_order_relaxed);
@@ -1169,6 +1176,7 @@ void publish_audio_progress(export_progress_state& state,
 void publish_audio_result(export_progress_state& state,
 	const safsyn::SmfRenderResult& result, std::uint64_t lead_in_frames)
 {
+	state.audio_preparing.store(false, std::memory_order_release);
 	state.completed_audio_frames.store(lead_in_frames + result.frames_written,
 		std::memory_order_relaxed);
 	state.completed_events.store(result.scheduled_events, std::memory_order_relaxed);
@@ -1197,6 +1205,9 @@ simple_player_video_progress make_progress_snapshot(export_progress_state& state
 	value.completed_audio_frames =
 		state.completed_audio_frames.load(std::memory_order_relaxed);
 	value.total_audio_frames = state.total_audio_frames.load(std::memory_order_relaxed);
+	value.audio_preparing = state.audio_preparing.load(std::memory_order_acquire);
+	value.preparation_completed = state.preparation_completed.load(std::memory_order_relaxed);
+	value.preparation_total = state.preparation_total.load(std::memory_order_relaxed);
 	value.completed_events = state.completed_events.load(std::memory_order_relaxed);
 	value.total_events = state.total_events.load(std::memory_order_relaxed);
 	value.active_voices = state.active_voices.load(std::memory_order_relaxed);
@@ -1218,6 +1229,12 @@ simple_player_video_progress make_progress_snapshot(export_progress_state& state
 	value.preview_stride = preview_stride;
 	value.preview_bgra = preview_bgra;
 	value.stage = std::move(stage);
+	// Video callbacks run independently. Keep the reason for silent audio
+	// visible even when a newer callback describes video work.
+	if (value.audio_preparing && value.preparation_total != 0)
+		value.stage += " | Prerendering sample variants " +
+			std::to_string(value.preparation_completed) + "/" +
+			std::to_string(value.preparation_total) + "...";
 	return value;
 }
 
@@ -1372,11 +1389,18 @@ bool on_audio_progress(const safsyn::SmfRenderProgress& value,
 	auto& bridge = *static_cast<audio_progress_bridge*>(user_data);
 	try
 	{
+		const bool preparation_boundary = value.stage == safsyn::SmfRenderProgressStage::Preparing &&
+			value.preparation.total != 0 &&
+			(bridge.state->preparation_total.load(std::memory_order_relaxed) == 0 ||
+				value.preparation.completed == value.preparation.total);
+		const bool preparation_finished = value.stage != safsyn::SmfRenderProgressStage::Preparing &&
+			bridge.state->audio_preparing.load(std::memory_order_acquire);
 		publish_audio_progress(*bridge.state, value, bridge.lead_in_frames);
 		const char* stage = value.stage == safsyn::SmfRenderProgressStage::Preparing
 			? "Preparing audio" : "Rendering audio";
 		return report_progress(bridge.progress, bridge.progress_user_data,
-			*bridge.state, stage, bridge.cancel);
+			*bridge.state, stage, bridge.cancel, nullptr, 0, 0, 0,
+			preparation_boundary || preparation_finished);
 	}
 	catch (...)
 	{

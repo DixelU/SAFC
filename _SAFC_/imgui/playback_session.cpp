@@ -462,6 +462,12 @@ playback_snapshot playback_session::snapshot()
 		result.message = "Choose an archive member";
 	else if (result.playing)
 		result.message = result.paused ? "Paused" : "Playing";
+	else if (run_busy)
+	{
+		const auto synth = impl_->engine.get_syncore_runtime_status();
+		if (synth.running && !synth.ready)
+			result.message = synth.message;
+	}
 	return result;
 }
 

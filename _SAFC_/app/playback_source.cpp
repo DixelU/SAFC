@@ -124,9 +124,10 @@ static void play_compressed_source_in_worker(
 		}
 	} guard;
 
-	if (!player->ensure_output(saved_midi_device_name))
+	bool output_cancelled = false;
+	if (!ensure_player_output_with_status(stop_token, output_cancelled))
 	{
-		if (!gui_stop_requested(stop_token))
+		if (!output_cancelled && !gui_stop_requested(stop_token))
 			report_player_output_error();
 		return;
 	}

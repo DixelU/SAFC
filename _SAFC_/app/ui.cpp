@@ -312,10 +312,10 @@ void init(bool reinitialise_font)
 			input_field::Type::FP_Any, 7);
 
 		(*window)["PHASE_MODE"] = new button(
-			"Phase: Coherent", system_white, on_syncore_phase_cycle,
+			"Phase: Direct sampling", system_white, on_syncore_phase_cycle,
 			-22.5, -16, 175, 10, 1, 0x7F3FFF3F, 0x7F3FFFFF,
 			0xFFFFFFFF, 0x7F3FFFFF, 0xFFFFFFFF, nullptr,
-			"Cycle the SYNCore phase policy; coherent is the deterministic default");
+			"Cycle the SYNCore phase policy; direct sampling is the deterministic default");
 		(*window)["LIMITER_LABEL"] = new text_box(
 			"Limiter", system_white, 62, 8, 10, 68, 7,
 			0, 0, 0, _Align::right);

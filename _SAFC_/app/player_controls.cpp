@@ -18,6 +18,41 @@ void report_player_output_error()
 		throw_alert_error(std::move(detail));
 }
 
+bool ensure_player_output_with_status(std::stop_token stop_token, bool& cancelled)
+{
+	cancelled = gui_stop_requested(stop_token);
+	if (gui_stop_requested(stop_token) || !player)
+		return false;
+	global_window_handler->enable_window("SIMPLAYER");
+	auto window = (*global_window_handler)["SIMPLAYER"];
+	auto textbox = (text_box*)(*window)["TEXT"];
+	textbox->safe_string_replace("Preparing MIDI output...");
+	std::atomic_bool window_closed{false};
+	// Output setup blocks until SYNCore can accept MIDI. Observe its published
+	// status here, before the ordinary playback watcher and event clock start.
+	std::jthread watcher([&](std::stop_token watcher_stop)
+	{
+		while (!watcher_stop.stop_requested() && !gui_stop_requested(stop_token))
+		{
+			if (!window->drawable)
+			{
+				window_closed.store(true, std::memory_order_release);
+				return;
+			}
+			const auto synth = player->get_syncore_runtime_status();
+			if (synth.running && !synth.ready)
+				textbox->safe_string_replace(synth.message);
+			std::this_thread::sleep_for(std::chrono::milliseconds(20));
+		}
+	});
+	const bool ready = player->ensure_output(saved_midi_device_name);
+	watcher.request_stop();
+	watcher.join();
+	cancelled = window_closed.load(std::memory_order_acquire) ||
+		!window->drawable || gui_stop_requested(stop_token);
+	return ready && !cancelled;
+}
+
 static void player_watch_func(std::stop_token stop_token)
 {
 	if (gui_stop_requested(stop_token))
@@ -199,7 +234,6 @@ void on_player_pause_toggle()
 		if (filename.empty())
 			return;
 
-		worker_singleton<struct player_watcher>::instance().push(player_watch_func);
 		worker_singleton<struct player_thread>::instance().push([filename](std::stop_token stop_token)
 		{
 			if (gui_stop_requested(stop_token))
@@ -209,14 +243,16 @@ void on_player_pause_toggle()
 				if (player)
 					player->stop();
 			});
-			if (!player->ensure_output(saved_midi_device_name))
+			bool output_cancelled = false;
+			if (!ensure_player_output_with_status(stop_token, output_cancelled))
 			{
-				if (!gui_stop_requested(stop_token))
+				if (!output_cancelled && !gui_stop_requested(stop_token))
 					report_player_output_error();
 				return;
 			}
 			if (gui_stop_requested(stop_token))
 				return;
+			worker_singleton<struct player_watcher>::instance().push(player_watch_func);
 			player->simple_run(filename);
 		});
 		return;
@@ -323,9 +359,10 @@ void open_regular_midi_file(std::wstring filename)
 			if (player)
 				player->stop();
 		});
-		if (!player->ensure_output(saved_midi_device_name))
+		bool output_cancelled = false;
+		if (!ensure_player_output_with_status(stop_token, output_cancelled))
 		{
-			if (!gui_stop_requested(stop_token))
+			if (!output_cancelled && !gui_stop_requested(stop_token))
 				report_player_output_error();
 			return;
 		}

@@ -383,6 +383,7 @@ void render_workspace(workspace& app, piano_texture& piano, GLFWwindow* window)
             visuals_changed |= ImGui::Combo("Overlap", &app.overlap_mode, "Naive removal\0Realtime removal\0Draw all\0");
             if (visuals_changed) app.playback.set_visual_options(app.simulate_lag, static_cast<std::uint8_t>(app.overlap_mode));
             if (!status.error.empty()) ImGui::TextWrapped("%s", status.error.c_str());
+            else if (status.busy && !status.playing) ImGui::TextWrapped("%s", status.message.c_str());
             else if (!app.notice.empty()) ImGui::TextWrapped("%s", app.notice.c_str());
             else ImGui::TextDisabled("%s", status.message.c_str());
         }
@@ -451,7 +452,7 @@ void render_workspace(workspace& app, piano_texture& piano, GLFWwindow* window)
             ImGui::Checkbox("Limiter", &app.draft.limiter_enabled);
             const auto a = ImGui::GetItemRectMin(), b = ImGui::GetItemRectMax();
             app.limiter_center = {(a.x + b.x) * .5f, (a.y + b.y) * .5f};
-            constexpr const char* phases[] = {"Coherent", "Random polarity", "Analytic", "Smooth field", "Independent bins"};
+            constexpr const char* phases[] = {"Direct sampling", "Random polarity", "Analytic", "Smooth field", "Independent bins"};
             int phase = static_cast<int>(app.draft.phase_mode);
             ImGui::SetNextItemWidth(-1);
             if (ImGui::Combo("##phase", &phase, phases, IM_ARRAYSIZE(phases))) app.draft.phase_mode = static_cast<syncore_phase_mode>(phase);

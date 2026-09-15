@@ -1,10 +1,12 @@
 #pragma once
 
 #include <string>
+#include <stop_token>
 #include <vector>
 
 // Playback controls and device selection shared by the player and editor UI.
 void report_player_output_error();
+bool ensure_player_output_with_status(std::stop_token stop_token, bool& cancelled);
 void update_device_list();
 bool try_open_drop_in_player(const std::vector<std::wstring>& filenames);
 void open_regular_midi_file(std::wstring filename);
