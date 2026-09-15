@@ -22,6 +22,7 @@
 #include "widgets.h"
 #include "window_icon.h"
 #include "update_service.h"
+#include "birthday_notification.h"
 
 #include <algorithm>
 #include <array>
@@ -194,6 +195,7 @@ struct workspace
     ui::preferences_store preferences_store;
     ui::application_preferences preferences;
     ui::update_service updates;
+    ui::birthday_notification birthday;
     ui::playback_session playback;
     ui::project_session project;
     ui::analysis_panel analysis;
@@ -218,6 +220,7 @@ struct workspace
         : dialogs(std::move(d)), analysis(dialogs), editor(playback, dialogs), video(playback, dialogs),
           project_view(project, analysis, dialogs), test_mode(test)
     {
+        if (!test) birthday = ui::birthday_notification::today();
         if (!test) preferences = preferences_store.load();
         project.set_defaults(preferences);
         bank = preferences.sound_bank; draft = preferences.synth;
@@ -272,12 +275,14 @@ void render_workspace(workspace& app, piano_texture& piano, GLFWwindow* window)
     const auto display = ImGui::GetIO().DisplaySize;
     const float scale = ImGui::GetFontSize() / 17.f;
     auto* background = ImGui::GetBackgroundDrawList();
-    if (app.preferences.background == 1)
+    if (app.birthday.active())
+        background->AddRectFilledMultiColor({0, 0}, display, IM_COL32(255, 255, 255, 255), IM_COL32(255, 230, 204, 255), IM_COL32(204, 230, 255, 255), IM_COL32(255, 255, 255, 255));
+    else if (app.preferences.background == 1)
         background->AddRectFilledMultiColor({0, 0}, display, IM_COL32(151, 111, 63, 255), IM_COL32(0, 120, 246, 255), IM_COL32(0, 120, 246, 255), IM_COL32(255, 135, 0, 255));
     else background->AddRectFilledMultiColor({0, 0}, display, IM_COL32(30, 42, 56, 255), IM_COL32(17, 47, 68, 255), IM_COL32(8, 25, 42, 255), IM_COL32(26, 33, 44, 255));
     background->AddLine({0, 3}, {display.x * 0.29f, 3}, IM_COL32(242, 152, 49, 255), 3.f);
     background->AddLine({display.x * 0.29f, 3}, {display.x * 0.29f + 9, 12}, IM_COL32(242, 152, 49, 255), 3.f);
-    background->AddText({24 * scale, 27 * scale}, IM_COL32(224, 239, 247, 255), "SAFC   /   MIDI WORKSTATION");
+    background->AddText({24 * scale, 27 * scale}, app.birthday.active() ? IM_COL32(30, 42, 56, 255) : IM_COL32(224, 239, 247, 255), "SAFC   /   MIDI WORKSTATION");
 
     ImGui::SetNextWindowPos({24 * scale, 48 * scale});
     ImGui::SetNextWindowSize({display.x - 48 * scale, 32 * scale});
@@ -562,7 +567,8 @@ void render_workspace(workspace& app, piano_texture& piano, GLFWwindow* window)
         }
         ui::end_folded_window();
     }
-    background->AddText({24 * scale, display.y - 29 * scale}, IM_COL32(136, 166, 187, 255), "SAFC  /  ImGui   |   Drag headers to move panels; drag corners to resize.");
+    background->AddText({24 * scale, display.y - 29 * scale}, app.birthday.active() ? IM_COL32(65, 87, 103, 255) : IM_COL32(136, 166, 187, 255), "SAFC  /  ImGui   |   Drag headers to move panels; drag corners to resize.");
+    app.birthday.draw();
 }
 
 void write_capture(const std::filesystem::path& path, int w, int h)

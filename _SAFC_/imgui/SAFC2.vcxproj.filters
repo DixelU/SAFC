@@ -27,6 +27,9 @@
     <ClCompile Include="folded_theme.cpp">
       <Filter>ImGui frontend</Filter>
     </ClCompile>
+    <ClCompile Include="birthday_notification.cpp">
+      <Filter>ImGui frontend</Filter>
+    </ClCompile>
     <ClCompile Include="window_icon.cpp">
       <Filter>ImGui frontend</Filter>
     </ClCompile>
@@ -123,6 +126,9 @@
       <Filter>ImGui frontend</Filter>
     </ClInclude>
     <ClInclude Include="folded_theme.h">
+      <Filter>ImGui frontend</Filter>
+    </ClInclude>
+    <ClInclude Include="birthday_notification.h">
       <Filter>ImGui frontend</Filter>
     </ClInclude>
     <ClInclude Include="mapping_panel.h">

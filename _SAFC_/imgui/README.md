@@ -20,6 +20,10 @@ Use the workspace navigation to open or hide panels. Hiding a panel leaves its
 document and running job alive. Drag folded captions to move panels and corners
 to resize them; **Reset layout** restores the initial arrangement.
 
+Launching on August 31 (local time) shows the SAFC birthday greeting, counting
+years since the first release in 2018. The light birthday background lasts for
+that session; closing the greeting dismisses it until the next launch.
+
 - **Project:** add MIDI files with the picker or drag and drop, select several
   files with Ctrl, and edit per-file or global PPQN, tempo, offset, selection,
   processing groups, event filters, channel splitting, track collapse, running

@@ -10,6 +10,7 @@ find_package(OpenGL REQUIRED)
 
 add_library(safc_imgui_core STATIC
 	folded_theme.cpp
+	birthday_notification.cpp
 	window_icon.cpp
 	update_service.cpp
 	playback_session.cpp
@@ -61,6 +62,10 @@ if(TARGET safsyn-windows)
 endif()
 
 if(BUILD_TESTING)
+	add_executable(safc-imgui-birthday-tests ../tests/imgui_birthday_tests.cpp)
+	target_link_libraries(safc-imgui-birthday-tests PRIVATE safc_imgui_core)
+	add_test(NAME safc-imgui-birthday COMMAND safc-imgui-birthday-tests)
+	set_tests_properties(safc-imgui-birthday PROPERTIES TIMEOUT 30)
 	add_executable(safc-imgui-update-tests ../tests/imgui_update_tests.cpp ../_SAFC_.rc)
 	target_link_libraries(safc-imgui-update-tests PRIVATE safc_imgui_core)
 	add_test(NAME safc-imgui-update COMMAND safc-imgui-update-tests)

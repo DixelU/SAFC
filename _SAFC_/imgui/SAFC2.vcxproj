@@ -121,6 +121,7 @@
   <ItemGroup>
     <ClCompile Include="main.cpp" />
     <ClCompile Include="folded_theme.cpp" />
+    <ClCompile Include="birthday_notification.cpp" />
     <ClCompile Include="window_icon.cpp" />
     <ClCompile Include="update_service.cpp" />
     <ClCompile Include="playback_session.cpp" />
@@ -207,6 +208,7 @@
     <ClInclude Include="cli.h" />
     <ClInclude Include="editor_panel.h" />
     <ClInclude Include="folded_theme.h" />
+    <ClInclude Include="birthday_notification.h" />
     <ClInclude Include="mapping_panel.h" />
     <ClInclude Include="platform_dialogs.h" />
     <ClInclude Include="playback_session.h" />
