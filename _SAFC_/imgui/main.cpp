@@ -886,8 +886,9 @@ int main()
         }
         if (!smoke && !workflows)
         {
-            DWORD processes[2]{};
-            if (GetConsoleProcessList(processes, 2) == 1) ShowWindow(GetConsoleWindow(), SW_HIDE);
+            // Detach GUI launches from both classic consoles and terminal hosts.
+            // A shared command-line shell keeps its own console and stays visible.
+            FreeConsole();
         }
         std::filesystem::path restart_path;
         const int result = run(smoke || workflows, workflows,
