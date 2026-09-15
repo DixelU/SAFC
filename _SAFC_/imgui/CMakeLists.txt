@@ -44,10 +44,12 @@ target_link_libraries(safc_imgui_core PUBLIC
 # for existing users, scripts, and captures. Both execute the identical frontend.
 add_library(safc_imgui_entry OBJECT main.cpp ../_SAFC_.rc)
 target_link_libraries(safc_imgui_entry PRIVATE safc_imgui_core)
-add_executable(SAFC $<TARGET_OBJECTS:safc_imgui_entry>)
+# GUI launches must not create a terminal before the entry point runs.
+# CLI and smoke modes attach to an existing parent console when needed.
+add_executable(SAFC WIN32 $<TARGET_OBJECTS:safc_imgui_entry>)
 target_link_libraries(SAFC PRIVATE safc_imgui_core)
 set_target_properties(SAFC PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
-add_executable(SAFCImGui $<TARGET_OBJECTS:safc_imgui_entry>)
+add_executable(SAFCImGui WIN32 $<TARGET_OBJECTS:safc_imgui_entry>)
 target_link_libraries(SAFCImGui PRIVATE safc_imgui_core)
 
 # No SAFGUIF widget headers, GLUT event loop, or GLUT link dependency are part

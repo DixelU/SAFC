@@ -30,6 +30,7 @@
 #include <cfloat>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <cwctype>
 #include <filesystem>
 #include <fstream>
@@ -42,6 +43,47 @@
 namespace ui = safc::imgui_ui;
 namespace
 {
+void attach_command_line_console()
+{
+    struct standard_stream
+    {
+        DWORD id;
+        FILE* stream;
+        const char* device;
+        const char* mode;
+        HANDLE inherited;
+        bool redirected;
+    };
+    standard_stream streams[] = {
+        {STD_INPUT_HANDLE, stdin, "CONIN$", "r"},
+        {STD_OUTPUT_HANDLE, stdout, "CONOUT$", "w"},
+        {STD_ERROR_HANDLE, stderr, "CONOUT$", "w"}
+    };
+    // Attaching can replace the Win32 standard handles. Keep each inherited
+    // pipe, file, or NUL stream so shell redirection continues to work.
+    for (auto& stream : streams)
+    {
+        stream.inherited = GetStdHandle(stream.id);
+        DWORD mode{};
+        stream.redirected = stream.inherited && stream.inherited != INVALID_HANDLE_VALUE
+            && GetFileType(stream.inherited) != FILE_TYPE_UNKNOWN
+            && !GetConsoleMode(stream.inherited, &mode);
+    }
+    if (!AttachConsole(ATTACH_PARENT_PROCESS) && GetLastError() != ERROR_ACCESS_DENIED) return;
+    for (const auto& stream : streams)
+    {
+        if (stream.redirected) SetStdHandle(stream.id, stream.inherited);
+        else
+        {
+            // The CRT was initialized before the console was attached.
+            FILE* reopened{};
+            freopen_s(&reopened, stream.device, stream.mode, stream.stream);
+        }
+    }
+    std::cin.clear(); std::cout.clear(); std::cerr.clear(); std::clog.clear();
+    std::wcin.clear(); std::wcout.clear(); std::wcerr.clear(); std::wclog.clear();
+}
+
 std::string utf8(const std::wstring& text)
 {
     if (text.empty()) return {};
@@ -864,7 +906,7 @@ int run(bool smoke, bool workflows, const std::filesystem::path& capture_path,
 }
 } // namespace
 
-int main()
+int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
 {
     int argc{};
     auto** argv = CommandLineToArgvW(GetCommandLineW(), &argc);
@@ -875,6 +917,7 @@ int main()
     bool cli = false;
     try
     {
+        if (smoke || workflows) attach_command_line_console();
         if ((smoke || workflows) && argc != 3) throw std::runtime_error("Usage: SAFCImGui --smoke|--workflow-smoke <capture.bmp>");
         if (!smoke && !workflows && argc > 1)
         {
@@ -882,13 +925,11 @@ int main()
             auto extension = std::filesystem::path(argument).extension().wstring();
             std::transform(extension.begin(), extension.end(), extension.begin(), towlower);
             cli = extension == L".json" || argument == L"--help" || argument == L"/?" || argument == L"-?" || argument == L"/help";
-            if (cli) return ui::run_cli(argument);
-        }
-        if (!smoke && !workflows)
-        {
-            // Detach GUI launches from both classic consoles and terminal hosts.
-            // A shared command-line shell keeps its own console and stays visible.
-            FreeConsole();
+            if (cli)
+            {
+                attach_command_line_console();
+                return ui::run_cli(argument);
+            }
         }
         std::filesystem::path restart_path;
         const int result = run(smoke || workflows, workflows,
