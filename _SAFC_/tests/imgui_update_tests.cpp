@@ -11,6 +11,7 @@
 #include <cstring>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <mutex>
 #include <stdexcept>
 #include <thread>
@@ -26,6 +27,23 @@ fs::path self() {
     std::wstring path(32768, L'\0'); DWORD size = static_cast<DWORD>(path.size());
     require(QueryFullProcessImageNameW(GetCurrentProcess(), 0, path.data(), &size), "query process path");
     path.resize(size); return path;
+}
+const detail::version& upgrade_version() {
+    static const auto result = [] {
+        const auto current = detail::executable_version(self());
+        require(bool(current), "test executable must contain a ProductVersion");
+        auto next = *current;
+        // Keep the offline release newer after application version bumps,
+        // carrying between the four 16-bit ProductVersion components.
+        for (auto i = next.size(); i-- > 0;) {
+            if (next[i] != std::numeric_limits<std::uint16_t>::max()) {
+                ++next[i]; return next;
+            }
+            next[i] = 0;
+        }
+        throw std::runtime_error("test executable ProductVersion has no newer representable version");
+    }();
+    return result;
 }
 std::vector<std::byte> read(const fs::path& file) {
     std::ifstream input(file, std::ios::binary | std::ios::ate);
@@ -82,8 +100,9 @@ void upgrade_fixture_version(const fs::path& path) {
     for (std::size_t offset = 0; offset + sizeof(VS_FIXEDFILEINFO) <= copied.size(); offset += sizeof(WORD)) {
         VS_FIXEDFILEINFO info{}; std::memcpy(&info, copied.data() + offset, sizeof(info));
         if (info.dwSignature != 0xfeef04bd) continue;
-        info.dwProductVersionMS = info.dwFileVersionMS = MAKELONG(0, 2);
-        info.dwProductVersionLS = info.dwFileVersionLS = 0;
+        const auto& version = upgrade_version();
+        info.dwProductVersionMS = info.dwFileVersionMS = MAKELONG(version[1], version[0]);
+        info.dwProductVersionLS = info.dwFileVersionLS = MAKELONG(version[3], version[2]);
         std::memcpy(copied.data() + offset, &info, sizeof(info)); patched = true; break;
     }
     require(patched, "locate fixture fixed version");
@@ -92,7 +111,7 @@ void upgrade_fixture_version(const fs::path& path) {
     require(UpdateResourceW(update, RT_VERSION, MAKEINTRESOURCEW(1), MAKELANGID(LANG_RUSSIAN, SUBLANG_DEFAULT),
         copied.data(), static_cast<DWORD>(copied.size())), "patch fixture resource");
     require(EndUpdateResourceW(update, FALSE), "save fixture resource");
-    require(detail::executable_version(path) == detail::version{2, 0, 0, 0}, "fixture ProductVersion was changed");
+    require(detail::executable_version(path) == upgrade_version(), "fixture ProductVersion was changed");
 }
 void wait_finished(ui::update_service& updater) {
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(15);
@@ -155,7 +174,7 @@ void replacement_tests(const fs::path& root, const fs::path& upgraded) {
     const auto result = detail::replace_executable(target, staged, backup, error);
     fs::current_path(previous_cwd);
     require(result, "absolute-path installation with different working directory: " + error);
-    require(detail::executable_version(target) == detail::version{2, 0, 0, 0}, "installed under original filename");
+    require(detail::executable_version(target) == upgrade_version(), "installed under original filename");
     require(detail::executable_version(backup) == detail::executable_version(self()), "retained previous file");
     fs::remove(target); fs::remove(backup);
     fs::copy_file(self(), target); fs::copy_file(upgraded, staged);
@@ -188,7 +207,7 @@ void running_image_test(const fs::path& root, const fs::path& upgraded) {
     CloseHandle(process.hProcess); CloseHandle(process.hThread); CloseHandle(done); CloseHandle(ready);
     require(started == WAIT_OBJECT_0 && finished == WAIT_OBJECT_0, "mapped-image fixture lifecycle");
     require(replaced, "replace an actual running Windows executable: " + error);
-    require(installed == detail::version{2, 0, 0, 0} && still_running, "running process retains old mapping while new path is installed");
+    require(installed == upgrade_version() && still_running, "running process retains old mapping while new path is installed");
     require(detail::executable_version(backup) == detail::executable_version(self()), "running-image backup holds previous executable");
 }
 void service_tests(const fs::path& root, const fs::path& upgraded) {
@@ -200,12 +219,15 @@ void service_tests(const fs::path& root, const fs::path& upgraded) {
     constexpr auto machine = detail::machine_x86;
 #endif
     std::string error;
-    require(detail::verify_executable(upgraded, {2, 0, 0, 0}, machine, error), "accept matching PE: " + error);
-    require(!detail::verify_executable(upgraded, {3, 0, 0, 0}, machine, error), "reject mismatched ProductVersion");
-    require(!detail::verify_executable(upgraded, {2, 0, 0, 0}, machine == detail::machine_x64 ? detail::machine_x86 : detail::machine_x64, error), "reject mismatched PE machine");
+    const auto current = detail::executable_version(self());
+    require(bool(current), "service fixture has a ProductVersion");
+    require(detail::verify_executable(upgraded, upgrade_version(), machine, error), "accept matching PE: " + error);
+    require(!detail::verify_executable(upgraded, *current, machine, error), "reject mismatched ProductVersion");
+    require(!detail::verify_executable(upgraded, upgrade_version(), machine == detail::machine_x64 ? detail::machine_x86 : detail::machine_x64, error), "reject mismatched PE machine");
     const auto target = root / L"custom SAFC.exe"; fs::copy_file(self(), target);
     const auto package = archive({{"SAFC.exe", read(upgraded)}});
-    const auto metadata = bytes(release(asset(wanted, package.size())));
+    const auto tag = detail::format_version(upgrade_version());
+    const auto metadata = bytes(release(asset(wanted, package.size(), tag.c_str()), tag.c_str()));
     std::atomic<unsigned> calls = 0;
     auto transport = [&](std::wstring_view url, std::size_t limit, std::stop_token, const detail::progress_callback& progress) {
         ++calls;
@@ -221,7 +243,7 @@ void service_tests(const fs::path& root, const fs::path& upgraded) {
         require(updater.install_pending(error), "install validated offline update: " + error);
         require(!updater.install_pending(error) && error.empty(), "completed update cannot install twice");
     }
-    require(calls == 2 && detail::executable_version(target) == detail::version{2, 0, 0, 0}, "one release check and one exact asset fetch");
+    require(calls == 2 && detail::executable_version(target) == upgrade_version(), "one release check and one exact asset fetch");
     {
         ui::update_service updater({target, transport}); updater.check(); wait_finished(updater);
         require(updater.snapshot().phase == ui::update_phase::up_to_date && calls == 3, "same-version release never downloads");

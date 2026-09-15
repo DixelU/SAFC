@@ -343,7 +343,7 @@ struct midi_processor_with_editor
             return false;
 
         // Build combined filter from all pending operations
-        single_midi_processor_2::filters_multimap filters;
+        single_midi_processor_2::filter_table filters;
         
         // Add editor filters
         for (auto& edit_filter : pending_filters)

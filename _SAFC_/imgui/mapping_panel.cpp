@@ -40,7 +40,7 @@ void draw_key_strip(ImDrawList& draw, ImVec2 origin, ImVec2 size,
         const float next = x + size.x / 128.f;
         if (next <= origin.x || x >= far.x) continue;
         const bool included = source >= 0 && source <= 255
-            && map.process(static_cast<std::uint8_t>(source)).has_value();
+            && map.process(static_cast<std::uint8_t>(source)) != ::cut_and_transpose::rejected;
         const ImU32 white = included ? IM_COL32(207, 225, 233, 255) : IM_COL32(61, 74, 83, 255);
         const ImU32 black = included ? IM_COL32(16, 33, 48, 255) : IM_COL32(23, 32, 42, 255);
         draw.AddRectFilled(ImVec2(x, origin.y), ImVec2(next, far.y), white);
@@ -167,7 +167,8 @@ void mapping_panel::draw_key_map(const char* label, std::shared_ptr<::cut_and_tr
                 map->max_val = static_cast<std::uint8_t>(std::max(cut_anchor_, key));
             }
             const auto result = map->process(static_cast<std::uint8_t>(key));
-            if (result) ImGui::SetTooltip("%s (%d) -> %s (%u)", key_name(key).c_str(), key, key_name(*result).c_str(), unsigned(*result));
+            if (result != ::cut_and_transpose::rejected)
+                ImGui::SetTooltip("%s (%d) -> %s (%u)", key_name(key).c_str(), key, key_name(result).c_str(), unsigned(result));
             else ImGui::SetTooltip("%s (%d) is removed", key_name(key).c_str(), key);
         }
         ImGui::PopID();
@@ -182,7 +183,7 @@ void mapping_panel::draw_key_map(const char* label, std::shared_ptr<::cut_and_tr
         map->transpose_val = static_cast<std::int16_t>(std::clamp(offset, -255, 255));
     }
     int kept = 0;
-    for (int key = 0; key <= 127; ++key) kept += map->process(static_cast<std::uint8_t>(key)).has_value();
+    for (int key = 0; key <= 127; ++key) kept += map->process(static_cast<std::uint8_t>(key)) != ::cut_and_transpose::rejected;
     ImGui::Text("%d of 128 standard keys retained; output range %d..%d", kept,
         std::max(0, int(map->min_val) + map->transpose_val), std::min(255, int(map->max_val) + map->transpose_val));
     end_folded_window();
