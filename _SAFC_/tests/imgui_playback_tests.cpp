@@ -3,8 +3,11 @@
 #include <archive.h>
 #include <archive_entry.h>
 #include "../imgui/playback_session.h"
+#include "../imgui/editor_panel.h"
 #include "../imgui/video_export_panel.h"
 #include "../SAFC_InnerModules/compressed_midi_event_source.h"
+#include "../SAFC_InnerModules/midi_editor.h"
+#include "../SAFC_InnerModules/simple_player.h"
 #include "../SAFC_InnerModules/single_midi_processor_lean.h"
 #include "../SAFC_InnerModules/midi_collection_threaded_merger.h"
 
@@ -16,6 +19,8 @@
 #include <sstream>
 #include <thread>
 #include <vector>
+#include <imgui.h>
+#include <imgui_internal.h>
 
 namespace ui = safc::imgui_ui;
 namespace fs = std::filesystem;
@@ -103,6 +108,139 @@ void stop(ui::playback_session& playback)
 {
     playback.stop();
     wait_for([&] { return !playback.snapshot().busy; }, "Stop must retire scheduler and preparation");
+}
+
+void editor_snapshot_checks(const fs::path& directory)
+{
+    const auto input = directory / "editor-snapshot.mid";
+    // A long held note spans several blocks of short notes. Seeking must
+    // restore it while skipping the ended prefix, even after sparse edits.
+    bytes track{0, 0x90, 40, 90};
+    for (unsigned i = 0; i < 4096; ++i)
+        track.insert(track.end(), {1, 0x90, 60, 100, 1, 0x80, 60, 0});
+    track.insert(track.end(), {100, 0x80, 40, 0, 0, 0xff, 0x2f, 0});
+    bytes file{'M','T','h','d',0,0,0,6,0,0,0,1,1,224,'M','T','r','k'};
+    for (int shift : {24, 16, 8, 0}) file.push_back(static_cast<unsigned char>(track.size() >> shift));
+    file.insert(file.end(), track.begin(), track.end());
+    write_bytes(input, file);
+    auto model = std::make_unique<midi_editor>();
+    require(model->load_file(input.wstring()), "Load editor snapshot fixture");
+    auto original = model->make_playback_source();
+    midi_editor::piano_note held;
+    require(model->find_note_at(0, 40, held), "Find long held note");
+    model->select_note(held.id, midi_editor::select_mode::replace);
+    model->change_velocity_selected(55);
+    model->change_channel_selected(3);
+    model->adjust_velocity_selected(2);
+    std::uint8_t old_velocity = 0;
+    model->set_note_velocity_transient(held, 61, old_velocity);
+    require(old_velocity == 57, "Sparse velocity operations compose correctly");
+    model->insert_note(4000, 7000, 72, 80, 2, 0);
+    auto edited = model->make_playback_source();
+    // Undo, deletion, and reloading may not change either prior snapshot.
+    model->undo();
+    model->erase_note_at(0, 40);
+    auto deleted = model->make_playback_source();
+    require(deleted->total_duration_us() < original->total_duration_us(), "Deleted final note shortens the snapshot duration");
+    require(model->load_file(input.wstring()), "Reload editor while readers retain old data");
+    model.reset();
+    auto* typed = static_cast<midi_editor::editor_event_source*>(edited.get());
+    auto reader = typed->fork_reader();
+    auto other = typed->fork_reader();
+    generated_event first{}, second{};
+    require(reader->next(first) && reader->next(second) && other->next(second) && first.short_msg == second.short_msg,
+        "Advancing one snapshot cursor does not move the other");
+    constexpr std::uint64_t target = 5000ull * 500000 / 480;
+    auto verify_held = [&](playback_event_source& source, unsigned velocity, unsigned channel, bool inserted)
+    {
+        source.seek(target);
+        generated_event event;
+        unsigned found = 0, found_inserted = 0;
+        std::uint64_t last = target;
+        while (source.next(event))
+        {
+            require(event.time_us >= last, "Seek stream stays ordered");
+            last = event.time_us;
+            if (event.k == generated_event::kind::note_on && event.key == 40)
+            {
+                require(event.time_us == target && event.velocity == velocity && event.channel == channel,
+                    "Snapshot preserves its held note and channel despite later edits");
+                ++found;
+            }
+            if (event.k == generated_event::kind::note_on && event.key == 72) ++found_inserted;
+        }
+        require(found == 1 && found_inserted == unsigned(inserted), "Seek restores base and overlay notes exactly once");
+    };
+    verify_held(*original, 90, 0, false);
+    verify_held(*reader, 61, 3, true);
+    verify_held(*other, 61, 3, true);
+    verify_held(*edited, 61, 3, true);
+
+    simple_player transport;
+    transport.init();
+    require(transport.use_silent_output(), "Prepare silent editor transport");
+    std::jthread run([&] { transport.run_from_external(reader.get(), .6, false); });
+    struct stop_transport { simple_player& player; ~stop_transport() { player.shutdown(); } } guard{transport};
+    const auto from = std::uint64_t(reader->total_duration_us() * .6);
+    wait_for([&] { return transport.is_playing() && !transport.is_seeking() && transport.get_position_us() > from + 100000; },
+        "Editor playback from view advances past the seek boundary");
+    transport.shutdown();
+    run.join();
+}
+
+// Optional integration run with a real sound bank and Windows audio endpoint.
+// Releasing the key during preparation ensures the probe remains silent.
+void audition_preparation_checks(const std::wstring& bank)
+{
+    auto* context = ImGui::CreateContext();
+    struct destroy_context { ImGuiContext* value; ~destroy_context() { ImGui::DestroyContext(value); } } context_guard{context};
+    auto& io = ImGui::GetIO();
+    io.IniFilename = nullptr;
+    io.DisplaySize = {1400, 1000};
+    io.DeltaTime = 1.f / 60.f;
+    unsigned char* pixels;
+    int width, height;
+    io.Fonts->GetTexDataAsRGBA32(&pixels, &width, &height);
+    ui::playback_session playback;
+    ui::editor_panel editor(playback, {});
+    syncore_preferences preferences;
+    preferences.phase_mode = syncore_phase_mode::independent_bins;
+    preferences.render_threads = 1;
+    playback.configure_synth(bank, preferences);
+    const auto started = std::chrono::steady_clock::now();
+    require(playback.audition_note(60, 100, 0, true), "Dispatch editor audition");
+    playback.audition_note(60, 0, 0, false);
+    require(std::chrono::steady_clock::now() - started < std::chrono::milliseconds(250),
+        "Editor clicks return before sound-bank preparation");
+    bool saw_progress = false, displayed_progress = false;
+    std::uint64_t last = 0;
+    wait_for([&] {
+        const auto before = std::chrono::steady_clock::now();
+        const auto state = playback.snapshot();
+        playback.audition_note(61, 0, 0, false);
+        require(std::chrono::steady_clock::now() - before < std::chrono::milliseconds(250),
+            "Status reads and note releases stay responsive during preparation");
+        if (state.preparing && state.preparation_total)
+        {
+            require(state.preparation_completed >= last && state.preparation_completed <= state.preparation_total,
+                "Prerender counters advance monotonically");
+            last = state.preparation_completed;
+            saw_progress = true;
+            require(state.message.find("Prerendering sample variants") != std::string::npos,
+                "Preparation message includes sample variant progress");
+            bool visible = true;
+            ImGui::NewFrame();
+            ImGui::LogToBuffer();
+            editor.draw(&visible);
+            displayed_progress |= std::strstr(context->LogBuffer.c_str(), "Prerendering sample variants") != nullptr;
+            ImGui::LogFinish();
+            ImGui::Render();
+        }
+        require(state.error.empty(), state.error.c_str());
+        return !state.busy;
+    }, "Editor audition preparation completes", 45);
+    require(saw_progress && displayed_progress, "Editor displays prerender progress while the player window is closed");
+    playback.shutdown();
 }
 
 void cancellation_checks(const fs::path& directory)
@@ -194,7 +332,7 @@ void output_failure_checks(const fs::path& directory)
 }
 }
 
-int main()
+int wmain(int argc, wchar_t** argv)
 {
     const auto directory = fs::temp_directory_path() /
         ("safc-imgui-service-tests-" + std::to_string(GetCurrentProcessId()));
@@ -202,6 +340,13 @@ int main()
     {
         require(fs::create_directory(directory), "Create isolated test directory");
         struct cleanup { fs::path path; ~cleanup() { std::error_code error; fs::remove_all(path, error); } } cleanup{directory};
+        if (argc == 2)
+        {
+            audition_preparation_checks(argv[1]);
+            std::cout << "Editor audition responsiveness and prerender progress passed\n";
+            return 0;
+        }
+        editor_snapshot_checks(directory);
         cancellation_checks(directory);
         output_failure_checks(directory);
         const auto multi = directory / "multiple.zip";

@@ -113,7 +113,7 @@ struct playback_session::impl
 		error = std::move(new_error);
 	}
 
-	void run(std::stop_token token, std::wstring path, std::size_t output,
+	void run(std::stop_token token, std::wstring path, std::string output_name,
 		std::wstring sound_bank, syncore_preferences synth, bool silent, bool start_paused,
 		std::shared_ptr<playback_event_source> external, double seek_fraction, bool output_only = false)
 	{
@@ -149,6 +149,20 @@ struct playback_session::impl
 		};
 		try
 		{
+			// MIDI driver enumeration can load a driver and block. Keep it with
+			// bank/output preparation on this worker, including editor audition.
+			engine.refresh_devices();
+			auto current_devices = engine.get_device_names();
+			const auto selected = std::find(current_devices.begin(), current_devices.end(), output_name);
+			const auto output = selected != current_devices.end()
+				? static_cast<std::size_t>(selected - current_devices.begin())
+				: simple_player::syncore_available()
+					? engine.get_syncore_device_index() : engine.get_current_device();
+			{
+				std::lock_guard lock(source_mutex);
+				devices = std::move(current_devices);
+				device = output;
+			}
 			if (cancelled())
 			{
 				set_status("Stopped");
@@ -323,20 +337,14 @@ bool playback_session::start(std::wstring path, std::shared_ptr<playback_event_s
 	impl_->busy.store(true, std::memory_order_release);
 	try
 	{
-		// Both prior workers have retired, so nothing can set the terminal gate
-		// concurrently with this reset. init() only enumerates devices; all
-		// output opening remains on the run worker below.
+		// Reset the terminal gate before dispatch, so an immediate Stop cannot
+		// be undone by worker initialization. Driver enumeration stays async.
+		impl_->engine.init(false);
+		std::lock_guard lock(impl_->source_mutex);
 		const auto selected_name = impl_->device < impl_->devices.size()
 			? impl_->devices[impl_->device] : std::string{};
-		impl_->engine.init();
-		impl_->devices = impl_->engine.get_device_names();
-		const auto selected = std::find(impl_->devices.begin(), impl_->devices.end(), selected_name);
-		impl_->device = selected != impl_->devices.end()
-			? static_cast<std::size_t>(selected - impl_->devices.begin())
-			: simple_player::syncore_available()
-				? impl_->engine.get_syncore_device_index() : impl_->engine.get_current_device();
 		impl_->worker = std::jthread(
-			[state = impl_.get(), path = std::move(path), output = impl_->device,
+			[state = impl_.get(), path = std::move(path), output = selected_name,
 			 sound_bank = impl_->bank, synth = impl_->preferences, silent, start_paused,
 			 source = std::move(source), seek_fraction]
 			(std::stop_token token) mutable
@@ -465,25 +473,38 @@ playback_snapshot playback_session::snapshot()
 	else if (run_busy)
 	{
 		const auto synth = impl_->engine.get_syncore_runtime_status();
+		result.preparing = true;
 		if (synth.running && !synth.ready)
+		{
 			result.message = synth.message;
+			result.preparation_completed = synth.preparation_completed;
+			result.preparation_total = synth.preparation_total;
+		}
+		else if (result.message == "Reading MIDI...")
+		{
+			result.preparation_completed = result.scanned_bytes;
+			result.preparation_total = result.total_bytes;
+		}
 	}
 	return result;
 }
 
 std::vector<std::string> playback_session::device_names() const
 {
+	std::lock_guard lock(impl_->source_mutex);
 	return impl_->devices;
 }
 
 void playback_session::select_device(std::size_t index)
 {
+	std::lock_guard lock(impl_->source_mutex);
 	if (index < impl_->devices.size())
 		impl_->device = index;
 }
 
 std::size_t playback_session::selected_device() const
 {
+	std::lock_guard lock(impl_->source_mutex);
 	return impl_->device;
 }
 
@@ -559,16 +580,11 @@ bool playback_session::audition_note(std::uint8_t key, std::uint8_t velocity,
 	impl_->set_status("Preparing editor audition...");
 	try
 	{
+		impl_->engine.init(false);
+		std::lock_guard source_lock(impl_->source_mutex);
 		const auto selected_name = impl_->device < impl_->devices.size()
 			? impl_->devices[impl_->device] : std::string{};
-		impl_->engine.init();
-		impl_->devices = impl_->engine.get_device_names();
-		const auto selected = std::find(impl_->devices.begin(), impl_->devices.end(), selected_name);
-		impl_->device = selected != impl_->devices.end()
-			? static_cast<std::size_t>(selected - impl_->devices.begin())
-			: simple_player::syncore_available() ? impl_->engine.get_syncore_device_index()
-				: impl_->engine.get_current_device();
-		impl_->worker = std::jthread([self = impl_.get(), output = impl_->device,
+		impl_->worker = std::jthread([self = impl_.get(), output = selected_name,
 			bank = impl_->bank, synth = impl_->preferences](std::stop_token token) mutable
 		{
 			self->run(token, {}, output, std::move(bank), synth, false, false, {}, 0, true);

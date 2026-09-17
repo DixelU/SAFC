@@ -536,7 +536,9 @@ struct midi_editor
 				if (auto* note = editor.find_note_by_id(id))
 				{
 					changes.emplace_back(note->id, note->velocity);
-					note->velocity = new_velocity;
+					auto updated = *note;
+					updated.velocity = new_velocity;
+					editor.replace_note(updated);
 				}
 			}
 			editor.mark_dirty_keep_order();
@@ -547,7 +549,11 @@ struct midi_editor
 			for (auto& [id, old_vel] : changes)
 			{
 				if (auto* note = editor.find_note_by_id(id))
-					note->velocity = old_vel;
+				{
+					auto updated = *note;
+					updated.velocity = old_vel;
+					editor.replace_note(updated);
+				}
 			}
 			editor.mark_dirty_keep_order();
 		}
@@ -577,7 +583,9 @@ struct midi_editor
 				if (!note)
 					continue;
 				changes.emplace_back(note->id, note->channel);
-				note->channel = new_channel;
+				auto updated = *note;
+				updated.channel = new_channel;
+				editor.replace_note(updated);
 			}
 			editor.mark_dirty_keep_order();
 		}
@@ -586,7 +594,11 @@ struct midi_editor
 		{
 			for (auto& [id, old_channel] : changes)
 				if (auto* note = editor.find_note_by_id(id))
-					note->channel = old_channel;
+				{
+					auto updated = *note;
+					updated.channel = old_channel;
+					editor.replace_note(updated);
+				}
 			editor.mark_dirty_keep_order();
 		}
 
@@ -616,7 +628,9 @@ struct midi_editor
 				if (auto* note = editor.find_note_by_id(id))
 				{
 					changes.emplace_back(note->id, note->velocity);
-					note->velocity = std::uint8_t(std::clamp(int(note->velocity) + delta, 1, 127));
+					auto updated = *note;
+					updated.velocity = std::uint8_t(std::clamp(int(note->velocity) + delta, 1, 127));
+					editor.replace_note(updated);
 				}
 			}
 			editor.mark_dirty_keep_order();
@@ -627,7 +641,11 @@ struct midi_editor
 			for (auto& [id, old_vel] : changes)
 			{
 				if (auto* note = editor.find_note_by_id(id))
-					note->velocity = old_vel;
+				{
+					auto updated = *note;
+					updated.velocity = old_vel;
+					editor.replace_note(updated);
+				}
 			}
 			editor.mark_dirty_keep_order();
 		}
@@ -710,7 +728,11 @@ struct midi_editor
 			for (const auto& en : entries)
 			{
 				if (auto* note = editor.find_note_by_id(en.note.id))
-					note->velocity = use_new ? en.new_velocity : en.old_velocity;
+				{
+					auto updated = *note;
+					updated.velocity = use_new ? en.new_velocity : en.old_velocity;
+					editor.replace_note(updated);
+				}
 			}
 			editor.mark_dirty_keep_order();
 		}
@@ -944,7 +966,16 @@ private:
 	// vector: changed/inserted notes live in a sparse overlay and base notes that
 	// they replace (or delete) are suppressed by id. This keeps a one-note edit
 	// independent of the total MIDI size.
-	mutable std::vector<piano_note> notes;
+	// Playback retains the immutable loaded vector; reloading replaces its
+	// owner so existing readers keep their original score without copying it.
+	struct loaded_note_data
+	{
+		static constexpr std::size_t block_size = 1024;
+		std::vector<piano_note> notes;
+		std::vector<tick_type> block_max_end;
+	};
+	std::shared_ptr<loaded_note_data> notes_storage = std::make_shared<loaded_note_data>();
+	std::vector<piano_note>& base_notes() const { return notes_storage->notes; }
 	std::unordered_map<std::uint32_t, piano_note> edited_notes;
 	std::unordered_set<std::uint32_t> suppressed_base_note_ids;
 	mutable std::vector<std::uint32_t> base_note_index_by_id;
@@ -1242,7 +1273,7 @@ public:
 
 		is_loaded = false;
 		is_dirty = false;
-		notes.clear();
+		notes_storage = std::make_shared<loaded_note_data>();
 		edited_notes.clear();
 		suppressed_base_note_ids.clear();
 		base_note_index_by_id.clear();
@@ -1298,10 +1329,13 @@ public:
 			on_load_progress(size, size);
 
 		std::sort(tempo_events.begin(), tempo_events.end());
-		std::sort(notes.begin(), notes.end());
+		std::sort(base_notes().begin(), base_notes().end());
 		notes_order_dirty = true; // recompute scan bounds for the new file
 		rebuild_base_note_index();
-		logical_note_count = notes.size();
+		logical_note_count = base_notes().size();
+		// Finish the full-score query index on the loading worker. The first
+		// frame or click must not trigger this scan for a huge MIDI.
+		ensure_note_order();
 
 		is_loaded = true;
 
@@ -1324,7 +1358,7 @@ public:
 		const auto total = get_total_ticks();
 		view_duration_ticks = total ? total : tick_type(ppqn) * 4;
 
-		if (notes.empty())
+		if (base_notes().empty())
 		{
 			view_key_low = 24;
 			view_key_high = 108;
@@ -1332,7 +1366,7 @@ public:
 		}
 
 		std::uint8_t min_key = 127, max_key = 0;
-		for (const auto& note : notes)
+		for (const auto& note : base_notes())
 		{
 			min_key = std::min(min_key, note.key);
 			max_key = std::max(max_key, note.key);
@@ -1448,10 +1482,10 @@ public:
 						{
 							auto note = it->second.front();
 							it->second.pop_front();
-							notes.emplace_back(note.start, current_tick,
+							base_notes().emplace_back(note.start, current_tick,
 								note.key, note.velocity,
 								note.channel, track_index);
-							notes.back().id = next_note_id++;
+							base_notes().back().id = next_note_id++;
 							if (it->second.empty())
 								active_notes.erase(it);
 						}
@@ -1467,10 +1501,10 @@ public:
 					{
 						auto note = it->second.front();
 						it->second.pop_front();
-						notes.emplace_back(note.start, current_tick,
+						base_notes().emplace_back(note.start, current_tick,
 							note.key, note.velocity,
 							note.channel, track_index);
-						notes.back().id = next_note_id++;
+						base_notes().back().id = next_note_id++;
 						if (it->second.empty())
 							active_notes.erase(it);
 					}
@@ -1537,9 +1571,9 @@ public:
 		{
 			for (const auto& note : pending)
 			{
-				notes.emplace_back(note.start, current_tick + 1,
+				base_notes().emplace_back(note.start, current_tick + 1,
 					note.key, note.velocity, note.channel, track_index);
-				notes.back().id = next_note_id++;
+				base_notes().back().id = next_note_id++;
 			}
 		}
 
@@ -1660,13 +1694,13 @@ public:
 
 	note_iterator begin_notes() const
 	{
-		return note_iterator(notes.begin(), notes.end(), view_start_tick,
+		return note_iterator(base_notes().begin(), base_notes().end(), view_start_tick,
 			view_start_tick + view_duration_ticks);
 	}
 
 	note_iterator end_notes() const
 	{
-		return note_iterator(notes.end(), notes.end(), view_start_tick,
+		return note_iterator(base_notes().end(), base_notes().end(), view_start_tick,
 			view_start_tick + view_duration_ticks);
 	}
 
@@ -1716,7 +1750,9 @@ public:
 		if (auto* note = find_note_by_id(ident.id))
 		{
 			old_velocity = note->velocity;
-			note->velocity = std::clamp<std::uint8_t>(velocity, 1, 127);
+			auto updated = *note;
+			updated.velocity = std::clamp<std::uint8_t>(velocity, 1, 127);
+			replace_note(updated);
 			mark_dirty_keep_order();
 			return true;
 		}
@@ -2158,23 +2194,23 @@ private:
 	void rebuild_base_note_index() const
 	{
 		base_note_index_by_id.assign(std::size_t(next_note_id), invalid_note_index);
-		for (std::size_t index = 0; index < notes.size(); ++index)
+		for (std::size_t index = 0; index < base_notes().size(); ++index)
 		{
-			const auto id = notes[index].id;
+			const auto id = base_notes()[index].id;
 			if (id >= base_note_index_by_id.size())
 				base_note_index_by_id.resize(std::size_t(id) + 1, invalid_note_index);
 			base_note_index_by_id[id] = static_cast<std::uint32_t>(index);
 		}
 	}
 
-	piano_note* find_base_note_by_id(std::uint32_t id)
+	const piano_note* find_base_note_by_id(std::uint32_t id)
 	{
 		if (id >= base_note_index_by_id.size())
 			return nullptr;
 		const auto index = base_note_index_by_id[id];
-		if (index == invalid_note_index || index >= notes.size() || notes[index].id != id)
+		if (index == invalid_note_index || index >= base_notes().size() || base_notes()[index].id != id)
 			return nullptr;
-		return &notes[index];
+		return &base_notes()[index];
 	}
 
 	const piano_note* find_base_note_by_id(std::uint32_t id) const
@@ -2182,7 +2218,7 @@ private:
 		return const_cast<midi_editor*>(this)->find_base_note_by_id(id);
 	}
 
-	piano_note* find_note_by_id(std::uint32_t id)
+	const piano_note* find_note_by_id(std::uint32_t id)
 	{
 		if (auto changed = edited_notes.find(id); changed != edited_notes.end())
 			return &changed->second;
@@ -2251,7 +2287,7 @@ private:
 	template<typename func_type>
 	void for_each_logical_note(func_type&& fn) const
 	{
-		for (const auto& note : notes)
+		for (const auto& note : base_notes())
 			if (!suppressed_base_note_ids.count(note.id))
 				fn(note);
 		for (const auto& [_, note] : edited_notes)
@@ -2308,9 +2344,9 @@ private:
 
 		// Edits leave the vector nearly sorted; the is_sorted fast path makes
 		// the common "only velocities changed via undo" case O(N)
-		if (!std::is_sorted(notes.begin(), notes.end()))
+		if (!std::is_sorted(base_notes().begin(), base_notes().end()))
 		{
-			std::sort(notes.begin(), notes.end());
+			std::sort(base_notes().begin(), base_notes().end());
 			rebuild_base_note_index();
 		}
 
@@ -2322,19 +2358,22 @@ private:
 		long_note_indices.clear();
 		max_typical_length = 0;
 		cached_max_end_tick = 0;
-		for (std::size_t i = 0; i < notes.size(); ++i)
+		notes_storage->block_max_end.assign((base_notes().size() + loaded_note_data::block_size - 1) / loaded_note_data::block_size, 0);
+		for (std::size_t i = 0; i < base_notes().size(); ++i)
 		{
-			const auto length = notes[i].length();
-			cached_max_end_tick = std::max(cached_max_end_tick, notes[i].end_tick);
+			const auto length = base_notes()[i].length();
+			cached_max_end_tick = std::max(cached_max_end_tick, base_notes()[i].end_tick);
+			auto& block_end = notes_storage->block_max_end[i / loaded_note_data::block_size];
+			block_end = std::max(block_end, base_notes()[i].end_tick);
 			if (length > threshold)
 				long_note_indices.push_back(i);
 			else
 				max_typical_length = std::max(max_typical_length, length);
 		}
-		if (long_note_indices.size() > notes.size() / 16 + 64)
+		if (long_note_indices.size() > base_notes().size() / 16 + 64)
 		{
 			long_note_indices.clear();
-			for (const auto& note : notes)
+			for (const auto& note : base_notes())
 				max_typical_length = std::max(max_typical_length, note.length());
 		}
 
@@ -2357,7 +2396,7 @@ private:
 		// loop below, so only take the ones starting before it
 		for (const auto index : long_note_indices)
 		{
-			const auto& note = notes[index];
+			const auto& note = base_notes()[index];
 			if (note.start_tick >= end)
 				break; // side list is start-sorted too
 			if (!suppressed_base_note_ids.count(note.id) &&
@@ -2365,9 +2404,9 @@ private:
 				fn(note);
 		}
 
-		auto it = std::lower_bound(notes.begin(), notes.end(), scan_from,
+		auto it = std::lower_bound(base_notes().begin(), base_notes().end(), scan_from,
 			[](const piano_note& note, tick_type t) { return note.start_tick < t; });
-		for (; it != notes.end() && it->start_tick < end; ++it)
+		for (; it != base_notes().end() && it->start_tick < end; ++it)
 		{
 			if (!suppressed_base_note_ids.count(it->id) && it->end_tick > start)
 				fn(*it);
@@ -3292,23 +3331,16 @@ public:
 		editor_event_source(std::vector<piano_note>&& notes,
 			std::vector<control_ev>&& controls,
 			std::vector<std::pair<tick_type, std::uint32_t>>&& tempo,
-			std::uint16_t ppqn)
-			: notes_(std::move(notes)), controls_(std::move(controls)),
-			tempo_(std::move(tempo)), ppqn_(ppqn ? ppqn : 480), total_us_(0)
+			std::uint16_t ppqn, std::shared_ptr<const loaded_note_data> base = {},
+			std::unordered_set<std::uint32_t> suppressed = {})
+			: editor_event_source(std::make_shared<snapshot_data>(std::move(notes),
+				std::move(controls), std::move(tempo), ppqn, std::move(base), std::move(suppressed)))
 		{
-			std::sort(notes_.begin(), notes_.end());
-			std::stable_sort(controls_.begin(), controls_.end(),
-				[](const control_ev& a, const control_ev& b) { return a.tick < b.tick; });
+		}
 
-			// Total duration: latest note end or controller tick, in microseconds
-			tick_type max_tick = 0;
-			for (const auto& note : notes_)
-				max_tick = std::max(max_tick, note.end_tick);
-			if (!controls_.empty())
-				max_tick = std::max(max_tick, controls_.back().tick);
-			total_us_ = us_at_tick_scan(max_tick);
-
-			rewind();
+		std::shared_ptr<editor_event_source> fork_reader() const
+		{
+			return std::shared_ptr<editor_event_source>(new editor_event_source(data_, total_us_));
 		}
 
 		std::uint64_t total_duration_us() const override { return total_us_; }
@@ -3316,6 +3348,7 @@ public:
 		void rewind() override
 		{
 			on_idx_ = 0;
+			base_idx_ = 0;
 			raw_idx_ = 0;
 			off_heap_ = {};
 			tempo_idx_ = 0;
@@ -3345,6 +3378,8 @@ public:
 			on_idx_ = std::size_t(std::lower_bound(notes_.begin(), notes_.end(), cross_tick,
 				[](const piano_note& note, tick_type t) { return note.start_tick < t; })
 				- notes_.begin());
+			base_idx_ = std::size_t(std::lower_bound(base_notes_.begin(), base_notes_.end(), cross_tick,
+				[](const piano_note& note, tick_type t) { return note.start_tick < t; }) - base_notes_.begin());
 
 			// Notes crossing the boundary must be re-struck. Without this, a view
 			// beginning inside a long chord can be silent until the next note-on (or
@@ -3352,6 +3387,16 @@ public:
 			for (std::size_t i = 0; i < on_idx_; ++i)
 				if (notes_[i].end_tick > cross_tick)
 					seek_held_notes_.push_back(notes_[i]);
+			// Skip whole blocks of ended notes instead of scanning a huge prefix.
+			for (std::size_t block = 0; block * loaded_note_data::block_size < base_idx_; ++block)
+			{
+				if (data_->base->block_max_end[block] <= cross_tick) continue;
+				const auto end = std::min(base_idx_, (block + 1) * loaded_note_data::block_size);
+				for (auto i = block * loaded_note_data::block_size; i < end; ++i)
+					if (base_notes_[i].end_tick > cross_tick && !data_->suppressed.count(base_notes_[i].id))
+						seek_held_notes_.push_back(base_notes_[i]);
+			}
+			std::sort(seek_held_notes_.begin(), seek_held_notes_.end());
 			seek_held_idx_ = 0;
 			seek_target_us_ = target_us;
 			seek_anchor_pending_ = true;
@@ -3534,7 +3579,11 @@ public:
 
 			constexpr tick_type inf = ~tick_type(0);
 
-			const tick_type on_tick = on_idx_ < notes_.size() ? notes_[on_idx_].start_tick : inf;
+			while (base_idx_ < base_notes_.size() && data_->suppressed.count(base_notes_[base_idx_].id)) ++base_idx_;
+			const bool pick_base = base_idx_ < base_notes_.size() &&
+				(on_idx_ == notes_.size() || base_notes_[base_idx_] < notes_[on_idx_]);
+			const auto* next_note = pick_base ? &base_notes_[base_idx_] : on_idx_ < notes_.size() ? &notes_[on_idx_] : nullptr;
+			const tick_type on_tick = next_note ? next_note->start_tick : inf;
 			const tick_type off_tick = off_heap_.empty() ? inf : off_heap_.top().end_tick;
 			const tick_type raw_tick = raw_idx_ < controls_.size() ? controls_[raw_idx_].tick : inf;
 
@@ -3574,7 +3623,7 @@ public:
 			}
 			else // pick_on
 			{
-				const auto& note = notes_[on_idx_];
+				const auto& note = *next_note;
 				const std::uint8_t vel = std::max<std::uint8_t>(note.velocity, 1);
 				out.time_us = time_us;
 				out.short_msg = smsg(0x90 | (note.channel & 0x0F), note.key, vel);
@@ -3584,13 +3633,56 @@ public:
 				out.channel = note.channel;
 				out.track_index = note.track_index;
 				off_heap_.push({note.end_tick, note.key, note.channel, note.track_index});
-				++on_idx_;
+				if (pick_base) ++base_idx_;
+				else ++on_idx_;
 			}
 
 			return true;
 		}
 
 	private:
+		struct snapshot_data
+		{
+			std::shared_ptr<const loaded_note_data> base;
+			std::vector<piano_note> notes;
+			std::vector<control_ev> controls;
+			std::vector<std::pair<tick_type, std::uint32_t>> tempo;
+			std::unordered_set<std::uint32_t> suppressed;
+			std::uint16_t ppqn;
+			tick_type max_tick = 0;
+
+			snapshot_data(std::vector<piano_note>&& edits, std::vector<control_ev>&& events,
+				std::vector<std::pair<tick_type, std::uint32_t>>&& tempos, std::uint16_t division,
+				std::shared_ptr<const loaded_note_data> loaded, std::unordered_set<std::uint32_t> excluded)
+				: base(loaded ? std::move(loaded) : std::make_shared<loaded_note_data>()),
+				  notes(std::move(edits)), controls(std::move(events)), tempo(std::move(tempos)),
+				  suppressed(std::move(excluded)), ppqn(division ? division : 480)
+			{
+				std::sort(notes.begin(), notes.end());
+				std::stable_sort(controls.begin(), controls.end(),
+					[](const control_ev& a, const control_ev& b) { return a.tick < b.tick; });
+				for (const auto& note : notes) max_tick = std::max(max_tick, note.end_tick);
+				if (!controls.empty()) max_tick = std::max(max_tick, controls.back().tick);
+				for (std::size_t block = base->block_max_end.size(); block-- > 0;)
+				{
+					if (base->block_max_end[block] <= max_tick) continue;
+					if (suppressed.empty()) { max_tick = base->block_max_end[block]; continue; }
+					const auto end = std::min(base->notes.size(), (block + 1) * loaded_note_data::block_size);
+					for (auto i = block * loaded_note_data::block_size; i < end; ++i)
+						if (!suppressed.count(base->notes[i].id)) max_tick = std::max(max_tick, base->notes[i].end_tick);
+				}
+			}
+		};
+
+		explicit editor_event_source(std::shared_ptr<const snapshot_data> data,
+			std::optional<std::uint64_t> duration = {})
+			: data_(std::move(data)), base_notes_(data_->base->notes), notes_(data_->notes),
+			  controls_(data_->controls), tempo_(data_->tempo), ppqn_(data_->ppqn), total_us_(0)
+		{
+			total_us_ = duration ? *duration : us_at_tick_scan(data_->max_tick);
+			rewind();
+		}
+
 		static std::uint32_t smsg(std::uint8_t status, std::uint8_t d1, std::uint8_t d2 = 0)
 		{
 			return std::uint32_t(status) | (std::uint32_t(d1) << 8) | (std::uint32_t(d2) << 16);
@@ -3664,14 +3756,17 @@ public:
 			return us;
 		}
 
-		std::vector<piano_note> notes_;    // sorted by start_tick
-		std::vector<control_ev> controls_; // sorted by tick
-		std::vector<std::pair<tick_type, std::uint32_t>> tempo_; // (tick, us/qn), sorted
+		std::shared_ptr<const snapshot_data> data_;
+		const std::vector<piano_note>& base_notes_;
+		const std::vector<piano_note>& notes_; // sparse edited/inserted notes, sorted
+		const std::vector<control_ev>& controls_;
+		const std::vector<std::pair<tick_type, std::uint32_t>>& tempo_;
 		std::uint16_t ppqn_;
 		std::uint64_t total_us_;
 
 		// Iteration state (reset by rewind)
 		std::size_t on_idx_ = 0;
+		std::size_t base_idx_ = 0;
 		std::size_t raw_idx_ = 0;
 		std::priority_queue<off_entry> off_heap_;
 
@@ -3693,14 +3788,17 @@ public:
 	/**
 	 * Build a live playback source over a snapshot of the current notes, tempo
 	 * map and channel controllers. simple_player::run_from_external streams it
-	 * directly — nothing is written to disk. The snapshot is copied under lock,
+	 * directly — nothing is written to disk. The loaded notes are shared and edits copied under lock,
 	 * so later edits do not disturb an in-flight playback.
 	 */
 	std::unique_ptr<playback_event_source> make_playback_source() const
 	{
 		std::lock_guard<std::recursive_mutex> lock(editor_mutex);
 
-		auto notes_copy = materialize_logical_notes();
+		ensure_note_order();
+		std::vector<piano_note> notes_copy;
+		notes_copy.reserve(edited_notes.size());
+		for (const auto& [id, note] : edited_notes) notes_copy.push_back(note);
 
 		std::vector<editor_event_source::control_ev> controls;
 		for (const auto& [track, events] : raw_track_events)
@@ -3737,7 +3835,8 @@ public:
 		auto tempo_copy = tempo_events;
 
 		return std::make_unique<editor_event_source>(
-			std::move(notes_copy), std::move(controls), std::move(tempo_copy), ppqn);
+			std::move(notes_copy), std::move(controls), std::move(tempo_copy), ppqn,
+			notes_storage, suppressed_base_note_ids);
 	}
 };
 

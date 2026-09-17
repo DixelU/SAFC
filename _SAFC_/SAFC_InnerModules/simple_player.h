@@ -602,14 +602,16 @@ struct simple_player
 		shutdown();
 	}
 
-	void init()
+	void init(bool enumerate_devices = true)
 	{
 		shutdown_requested.store(false, std::memory_order_release);
-		update_devices();
+		if (enumerate_devices) refresh_devices();
 		//init_midi_out(devices.size() - 1);
 
 		warnings = std::make_shared<printing_logger>("33");
 	}
+
+	void refresh_devices() { update_devices(); }
 
 	// Get device names as vector of strings for UI
 	std::vector<std::string> get_device_names() const

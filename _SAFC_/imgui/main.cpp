@@ -408,6 +408,13 @@ void render_workspace(workspace& app, piano_texture& piano, GLFWwindow* window)
             if (status.playing && !status.paused && status.lead_in_us && !status.stopping)
                 ImGui::TextDisabled("  Starts in %.1fs", status.lead_in_us / 1000000.0);
             else ImGui::TextDisabled("  %s", status.stopping ? "Stopping..." : status.seeking ? "Seeking..." : status.paused ? "Paused" : status.playing ? "Playing" : status.busy ? "Opening..." : "Ready");
+            if (status.preparing)
+            {
+                ImGui::TextWrapped("%s", status.message.c_str());
+                ImGui::ProgressBar(status.preparation_total
+                    ? float(double(status.preparation_completed) / double(status.preparation_total))
+                    : -float(ImGui::GetTime()), {-1, 0});
+            }
             if (!app.seek_editing) app.seek_position = status.duration_us ? static_cast<float>(static_cast<double>(status.position_us) / status.duration_us) : 0.f;
             ImGui::BeginDisabled(!status.playing || status.stopping || status.seeking);
             ImGui::SetNextItemWidth(-1);

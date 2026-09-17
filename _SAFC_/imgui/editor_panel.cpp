@@ -162,12 +162,10 @@ struct editor_panel::impl
         if (prepared_source)
         {
             auto pristine = std::move(prepared_source);
-            active_playback_source = std::make_shared<midi_editor::editor_event_source>(*pristine);
+            active_playback_source = pristine->fork_reader();
             auto factory = [pristine]() -> std::shared_ptr<playback_event_source>
             {
-                auto source = std::make_shared<midi_editor::editor_event_source>(*pristine);
-                source->rewind();
-                return source;
+                return pristine->fork_reader();
             };
             if (!playback.open_external(active_playback_source, false, prepared_seek, std::move(factory)))
                 status = "Playback is busy; stop it before playing the editor.";
@@ -253,12 +251,13 @@ struct editor_panel::impl
         const auto playback_state = playback.snapshot();
         if (playback_state.busy) { playback.stop(); return; }
         if (busy || !document->is_file_loaded()) return;
-        prepared_seek = from_view && document->get_total_seconds() > 0
-            ? std::clamp(document->get_seconds_at_tick(document->get_view_start_tick()) / document->get_total_seconds(), 0., 1.) : 0.;
-        start_job("Preparing editor playback...", [this](std::stop_token stop)
+        const auto start_seconds = from_view ? document->get_seconds_at_tick(document->get_view_start_tick()) : 0.;
+        start_job("Preparing editor playback...", [this, start_seconds](std::stop_token stop)
         {
             auto source = document->make_playback_source();
             if (stop.stop_requested()) return;
+            prepared_seek = source->total_duration_us()
+                ? std::clamp(start_seconds * 1000000. / double(source->total_duration_us()), 0., 1.) : 0.;
             prepared_source.reset(static_cast<midi_editor::editor_event_source*>(source.release()));
             completed_status = "Playing a snapshot of the current edits.";
         });
@@ -1052,6 +1051,15 @@ struct editor_panel::impl
             else
             {
                 draw_toolbar();
+                const auto playback_state = playback.snapshot();
+                if (playback_state.preparing)
+                {
+                    ImGui::TextWrapped("%s", playback_state.message.c_str());
+                    ImGui::ProgressBar(playback_state.preparation_total
+                        ? float(double(playback_state.preparation_completed) / double(playback_state.preparation_total))
+                        : -float(ImGui::GetTime()), ImVec2(-1, 0));
+                }
+                else if (!playback_state.error.empty()) ImGui::TextWrapped("%s", playback_state.error.c_str());
                 if (!busy && document->is_file_loaded()) draw_document();
                 else if (!busy) ImGui::TextWrapped("Open a MIDI file to begin. Unsaved edits can play and render through the shared player.");
             }

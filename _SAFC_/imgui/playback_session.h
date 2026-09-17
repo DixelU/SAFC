@@ -20,6 +20,9 @@ struct playback_snapshot
 	bool paused = false;
 	bool seeking = false;
 	bool stopping = false;
+	bool preparing = false;
+	std::uint64_t preparation_completed = 0;
+	std::uint64_t preparation_total = 0;
 	std::uint64_t position_us = 0;
 	std::uint64_t duration_us = 0;
 	std::uint64_t scanned_bytes = 0;
