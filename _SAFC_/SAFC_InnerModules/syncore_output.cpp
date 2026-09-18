@@ -300,6 +300,18 @@ void syncore_output::stop() noexcept
 	}
 }
 
+void syncore_output::panic() noexcept
+{
+#ifdef SAFC_WITH_SYNCORE
+	std::shared_ptr<safsyn::WindowsSynth> synth;
+	{
+		std::lock_guard lock(impl_->synth_mutex);
+		synth = impl_->synth;
+	}
+	if (synth) synth->panic();
+#endif
+}
+
 bool syncore_output::send_short_message(std::uint32_t message) noexcept
 {
 #ifdef SAFC_WITH_SYNCORE

@@ -56,6 +56,7 @@ public:
 	bool start(const std::wstring& bank_path, const syncore_preferences& preferences,
 		std::string& error);
 	void stop() noexcept;
+	void panic() noexcept;
 	bool send_short_message(std::uint32_t message) noexcept;
 	syncore_send_result try_send_short_message(std::uint32_t message) noexcept;
 	bool active() const noexcept;

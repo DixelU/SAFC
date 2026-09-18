@@ -1017,13 +1017,25 @@ struct simple_player
 		}
 	}
 
+	// Cancel this dispatch, including a run that has not entered simple_run yet.
+	// Unlike stop(), the cancellation survives run initialization until init().
+	// The selected output and its prepared sample cache remain available.
+	void cancel_playback()
+	{
+		shutdown_requested.store(true, std::memory_order_release);
+		stop();
+	}
+
+	// Call between runs, after the old sender has retired. SYNCore invalidates
+	// queued MIDI and resets voices/controllers without discarding its cache.
+	void reset_syncore() noexcept { syncore.panic(); }
+
 	// The scheduler and the selected output have separate ownership.  Closing
 	// the application must retire both while the player is still intact, rather
 	// than defer SYNCore's thread joins to member/static destruction.
 	void shutdown() noexcept
 	{
-		shutdown_requested.store(true, std::memory_order_release);
-		stop();
+		cancel_playback();
 
 		// Stop SYNCore immediately, including during asynchronous bank startup.
 		// Its wrapper keeps senders safe while the current player run observes stop.

@@ -110,6 +110,40 @@ void stop(ui::playback_session& playback)
     wait_for([&] { return !playback.snapshot().busy; }, "Stop must retire scheduler and preparation");
 }
 
+void pending_stop_checks(const fs::path& directory)
+{
+    const auto input = directory / "stop-before-dispatch.mid";
+    write_bytes(input, midi(60));
+    simple_player transport;
+    transport.init();
+    require(transport.use_silent_output(), "Prepare silent cancellation probe");
+    transport.cancel_playback();
+    // Exercise the gap between the session's final cancellation check and
+    // entering the player. An ordinary stop() would be reset by either run.
+    struct source_probe : playback_event_source
+    {
+        mutable bool touched = false;
+        std::uint64_t total_duration_us() const override { touched = true; return 0; }
+        void rewind() override { touched = true; }
+        bool next(generated_event&) override { touched = true; return false; }
+    } source;
+    transport.simple_run(input.wstring(), 0, false);
+    transport.run_from_external(&source, 0, false);
+    require(!source.touched && !transport.get_info().open_complete && !transport.is_playing(),
+        "Stop before dispatch prevents both file and editor playback from starting");
+    transport.init(false);
+    transport.run_from_external(&source, 0, false);
+    require(source.touched, "A new dispatch clears the cancellation gate");
+
+    ui::playback_session playback;
+    for (int attempt = 0; attempt < 20; ++attempt)
+    {
+        require(playback.open(input.wstring(), true, true), "Dispatch immediate-stop probe");
+        stop(playback);
+        require(!playback.snapshot().playing, "Immediate Stop cannot leave a paused run alive");
+    }
+}
+
 void editor_snapshot_checks(const fs::path& directory)
 {
     const auto input = directory / "editor-snapshot.mid";
@@ -190,7 +224,7 @@ void editor_snapshot_checks(const fs::path& directory)
 
 // Optional integration run with a real sound bank and Windows audio endpoint.
 // Releasing the key during preparation ensures the probe remains silent.
-void audition_preparation_checks(const std::wstring& bank)
+void audition_preparation_checks(const std::wstring& bank, const fs::path& directory)
 {
     auto* context = ImGui::CreateContext();
     struct destroy_context { ImGuiContext* value; ~destroy_context() { ImGui::DestroyContext(value); } } context_guard{context};
@@ -240,6 +274,65 @@ void audition_preparation_checks(const std::wstring& bank)
         return !state.busy;
     }, "Editor audition preparation completes", 45);
     require(saw_progress && displayed_progress, "Editor displays prerender progress while the player window is closed");
+
+    // Once SYNCore is ready, transport Stop must not discard its prepared
+    // phase/sample cache. An audition immediately after Stop should therefore
+    // use the existing output instead of dispatching another preparation run.
+    const auto input = directory / "cache-reuse.mid";
+    write_bytes(input, midi(60));
+    auto wait_for_reuse = [&]
+    {
+        wait_for([&]
+        {
+            const auto state = playback.snapshot();
+            require(state.error.empty(), state.error.c_str());
+            require(state.message.find("Prerendering sample variants") == std::string::npos,
+                "Matching playback must not prerender its existing cache again");
+            return state.playing;
+        }, "Playback reuses prepared SYNCore output", 5);
+    };
+    require(playback.open(input.wstring(), false, true), "Start playback with prepared SYNCore output");
+    wait_for_reuse();
+    stop(playback);
+    // Velocity zero exercises ready-output audition without sounding a note.
+    require(playback.audition_note(60, 0, 0, true), "Audition after transport Stop");
+    require(!playback.snapshot().busy, "Transport Stop preserves the prepared SYNCore output session");
+    playback.audition_note(60, 0, 0, false);
+    require(playback.restart(false, true), "Restart playback with retained SYNCore output");
+    wait_for_reuse();
+    stop(playback);
+
+    // EOF must keep the same session too. An empty source avoids audible notes.
+    struct empty_source : playback_event_source
+    {
+        std::uint64_t total_duration_us() const override { return 0; }
+        void rewind() override {}
+        bool next(generated_event&) override { return false; }
+    };
+    require(playback.open_external(std::make_shared<empty_source>()), "Dispatch empty editor source");
+    wait_for([&] { return !playback.snapshot().busy; }, "Natural EOF completes", 5);
+    require(playback.snapshot().error.empty(), "Natural EOF preserves a healthy output");
+    require(playback.open(input.wstring(), false, true), "Replay after natural EOF");
+    wait_for_reuse();
+    stop(playback);
+
+    // A changed synth setting must invalidate the old session. Cancelling that
+    // rebuild still uses terminal teardown and must not wait for the full cache.
+    preferences.output_gain_db -= 1;
+    playback.configure_synth(bank, preferences);
+    require(playback.audition_note(60, 0, 0, true), "Audition applies changed SYNCore settings");
+    wait_for([&]
+    {
+        const auto state = playback.snapshot();
+        require(state.error.empty(), state.error.c_str());
+        return state.preparing && state.preparation_total;
+    }, "Changed settings rebuild sample variants", 15);
+    const auto stopping = std::chrono::steady_clock::now();
+    playback.stop();
+    require(std::chrono::steady_clock::now() - stopping < std::chrono::milliseconds(250),
+        "Stop during preparation returns immediately");
+    wait_for([&] { return !playback.snapshot().busy; }, "Stop cancels phase preparation", 5);
+    require(playback.snapshot().error.empty(), "Cancelled preparation reports no failure");
     playback.shutdown();
 }
 
@@ -342,10 +435,11 @@ int wmain(int argc, wchar_t** argv)
         struct cleanup { fs::path path; ~cleanup() { std::error_code error; fs::remove_all(path, error); } } cleanup{directory};
         if (argc == 2)
         {
-            audition_preparation_checks(argv[1]);
-            std::cout << "Editor audition responsiveness and prerender progress passed\n";
+            audition_preparation_checks(argv[1], directory);
+            std::cout << "Editor preparation, SYNCore cache reuse and cancellation passed\n";
             return 0;
         }
+        pending_stop_checks(directory);
         editor_snapshot_checks(directory);
         cancellation_checks(directory);
         output_failure_checks(directory);
@@ -400,7 +494,7 @@ int wmain(int argc, wchar_t** argv)
         }
         stop(playback);
 
-        require(playback.open(nested.wstring(), true, true), "Replay after terminal Stop with nested archive");
+        require(playback.open(nested.wstring(), true, true), "Replay after Stop with nested archive");
         wait_for([&] { return playback.snapshot().waiting_for_member; }, "Nested ZIP member selection must appear");
         require(playback.snapshot().archive_layer == 2, "Selection identifies nested archive layer");
         playback.choose_archive_member(0);

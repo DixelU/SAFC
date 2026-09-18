@@ -70,6 +70,10 @@ struct playback_session::impl
 	std::atomic_bool stop_busy{false};
 	std::atomic_bool closing{false};
 	std::atomic_bool preparation_cancel{false};
+	// True only while a playback run is replacing/starting its output sink.
+	// Ordinary transport Stop must not tear down a ready SYNCore session,
+	// because its phase/sample-variant cache belongs to that output session.
+	bool output_transition = false; // guarded by audition_mutex
 	std::mutex audition_mutex;
 	std::array<std::uint8_t, 16 * 128> audition_keys{};
 	bool audition_preparing = false;
@@ -125,6 +129,8 @@ struct playback_session::impl
 			~completion()
 			{
 				std::lock_guard lock(state.audition_mutex);
+				if (state.preparation_cancel.load(std::memory_order_acquire))
+					state.engine.reset_syncore();
 				if (audition_ready && !state.preparation_cancel.load(std::memory_order_acquire) &&
 					!state.closing.load(std::memory_order_acquire))
 					for (std::size_t note = 0; note < state.audition_keys.size(); ++note)
@@ -132,6 +138,7 @@ struct playback_session::impl
 							state.engine.preview_note(static_cast<std::uint8_t>(note / 128),
 								static_cast<std::uint8_t>(note % 128), velocity, true);
 				state.audition_preparing = false;
+				state.output_transition = false;
 				state.busy.store(false, std::memory_order_release);
 			}
 		} finished{*this, audition_ready};
@@ -141,7 +148,7 @@ struct playback_session::impl
 		{
 			preparation_cancel.store(true, std::memory_order_release);
 			member_changed.notify_all();
-			engine.stop();
+			engine.cancel_playback();
 		});
 		auto cancelled = [&]
 		{
@@ -149,9 +156,17 @@ struct playback_session::impl
 		};
 		try
 		{
-			// MIDI driver enumeration can load a driver and block. Keep it with
-			// bank/output preparation on this worker, including editor audition.
-			engine.refresh_devices();
+			// Check before enumeration, which resets the selected-device index.
+			// Matching SYNCore runs keep their bank/cache; actual device changes
+			// still refresh the external MIDI list on this worker.
+			const bool reuse_syncore = !silent && simple_player::syncore_available() &&
+				engine.has_output() &&
+				engine.get_current_device() == engine.get_syncore_device_index() &&
+				engine.get_device_names()[engine.get_current_device()] == output_name &&
+				engine.get_syncore_bank_path() == sound_bank &&
+				engine.get_syncore_preferences() == synth;
+			if (!reuse_syncore)
+				engine.refresh_devices();
 			auto current_devices = engine.get_device_names();
 			const auto selected = std::find(current_devices.begin(), current_devices.end(), output_name);
 			const auto output = selected != current_devices.end()
@@ -211,15 +226,28 @@ struct playback_session::impl
 			}
 			if (cancelled()) { set_status("Stopped"); return; }
 			set_status("Preparing MIDI output...");
-			// Retire the old sink once before applying either preference draft.
-			// The setters then cannot reopen the previous bank as an intermediate
-			// step, and switching to an external output never loads that bank.
-			if (!engine.use_silent_output())
+			// A ready SYNCore with identical settings is an output-session cache:
+			// keep it alive and only reset the MIDI transport. Any real output
+			// transition still detaches once before applying both drafts, avoiding
+			// an intermediate reopen with half-updated SYNCore settings.
+			if (!reuse_syncore)
 			{
-				set_status(cancelled() ? "Stopped" : "MIDI output failed",
-					cancelled() ? std::string{} : "Could not detach the previous MIDI output");
-				return;
+				{
+					// Serialize this decision with Stop so preparation cannot begin
+					// after it has decided that the ready output can be retained.
+					std::lock_guard lock(audition_mutex);
+					if (cancelled()) { set_status("Stopped"); return; }
+					output_transition = true;
+				}
+				if (!engine.use_silent_output())
+				{
+					set_status(cancelled() ? "Stopped" : "MIDI output failed",
+						cancelled() ? std::string{} : "Could not detach the previous MIDI output");
+					return;
+				}
 			}
+			else
+				engine.reset_syncore();
 			if (!silent)
 			{
 				if (!engine.set_syncore_preferences(synth) ||
@@ -237,6 +265,10 @@ struct playback_session::impl
 					}
 					return;
 				}
+			}
+			{
+				std::lock_guard lock(audition_mutex);
+				output_transition = false;
 			}
 			if (cancelled())
 			{
@@ -325,6 +357,7 @@ bool playback_session::start(std::wstring path, std::shared_ptr<playback_event_s
 	impl_->stopping = false;
 	impl_->duration_us = 0;
 	impl_->preparation_cancel.store(false, std::memory_order_release);
+	impl_->output_transition = false;
 	{
 		std::lock_guard lock(impl_->source_mutex);
 		impl_->source = source;
@@ -382,17 +415,25 @@ void playback_session::stop()
 	if (impl_->stopping || !impl_->busy.load(std::memory_order_acquire))
 		return;
 	impl_->stopping = true;
-	impl_->stop_busy.store(true, std::memory_order_release);
+	// The worker's stop callback may already be retiring before completion
+	// publishes idle. Suppress deferred audition notes in that window too.
+	impl_->preparation_cancel.store(true, std::memory_order_release);
 	impl_->worker.request_stop();
-	impl_->engine.stop();
+	impl_->engine.cancel_playback();
+
+	// A normal transport stop keeps the selected output alive. In particular,
+	// this preserves SYNCore's already-prerendered analytic sample variants.
+	// Only an output transition can be blocked inside asynchronous bank/phase
+	// preparation and therefore still needs terminal shutdown cancellation.
+	if (!impl_->output_transition)
+		return;
+
+	impl_->stop_busy.store(true, std::memory_order_release);
 	audition_lock.unlock();
 	try
 	{
 		impl_->stop_worker = std::jthread([state = impl_.get()]
 		{
-			// Terminal cancellation also interrupts SYNCore bank preparation.
-			// Its gate cannot be reset by simple_run's ordinary stop handling,
-			// so cancellation continues even while the UI is minimized.
 			state->engine.shutdown();
 			state->stop_busy.store(false, std::memory_order_release);
 		});
@@ -410,14 +451,14 @@ void playback_session::shutdown()
 	std::unique_lock audition_lock(impl_->audition_mutex);
 	if (impl_->closing.exchange(true, std::memory_order_acq_rel)) return;
 	impl_->stopping = true;
+	impl_->preparation_cancel.store(true, std::memory_order_release);
 	impl_->worker.request_stop();
 	audition_lock.unlock();
-	// A pending Stop already owns terminal teardown. Otherwise retire the
-	// scheduler and SYNCore here before joining a possibly paused run.
+	// Ordinary Stop may retain SYNCore. Application shutdown always releases
+	// it, including after a completed stop worker or while a run is paused.
 	if (impl_->stop_worker.joinable())
 		impl_->stop_worker.join();
-	else
-		impl_->engine.shutdown();
+	impl_->engine.shutdown();
 	if (impl_->worker.joinable())
 		impl_->worker.join();
 	impl_->stopping = false;
@@ -564,7 +605,14 @@ bool playback_session::audition_note(std::uint8_t key, std::uint8_t velocity,
 		return true;
 	}
 	if (impl_->busy.load(std::memory_order_acquire) && !impl_->engine.is_playing()) return false;
-	if (impl_->engine.has_output())
+	const bool matching_output = impl_->engine.get_current_device() == selected_device() &&
+		(impl_->engine.get_current_device() != impl_->engine.get_syncore_device_index() ||
+			(impl_->engine.get_syncore_bank_path() == impl_->bank &&
+				impl_->engine.get_syncore_preferences() == impl_->preferences));
+	// Releases still reach the old output; new idle auditions apply changed
+	// device/bank settings on the worker before sending any note-on.
+	if (impl_->engine.has_output() &&
+		(!on || impl_->busy.load(std::memory_order_acquire) || matching_output))
 	{
 		impl_->engine.preview_note(channel, key, velocity, on);
 		return true;
