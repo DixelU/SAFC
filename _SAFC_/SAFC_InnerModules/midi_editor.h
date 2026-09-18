@@ -1210,7 +1210,7 @@ private:
 	};
 
 	// Track edits apply to (piano roll focus); notes of other tracks are shown dimmed
-	std::uint8_t active_track = 0;
+	std::uint16_t active_track = 0;
 
 	// Note-set selection: ids of the selected notes. Ids are stable across
 	// moves and velocity edits, so the selection follows the notes.
@@ -1726,14 +1726,18 @@ public:
 	/**
 	 * Insert a note into the active track using its primary channel
 	 */
-	void insert_note_active_track(tick_type start, tick_type end,
-		std::uint8_t key, std::uint8_t velocity)
+	void insert_note_active_track(
+		tick_type start,
+		tick_type end,
+		std::uint8_t key,
+		std::uint8_t velocity)
 	{
 		std::lock_guard<std::recursive_mutex> lock(editor_mutex);
 		std::uint8_t channel = 0;
 		auto it = tracks.find(active_track);
 		if (it != tracks.end() && it->second.channel != 0xFF)
 			channel = it->second.channel;
+
 		insert_note(start, end, key, velocity, channel, active_track);
 	}
 
@@ -1891,15 +1895,16 @@ public:
 	 * Next/previous track that actually contains notes, in cyclic order.
 	 * Returns the current active track if no track has notes.
 	 */
-	std::uint8_t next_track_with_notes(int direction) const
+	std::uint16_t next_track_with_notes(int direction) const
 	{
 		std::lock_guard<std::recursive_mutex> lock(editor_mutex);
 
-		std::set<std::uint8_t> populated;
+		std::set<std::uint16_t> populated;
 		for_each_logical_note([&](const piano_note& note)
 		{
 			populated.insert(note.track_index);
 		});
+
 		if (populated.empty())
 			return active_track;
 
@@ -1908,12 +1913,14 @@ public:
 			auto it = populated.upper_bound(active_track);
 			if (it == populated.end())
 				it = populated.begin();
+
 			return *it;
 		}
 
 		auto it = populated.lower_bound(active_track);
 		if (it == populated.begin())
 			it = populated.end();
+
 		return *(--it);
 	}
 
@@ -2729,30 +2736,32 @@ public:
 	// Active Track
 	// ========================================================================
 
-	void set_active_track(std::uint8_t track)
+	void set_active_track(std::uint16_t track)
 	{
 		std::lock_guard<std::recursive_mutex> lock(editor_mutex);
 		active_track = track;
 		selected_notes.clear(); // selection gestures are per-track
 	}
 
-	std::uint8_t get_active_track() const
+	std::uint16_t get_active_track() const
 	{
 		std::lock_guard<std::recursive_mutex> lock(editor_mutex);
 		return active_track;
 	}
 
-	std::string get_track_label(std::uint8_t track) const
+	std::string get_track_label(std::uint16_t track) const
 	{
 		std::lock_guard<std::recursive_mutex> lock(editor_mutex);
 		std::string label = "Track " + std::to_string(track);
+
 		auto it = tracks.find(track);
 		if (it != tracks.end() && !it->second.name.empty())
 			label += " (" + it->second.name + ")";
+
 		return label;
 	}
 
-	void set_track_name(std::uint8_t track, const std::string& name)
+	void set_track_name(std::uint16_t track, const std::string& name)
 	{
 		std::lock_guard<std::recursive_mutex> lock(editor_mutex);
 		auto& info = tracks[track];
@@ -2771,8 +2780,10 @@ public:
 				break;
 			}
 		}
+
 		if (!replaced)
 			events.push_back({0, bytes});
+
 		sort_raw_track(track);
 		mark_dirty_keep_order();
 	}

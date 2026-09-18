@@ -41,6 +41,7 @@ enum class log_event_type : uint8_t
 	unknown_event_type,
 	unexpected_end_of_buffer,
 	track_size_mismatch,
+	meta_too_large,
 };
 
 struct log_event
@@ -81,6 +82,8 @@ struct log_event
 			return "B*" + std::to_string(e.param1) + ": unexpected end of buffer";
 		case log_event_type::track_size_mismatch:
 			return "Track size mismatch (expected " + std::to_string(e.param1) + ", got " + std::to_string(e.param2) + ")";
+		case log_event_type::meta_too_large:
+			return "Meta too large (size: " + std::to_string(e.param1) + ")";
 		default:
 			return "";
 		}
@@ -242,12 +245,11 @@ struct single_midi_processor_2
 			{
 				base_type field1 = 0;
 				base_type field2 = 0;
-				bool field1_is_set = true;
 				bool field2_is_set = false;
 			};
 
 			std::unordered_map<std::uint16_t, base_type> key_events_at_selection_front;
-			std::unordered_map<base_type, event_data_fixed_size_2> channel_events_at_selection_front;
+			std::unordered_map<std::uint16_t, event_data_fixed_size_2> channel_events_at_selection_front;
 			std::uint32_t frontal_tempo = default_tempo;
 			color_event frontal_color_event{};
 
@@ -369,7 +371,7 @@ struct single_midi_processor_2
 			}
 			inline void set_override_value(double tempo)
 			{
-				tempo_override_value = (60000000. / tempo);
+				tempo_override_value = static_cast<metasize_type>(60000000. / tempo);
 			}
 			inline metasize_type process(metasize_type a) const 
 			{
@@ -491,11 +493,11 @@ struct single_midi_processor_2
 				*stack |= $adjacent7byte_mask;
 		} while (value);
 
-		auto stack_size = size_t(stack_end - stack);
+		auto stack_size = static_cast<uint8_t>(stack_end - stack);
 
 		copy_back_traits::copy_back(
 			vec,
-			copy_back_traits::raw_storage{ stack, stack_size }
+			copy_back_traits::raw_storage{ stack, static_cast<size_t>(stack_size) }
 		);
 
 		return stack_size;
@@ -871,13 +873,23 @@ struct single_midi_processor_2
 
 				// 8 tick  1 type  1 metatype (except when sysex)  1 vlv size  4 size  ...<raw meta>~vlv+data
 
-				metasize_type length = get_vlv(file_input);
+				tick_type raw_length = get_vlv(file_input);
+				tick_type length;
+				if (raw_length > 0x7FFFFFFF) [[unlikely]]
+				{
+					is_good = false;
+					(*buffers.error) << log_event{log_event_type::meta_too_large, file_input.position(), length};
+					length = 0x7FFFFFFF;
+				}
+				else
+					length = raw_length;
+
 				auto encoded_length = push_vlv_s(length, meta_buffer);
 
-				for (std::size_t i = 0; i < length; ++i)
+				for (std::size_t i = 0; i < raw_length; ++i)
 					meta_buffer.push_back(read_midi_byte(file_input));
 				length += encoded_length;
-				
+
 				if (com == 0xFF) [[likely]]
 				{
 					copy_back_traits::copy_back(
@@ -888,7 +900,7 @@ struct single_midi_processor_2
 						encoded_length,
 						length,
 						copy_back_traits::raw_storage{
-							meta_buffer.data(), meta_buffer.size() });
+							meta_buffer.data(), length});
 				}
 				else
 				{
@@ -899,7 +911,7 @@ struct single_midi_processor_2
 						encoded_length,
 						length,
 						copy_back_traits::raw_storage{
-							meta_buffer.data(), meta_buffer.size() });
+							meta_buffer.data(), length});
 				}
 
 				meta_buffer.clear();
@@ -1213,6 +1225,8 @@ struct single_midi_processor_2
 					{
 						if (filter.piano_only) [[likely]]
 							break;
+
+						[[fallthrough]];
 					}
 					case 0xD0:
 					{
@@ -1220,10 +1234,11 @@ struct single_midi_processor_2
 							break;
 
 						const auto& param = get_value<base_type>(cur, event_param1);
-						const std::uint16_t key = type;
+						const std::uint16_t key = (type << 8);
 						auto& data = std_ref.selection_data.channel_events_at_selection_front[key];
 						data.field1 = param;
 						data.field2_is_set = false;
+
 						break;
 					}
 					case 0xE0:
@@ -1233,11 +1248,12 @@ struct single_midi_processor_2
 
 						const auto& param1 = get_value<base_type>(cur, event_param1);
 						const auto& param2 = get_value<base_type>(cur, event_param2);
-						const std::uint16_t key = type;
+						const std::uint16_t key = (type << 8);
 						auto& data = std_ref.selection_data.channel_events_at_selection_front[key];
 						data.field1 = param1;
 						data.field2 = param2;
 						data.field2_is_set = true;
+
 						break;
 					}
 					case 0xF0:
@@ -1816,8 +1832,9 @@ struct single_midi_processor_2
 		}
 		std_ref.selection_data.key_events_at_selection_front.clear();
 
-		for (auto& [event_kind, data] : std_ref.selection_data.channel_events_at_selection_front)
+		for (auto& [event_header, data] : std_ref.selection_data.channel_events_at_selection_front)
 		{
+			auto event_kind = event_header >> 8;
 			auto channel = event_kind & 0xF;
 
 			if (!had_non_meta_events)
@@ -1830,6 +1847,7 @@ struct single_midi_processor_2
 			auto& track_data = out_buffer.get_vec(channel);
 			auto delta = selection_front_tick - prev_tick;
 			prev_tick = selection_front_tick;
+
 			push_vlv_s(delta, track_data);
 
 			track_data.push_back(event_kind);

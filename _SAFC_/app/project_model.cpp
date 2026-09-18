@@ -123,7 +123,9 @@ std::shared_ptr<single_midi_processor_2::processing_data> file_settings::build_s
 
 safc_data::safc_data()
 {
-	global_ppqn = global_offset = global_new_tempo = 0;
+	global_new_tempo = 0;
+	global_offset = 0;
+	global_ppqn = 0;
 	detected_threads = 1;
 	incremental_ppqn = true;
 	inplace_merge_flag = false;

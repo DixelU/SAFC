@@ -603,7 +603,7 @@ private:
 					{
 						check_cancelled();
 						std::uint8_t event_type = read_midi_byte(reader);
-						auto delta_len = single_midi_processor_2::push_vlv(in_track_delta, track);
+						auto delta_len = single_midi_processor_2::push_vlv_s(in_track_delta, track);
 						in_track_delta = 0;
 
 						bool track_ended = false;
