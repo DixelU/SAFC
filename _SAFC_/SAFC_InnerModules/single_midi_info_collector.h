@@ -128,7 +128,7 @@ struct single_midi_info_collector
 	struct long_time
 	{
 		dixelu::long_uint<0> numerator;
-		std::uint64_t denominator;
+		std::uint64_t denominator = 1;
 	};
 
 	using tempo_graph = btree::btree_map<std::int64_t, tempo_event>;

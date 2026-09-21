@@ -651,7 +651,7 @@ private:
 								track.push_back(read_midi_byte(reader));
 						}
 						else if ((event_type >= 0x80 && event_type <= 0xBF) ||
-							(event_type >= 0xE0 && event_type <= 0xEF))
+							 (event_type >= 0xE0 && event_type <= 0xEF))
 						{
 							track.push_back(event_type);
 							track.push_back(read_midi_byte(reader));
@@ -706,7 +706,7 @@ private:
 
 				if (!active_track && !track.empty())
 				{
-					single_midi_processor_2::push_vlv(in_track_delta, track);
+					single_midi_processor_2::push_vlv_s(in_track_delta, track);
 					in_track_delta = 0;
 					track.push_back(0xFF);
 					track.push_back(0x2F);

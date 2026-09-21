@@ -2166,13 +2166,13 @@ struct simple_player
 			{
 				if (is_white_key(key))
 				{
-					uint32_t index = first - keyboard;
+					uint32_t index = static_cast<uint32_t>(first - keyboard);
 
 					first->bl.x = first->tl.x = index * white_width;
 					first->br.x = first->tr.x = (index + 1) * white_width;
 
-					first->bl.y = first->br.y = -0.5 * height - keyboard_height;
-					first->tl.y = first->tr.y = -0.5 * height;
+					first->bl.y = first->br.y = -0.5f * height - keyboard_height;
+					first->tl.y = first->tr.y = -0.5f * height;
 
 					key_n[index] = key;
 
@@ -2192,8 +2192,8 @@ struct simple_player
 					last->bl.x = last->tl.x = center_x - black_half_width;
 					last->br.x = last->tr.x = center_x + black_half_width;
 
-					last->bl.y = last->br.y = -0.5 * height - black_hight;
-					last->tl.y = last->tr.y = -0.5 * height;
+					last->bl.y = last->br.y = -0.5f * height - black_hight;
+					last->tl.y = last->tr.y = -0.5f * height;
 
 					key_n[last - keyboard] = key;
 
@@ -3013,10 +3013,10 @@ private:
 		devices.clear();
 		current_device = ~0ULL;
 
-		auto count = midiOutGetNumDevs();
+		size_t count = midiOutGetNumDevs();
 		devices.reserve(count);
 
-		for (int i = 0; i < count; i++)
+		for (size_t i = 0; i < count; i++)
 		{
 			MIDIOUTCAPSW out;
 			auto ret = midiOutGetDevCapsW(i, &out, sizeof(out));
@@ -3087,7 +3087,7 @@ private:
 
 		try
 		{
-			if (midiOutOpen(&hout_copy, device, 0, 0, 0) != MMSYSERR_NOERROR)
+			if (midiOutOpen(&hout_copy, static_cast<UINT>(device), 0, 0, 0) != MMSYSERR_NOERROR)
 			{
 				std::wstring name = devices[device].szPname;
 				std::string readable_name(name.size(), '\0');

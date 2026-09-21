@@ -105,6 +105,7 @@ struct editor_panel::impl
 {
 	playback_session& playback;
 	native_dialogs dialogs;
+
 	std::shared_ptr<midi_editor> document = std::make_shared<midi_editor>();
 	std::jthread worker;
 	std::atomic<bool> busy = false;
@@ -150,6 +151,7 @@ struct editor_panel::impl
 		control,
 		divider
 	};
+
 	gesture_kind gesture = gesture_kind::none;
 	ImVec2 anchor_mouse{}, current_mouse{};
 	tick anchor_tick = 0, current_tick = 0, pan_start = 0;
@@ -160,7 +162,8 @@ struct editor_panel::impl
 	double stretch_factor = 1.;
 	midi_editor::select_mode selection_mode = midi_editor::select_mode::add;
 	std::vector<note> gesture_notes;
-	std::map<std::uint32_t, velocity_entry> velocities;
+	std::map<midi_editor::note_id_type, velocity_entry> velocities;
+
 	std::map<tick, double> control_values;
 	double anchor_value = 0;
 	bool line_gesture = false;
@@ -174,6 +177,7 @@ struct editor_panel::impl
 		claw,
 		lfo
 	};
+
 	tool_kind tool = tool_kind::none;
 	bool tool_open = false, preview_dirty = false;
 	int divisions = 4, trash_every = 4, lfo_shape = 0;
@@ -407,7 +411,7 @@ struct editor_panel::impl
 
 	tick snap_ticks() const
 	{
-		static constexpr int denominators[] = {4, 8, 16, 32, 64, 0};
+		static constexpr int denominators[] = {3, 4, 6, 8, 12, 16, 24, 32, 0};
 		return denominators[snap_index] ? std::max<tick>(1, tick(document->get_ppqn()) * 4 / denominators[snap_index])
 										: 1;
 	}
@@ -452,15 +456,18 @@ struct editor_panel::impl
 	{
 		if (control_values.empty())
 			return;
+
 		if (lane == lane_kind::tempo)
 		{
 			document->set_tempo_points({control_values.begin(), control_values.end()});
 			return;
 		}
+
 		std::vector<std::pair<tick, std::uint16_t>> values;
 		values.reserve(control_values.size());
 		for (const auto& [position, value] : control_values)
 			values.emplace_back(position, std::uint16_t(std::lround(value)));
+
 		document->set_channel_control_points(
 			document->get_active_track(), std::uint8_t(channel()), control_lane(), std::move(values));
 	}
@@ -487,10 +494,11 @@ struct editor_panel::impl
 		{
 			if (!delta_tick)
 				break;
-			std::vector<std::uint32_t> ids;
+			std::vector<midi_editor::note_id_type> ids;
 			ids.reserve(gesture_notes.size());
 			for (const auto& value : gesture_notes)
 				ids.push_back(value.id);
+
 			document->resize_notes_by(std::move(ids), delta_tick);
 			break;
 		}
@@ -1210,10 +1218,11 @@ struct editor_panel::impl
 					continue;
 
 				const auto pending_velocity = velocities.find(value.id);
+
 				const float x = view.x_at(double(value.start_tick)),
-							y = view.lane_y(pending_velocity == velocities.end()
-									? value.velocity
-									: pending_velocity->second.new_velocity);
+					y = view.lane_y(pending_velocity == velocities.end()
+						? value.velocity
+						: pending_velocity->second.new_velocity);
 
 				const auto color = note_color(value.track_index, value.channel, document->is_note_selected(value.id));
 
@@ -1261,6 +1270,7 @@ struct editor_panel::impl
 					ImVec2(view.x_at(double(position)), view.lane_y(value)), 3.f, IM_COL32(255, 210, 110, 255));
 			}
 		}
+
 		if (line_gesture && (gesture == gesture_kind::velocity || gesture == gesture_kind::control))
 		{
 			draw->AddLine(ImVec2(view.x_at(double(anchor_tick)), view.lane_y(anchor_value)), current_mouse,

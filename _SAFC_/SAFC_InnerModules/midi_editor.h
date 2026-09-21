@@ -41,6 +41,7 @@ struct midi_editor
 	using tick_type = std::uint64_t;
 	using sgtick_type = std::int64_t;
 	using base_type = std::uint8_t;
+	using note_id_type = std::size_t;
 
 	// ========================================================================
 	// Core Data Structures
@@ -53,19 +54,26 @@ struct midi_editor
 	{
 		tick_type start_tick;
 		tick_type end_tick;
-		std::uint8_t key;		  // 0-127
-		std::uint8_t velocity;	 // 1-127
-		std::uint8_t channel;	  // 0-15
-		std::uint16_t track_index;  // Track identifier
+
 		// Stable identity minted by the editor on load/insert; selection and
 		// undo target notes through it, so it survives moves and edits
-		std::uint32_t id;
+		note_id_type id;
+
+		std::uint16_t track_index;	// Track identifier
+
+		std::uint8_t key;		// 0-127
+		std::uint8_t velocity;		// 1-127
+		std::uint8_t channel;		// 0-15
 
 		piano_note() : start_tick(0), end_tick(0), key(60), velocity(100), channel(0), track_index(0), id(0) {}
 
-		piano_note(tick_type start, tick_type end, std::uint8_t k, std::uint8_t vel,
-			std::uint8_t ch = 0, std::uint16_t track = 0)
-			: start_tick(start), end_tick(end), key(k), velocity(vel), channel(ch), track_index(track), id(0)
+		piano_note(tick_type start,
+			tick_type end,
+			std::uint8_t k,
+			std::uint8_t vel,
+			std::uint8_t ch = 0,
+			std::uint16_t track = 0) :
+			start_tick(start), end_tick(end), key(k), velocity(vel), channel(ch), track_index(track), id(0)
 		{
 		}
 
@@ -73,17 +81,25 @@ struct midi_editor
 
 		bool operator<(const piano_note& other) const
 		{
-			if (start_tick != other.start_tick) return start_tick < other.start_tick;
-			if (key != other.key) return key < other.key;
-			if (track_index != other.track_index) return track_index < other.track_index;
+			if (start_tick != other.start_tick)
+				return start_tick < other.start_tick;
+			if (key != other.key)
+				return key < other.key;
+			if (track_index != other.track_index)
+				return track_index < other.track_index;
+
 			return id < other.id;
 		}
 
 		bool operator==(const piano_note& other) const
 		{
-			return start_tick == other.start_tick && end_tick == other.end_tick &&
-				key == other.key && velocity == other.velocity &&
-				channel == other.channel && track_index == other.track_index &&
+			return
+				start_tick == other.start_tick &&
+				end_tick == other.end_tick &&
+				key == other.key &&
+				velocity == other.velocity &&
+				channel == other.channel &&
+				track_index == other.track_index &&
 				id == other.id;
 		}
 	};
@@ -102,7 +118,7 @@ struct midi_editor
 		track_info() : channel(0xFF), is_visible(true), is_solo(false), is_muted(false) {}
 	};
 
-	static constexpr std::uint8_t all_tracks = 0xFF;
+	static constexpr std::uint16_t all_tracks = 0xFFFF;
 
 	/**
 	 * How a selection gesture combines with the current note set:
@@ -120,45 +136,51 @@ struct midi_editor
 	struct note_selection
 	{
 		std::vector<std::uint64_t> bits;
-		std::vector<std::uint32_t> ids;
-		std::unordered_set<std::uint32_t> stale_ids;
+		std::vector<note_id_type> ids;
+		std::unordered_set<note_id_type> stale_ids;
 		std::size_t live_count = 0;
 
-		bool contains(std::uint32_t id) const
+		bool contains(note_id_type id) const
 		{
 			const auto word = std::size_t(id) >> 6;
 			return word < bits.size() && (bits[word] & (std::uint64_t(1) << (id & 63))) != 0;
 		}
 
-		std::size_t count(std::uint32_t id) const { return contains(id) ? 1 : 0; }
+		std::size_t count(note_id_type id) const { return contains(id) ? 1 : 0; }
 		bool empty() const { return live_count == 0; }
 		std::size_t size() const { return live_count; }
 
-		void insert(std::uint32_t id)
+		void insert(note_id_type id)
 		{
 			const auto word = std::size_t(id) >> 6;
 			if (word >= bits.size())
 				bits.resize(word + 1);
+
 			const auto mask = std::uint64_t(1) << (id & 63);
 			if (bits[word] & mask)
 				return;
+
 			bits[word] |= mask;
 			if (!stale_ids.erase(id))
 				ids.push_back(id);
+
 			++live_count;
 		}
 
-		std::size_t erase(std::uint32_t id)
+		std::size_t erase(note_id_type id)
 		{
 			const auto word = std::size_t(id) >> 6;
 			if (word >= bits.size())
 				return 0;
+
 			const auto mask = std::uint64_t(1) << (id & 63);
 			if (!(bits[word] & mask))
 				return 0;
+
 			bits[word] &= ~mask;
 			--live_count;
 			stale_ids.insert(id);
+
 			return 1;
 		}
 
@@ -174,8 +196,10 @@ struct midi_editor
 		{
 			if (ids.size() <= live_count * 2 + 64)
 				return;
+
 			ids.erase(std::remove_if(ids.begin(), ids.end(),
-				[&](std::uint32_t id) { return !contains(id); }), ids.end());
+				[&](std::size_t id) { return !contains(id); }), ids.end());
+
 			stale_ids.clear();
 		}
 
@@ -189,7 +213,8 @@ struct midi_editor
 				while (index < owner->ids.size() && !owner->contains(owner->ids[index]))
 					++index;
 			}
-			std::uint32_t operator*() const { return owner->ids[index]; }
+
+			note_id_type operator*() const { return owner->ids[index]; }
 			iterator& operator++() { ++index; skip_stale(); return *this; }
 			bool operator==(const iterator& other) const { return index == other.index; }
 			bool operator!=(const iterator& other) const { return !(*this == other); }
@@ -197,6 +222,7 @@ struct midi_editor
 
 		iterator begin() const { iterator it{this, 0}; it.skip_stale(); return it; }
 		iterator end() const { return iterator{this, ids.size()}; }
+
 		void swap(note_selection& other)
 		{
 			bits.swap(other.bits);
@@ -259,21 +285,25 @@ struct midi_editor
 	 */
 	struct delete_notes_op : edit_operation
 	{
-		std::vector<std::uint32_t> ids;
+		std::vector<note_id_type> ids;
 		std::vector<piano_note> removed_notes;
 
-		delete_notes_op(std::vector<std::uint32_t>&& target_ids) : ids(std::move(target_ids)) {}
+		delete_notes_op(std::vector<note_id_type>&& target_ids) : ids(std::move(target_ids)) {}
 
 		void execute(midi_editor& editor) override
 		{
 			removed_notes.clear();
 			removed_notes.reserve(ids.size());
+
 			for (const auto id : ids)
+			{
 				if (const auto* note = editor.find_note_by_id(id))
 				{
 					removed_notes.push_back(*note);
 					editor.remove_note_by_id(id);
 				}
+			}
+
 			editor.mark_dirty_keep_order();
 		}
 
@@ -281,6 +311,7 @@ struct midi_editor
 		{
 			for (const auto& note : removed_notes)
 				editor.add_note(note);
+
 			editor.mark_dirty_keep_order();
 		}
 
@@ -292,12 +323,12 @@ struct midi_editor
 	 */
 	struct move_notes_op : edit_operation
 	{
-		std::vector<std::uint32_t> ids;
-		std::vector<std::pair<std::uint32_t, piano_note>> before; // id, prior geometry
+		std::vector<note_id_type> ids;
+		std::vector<std::pair<note_id_type, piano_note>> before; // id, prior geometry
 		sgtick_type delta_ticks;
 		int delta_keys;
 
-		move_notes_op(std::vector<std::uint32_t>&& target_ids, sgtick_type dt = 0, int dk = 0)
+		move_notes_op(std::vector<note_id_type>&& target_ids, sgtick_type dt = 0, int dk = 0)
 			: ids(std::move(target_ids)), delta_ticks(dt), delta_keys(dk)
 		{
 		}
@@ -311,6 +342,7 @@ struct midi_editor
 				const auto* current = editor.find_note_by_id(id);
 				if (!current)
 					continue;
+
 				auto note = *current;
 
 				before.emplace_back(note.id, note);
@@ -344,6 +376,7 @@ struct midi_editor
 				if (editor.find_note_by_id(id))
 					editor.replace_note(prior);
 			}
+
 			editor.mark_dirty_keep_order();
 		}
 
@@ -359,12 +392,12 @@ struct midi_editor
 	 */
 	struct resize_note_op : edit_operation
 	{
-		std::uint32_t target_id;
+		note_id_type target_id;
 		tick_type new_length;
 		tick_type old_length = 0;
 		bool applied = false;
 
-		resize_note_op(std::uint32_t id, tick_type len) : target_id(id), new_length(len) {}
+		resize_note_op(note_id_type id, tick_type len) : target_id(id), new_length(len) {}
 
 		void execute(midi_editor& editor) override
 		{
@@ -377,6 +410,7 @@ struct midi_editor
 				editor.replace_note(std::move(note));
 				applied = true;
 			}
+
 			editor.mark_dirty_keep_order();
 		}
 
@@ -384,6 +418,7 @@ struct midi_editor
 		{
 			if (!applied)
 				return;
+
 			if (const auto* current = editor.find_note_by_id(target_id))
 			{
 				auto note = *current;
@@ -402,11 +437,11 @@ struct midi_editor
 	 */
 	struct resize_notes_op : edit_operation
 	{
-		std::vector<std::uint32_t> ids;
+		std::vector<note_id_type> ids;
 		sgtick_type delta_length;
-		std::vector<std::pair<std::uint32_t, tick_type>> before; // id, prior end_tick
+		std::vector<std::pair<note_id_type, tick_type>> before; // id, prior end_tick
 
-		resize_notes_op(std::vector<std::uint32_t>&& target_ids, sgtick_type delta)
+		resize_notes_op(std::vector<note_id_type>&& target_ids, sgtick_type delta)
 			: ids(std::move(target_ids)), delta_length(delta)
 		{
 		}
@@ -415,11 +450,13 @@ struct midi_editor
 		{
 			before.clear();
 			before.reserve(ids.size());
+
 			for (const auto id : ids)
 			{
 				const auto* current = editor.find_note_by_id(id);
 				if (!current)
 					continue;
+
 				auto note = *current;
 
 				before.emplace_back(note.id, note.end_tick);
@@ -428,6 +465,7 @@ struct midi_editor
 				note.end_tick = note.start_tick + tick_type(new_length);
 				editor.replace_note(std::move(note));
 			}
+
 			editor.mark_dirty_keep_order();
 		}
 
@@ -442,6 +480,7 @@ struct midi_editor
 					editor.replace_note(std::move(note));
 				}
 			}
+
 			editor.mark_dirty_keep_order();
 		}
 
@@ -458,12 +497,12 @@ struct midi_editor
 	 */
 	struct stretch_notes_op : edit_operation
 	{
-		std::vector<std::uint32_t> ids;
+		std::vector<note_id_type> ids;
 		tick_type pivot;
 		double factor;
-		std::vector<std::pair<std::uint32_t, piano_note>> before; // id, prior geometry
+		std::vector<std::pair<note_id_type, piano_note>> before; // id, prior geometry
 
-		stretch_notes_op(std::vector<std::uint32_t>&& target_ids, tick_type pivot_tick, double f)
+		stretch_notes_op(std::vector<note_id_type>&& target_ids, tick_type pivot_tick, double f)
 			: ids(std::move(target_ids)), pivot(pivot_tick), factor(f)
 		{
 		}
@@ -472,11 +511,13 @@ struct midi_editor
 		{
 			before.clear();
 			before.reserve(ids.size());
+
 			for (const auto id : ids)
 			{
 				const auto* current = editor.find_note_by_id(id);
 				if (!current)
 					continue;
+
 				auto note = *current;
 
 				before.emplace_back(note.id, note);
@@ -494,6 +535,7 @@ struct midi_editor
 				note.end_tick = tick_type(new_end);
 				editor.replace_note(std::move(note));
 			}
+
 			editor.mark_dirty_keep_order();
 		}
 
@@ -504,6 +546,7 @@ struct midi_editor
 				if (editor.find_note_by_id(id))
 					editor.replace_note(prior);
 			}
+
 			editor.mark_dirty_keep_order();
 		}
 
@@ -518,11 +561,11 @@ struct midi_editor
 	 */
 	struct velocity_change_op : edit_operation
 	{
-		std::vector<std::uint32_t> ids;
+		std::vector<note_id_type> ids;
 		std::uint8_t new_velocity;
-		std::vector<std::pair<std::uint32_t, std::uint8_t>> changes; // id, old velocity
+		std::vector<std::pair<note_id_type, std::uint8_t>> changes; // id, old velocity
 
-		velocity_change_op(std::vector<std::uint32_t>&& target_ids, std::uint8_t vel)
+		velocity_change_op(std::vector<note_id_type>&& target_ids, std::uint8_t vel)
 			: ids(std::move(target_ids)), new_velocity(vel)
 		{
 		}
@@ -541,12 +584,13 @@ struct midi_editor
 					editor.replace_note(updated);
 				}
 			}
+
 			editor.mark_dirty_keep_order();
 		}
 
 		void undo(midi_editor& editor) override
 		{
-			for (auto& [id, old_vel] : changes)
+			for (const auto& [id, old_vel] : changes)
 			{
 				if (auto* note = editor.find_note_by_id(id))
 				{
@@ -555,6 +599,7 @@ struct midi_editor
 					editor.replace_note(updated);
 				}
 			}
+
 			editor.mark_dirty_keep_order();
 		}
 
@@ -564,11 +609,11 @@ struct midi_editor
 	/** Functor for assigning a MIDI channel to a set of notes. */
 	struct channel_change_op : edit_operation
 	{
-		std::vector<std::uint32_t> ids;
+		std::vector<note_id_type> ids;
 		std::uint8_t new_channel;
-		std::vector<std::pair<std::uint32_t, std::uint8_t>> changes; // id, old channel
+		std::vector<std::pair<note_id_type, std::uint8_t>> changes; // id, old channel
 
-		channel_change_op(std::vector<std::uint32_t>&& target_ids, std::uint8_t channel)
+		channel_change_op(std::vector<note_id_type>&& target_ids, std::uint8_t channel)
 			: ids(std::move(target_ids)), new_channel(channel & 0x0F)
 		{
 		}
@@ -577,28 +622,34 @@ struct midi_editor
 		{
 			changes.clear();
 			changes.reserve(ids.size());
+
 			for (const auto id : ids)
 			{
 				auto* note = editor.find_note_by_id(id);
 				if (!note)
 					continue;
+
 				changes.emplace_back(note->id, note->channel);
 				auto updated = *note;
 				updated.channel = new_channel;
 				editor.replace_note(updated);
 			}
+
 			editor.mark_dirty_keep_order();
 		}
 
 		void undo(midi_editor& editor) override
 		{
 			for (auto& [id, old_channel] : changes)
+			{
 				if (auto* note = editor.find_note_by_id(id))
 				{
 					auto updated = *note;
 					updated.channel = old_channel;
 					editor.replace_note(updated);
 				}
+			}
+
 			editor.mark_dirty_keep_order();
 		}
 
@@ -610,11 +661,11 @@ struct midi_editor
 	 */
 	struct velocity_adjust_op : edit_operation
 	{
-		std::vector<std::uint32_t> ids;
+		std::vector<note_id_type> ids;
 		int delta;
-		std::vector<std::pair<std::uint32_t, std::uint8_t>> changes; // id, old velocity
+		std::vector<std::pair<note_id_type, std::uint8_t>> changes; // id, old velocity
 
-		velocity_adjust_op(std::vector<std::uint32_t>&& target_ids, int d)
+		velocity_adjust_op(std::vector<note_id_type>&& target_ids, int d)
 			: ids(std::move(target_ids)), delta(d)
 		{
 		}
@@ -623,6 +674,7 @@ struct midi_editor
 		{
 			changes.clear();
 			changes.reserve(ids.size());
+
 			for (const auto id : ids)
 			{
 				if (auto* note = editor.find_note_by_id(id))
@@ -633,6 +685,7 @@ struct midi_editor
 					editor.replace_note(updated);
 				}
 			}
+
 			editor.mark_dirty_keep_order();
 		}
 
@@ -647,6 +700,7 @@ struct midi_editor
 					editor.replace_note(updated);
 				}
 			}
+
 			editor.mark_dirty_keep_order();
 		}
 
@@ -753,7 +807,9 @@ struct midi_editor
 		note_tool_op(std::vector<piano_note> old_notes,
 			std::vector<piano_note> new_notes, std::string description)
 			: before(std::move(old_notes)), after(std::move(new_notes)),
-			label(std::move(description)) {}
+			label(std::move(description))
+		{
+		}
 
 		static void remove(midi_editor& editor, const std::vector<piano_note>& values)
 		{
@@ -783,11 +839,11 @@ struct midi_editor
 	 */
 	struct quantize_op : edit_operation
 	{
-		std::vector<std::uint32_t> ids;
+		std::vector<note_id_type> ids;
 		tick_type grid_resolution;
-		std::vector<std::pair<std::uint32_t, piano_note>> changes; // id, prior geometry
+		std::vector<std::pair<note_id_type, piano_note>> changes; // id, prior geometry
 
-		quantize_op(std::vector<std::uint32_t>&& target_ids, tick_type grid)
+		quantize_op(std::vector<note_id_type>&& target_ids, tick_type grid)
 			: ids(std::move(target_ids)), grid_resolution(grid)
 		{
 		}
@@ -801,6 +857,7 @@ struct midi_editor
 				const auto* current = editor.find_note_by_id(id);
 				if (!current)
 					continue;
+
 				auto note = *current;
 				const auto before = note;
 
@@ -976,11 +1033,11 @@ private:
 	};
 	std::shared_ptr<loaded_note_data> notes_storage = std::make_shared<loaded_note_data>();
 	std::vector<piano_note>& base_notes() const { return notes_storage->notes; }
-	std::unordered_map<std::uint32_t, piano_note> edited_notes;
-	std::unordered_set<std::uint32_t> suppressed_base_note_ids;
-	mutable std::vector<std::uint32_t> base_note_index_by_id;
+	std::unordered_map<note_id_type, piano_note> edited_notes;
+	std::unordered_set<note_id_type> suppressed_base_note_ids;
+	mutable std::vector<note_id_type> base_note_index_by_id;
 	std::size_t logical_note_count = 0;
-	std::map<std::uint8_t, track_info> tracks;
+	std::map<std::uint16_t, track_info> tracks;
 
 	// Sorted-base query acceleration (rebuilt after loading):
 	// any note intersecting [a, b) must start in [a - max_typical_length, b),
@@ -1007,13 +1064,13 @@ private:
 		tick_type tick;
 		std::vector<base_type> bytes;
 	};
-	std::map<std::uint8_t, std::vector<raw_event>> raw_track_events;
+	std::map<std::uint16_t, std::vector<raw_event>> raw_track_events;
 
 	struct tempo_change_op : edit_operation
 	{
 		tick_type tick;
 		std::uint32_t tempo_us;
-		std::vector<std::pair<std::uint8_t, raw_event>> previous;
+		std::vector<std::pair<std::uint16_t, raw_event>> previous;
 
 		tempo_change_op(tick_type tk, std::uint32_t us) : tick(tk), tempo_us(us) {}
 
@@ -1069,16 +1126,20 @@ private:
 
 	struct raw_control_change_op : edit_operation
 	{
-		std::uint8_t track;
+		std::uint16_t track;
 		control_lane lane;
 		std::uint8_t channel;
 		tick_type tick;
 		std::uint16_t value;
 		std::optional<raw_event> previous;
 
-		raw_control_change_op(std::uint8_t tr, control_lane ln, std::uint8_t ch,
-			tick_type tk, std::uint16_t val)
-			: track(tr), lane(ln), channel(ch), tick(tk), value(val)
+		raw_control_change_op(
+			std::uint16_t tr,
+			control_lane ln,
+			std::uint8_t ch,
+			tick_type tk,
+			std::uint16_t val):
+			track(tr), lane(ln), channel(ch), tick(tk), value(val)
 		{
 		}
 
@@ -1112,12 +1173,12 @@ private:
 			std::optional<raw_event> previous;
 		};
 
-		std::uint8_t track;
+		std::uint16_t track;
 		control_lane lane;
 		std::uint8_t channel;
 		std::vector<entry> entries;
 
-		raw_control_change_batch_op(std::uint8_t tr, control_lane ln, std::uint8_t ch,
+		raw_control_change_batch_op(std::uint16_t tr, control_lane ln, std::uint8_t ch,
 			std::vector<std::pair<tick_type, std::uint16_t>> points)
 			: track(tr), lane(ln), channel(ch)
 		{
@@ -1156,14 +1217,14 @@ private:
 	/** Replaces a controller range, rather than leaving old points between LFO samples. */
 	struct raw_control_range_op : edit_operation
 	{
-		std::uint8_t track;
+		std::uint16_t track;
 		control_lane lane;
 		std::uint8_t channel;
 		tick_type begin, end;
 		std::vector<raw_event> before;
 		std::vector<raw_event> after;
 
-		raw_control_range_op(std::uint8_t tr, control_lane ln, std::uint8_t ch,
+		raw_control_range_op(std::uint16_t tr, control_lane ln, std::uint8_t ch,
 			tick_type first, tick_type last,
 			std::vector<std::pair<tick_type, std::uint16_t>> points)
 			: track(tr), lane(ln), channel(ch), begin(first), end(last)
@@ -1217,7 +1278,7 @@ private:
 	note_selection selected_notes;
 
 	// Monotonic source for piano_note::id; never reused within a session
-	std::uint32_t next_note_id = 1;
+	note_id_type next_note_id = 1;
 
 	// Copy/paste buffer; notes keep their original ticks and channels,
 	// paste retargets them onto the active track
@@ -1306,6 +1367,7 @@ public:
 		ppqn = (begin[12] << 8) | (begin[13]);
 		if (ppqn == 0 || (ppqn & 0x8000))
 			ppqn = 480;
+
 		ticks_per_beat = ppqn;
 
 		// Progress reporting: at most ~200 updates, at least 1 MB apart
@@ -1316,9 +1378,9 @@ public:
 
 		// Parse tracks and extract notes
 		auto ptr = begin + 14;
-		std::uint8_t track_index = 0;
+		std::uint16_t track_index = 0;
 
-		while (ptr < end && track_index < 0xFF)
+		while (ptr < end && track_index < 0xFFFF)
 		{
 			if (!parse_track_mmap(ptr, end, track_index++))
 				break;
@@ -1371,6 +1433,7 @@ public:
 			min_key = std::min(min_key, note.key);
 			max_key = std::max(max_key, note.key);
 		}
+
 		view_key_low = min_key > 2 ? min_key - 2 : 0;
 		view_key_high = max_key < 125 ? max_key + 2 : 127;
 
@@ -1387,7 +1450,7 @@ public:
 	/**
 	 * Parse a single track from mmap (similar to simple_player::read_through_one_track)
 	 */
-	bool parse_track_mmap(const uint8_t*& cur, const uint8_t* end, std::uint8_t track_index)
+	bool parse_track_mmap(const uint8_t*& cur, const uint8_t* end, std::uint16_t track_index)
 	{
 		tick_type current_tick = 0;
 		std::uint8_t rsb = 0;
@@ -1497,6 +1560,7 @@ public:
 					data2 = *(cur++);
 					std::uint16_t note_key = (std::uint16_t(command & 0x0F) << 8) | data1;
 					auto it = active_notes.find(note_key);
+
 					if (it != active_notes.end() && !it->second.empty())
 					{
 						auto note = it->second.front();
@@ -1508,6 +1572,7 @@ public:
 						if (it->second.empty())
 							active_notes.erase(it);
 					}
+
 					break;
 				}
 				case 0xA: case 0xB: case 0xE:
@@ -1606,6 +1671,7 @@ public:
 			if (note.key >= key_low && note.key <= key_high)
 				result.push_back(note);
 		});
+
 		if (!edited_notes.empty())
 			std::sort(result.begin(), result.end());
 		return result;
@@ -1711,8 +1777,8 @@ public:
 	/**
 	 * Insert a note; returns its freshly minted id
 	 */
-	std::uint32_t insert_note(tick_type start, tick_type end, std::uint8_t key,
-		std::uint8_t velocity, std::uint8_t channel = 0, std::uint8_t track = 0)
+	note_id_type insert_note(tick_type start, tick_type end, std::uint8_t key,
+		std::uint8_t velocity, std::uint8_t channel = 0, std::uint16_t track = 0)
 	{
 		std::lock_guard<std::recursive_mutex> lock(editor_mutex);
 		piano_note note(start, end, key, velocity, channel, track);
@@ -1819,7 +1885,7 @@ public:
 	 * erases from any track, otherwise only from the given one.
 	 */
 	bool erase_note_at(tick_type tick, std::uint8_t key,
-		std::uint8_t track_filter = all_tracks)
+		std::uint16_t track_filter = all_tracks)
 	{
 		std::lock_guard<std::recursive_mutex> lock(editor_mutex);
 
@@ -1850,7 +1916,7 @@ public:
 	 */
 	bool find_note_at(tick_type tick, std::uint8_t key, piano_note& out,
 		tick_type tick_tolerance = 0, std::uint8_t key_tolerance = 0,
-		std::uint8_t track_filter = all_tracks) const
+		std::uint16_t track_filter = all_tracks) const
 	{
 		std::lock_guard<std::recursive_mutex> lock(editor_mutex);
 
@@ -1860,6 +1926,7 @@ public:
 		{
 			if (track_filter != all_tracks && note.track_index != track_filter)
 				return;
+
 			if (note.key == key)
 			{
 				if (!found || out < note)
@@ -1869,11 +1936,13 @@ public:
 				}
 			}
 		});
+
 		if (found || (!tick_tolerance && !key_tolerance))
 			return found;
 
 		const auto lo_tick = tick > tick_tolerance ? tick - tick_tolerance : 0;
 		const auto hi_tick = tick + tick_tolerance;
+
 		for_each_note_intersecting(lo_tick, hi_tick + 1,
 			[&](const piano_note& note)
 		{
@@ -1888,6 +1957,7 @@ public:
 				}
 			}
 		});
+
 		return found;
 	}
 
@@ -1950,12 +2020,16 @@ public:
 		std::vector<piano_note> copied;
 		copied.reserve(selected_notes.size());
 		for (const auto id : selected_notes)
+		{
 			if (const auto* note = find_note_by_id(id))
 				copied.push_back(*note);
+		}
+
 		std::sort(copied.begin(), copied.end());
 
 		if (copied.empty())
 			return 0;
+
 		clipboard = std::move(copied);
 		return clipboard.size();
 	}
@@ -1984,6 +2058,7 @@ public:
 			channel_override = it->second.channel;
 
 		auto pasted = clipboard;
+
 		note_selection new_ids;
 		for (auto& note : pasted)
 		{
@@ -2057,7 +2132,7 @@ public:
 		// Ids are stable, so the selection follows the moved notes by itself
 	}
 
-	void resize_note(std::uint32_t note_id, tick_type new_length)
+	void resize_note(note_id_type note_id, tick_type new_length)
 	{
 		std::lock_guard<std::recursive_mutex> lock(editor_mutex);
 		auto op = std::make_unique<resize_note_op>(note_id, new_length);
@@ -2069,7 +2144,7 @@ public:
 	 * Change the length of the given notes by a common delta (tail drag);
 	 * notes squash to a 1-tick minimum instead of vanishing
 	 */
-	void resize_notes_by(std::vector<std::uint32_t> ids, sgtick_type delta_length)
+	void resize_notes_by(std::vector<note_id_type> ids, sgtick_type delta_length)
 	{
 		std::lock_guard<std::recursive_mutex> lock(editor_mutex);
 		if (ids.empty() || !delta_length)
@@ -2110,7 +2185,7 @@ public:
 	{
 		std::lock_guard<std::recursive_mutex> lock(editor_mutex);
 		channel &= 0x0F;
-		std::vector<std::uint32_t> ids;
+		std::vector<note_id_type> ids;
 		ids.reserve(selected_notes.size());
 		for (const auto id : selected_notes)
 			if (const auto* note = find_note_by_id(id); note && note->channel != channel)
@@ -2195,8 +2270,8 @@ private:
 		redo_stack.clear();
 	}
 
-	static constexpr std::uint32_t invalid_note_index =
-		std::numeric_limits<std::uint32_t>::max();
+	static constexpr note_id_type invalid_note_index =
+		std::numeric_limits<note_id_type>::max();
 
 	void rebuild_base_note_index() const
 	{
@@ -2206,11 +2281,11 @@ private:
 			const auto id = base_notes()[index].id;
 			if (id >= base_note_index_by_id.size())
 				base_note_index_by_id.resize(std::size_t(id) + 1, invalid_note_index);
-			base_note_index_by_id[id] = static_cast<std::uint32_t>(index);
+			base_note_index_by_id[id] = static_cast<note_id_type>(index);
 		}
 	}
 
-	const piano_note* find_base_note_by_id(std::uint32_t id)
+	const piano_note* find_base_note_by_id(note_id_type id)
 	{
 		if (id >= base_note_index_by_id.size())
 			return nullptr;
@@ -2220,12 +2295,12 @@ private:
 		return &base_notes()[index];
 	}
 
-	const piano_note* find_base_note_by_id(std::uint32_t id) const
+	const piano_note* find_base_note_by_id(note_id_type id) const
 	{
 		return const_cast<midi_editor*>(this)->find_base_note_by_id(id);
 	}
 
-	const piano_note* find_note_by_id(std::uint32_t id)
+	const piano_note* find_note_by_id(note_id_type id)
 	{
 		if (auto changed = edited_notes.find(id); changed != edited_notes.end())
 			return &changed->second;
@@ -2234,7 +2309,7 @@ private:
 		return find_base_note_by_id(id);
 	}
 
-	const piano_note* find_note_by_id(std::uint32_t id) const
+	const piano_note* find_note_by_id(note_id_type id) const
 	{
 		return const_cast<midi_editor*>(this)->find_note_by_id(id);
 	}
@@ -2278,7 +2353,7 @@ private:
 		replace_note(std::move(value));
 	}
 
-	bool remove_note_by_id(std::uint32_t id)
+	bool remove_note_by_id(note_id_type id)
 	{
 		if (!find_note_by_id(id))
 			return false;
@@ -2295,8 +2370,11 @@ private:
 	void for_each_logical_note(func_type&& fn) const
 	{
 		for (const auto& note : base_notes())
+		{
 			if (!suppressed_base_note_ids.count(note.id))
 				fn(note);
+		}
+
 		for (const auto& [_, note] : edited_notes)
 			fn(note);
 	}
@@ -2310,12 +2388,14 @@ private:
 		return result;
 	}
 
-	std::vector<std::uint32_t> selected_ids_vector() const
+	std::vector<note_id_type> selected_ids_vector() const
 	{
-		std::vector<std::uint32_t> result;
+		std::vector<note_id_type> result;
+
 		result.reserve(selected_notes.size());
 		for (const auto id : selected_notes)
 			result.push_back(id);
+
 		return result;
 	}
 
@@ -2324,10 +2404,14 @@ private:
 	{
 		if (selected_notes.empty())
 			return;
+
 		note_selection alive;
 		for (const auto id : selected_notes)
+		{
 			if (find_note_by_id(id))
 				alive.insert(id);
+		}
+
 		selected_notes.swap(alive);
 	}
 
@@ -2366,6 +2450,7 @@ private:
 		max_typical_length = 0;
 		cached_max_end_tick = 0;
 		notes_storage->block_max_end.assign((base_notes().size() + loaded_note_data::block_size - 1) / loaded_note_data::block_size, 0);
+
 		for (std::size_t i = 0; i < base_notes().size(); ++i)
 		{
 			const auto length = base_notes()[i].length();
@@ -2377,6 +2462,7 @@ private:
 			else
 				max_typical_length = std::max(max_typical_length, length);
 		}
+
 		if (long_note_indices.size() > base_notes().size() / 16 + 64)
 		{
 			long_note_indices.clear();
@@ -2446,9 +2532,9 @@ private:
 			base_type(tempo_us >> 8), base_type(tempo_us)};
 	}
 
-	std::vector<std::pair<std::uint8_t, raw_event>> remove_tempo_events_at(tick_type tick)
+	std::vector<std::pair<std::uint16_t, raw_event>> remove_tempo_events_at(tick_type tick)
 	{
-		std::vector<std::pair<std::uint8_t, raw_event>> removed;
+		std::vector<std::pair<std::uint16_t, raw_event>> removed;
 		for (auto& [track, events] : raw_track_events)
 		{
 			events.erase(std::remove_if(events.begin(), events.end(), [&](const raw_event& event)
@@ -2466,13 +2552,18 @@ private:
 	{
 		tempo_events.clear();
 		for (const auto& [_, events] : raw_track_events)
+		{
 			for (const auto& event : events)
+			{
 				if (is_tempo_event(event))
 				{
 					const auto us = (std::uint32_t(event.bytes[3]) << 16) |
 						(std::uint32_t(event.bytes[4]) << 8) | event.bytes[5];
 					tempo_events.push_back({event.tick, us});
 				}
+			}
+		}
+
 		std::stable_sort(tempo_events.begin(), tempo_events.end());
 	}
 
@@ -2490,7 +2581,7 @@ private:
 				base_type(0xE0 | (channel & 0x0F)),
 				base_type(value & 0x7F),
 				base_type((value >> 7) & 0x7F)
-			};
+		};
 
 		return {
 			base_type(0xB0 | (channel & 0x0F)),
@@ -2512,8 +2603,11 @@ private:
 		return ev.bytes.size() >= 3 && ev.bytes[0] == 0xFF && ev.bytes[1] == 0x03;
 	}
 
-	static bool decode_control_event(const raw_event& ev, control_lane lane,
-		std::uint8_t channel, std::uint16_t& value)
+	static bool decode_control_event(
+		const raw_event& ev,
+		control_lane lane,
+		std::uint8_t channel,
+		std::uint16_t& value)
 	{
 		if (ev.bytes.size() < 3)
 			return false;
@@ -2538,8 +2632,11 @@ private:
 		return true;
 	}
 
-	std::optional<raw_event> remove_control_event_at(std::uint8_t track,
-		control_lane lane, std::uint8_t channel, tick_type tick)
+	std::optional<raw_event> remove_control_event_at(
+		std::uint16_t track,
+		control_lane lane,
+		std::uint8_t channel,
+		tick_type tick)
 	{
 		auto it = raw_track_events.find(track);
 		if (it == raw_track_events.end())
@@ -2559,7 +2656,7 @@ private:
 		return std::nullopt;
 	}
 
-	void sort_raw_track(std::uint8_t track)
+	void sort_raw_track(std::uint16_t track)
 	{
 		auto it = raw_track_events.find(track);
 		if (it == raw_track_events.end())
@@ -2583,7 +2680,7 @@ public:
 	 */
 	std::size_t select_rect(tick_type begin, tick_type end,
 		std::uint8_t key_begin, std::uint8_t key_end,
-		std::uint8_t track_filter = all_tracks,
+		std::uint16_t track_filter = all_tracks,
 		select_mode mode = select_mode::replace)
 	{
 		std::lock_guard<std::recursive_mutex> lock(editor_mutex);
@@ -2608,7 +2705,7 @@ public:
 
 	/** Select notes on a channel, optionally limited to one track. */
 	std::size_t select_channel(std::uint8_t channel,
-		std::uint8_t track_filter = all_tracks,
+		std::uint16_t track_filter = all_tracks,
 		select_mode mode = select_mode::replace)
 	{
 		std::lock_guard<std::recursive_mutex> lock(editor_mutex);
@@ -2630,7 +2727,7 @@ public:
 		return selected_notes.size();
 	}
 
-	void select_note(std::uint32_t id, select_mode mode = select_mode::replace)
+	void select_note(note_id_type id, select_mode mode = select_mode::replace)
 	{
 		std::lock_guard<std::recursive_mutex> lock(editor_mutex);
 		if (mode == select_mode::replace)
@@ -2641,7 +2738,7 @@ public:
 			selected_notes.insert(id);
 	}
 
-	void set_selected_ids(std::set<std::uint32_t> ids)
+	void set_selected_ids(std::set<note_id_type> ids)
 	{
 		std::lock_guard<std::recursive_mutex> lock(editor_mutex);
 		selected_notes.clear();
@@ -2649,20 +2746,20 @@ public:
 			selected_notes.insert(id);
 	}
 
-	std::set<std::uint32_t> get_selected_ids() const
+	std::set<note_id_type> get_selected_ids() const
 	{
 		std::lock_guard<std::recursive_mutex> lock(editor_mutex);
 		const auto ids = selected_ids_vector();
-		return std::set<std::uint32_t>(ids.begin(), ids.end());
+		return std::set<note_id_type>(ids.begin(), ids.end());
 	}
 
 	// Rendering only needs membership for notes in the viewport. Returning this
 	// compact subset avoids copying a massive score-wide selection every frame.
-	std::set<std::uint32_t> get_selected_ids_in_range(tick_type begin, tick_type end,
+	std::set<note_id_type> get_selected_ids_in_range(tick_type begin, tick_type end,
 		std::uint8_t key_low = 0, std::uint8_t key_high = 127) const
 	{
 		std::lock_guard<std::recursive_mutex> lock(editor_mutex);
-		std::set<std::uint32_t> result;
+		std::set<note_id_type> result;
 		for_each_note_intersecting(begin, end, [&](const piano_note& note)
 		{
 			if (note.key >= key_low && note.key <= key_high && selected_notes.count(note.id))
@@ -2675,11 +2772,16 @@ public:
 	{
 		std::lock_guard<std::recursive_mutex> lock(editor_mutex);
 		std::vector<piano_note> result;
+
 		result.reserve(selected_notes.size());
 		for (const auto id : selected_notes)
+		{
 			if (const auto* note = find_note_by_id(id))
 				result.push_back(*note);
+		}
+
 		std::sort(result.begin(), result.end());
+
 		return result;
 	}
 
@@ -2695,7 +2797,7 @@ public:
 		return selected_notes.size();
 	}
 
-	bool is_note_selected(std::uint32_t id) const
+	bool is_note_selected(note_id_type id) const
 	{
 		std::lock_guard<std::recursive_mutex> lock(editor_mutex);
 		return selected_notes.count(id) != 0;
@@ -2708,6 +2810,7 @@ public:
 		std::uint8_t& key_low, std::uint8_t& key_high) const
 	{
 		std::lock_guard<std::recursive_mutex> lock(editor_mutex);
+
 		bool any = false;
 		for (const auto id : selected_notes)
 		{
@@ -2729,6 +2832,7 @@ public:
 				key_high = std::max(key_high, note->key);
 			}
 		}
+
 		return any;
 	}
 
@@ -2789,7 +2893,7 @@ public:
 	}
 
 	std::vector<channel_control_point> get_channel_control_points(
-		std::uint8_t track, std::uint8_t channel, control_lane lane,
+		std::uint16_t track, std::uint8_t channel, control_lane lane,
 		tick_type start, tick_type end) const
 	{
 		std::lock_guard<std::recursive_mutex> lock(editor_mutex);
@@ -2808,20 +2912,31 @@ public:
 			if (decode_control_event(ev, lane, channel, value))
 				result.push_back({ev.tick, std::uint8_t(channel & 0x0F), value});
 		}
+
 		return result;
 	}
 
-	void set_channel_control_point(std::uint8_t track, std::uint8_t channel,
-		control_lane lane, tick_type tick, std::uint16_t value)
+	void set_channel_control_point(
+		std::uint16_t track,
+		std::uint8_t channel,
+		control_lane lane,
+		tick_type tick,
+		std::uint16_t value)
 	{
+		auto op = std::make_unique<raw_control_change_op>(
+			track,
+			lane,
+			std::uint8_t(channel & 0x0F),
+			tick,
+			clamp_control_value(lane, value));
+
 		std::lock_guard<std::recursive_mutex> lock(editor_mutex);
-		auto op = std::make_unique<raw_control_change_op>(track, lane,
-			std::uint8_t(channel & 0x0F), tick, clamp_control_value(lane, value));
+
 		op->execute(*this);
 		push_undo(std::move(op));
 	}
 
-	void set_channel_control_points(std::uint8_t track, std::uint8_t channel,
+	void set_channel_control_points(std::uint16_t track, std::uint8_t channel,
 		control_lane lane, std::vector<std::pair<tick_type, std::uint16_t>> points)
 	{
 		std::lock_guard<std::recursive_mutex> lock(editor_mutex);
@@ -2836,6 +2951,7 @@ public:
 		{
 			return a.first < b.first;
 		});
+
 		points.erase(std::unique(points.begin(), points.end(),
 			[](const auto& a, const auto& b)
 		{
@@ -2852,20 +2968,29 @@ public:
 		tick_type start, tick_type end) const
 	{
 		std::lock_guard<std::recursive_mutex> lock(editor_mutex);
+
 		std::vector<std::pair<tick_type, double>> result;
+
 		for (const auto& [tick, tempo_us] : tempo_events)
+		{
 			if (tick >= start && tick < end && tempo_us)
 				result.push_back({tick, 60000000.0 / double(tempo_us)});
+		}
+
 		return result;
 	}
 
 	void set_tempo_point(tick_type tick, double bpm)
 	{
-		std::lock_guard<std::recursive_mutex> lock(editor_mutex);
 		bpm = std::clamp(bpm, 60000000.0 / 16777215.0, 60000000.0);
 		const auto tempo_us = std::uint32_t(std::lround(60000000.0 / bpm));
+
 		auto op = std::make_unique<tempo_change_op>(tick, tempo_us);
+
+		std::lock_guard<std::recursive_mutex> lock(editor_mutex);
+
 		op->execute(*this);
+
 		push_undo(std::move(op));
 	}
 
@@ -2874,39 +2999,47 @@ public:
 		std::lock_guard<std::recursive_mutex> lock(editor_mutex);
 		if (points.empty())
 			return;
+
 		std::sort(points.begin(), points.end());
 		points.erase(std::unique(points.begin(), points.end(),
 			[](const auto& a, const auto& b) { return a.first == b.first; }), points.end());
+
 		std::vector<std::pair<tick_type, std::uint32_t>> encoded;
 		encoded.reserve(points.size());
+
 		for (const auto& [tick, bpm_value] : points)
 		{
 			const double bpm = std::clamp(bpm_value, 60000000.0 / 16777215.0, 60000000.0);
 			encoded.push_back({tick, std::uint32_t(std::lround(60000000.0 / bpm))});
 		}
+
 		auto op = std::make_unique<tempo_batch_op>(std::move(encoded));
 		op->execute(*this);
+
 		push_undo(std::move(op));
 	}
 
-	std::uint8_t get_track_count() const
+	std::uint16_t get_track_count() const
 	{
 		std::lock_guard<std::recursive_mutex> lock(editor_mutex);
-		return std::uint8_t(tracks.size());
+		return std::uint16_t(tracks.size());
 	}
 
-	std::uint8_t get_track_primary_channel(std::uint8_t track) const
+	std::uint8_t get_track_primary_channel(std::uint16_t track) const
 	{
 		std::lock_guard<std::recursive_mutex> lock(editor_mutex);
+
 		auto it = tracks.find(track);
 		if (it != tracks.end() && it->second.channel != 0xFF)
 			return it->second.channel;
+
 		return 0;
 	}
 
 	std::uint8_t get_active_track_channel() const
 	{
 		std::lock_guard<std::recursive_mutex> lock(editor_mutex);
+
 		return get_track_primary_channel(active_track);
 	}
 
@@ -3108,19 +3241,24 @@ private:
 			return false;
 
 		// Group notes by track
-		std::map<std::uint8_t, std::vector<piano_note>> notes_by_track;
+		std::map<std::uint16_t, std::vector<piano_note>> notes_by_track;
 		for_each_logical_note([&](const piano_note& note)
 		{
 			notes_by_track[note.track_index].push_back(note);
 		});
 
 		// A track is written if it has notes or captured non-note events
-		std::vector<std::uint8_t> track_ids;
+		std::vector<std::uint16_t> track_ids;
+
 		for (const auto& [id, _] : notes_by_track)
 			track_ids.push_back(id);
+
 		for (const auto& [id, _] : raw_track_events)
+		{
 			if (!notes_by_track.count(id))
 				track_ids.push_back(id);
+		}
+
 		std::sort(track_ids.begin(), track_ids.end());
 
 		out.write("MThd", 4);
@@ -3220,6 +3358,7 @@ public:
 		std::lock_guard<std::recursive_mutex> lock(editor_mutex);
 		return materialize_logical_notes();
 	}
+
 	size_t get_note_count() const
 	{
 		std::lock_guard<std::recursive_mutex> lock(editor_mutex);
@@ -3304,7 +3443,7 @@ private:
 
 public:
 
-	const std::map<std::uint8_t, track_info>& get_tracks() const { return tracks; }
+	const std::map<std::uint16_t, track_info>& get_tracks() const { return tracks; }
 	const std::wstring& get_filename() const { return filename; }
 
 	// ========================================================================
@@ -3343,7 +3482,7 @@ public:
 			std::vector<control_ev>&& controls,
 			std::vector<std::pair<tick_type, std::uint32_t>>&& tempo,
 			std::uint16_t ppqn, std::shared_ptr<const loaded_note_data> base = {},
-			std::unordered_set<std::uint32_t> suppressed = {})
+			std::unordered_set<note_id_type> suppressed = {})
 			: editor_event_source(std::make_shared<snapshot_data>(std::move(notes),
 				std::move(controls), std::move(tempo), ppqn, std::move(base), std::move(suppressed)))
 		{
@@ -3396,18 +3535,28 @@ public:
 			// beginning inside a long chord can be silent until the next note-on (or
 			// forever). Only active polyphony is copied into this side buffer.
 			for (std::size_t i = 0; i < on_idx_; ++i)
+			{
 				if (notes_[i].end_tick > cross_tick)
 					seek_held_notes_.push_back(notes_[i]);
+			}
+
 			// Skip whole blocks of ended notes instead of scanning a huge prefix.
 			for (std::size_t block = 0; block * loaded_note_data::block_size < base_idx_; ++block)
 			{
-				if (data_->base->block_max_end[block] <= cross_tick) continue;
+				if (data_->base->block_max_end[block] <= cross_tick)
+					continue;
+
 				const auto end = std::min(base_idx_, (block + 1) * loaded_note_data::block_size);
+
 				for (auto i = block * loaded_note_data::block_size; i < end; ++i)
+				{
 					if (base_notes_[i].end_tick > cross_tick && !data_->suppressed.count(base_notes_[i].id))
 						seek_held_notes_.push_back(base_notes_[i]);
+				}
 			}
+
 			std::sort(seek_held_notes_.begin(), seek_held_notes_.end());
+
 			seek_held_idx_ = 0;
 			seek_target_us_ = target_us;
 			seek_anchor_pending_ = true;
@@ -3481,7 +3630,7 @@ public:
 							p.msb = cs.sel_msb; p.lsb = cs.sel_lsb; p.is_nrpn = cs.is_nrpn;
 							p.tick = controls_[i].tick;
 							if (d1 == 0x06) { p.data_msb = d2; p.has_msb = true; }
-							else			{ p.data_lsb = d2; p.has_lsb = true; }
+							else { p.data_lsb = d2; p.has_lsb = true; }
 							break;
 						}
 						// Data Increment/Decrement (0x60/0x61) are relative to the
@@ -3523,20 +3672,21 @@ public:
 				ge.k = generated_event::kind::control;
 				seek_state_.push_back(ge);
 			};
+
 			for (std::uint8_t ch = 0; ch < 16; ++ch)
 			{
 				chan_rpn& cs = rpn[ch];
 				for (const auto& [key, p] : cs.params)
 				{
 					if (p.is_nrpn) { push_cc(ch, 0x63, p.msb, p.tick); push_cc(ch, 0x62, p.lsb, p.tick); }
-					else		   { push_cc(ch, 0x65, p.msb, p.tick); push_cc(ch, 0x64, p.lsb, p.tick); }
+					else { push_cc(ch, 0x65, p.msb, p.tick); push_cc(ch, 0x64, p.lsb, p.tick); }
 					if (p.has_msb) push_cc(ch, 0x06, p.data_msb, p.tick);
 					if (p.has_lsb) push_cc(ch, 0x26, p.data_lsb, p.tick);
 				}
 				if (cs.had_selection)
 				{
 					if (cs.is_nrpn) { push_cc(ch, 0x63, cs.sel_msb, cs.sel_tick); push_cc(ch, 0x62, cs.sel_lsb, cs.sel_tick); }
-					else			{ push_cc(ch, 0x65, cs.sel_msb, cs.sel_tick); push_cc(ch, 0x64, cs.sel_lsb, cs.sel_tick); }
+					else { push_cc(ch, 0x65, cs.sel_msb, cs.sel_tick); push_cc(ch, 0x64, cs.sel_lsb, cs.sel_tick); }
 				}
 			}
 
@@ -3605,9 +3755,22 @@ public:
 			// (matches write_midi_from_notes ordering so playback == the saved file).
 			tick_type tick;
 			enum { pick_off, pick_raw, pick_on } which;
-			if (off_tick <= raw_tick && off_tick <= on_tick) { which = pick_off; tick = off_tick; }
-			else if (raw_tick <= on_tick)					{ which = pick_raw; tick = raw_tick; }
-			else											 { which = pick_on;  tick = on_tick; }
+
+			if (off_tick <= raw_tick && off_tick <= on_tick)
+			{
+				which = pick_off;
+				tick = off_tick;
+			}
+			else if (raw_tick <= on_tick)
+			{
+				which = pick_raw;
+				tick = raw_tick;
+			}
+			else
+			{
+				which = pick_on;
+				tick = on_tick;
+			}
 
 			const std::uint64_t time_us = advance_us_to(tick);
 
@@ -3644,7 +3807,8 @@ public:
 				out.channel = note.channel;
 				out.track_index = note.track_index;
 				off_heap_.push({note.end_tick, note.key, note.channel, note.track_index});
-				if (pick_base) ++base_idx_;
+				if (pick_base)
+					++base_idx_;
 				else ++on_idx_;
 			}
 
@@ -3658,37 +3822,58 @@ public:
 			std::vector<piano_note> notes;
 			std::vector<control_ev> controls;
 			std::vector<std::pair<tick_type, std::uint32_t>> tempo;
-			std::unordered_set<std::uint32_t> suppressed;
+			std::unordered_set<note_id_type> suppressed;
 			std::uint16_t ppqn;
 			tick_type max_tick = 0;
 
 			snapshot_data(std::vector<piano_note>&& edits, std::vector<control_ev>&& events,
 				std::vector<std::pair<tick_type, std::uint32_t>>&& tempos, std::uint16_t division,
-				std::shared_ptr<const loaded_note_data> loaded, std::unordered_set<std::uint32_t> excluded)
+				std::shared_ptr<const loaded_note_data> loaded, std::unordered_set<note_id_type> excluded)
 				: base(loaded ? std::move(loaded) : std::make_shared<loaded_note_data>()),
-				  notes(std::move(edits)), controls(std::move(events)), tempo(std::move(tempos)),
-				  suppressed(std::move(excluded)), ppqn(division ? division : 480)
+				notes(std::move(edits)), controls(std::move(events)), tempo(std::move(tempos)),
+				suppressed(std::move(excluded)), ppqn(division ? division : 480)
 			{
 				std::sort(notes.begin(), notes.end());
+
 				std::stable_sort(controls.begin(), controls.end(),
 					[](const control_ev& a, const control_ev& b) { return a.tick < b.tick; });
-				for (const auto& note : notes) max_tick = std::max(max_tick, note.end_tick);
-				if (!controls.empty()) max_tick = std::max(max_tick, controls.back().tick);
+
+				for (const auto& note : notes)
+					max_tick = std::max(max_tick, note.end_tick);
+
+				if (!controls.empty())
+					max_tick = std::max(max_tick, controls.back().tick);
+
 				for (std::size_t block = base->block_max_end.size(); block-- > 0;)
 				{
-					if (base->block_max_end[block] <= max_tick) continue;
-					if (suppressed.empty()) { max_tick = base->block_max_end[block]; continue; }
+					if (base->block_max_end[block] <= max_tick)
+						continue;
+
+					if (suppressed.empty())
+					{
+						max_tick = base->block_max_end[block];
+						continue;
+					}
+
 					const auto end = std::min(base->notes.size(), (block + 1) * loaded_note_data::block_size);
 					for (auto i = block * loaded_note_data::block_size; i < end; ++i)
-						if (!suppressed.count(base->notes[i].id)) max_tick = std::max(max_tick, base->notes[i].end_tick);
+					{
+						if (!suppressed.count(base->notes[i].id))
+							max_tick = std::max(max_tick, base->notes[i].end_tick);
+					}
 				}
 			}
 		};
 
 		explicit editor_event_source(std::shared_ptr<const snapshot_data> data,
-			std::optional<std::uint64_t> duration = {})
-			: data_(std::move(data)), base_notes_(data_->base->notes), notes_(data_->notes),
-			  controls_(data_->controls), tempo_(data_->tempo), ppqn_(data_->ppqn), total_us_(0)
+			std::optional<std::uint64_t> duration = {}) :
+			data_(std::move(data)),
+			base_notes_(data_->base->notes),
+			notes_(data_->notes),
+			controls_(data_->controls),
+			tempo_(data_->tempo),
+			ppqn_(data_->ppqn),
+			total_us_(0)
 		{
 			total_us_ = duration ? *duration : us_at_tick_scan(data_->max_tick);
 			rewind();

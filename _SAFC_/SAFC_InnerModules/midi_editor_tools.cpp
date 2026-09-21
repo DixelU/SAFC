@@ -22,6 +22,7 @@ std::vector<midi_editor::piano_note> midi_editor::get_tool_target_notes() const
 				result.push_back(note);
 		});
 	}
+
 	std::sort(result.begin(), result.end());
 	return result;
 }
@@ -65,6 +66,7 @@ void midi_editor::cancel_tool_preview()
 	std::lock_guard<std::recursive_mutex> lock(editor_mutex);
 	if (tool_preview)
 		tool_preview->undo(*this);
+
 	tool_preview.reset();
 	if (tool_preview_session)
 	{
@@ -80,6 +82,7 @@ void midi_editor::commit_note_tool(std::vector<piano_note> before,
 	std::lock_guard<std::recursive_mutex> lock(editor_mutex);
 	if (before.empty())
 		return;
+
 	auto op = std::make_unique<note_tool_op>(std::move(before), std::move(after), label);
 	op->execute(*this);
 	if (preview)
@@ -138,6 +141,7 @@ void midi_editor::flip_tool(bool horizontal, bool preserve_start_times,
 	auto before = get_tool_target_notes();
 	if (before.empty() || (!horizontal && !vertical))
 		return;
+
 	auto after = before;
 
 	tick_type min_start = before.front().start_tick, max_end = before.front().end_tick;
@@ -172,6 +176,7 @@ void midi_editor::flip_tool(bool horizontal, bool preserve_start_times,
 		if (vertical)
 			note.key = std::uint8_t(unsigned(min_key) + unsigned(max_key) - note.key);
 	}
+
 	commit_note_tool(std::move(before), std::move(after), "Flip Score", preview);
 }
 
@@ -183,6 +188,7 @@ std::size_t midi_editor::claw_tool(double period_beats, unsigned trash_every,
 	auto before = get_tool_target_notes();
 	if (before.empty())
 		return 0;
+
 	period_beats = std::clamp(period_beats, 0.0625, 64.0);
 	trash_every = std::clamp(trash_every, 2u, 64u);
 	time_distortion = std::clamp(time_distortion, 0.0, 1.0);
@@ -194,6 +200,7 @@ std::size_t midi_editor::claw_tool(double period_beats, unsigned trash_every,
 	const tick_type original_end = std::max_element(before.begin(), before.end(),
 		[](const piano_note& a, const piano_note& b) { return a.end_tick < b.end_tick; })->end_tick;
 	const double exponent = std::pow(2.0, (0.5 - time_distortion) * 3.0);
+
 	auto warp = [&](tick_type tick)
 	{
 		const tick_type rel = tick - origin;
@@ -268,6 +275,7 @@ std::size_t midi_editor::lfo_velocity_tool(double center, double range, double c
 	auto before = get_tool_target_notes();
 	if (before.empty())
 		return 0;
+
 	auto after = before;
 	const auto first = std::min_element(before.begin(), before.end(),
 		[](const piano_note& a, const piano_note& b) { return a.start_tick < b.start_tick; })->start_tick;
@@ -280,6 +288,7 @@ std::size_t midi_editor::lfo_velocity_tool(double center, double range, double c
 		const int value = int(std::lround(center + range * lfo_sample(shape, phase + cycles * x)));
 		note.velocity = std::uint8_t(std::clamp(value, 1, 127));
 	}
+
 	const auto count = before.size();
 	commit_note_tool(std::move(before), std::move(after), "Velocity LFO", preview);
 	return count;
@@ -293,6 +302,7 @@ std::size_t midi_editor::lfo_control_tool(control_lane lane, std::uint8_t channe
 	prepare_tool_preview(preview);
 	if (end <= begin)
 		return 0;
+
 	step = std::max<tick_type>(1, step);
 	const double span = double(end - begin);
 	const int maximum = lane == control_lane::pitch_bend ? 16383 : 127;
@@ -302,6 +312,7 @@ std::size_t midi_editor::lfo_control_tool(control_lane lane, std::uint8_t channe
 		const double x = double(tick - begin) / span;
 		const int value = int(std::lround(center + range * lfo_sample(shape, phase + cycles * x)));
 		points.emplace_back(tick, std::uint16_t(std::clamp(value, 0, maximum)));
+
 		if (end - tick < step)
 			break;
 	}
@@ -310,9 +321,11 @@ std::size_t midi_editor::lfo_control_tool(control_lane lane, std::uint8_t channe
 		const int value = int(std::lround(center + range * lfo_sample(shape, phase + cycles)));
 		points.emplace_back(end, std::uint16_t(std::clamp(value, 0, maximum)));
 	}
+
 	auto op = std::make_unique<raw_control_range_op>(active_track, lane,
 		std::uint8_t(channel & 0x0F), begin, end, std::move(points));
 	const auto count = op->after.size();
+
 	op->execute(*this);
 	if (preview)
 		tool_preview = std::move(op);

@@ -42,6 +42,7 @@ enum class log_event_type : uint8_t
 	unexpected_end_of_buffer,
 	track_size_mismatch,
 	meta_too_large,
+	internal_buffer_corruption,
 };
 
 struct log_event
@@ -84,6 +85,8 @@ struct log_event
 			return "Track size mismatch (expected " + std::to_string(e.param1) + ", got " + std::to_string(e.param2) + ")";
 		case log_event_type::meta_too_large:
 			return "Meta too large (size: " + std::to_string(e.param1) + ")";
+		case log_event_type::internal_buffer_corruption:
+			return "Internal buffer corruption - " + std::to_string(e.param1) + " ~ " + std::to_string(e.param2);
 		default:
 			return "";
 		}
@@ -1092,9 +1095,13 @@ struct single_midi_processor_2
 
 			auto& tick = get_value<tick_type>(db_current, tick_position);
 
-			di = expected_size(db_current);
+			auto db_size = expected_size(db_current);
+			if (db_size > (1ULL << 32) - 1) [[unlikely]]
+				(*buffers.error) << log_event{log_event_type::meta_too_large, (uint64_t)i, static_cast<uint64_t>(db_size)};
 
-			if(tick != disable_tick)
+			di = static_cast<metasize_type>(db_size);
+
+			if(tick != disable_tick) [[likely]]
 				data_pointers.emplace_back(tick, i, di);
 
 			db_current += di;
@@ -2127,12 +2134,16 @@ struct single_midi_processor_2
 			(*loggers.log) << log_event{log_event_type::tracks_processed, (uint64_t)track_counter, (uint64_t)current_count};
 		}
 
-		if (file_input.failed()) throw std::runtime_error("MIDI input read failed");
+		if (file_input.failed())
+			throw std::runtime_error("MIDI input read failed");
+
 		file_input.close();
+
 		file_output.seekp(10, std::ios::beg);
-		file_output.put(track_counter >> 8);
-		file_output.put(track_counter & 0xFF);
+		file_output.put(static_cast<uint8_t>(track_counter >> 8));
+		file_output.put(static_cast<uint8_t>(track_counter & 0xFF));
 		file_output.flush();
+
 		file_output.close();
 
 		data.tracks_count = track_counter;
