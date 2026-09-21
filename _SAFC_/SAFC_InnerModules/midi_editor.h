@@ -834,6 +834,55 @@ struct midi_editor
 		std::string description() const override { return label; }
 	};
 
+	/** One undo entry for an interactive cut-line gesture. */
+	struct split_notes_op : edit_operation
+	{
+		std::vector<piano_note> before;
+		std::vector<piano_note> after;
+		std::vector<note_id_type> selected_before;
+		std::vector<note_id_type> selected_after;
+
+		split_notes_op(std::vector<piano_note> old_notes,
+			std::vector<piano_note> new_notes,
+			std::vector<note_id_type> old_selection,
+			std::vector<note_id_type> new_selection)
+			: before(std::move(old_notes)), after(std::move(new_notes)),
+			selected_before(std::move(old_selection)), selected_after(std::move(new_selection))
+		{
+		}
+
+		static void apply(midi_editor& editor,
+			const std::vector<piano_note>& remove_values,
+			const std::vector<piano_note>& add_values,
+			const std::vector<note_id_type>& next_selection)
+		{
+			for (const auto& value : remove_values)
+			{
+				editor.selected_notes.erase(value.id);
+				editor.remove_note_by_id(value.id);
+			}
+			for (const auto& value : add_values)
+				editor.add_note(value);
+			for (const auto id : next_selection)
+				editor.selected_notes.insert(id);
+
+			editor.selected_notes.compact();
+			editor.mark_dirty_keep_order();
+		}
+
+		void execute(midi_editor& editor) override
+		{
+			apply(editor, before, after, selected_after);
+		}
+
+		void undo(midi_editor& editor) override
+		{
+			apply(editor, after, before, selected_before);
+		}
+
+		std::string description() const override { return "Split Notes"; }
+	};
+
 	/**
 	 * Functor for quantizing notes to grid
 	 */
@@ -1907,6 +1956,89 @@ public:
 		push_undo(std::move(op));
 		selected_notes.erase(id);
 		return true;
+	}
+
+	/** Erase a gesture's collected notes as one undoable edit. */
+	std::size_t erase_notes(std::vector<note_id_type> ids)
+	{
+		std::lock_guard<std::recursive_mutex> lock(editor_mutex);
+		if (ids.empty())
+			return 0;
+
+		std::sort(ids.begin(), ids.end());
+		ids.erase(std::unique(ids.begin(), ids.end()), ids.end());
+		ids.erase(std::remove_if(ids.begin(), ids.end(),
+			[&](note_id_type id) { return find_note_by_id(id) == nullptr; }), ids.end());
+		if (ids.empty())
+			return 0;
+
+		auto op = std::make_unique<delete_notes_op>(std::move(ids));
+		op->execute(*this);
+
+		for (const auto& value : op->removed_notes)
+			selected_notes.erase(value.id);
+		selected_notes.compact();
+
+		const auto count = op->removed_notes.size();
+		push_undo(std::move(op));
+		return count;
+	}
+
+	/**
+	 * Split notes at their per-note cut ticks. The shorter result from each cut
+	 * is selected; equal halves deterministically select the left result.
+	 */
+	std::size_t split_notes_at(std::vector<std::pair<note_id_type, tick_type>> cuts)
+	{
+		std::lock_guard<std::recursive_mutex> lock(editor_mutex);
+		if (cuts.empty())
+			return 0;
+
+		std::vector<piano_note> before;
+		std::vector<piano_note> after;
+		std::vector<note_id_type> selected_before;
+		std::vector<note_id_type> selected_after;
+		std::unordered_set<note_id_type> seen;
+
+		before.reserve(cuts.size());
+		after.reserve(cuts.size() * 2);
+		selected_before.reserve(cuts.size());
+		selected_after.reserve(cuts.size());
+
+		for (const auto& [id, cut] : cuts)
+		{
+			if (!seen.insert(id).second)
+				continue;
+
+			const auto* source_ptr = find_note_by_id(id);
+			if (!source_ptr || cut <= source_ptr->start_tick || cut >= source_ptr->end_tick)
+				continue;
+
+			const auto source = *source_ptr;
+			before.push_back(source);
+			if (selected_notes.count(source.id))
+				selected_before.push_back(source.id);
+
+			auto left = source;
+			left.end_tick = cut;
+			auto right = source;
+			right.start_tick = cut;
+			right.id = next_note_id++;
+
+			after.push_back(left);
+			after.push_back(right);
+			selected_after.push_back(left.length() <= right.length() ? left.id : right.id);
+		}
+
+		if (before.empty())
+			return 0;
+
+		const auto count = before.size();
+		auto op = std::make_unique<split_notes_op>(std::move(before), std::move(after),
+			std::move(selected_before), std::move(selected_after));
+		op->execute(*this);
+		push_undo(std::move(op));
+		return count;
 	}
 
 	/**
@@ -3729,6 +3861,7 @@ public:
 				const std::uint8_t vel = std::max<std::uint8_t>(note.velocity, 1);
 				out.time_us = seek_target_us_;
 				out.short_msg = smsg(0x90 | (note.channel & 0x0F), note.key, vel);
+				out.tick = note.start_tick;
 				out.k = generated_event::kind::note_on;
 				out.key = note.key;
 				out.velocity = vel;
@@ -3773,6 +3906,7 @@ public:
 			}
 
 			const std::uint64_t time_us = advance_us_to(tick);
+			out.tick = tick;
 
 			if (which == pick_off)
 			{

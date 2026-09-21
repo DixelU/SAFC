@@ -11,7 +11,8 @@ A memory-efficient MIDI piano roll editor that reads directly from memory-mapped
 - `midi_editor.h` contains the editor model and public interface.
 - `midi_editor_tools.cpp` contains Chopper, Flip, Claw, LFO, and reversible
   preview implementation.
-- `midi_editor_viewer.h` contains piano-roll drawing and interaction.
+- `imgui/editor_panel.cpp` contains the current ImGui piano-roll drawing and
+  interaction; `midi_editor_viewer.h` contains the legacy frontend.
 - `midi_editor_tools_ui.h/.cpp` contains score-tool callbacks and settings
   window construction.
 - `simple_player_viewer.h` contains player visualization; playback remains in
@@ -211,6 +212,18 @@ scale spanning the complete MIDI Set Tempo range (about 3.576 to 60,000,000 BPM)
 Ctrl+wheel zooms the BPM scale around the cursor, Shift+wheel pans it, and
 Ctrl+Shift+wheel restores the full range. Space toggles playback from the visible
 start tick; Ctrl+S opens the edited-MIDI save workflow.
+
+### Direct roll gestures
+
+Right-drag erasing tests every note rectangle against the complete cursor segment
+between input frames, so quick movements do not skip notes at low frame rates. A
+whole erase drag is committed as one undo entry.
+
+The ImGui **Split** tool (shortcut **C**) draws a vertical or diagonal cut line.
+Active-track notes are split where that line intersects each note's horizontal
+middle. The shorter piece from every cut is added to the selection (the left piece
+wins an exact tie), and the complete cut gesture is one undo entry. **P**, **E**,
+and **D** switch back to Draw, Select, and Erase respectively.
 
 ### Integration with Processor
 

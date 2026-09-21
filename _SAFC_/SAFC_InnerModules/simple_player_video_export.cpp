@@ -1299,6 +1299,7 @@ public:
 				continue;
 			output = {};
 			output.time_us = scale_time(scheduled.sample, 1'000'000ULL, sample_rate_);
+			output.tick = scheduled.event.tick;
 			output.short_msg = scheduled.event.status |
 				(static_cast<std::uint32_t>(scheduled.event.data1) << 8) |
 				(static_cast<std::uint32_t>(scheduled.event.data2) << 16);
@@ -1359,6 +1360,7 @@ bool next_playback_audio_event(safsyn::TimedMidiEvent& output,
 				continue;
 			output = {};
 			output.frame = scale_time(event.time_us, adapter.sample_rate, 1'000'000ULL);
+			output.tick = event.tick.value_or(event.time_us);
 			output.kind = safsyn::TimedMidiEventKind::ShortMessage;
 			output.short_message = event.short_msg;
 			return true;

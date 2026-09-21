@@ -15,10 +15,11 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <limits>
 #include <map>
-#include <set>
 #include <stdexcept>
 #include <thread>
+#include <unordered_set>
 
 namespace safc::imgui_ui
 {
@@ -34,7 +35,8 @@ enum class edit_mode
 {
 	draw,
 	select,
-	erase
+	erase,
+	split
 };
 enum class lane_kind
 {
@@ -86,6 +88,40 @@ ImU32 note_color(unsigned track, unsigned channel, bool selected, bool ghost = f
 bool contains(ImVec2 p, ImVec2 low, ImVec2 high)
 {
 	return p.x >= low.x && p.x < high.x && p.y >= low.y && p.y < high.y;
+}
+
+bool clip_segment_to_rect(ImVec2& first, ImVec2& last, ImVec2 low, ImVec2 high)
+{
+	const ImVec2 origin = first;
+	const ImVec2 delta(last.x - first.x, last.y - first.y);
+	float enter = 0.f, leave = 1.f;
+
+	auto clip_axis = [&](float value, float change, float minimum, float maximum)
+	{
+		if (std::abs(change) < 1.e-6f)
+			return value >= minimum && value <= maximum;
+
+		float lower_t = (minimum - value) / change;
+		float upper_t = (maximum - value) / change;
+		if (lower_t > upper_t)
+			std::swap(lower_t, upper_t);
+		enter = std::max(enter, lower_t);
+		leave = std::min(leave, upper_t);
+		return enter <= leave;
+	};
+
+	if (!clip_axis(origin.x, delta.x, low.x, high.x) ||
+		!clip_axis(origin.y, delta.y, low.y, high.y))
+		return false;
+
+	first = ImVec2(origin.x + delta.x * enter, origin.y + delta.y * enter);
+	last = ImVec2(origin.x + delta.x * leave, origin.y + delta.y * leave);
+	return true;
+}
+
+bool segment_intersects_rect(ImVec2 first, ImVec2 last, ImVec2 low, ImVec2 high)
+{
+	return clip_segment_to_rect(first, last, low, high);
 }
 
 void help_tip(const char* text)
@@ -142,6 +178,8 @@ struct editor_panel::impl
 		none,
 		draw,
 		select,
+		erase,
+		split,
 		move,
 		resize,
 		stretch,
@@ -162,6 +200,8 @@ struct editor_panel::impl
 	double stretch_factor = 1.;
 	midi_editor::select_mode selection_mode = midi_editor::select_mode::add;
 	std::vector<note> gesture_notes;
+	std::unordered_set<midi_editor::note_id_type> erased_notes;
+	std::vector<std::pair<midi_editor::note_id_type, tick>> split_cuts;
 	std::map<midi_editor::note_id_type, velocity_entry> velocities;
 
 	std::map<tick, double> control_values;
@@ -486,6 +526,23 @@ struct editor_panel::impl
 				std::uint8_t(std::min(anchor_key, current_key)), std::uint8_t(std::max(anchor_key, current_key)),
 				document->get_active_track(), selection_mode);
 			break;
+		case gesture_kind::erase:
+		{
+			std::vector<midi_editor::note_id_type> ids(erased_notes.begin(), erased_notes.end());
+			const auto count = document->erase_notes(std::move(ids));
+			if (count)
+				status = "Erased " + std::to_string(count) + (count == 1 ? " note." : " notes.");
+			break;
+		}
+		case gesture_kind::split:
+		{
+			const auto count = document->split_notes_at(std::move(split_cuts));
+			status = count
+				? "Split " + std::to_string(count) + (count == 1 ? " note; shorter piece selected."
+					: " notes; shorter pieces selected.")
+				: "The split line did not cross the middle of an active-track note.";
+			break;
+		}
 		case gesture_kind::move:
 			if (delta_tick || delta_key)
 				document->move_selected_notes(delta_tick, delta_key);
@@ -533,6 +590,8 @@ struct editor_panel::impl
 			apply_gesture();
 		gesture = gesture_kind::none;
 		gesture_notes.clear();
+		erased_notes.clear();
+		split_cuts.clear();
 		velocities.clear();
 		control_values.clear();
 		delta_tick = 0;
@@ -765,6 +824,17 @@ struct editor_panel::impl
 		{
 			if (io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_C))
 				document->select_channel(std::uint8_t(channel()), document->get_active_track());
+			if (!io.KeyShift)
+			{
+				if (ImGui::IsKeyPressed(ImGuiKey_C))
+					mode = edit_mode::split;
+				if (ImGui::IsKeyPressed(ImGuiKey_P))
+					mode = edit_mode::draw;
+				if (ImGui::IsKeyPressed(ImGuiKey_E))
+					mode = edit_mode::select;
+				if (ImGui::IsKeyPressed(ImGuiKey_D))
+					mode = edit_mode::erase;
+			}
 			if (ImGui::IsKeyPressed(ImGuiKey_Delete))
 				document->delete_selected_notes();
 			if (ImGui::IsKeyPressed(ImGuiKey_Space))
@@ -1049,6 +1119,94 @@ struct editor_panel::impl
 		}
 	};
 
+	std::pair<int, int> segment_key_range(const canvas_view& view, ImVec2 first, ImVec2 last) const
+	{
+		const float bottom = std::nextafter(view.roll_max.y, view.roll_min.y);
+		const auto key_at = [&](float y)
+		{
+			return view.key_at(std::clamp(y, view.roll_min.y, bottom));
+		};
+		const int first_key = key_at(first.y), last_key = key_at(last.y);
+		const int padding = std::max(1, int(std::ceil(2.f / view.key_height)));
+		return {std::max(view.low, std::min(first_key, last_key) - padding),
+			std::min(view.high, std::max(first_key, last_key) + padding)};
+	}
+
+	std::pair<tick, tick> segment_tick_range(const canvas_view& view, ImVec2 first, ImVec2 last) const
+	{
+		const tick first_tick = view.tick_at(std::min(first.x, last.x));
+		const tick last_tick = view.tick_at(std::max(first.x, last.x));
+		const tick padding = std::max<tick>(1,
+			tick(std::ceil(double(view.duration) * 2. / double(view.width))));
+		const tick begin = first_tick > padding ? first_tick - padding : 0;
+		const tick remaining = std::numeric_limits<tick>::max() - last_tick;
+		const tick requested_padding = padding == std::numeric_limits<tick>::max() ? padding : padding + 1;
+		const tick end_padding = std::min(remaining, requested_padding);
+		return {begin, last_tick + end_padding};
+	}
+
+	void collect_erased_notes(const canvas_view& view, ImVec2 first, ImVec2 last)
+	{
+		if (!clip_segment_to_rect(first, last, view.roll_min, view.roll_max))
+			return;
+
+		const auto [begin, end] = segment_tick_range(view, first, last);
+		const auto [low, high] = segment_key_range(view, first, last);
+		const auto active_track = document->get_active_track();
+		for (const auto& value : document->get_notes_in_range(
+			begin, end, std::uint8_t(low), std::uint8_t(high)))
+		{
+			if (value.track_index != active_track)
+				continue;
+
+			const float x0 = view.x_at(double(value.start_tick));
+			const float x1 = std::max(x0 + 2.f, view.x_at(double(value.end_tick)));
+			const float note_y = view.y_at(value.key);
+			const float y0 = note_y + .5f;
+			const float y1 = note_y + std::max(2.f, view.key_height - .5f);
+			if (segment_intersects_rect(first, last, ImVec2(x0, y0), ImVec2(x1, y1)))
+				erased_notes.insert(value.id);
+		}
+	}
+
+	std::vector<std::pair<midi_editor::note_id_type, tick>> find_split_cuts(
+		const canvas_view& view, ImVec2 first, ImVec2 last) const
+	{
+		std::vector<std::pair<midi_editor::note_id_type, tick>> result;
+		if (!clip_segment_to_rect(first, last, view.roll_min, view.roll_max) ||
+			std::abs(last.y - first.y) < .5f)
+			return result;
+
+		const auto [begin, end] = segment_tick_range(view, first, last);
+		const auto [low, high] = segment_key_range(view, first, last);
+		const double delta_y = double(last.y - first.y);
+		const auto active_track = document->get_active_track();
+		for (const auto& value : document->get_notes_in_range(
+			begin, end, std::uint8_t(low), std::uint8_t(high)))
+		{
+			if (value.track_index != active_track)
+				continue;
+
+			const double center_y = double(view.y_at(value.key) + view.key_height * .5f);
+			const double ratio = (center_y - double(first.y)) / delta_y;
+			if (ratio < 0. || ratio > 1.)
+				continue;
+
+			const double x = double(first.x) + double(last.x - first.x) * ratio;
+			const double position = double(view.start) +
+				(x - double(view.roll_min.x)) / double(view.width) * double(view.duration);
+			if (!std::isfinite(position) || position < 0. ||
+				position > double(std::numeric_limits<tick>::max()))
+				continue;
+
+			const auto cut = tick(std::llround(position));
+			if (cut > value.start_tick && cut < value.end_tick)
+				result.emplace_back(value.id, cut);
+		}
+
+		return result;
+	}
+
 	void draw_piano_roll(const canvas_view& view)
 	{
 		auto* draw = ImGui::GetWindowDrawList();
@@ -1135,6 +1293,8 @@ struct editor_panel::impl
 		{
 			if (value.track_index != document->get_active_track())
 				continue;
+			if (gesture == gesture_kind::erase && erased_notes.contains(value.id))
+				continue;
 
 			render_note(value, false, false);
 		}
@@ -1185,6 +1345,16 @@ struct editor_panel::impl
 
 			draw->AddRectFilled(a, b, IM_COL32(70, 169, 230, 55));
 			draw->AddRect(a, b, IM_COL32(119, 207, 255, 255));
+		}
+		else if (gesture == gesture_kind::split)
+		{
+			auto first = anchor_mouse, last = current_mouse;
+			if (clip_segment_to_rect(first, last, view.roll_min, view.roll_max))
+			{
+				draw->AddLine(first, last, IM_COL32(255, 104, 111, 255), 2.f);
+				draw->AddCircleFilled(first, 3.f, IM_COL32(255, 211, 112, 255));
+				draw->AddCircleFilled(last, 3.f, IM_COL32(255, 211, 112, 255));
+			}
 		}
 		const auto playback_state = playback.snapshot();
 		if (playback_state.busy && active_playback_source && playback.current_source() == active_playback_source)
@@ -1358,12 +1528,20 @@ struct editor_panel::impl
 		else if (in_roll && ImGui::IsMouseClicked(ImGuiMouseButton_Right))
 		{
 			note hit;
-			if (document->find_note_at(
-					view.tick_at(mouse.x), std::uint8_t(view.key_at(mouse.y)), hit, 0, 0, document->get_active_track()))
-				document->erase_note_at(
-					view.tick_at(mouse.x), std::uint8_t(view.key_at(mouse.y)), document->get_active_track());
-			else if (ghosts && document->find_note_at(view.tick_at(mouse.x), std::uint8_t(view.key_at(mouse.y)), hit))
+			const auto position = view.tick_at(mouse.x);
+			const auto key = std::uint8_t(view.key_at(mouse.y));
+			const bool active_note = document->find_note_at(
+				position, key, hit, 0, 0, document->get_active_track());
+			if (!active_note && ghosts && document->find_note_at(position, key, hit))
 				document->set_active_track(std::uint8_t(hit.track_index));
+			else
+			{
+				gesture = gesture_kind::erase;
+				gesture_button = ImGuiMouseButton_Right;
+				anchor_mouse = current_mouse = mouse;
+				erased_notes.clear();
+				collect_erased_notes(view, mouse, mouse);
+			}
 		}
 		else if (in_roll && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
 		{
@@ -1377,7 +1555,14 @@ struct editor_panel::impl
 				document->find_note_at(anchor_tick, std::uint8_t(anchor_key), hit, 0, 0, document->get_active_track());
 			if (mode == edit_mode::erase)
 			{
-				document->erase_note_at(anchor_tick, std::uint8_t(anchor_key), document->get_active_track());
+				gesture = gesture_kind::erase;
+				erased_notes.clear();
+				collect_erased_notes(view, mouse, mouse);
+			}
+			else if (mode == edit_mode::split)
+			{
+				gesture = gesture_kind::split;
+				split_cuts.clear();
 			}
 			else if (io.KeyShift || (mode == edit_mode::select && !found))
 			{
@@ -1442,6 +1627,7 @@ struct editor_panel::impl
 		auto& io = ImGui::GetIO();
 		const auto mouse = io.MousePos;
 
+		const auto previous_mouse = current_mouse;
 		current_mouse = mouse;
 		const auto previous_tick = current_tick;
 		current_tick = view.tick_at(mouse.x);
@@ -1464,6 +1650,8 @@ struct editor_panel::impl
 				view.size.y * canvas_view::maximum_lane_fraction);
 		else if (gesture == gesture_kind::draw)
 			audition(current_key);
+		else if (gesture == gesture_kind::erase)
+			collect_erased_notes(view, previous_mouse, current_mouse);
 		else if (gesture == gesture_kind::move || gesture == gesture_kind::resize)
 		{
 			const tick cell = io.KeyAlt ? 1 : snap_ticks();
@@ -1499,6 +1687,8 @@ struct editor_panel::impl
 			finish_gesture(false);
 		else if (!ImGui::IsMouseDown(gesture_button))
 		{
+			if (gesture == gesture_kind::split)
+				split_cuts = find_split_cuts(view, anchor_mouse, current_mouse);
 			if (line_gesture && gesture == gesture_kind::velocity)
 				paint_velocity(anchor_tick, current_tick, anchor_value, view.value_at(mouse.y));
 			if (line_gesture && gesture == gesture_kind::control)
@@ -1539,10 +1729,6 @@ struct editor_panel::impl
 		if (gesture != gesture_kind::none)
 			update_canvas_gesture(view);
 
-		if (gesture == gesture_kind::none && in_roll && mode == edit_mode::erase &&
-			ImGui::IsMouseDown(ImGuiMouseButton_Left))
-			document->erase_note_at(
-				view.tick_at(mouse.x), std::uint8_t(view.key_at(mouse.y)), document->get_active_track());
 		if (gesture == gesture_kind::none && in_keys && ImGui::IsMouseDown(ImGuiMouseButton_Left))
 			audition(view.key_at(mouse.y));
 		if (in_lane && gesture == gesture_kind::none)
@@ -1595,7 +1781,7 @@ struct editor_panel::impl
 
 		ImGui::BeginDisabled(tool != tool_kind::none);
 		ImGui::SetNextItemWidth(135);
-		enum_combo("Tool", mode, "Draw / move\0Select\0Erase\0");
+		enum_combo("Tool", mode, "Draw / move\0Select\0Erase\0Split\0");
 		ImGui::SameLine();
 		ImGui::SetNextItemWidth(100);
 		ImGui::Combo("Snap", &snap_index,
@@ -1660,12 +1846,15 @@ struct editor_panel::impl
 		{
 			ImGui::TextWrapped(
 				"Draw: left-drag empty space. Move: drag a note. Resize: drag its right edge; Ctrl stretches the "
-				"selection. Shift-drag selects; Shift+Alt removes. Right-click erases or selects a ghost track. "
+				"selection. Shift-drag selects; Shift+Alt removes. Right-drag erases every note crossed between "
+				"frames, or selects a ghost track when pressed on one. Split: drag a vertical or diagonal cut line; "
+				"each note is divided where the line crosses its middle, and its shorter piece is selected. "
 				"Middle-drag pans; wheel zooms. Alt bypasses snap. Wheel on keys zooms pitch; right-drag keys scrolls. "
 				"Controller lane: left paints, right draws a ramp.");
 			ImGui::TextWrapped(
 				"Ctrl+Z/Y undo/redo; Ctrl+C/X/V/B copy/cut/paste/duplicate; Ctrl+A/D select track/deselect; Shift+C "
-				"selects channel; Alt+C assigns channel. Arrows move; Ctrl+Up/Down transposes octaves. Q quantizes. "
+				"selects channel; Alt+C assigns channel. P/E/D/C choose Draw/Select/Erase/Split. Arrows move; "
+				"Ctrl+Up/Down transposes octaves. Q quantizes. "
 				"Space plays from view. Alt+U/Y/W/O opens Chopper/Flip/Claw/LFO. Esc cancels a gesture.");
 		}
 		ImGui::Separator();
@@ -1859,6 +2048,29 @@ bool editor_panel::run_smoke(const std::wstring& output_directory, std::string& 
 		auto& model = *state.document;
 		require(model.is_file_loaded() && model.get_note_count() == 3, "Editor owned load did not read the fixture.");
 		model.set_active_track(0);
+		note first_note, second_note;
+		require(model.find_note_at(0, 60, first_note) && model.find_note_at(480, 64, second_note),
+			"Editor split/erase fixture notes are missing.");
+		model.select_note(second_note.id);
+		require(model.split_notes_at({{first_note.id, 120}}) == 1 && model.get_note_count() == 4,
+			"Interactive split did not create two note pieces.");
+		const auto split_pieces = model.get_notes_on_key(60);
+		require(split_pieces.size() == 2 && split_pieces[0].length() == 120 && split_pieces[1].length() == 360,
+			"Interactive split used the wrong cut tick.");
+		require(model.is_note_selected(second_note.id) && model.is_note_selected(split_pieces[0].id) &&
+			!model.is_note_selected(split_pieces[1].id),
+			"Interactive split did not add only the shorter half to selection.");
+		model.undo();
+		require(model.get_note_count() == 3 && model.find_note_at(0, 60, first_note),
+			"Interactive split did not undo as one edit.");
+		model.redo();
+		require(model.get_note_count() == 4 && model.get_notes_on_key(60).size() == 2,
+			"Interactive split redo did not restore both pieces.");
+		model.undo();
+		require(model.erase_notes({first_note.id, second_note.id}) == 2 && model.get_note_count() == 1,
+			"Swept erase did not batch its collected notes.");
+		model.undo();
+		require(model.get_note_count() == 3, "Swept erase did not undo as one edit.");
 		state.anchor_tick = 960;
 		state.current_tick = 1080;
 		state.anchor_key = state.current_key = 72;

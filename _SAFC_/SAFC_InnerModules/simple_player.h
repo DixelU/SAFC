@@ -330,6 +330,7 @@ struct simple_player
 	{
 		uint64_t time_us;	// target send time in microseconds from start
 		uint32_t short_msg;  // prepared MIDI short message (0 = invalid/empty)
+		std::optional<uint64_t> tick;
 	};
 
 	struct seek_held_note
@@ -1499,7 +1500,7 @@ struct simple_player
 						// Historical timestamps would underflow against start_offset_us
 						// if the sender had not drained them before FF completed.
 						state.send_buffer.push({
-							fast_forwarding ? skip_to_us : batch_time_us, msg_to_send});
+							fast_forwarding ? skip_to_us : batch_time_us, msg_to_send, batch_tick});
 
 						// Per-batch (outer) throttle only fires between unique
 						// ticks, so a single dense tick could otherwise push
@@ -1649,7 +1650,7 @@ struct simple_player
 			if (ev.short_msg != 0)
 			{
 				state.send_buffer.push({
-					fast_forwarding ? skip_to_us : batch_time_us, ev.short_msg});
+					fast_forwarding ? skip_to_us : batch_time_us, ev.short_msg, ev.tick});
 
 				// Same intra-batch size cap as the file parser (sampled every 1024).
 				if ((++cap_check_counter & 1023u) == 0)
@@ -1696,7 +1697,7 @@ struct simple_player
 				if (!state.send_buffer.empty())
 				{
 					auto& ev = state.send_buffer.front();
-					if (ev.short_msg != 0 && !send_playback_message(ev.short_msg))
+					if (ev.short_msg != 0 && !send_playback_message(ev.short_msg, ev.tick.value_or(ev.time_us)))
 						continue;
 					state.send_buffer.pop();
 					continue;
@@ -1785,7 +1786,7 @@ struct simple_player
 				continue;
 
 			// send the event
-			if (ev.short_msg != 0 && !send_playback_message(ev.short_msg))
+			if (ev.short_msg != 0 && !send_playback_message(ev.short_msg, ev.tick.value_or(ev.time_us)))
 				continue;
 
 			state.send_buffer.pop();
@@ -3125,7 +3126,7 @@ private:
 		send_output_message(make_smsg(0xB0 | channel, 123));
 	}
 
-	bool send_playback_message(uint32_t message)
+	bool send_playback_message(uint32_t message, std::optional<uint64_t> tick = {})
 	{
 		if (!syncore.active())
 			return send_output_message(message);
@@ -3136,7 +3137,7 @@ private:
 			if (!state.seeking_ff.load(std::memory_order_acquire) &&
 				state.paused.load(std::memory_order_acquire))
 				return false;
-			switch (syncore.try_send_short_message(message))
+			switch (syncore.try_send_short_message(message, tick))
 			{
 			case syncore_send_result::queued:
 				return true;

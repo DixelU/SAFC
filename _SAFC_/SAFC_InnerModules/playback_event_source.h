@@ -3,6 +3,7 @@
 #define SAFC_PLAYBACK_EVENT_SOURCE
 
 #include <cstdint>
+#include <optional>
 
 /**
  * Abstract, time-ordered source of playback events for simple_player.
@@ -26,6 +27,7 @@ struct generated_event
 	std::uint8_t  velocity;	 // note_on velocity (visuals)
 	std::uint8_t  channel;	  // 0-15 (visuals)
 	std::uint16_t track_index;  // visuals colour id
+	std::optional<std::uint64_t> tick; // Original source tick, when available.
 
 	generated_event()
 		: time_us(0), short_msg(0), k(kind::control),

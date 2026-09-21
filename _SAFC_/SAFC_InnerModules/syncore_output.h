@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 
 enum class syncore_phase_mode : std::uint32_t
@@ -58,7 +59,8 @@ public:
 	void stop() noexcept;
 	void panic() noexcept;
 	bool send_short_message(std::uint32_t message) noexcept;
-	syncore_send_result try_send_short_message(std::uint32_t message) noexcept;
+	syncore_send_result try_send_short_message(std::uint32_t message,
+		std::optional<std::uint64_t> tick = {}) noexcept;
 	bool active() const noexcept;
 	syncore_runtime_status status() const;
 

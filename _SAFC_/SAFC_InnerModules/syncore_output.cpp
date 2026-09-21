@@ -334,7 +334,8 @@ bool syncore_output::active() const noexcept
 	return impl_->active.load(std::memory_order_acquire);
 }
 
-syncore_send_result syncore_output::try_send_short_message(std::uint32_t message) noexcept
+syncore_send_result syncore_output::try_send_short_message(std::uint32_t message,
+	std::optional<std::uint64_t> tick) noexcept
 {
 #ifdef SAFC_WITH_SYNCORE
 	std::shared_ptr<safsyn::WindowsSynth> synth;
@@ -345,7 +346,7 @@ syncore_send_result syncore_output::try_send_short_message(std::uint32_t message
 		synth = impl_->synth;
 	}
 	if (synth)
-		switch (synth->try_send_short_message(message))
+		switch (synth->try_send_short_message(message, tick))
 		{
 		case safsyn::MidiEnqueueResult::Queued: return syncore_send_result::queued;
 		case safsyn::MidiEnqueueResult::Full: return syncore_send_result::full;
@@ -353,6 +354,7 @@ syncore_send_result syncore_output::try_send_short_message(std::uint32_t message
 		}
 #else
 	(void)message;
+	(void)tick;
 #endif
 	return syncore_send_result::unavailable;
 }

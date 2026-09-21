@@ -96,11 +96,13 @@ void verify_selected(ui::playback_session& playback, unsigned char key)
     auto second = factory();
     generated_event a{}, b{};
     require(first.get() != second.get() && first->next(a) && second->next(b), "Independent archive readers");
-    require(a.key == key && b.key == key && a.k == generated_event::kind::note_on,
+    require(a.key == key && b.key == key && a.k == generated_event::kind::note_on &&
+        a.tick == 0 && b.tick == 0,
         "Selected archive member reaches playback and both export readers");
     require(first->next(a) && a.k == generated_event::kind::note_off,
         "First cursor can advance independently");
-    require(second->next(b) && b.k == generated_event::kind::note_off && a.time_us == b.time_us,
+    require(second->next(b) && b.k == generated_event::kind::note_off && a.time_us == b.time_us &&
+        a.tick == 120 && b.tick == 120,
         "Second cursor preserves time ordering");
 }
 
@@ -182,7 +184,8 @@ void editor_snapshot_checks(const fs::path& directory)
     auto reader = typed->fork_reader();
     auto other = typed->fork_reader();
     generated_event first{}, second{};
-    require(reader->next(first) && reader->next(second) && other->next(second) && first.short_msg == second.short_msg,
+    require(reader->next(first) && reader->next(second) && other->next(second) && first.short_msg == second.short_msg &&
+        first.tick == 0 && second.tick == 0,
         "Advancing one snapshot cursor does not move the other");
     constexpr std::uint64_t target = 5000ull * 500000 / 480;
     auto verify_held = [&](playback_event_source& source, unsigned velocity, unsigned channel, bool inserted)
@@ -197,7 +200,7 @@ void editor_snapshot_checks(const fs::path& directory)
             last = event.time_us;
             if (event.k == generated_event::kind::note_on && event.key == 40)
             {
-                require(event.time_us == target && event.velocity == velocity && event.channel == channel,
+                require(event.time_us == target && event.velocity == velocity && event.channel == channel && event.tick == 0,
                     "Snapshot preserves its held note and channel despite later edits");
                 ++found;
             }

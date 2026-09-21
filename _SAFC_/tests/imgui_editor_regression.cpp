@@ -96,13 +96,14 @@ int main()
             return ImVec2(origin.x + 47.f + float(tick / double(duration)) * note_width,
                 origin.y + 24.f + (high - key + .5f) * key_height);
         };
-        auto drag = [&](ImVec2 from, ImVec2 to)
+        auto drag_button = [&](ImVec2 from, ImVec2 to, int button)
         {
             io.AddMousePosEvent(from.x, from.y); frame();
-            io.AddMouseButtonEvent(0, true); frame();
+            io.AddMouseButtonEvent(button, true); frame();
             io.AddMousePosEvent(to.x, to.y); frame();
-            io.AddMouseButtonEvent(0, false); frame(); frame();
+            io.AddMouseButtonEvent(button, false); frame(); frame();
         };
+        auto drag = [&](ImVec2 from, ImVec2 to) { drag_button(from, to, 0); };
         auto key = [&](ImGuiKey value, bool ctrl)
         {
             if (ctrl) io.AddKeyEvent(ImGuiMod_Ctrl, true);
@@ -124,9 +125,47 @@ int main()
             return model;
         };
 
+        // One input update jumps directly across both active-track notes. The
+        // complete segment, rather than only its frame endpoints, must erase them.
+        drag_button(position(240., 60), position(720., 64), 1);
+        auto saved = save();
+        require(saved->get_note_count() == initial_count - 2,
+            "Native right-drag erase missed notes between input frames.");
+        saved.reset();
+        key(ImGuiKey_Z, true);
+        saved = save();
+        require(saved->get_note_count() == initial_count, "Native swept erase was not one undo step.");
+        saved.reset();
+
+        // FL-style Split uses the dragged line's intersection with each note's
+        // horizontal middle. A cut near tick 120 leaves the shorter left piece selected.
+        key(ImGuiKey_C, false);
+        drag(position(120., 66), position(120., 58));
+        saved = save();
+        require(saved->get_note_count() == initial_count + 1, "Native split line did not divide its note.");
+        midi_editor::piano_note short_piece, long_piece;
+        require(saved->find_note_at(60, 60, short_piece) && saved->find_note_at(240, 60, long_piece) &&
+            short_piece.start_tick == 0 && short_piece.end_tick == long_piece.start_tick &&
+            long_piece.end_tick == 480 && short_piece.length() < long_piece.length(),
+            "Native split line used the wrong note-middle intersection.");
+        saved.reset();
+        key(ImGuiKey_Delete, false);
+        saved = save();
+        require(saved->get_note_count() == initial_count && !saved->find_note_at(60, 60, short_piece) &&
+            saved->find_note_at(240, 60, long_piece),
+            "Native split did not select only the shorter half.");
+        saved.reset();
+        key(ImGuiKey_Z, true);
+        key(ImGuiKey_Z, true);
+        saved = save();
+        require(saved->get_note_count() == initial_count && saved->find_note_at(0, 60, short_piece) &&
+            short_piece.length() == 480, "Native split/delete undo did not restore the original note.");
+        saved.reset();
+        key(ImGuiKey_P, false);
+
         const auto draw_at = position(double(duration) * .5, 76);
         drag(draw_at, {draw_at.x + 35.f, draw_at.y});
-        auto saved = save();
+        saved = save();
         require(saved->get_note_count() == initial_count + 1, "Native canvas draw did not insert one note.");
         midi_editor::piano_note drawn;
         require(saved->find_note_at(duration / 2, 76, drawn), "Native canvas draw used the wrong time or pitch.");
@@ -266,7 +305,7 @@ int main()
             frame(); frame();
         }
         auto* editor_content = content_window("MIDI editor");
-        audit_combo(editor_content, "Tool", {"Draw / move", "Select", "Erase"}, 0);
+        audit_combo(editor_content, "Tool", {"Draw / move", "Select", "Erase", "Split"}, 0);
         audit_combo(editor_content, "Snap", {"1/4", "1/8", "1/16", "1/32", "1/64", "Off"}, 2);
         audit_combo(editor_content, "Lane", {"Velocity", "Pitch bend", "Pan", "Volume", "Tempo"}, 4);
         for (const char* label : {"BPM min", "BPM max", "20-400 BPM", "At tick", "BPM", "Insert tempo"})
@@ -274,7 +313,7 @@ int main()
 
         editor.shutdown();
         playback.shutdown();
-        std::cout << "Native ImGui draw, move, keyboard undo/redo/delete, atomic Save, stable track IDs, four tool ID audits and silent transport passed.\n";
+        std::cout << "Native ImGui swept erase, split, draw, move, keyboard undo/redo/delete, atomic Save, stable track IDs, four tool ID audits and silent transport passed.\n";
         return 0;
     }
     catch (const std::exception& error)
