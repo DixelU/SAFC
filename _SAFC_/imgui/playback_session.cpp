@@ -30,8 +30,7 @@ struct scoped_alert_sink
 {
 	std::string* previous;
 
-	explicit scoped_alert_sink(std::string& messages)
-		: previous(std::exchange(playback_alert_sink, &messages)) {}
+	explicit scoped_alert_sink(std::string& messages) : previous(std::exchange(playback_alert_sink, &messages)) {}
 
 	~scoped_alert_sink() { playback_alert_sink = previous; }
 };
@@ -105,8 +104,7 @@ struct playback_session::impl
 	{
 		engine.init();
 		devices = engine.get_device_names();
-		device = simple_player::syncore_available()
-			? engine.get_syncore_device_index() : engine.get_current_device();
+		device = simple_player::syncore_available() ? engine.get_syncore_device_index() : engine.get_current_device();
 		visuals.enable_simulated_lag = false;
 	}
 
@@ -117,9 +115,9 @@ struct playback_session::impl
 		error = std::move(new_error);
 	}
 
-	void run(std::stop_token token, std::wstring path, std::string output_name,
-		std::wstring sound_bank, syncore_preferences synth, bool silent, bool start_paused,
-		std::shared_ptr<playback_event_source> external, double seek_fraction, bool output_only = false)
+	void run(std::stop_token token, std::wstring path, std::string output_name, std::wstring sound_bank,
+		syncore_preferences synth, bool silent, bool start_paused, std::shared_ptr<playback_event_source> external,
+		double seek_fraction, bool output_only = false)
 	{
 		bool audition_ready = false;
 		struct completion
@@ -159,20 +157,18 @@ struct playback_session::impl
 			// Check before enumeration, which resets the selected-device index.
 			// Matching SYNCore runs keep their bank/cache; actual device changes
 			// still refresh the external MIDI list on this worker.
-			const bool reuse_syncore = !silent && simple_player::syncore_available() &&
-				engine.has_output() &&
+			const bool reuse_syncore = !silent && simple_player::syncore_available() && engine.has_output() &&
 				engine.get_current_device() == engine.get_syncore_device_index() &&
 				engine.get_device_names()[engine.get_current_device()] == output_name &&
-				engine.get_syncore_bank_path() == sound_bank &&
-				engine.get_syncore_preferences() == synth;
+				engine.get_syncore_bank_path() == sound_bank && engine.get_syncore_preferences() == synth;
 			if (!reuse_syncore)
 				engine.refresh_devices();
 			auto current_devices = engine.get_device_names();
 			const auto selected = std::find(current_devices.begin(), current_devices.end(), output_name);
 			const auto output = selected != current_devices.end()
 				? static_cast<std::size_t>(selected - current_devices.begin())
-				: simple_player::syncore_available()
-					? engine.get_syncore_device_index() : engine.get_current_device();
+				: simple_player::syncore_available() ? engine.get_syncore_device_index()
+													 : engine.get_current_device();
 			{
 				std::lock_guard lock(source_mutex);
 				devices = std::move(current_devices);
@@ -193,25 +189,23 @@ struct playback_session::impl
 					set_status("Inspecting archive...");
 					std::string detail;
 					auto prepared = compressed_midi_event_source::open(path,
-						[this](const std::string& text) { set_status(text); },
-						&preparation_cancel, detail,
+						[this](const std::string& text) { set_status(text); }, &preparation_cancel, detail,
 						[this](const std::vector<std::string>& members, std::uint32_t depth)
+					{
+						std::unique_lock lock(source_mutex);
+						archive_members = members;
+						archive_layer = depth;
+						chosen_member = std::numeric_limits<std::size_t>::max();
+						waiting_for_member = true;
+						member_changed.wait(lock, [this]
 						{
-							std::unique_lock lock(source_mutex);
-							archive_members = members;
-							archive_layer = depth;
-							chosen_member = std::numeric_limits<std::size_t>::max();
-							waiting_for_member = true;
-							member_changed.wait(lock, [this]
-							{
-								return preparation_cancel.load(std::memory_order_acquire) ||
-									chosen_member != std::numeric_limits<std::size_t>::max();
-							});
-							waiting_for_member = false;
-							archive_members.clear();
-							return preparation_cancel.load(std::memory_order_acquire)
-								? members.size() : chosen_member;
+							return preparation_cancel.load(std::memory_order_acquire) ||
+								chosen_member != std::numeric_limits<std::size_t>::max();
 						});
+						waiting_for_member = false;
+						archive_members.clear();
+						return preparation_cancel.load(std::memory_order_acquire) ? members.size() : chosen_member;
+					});
 					if (!prepared)
 					{
 						set_status(cancelled() ? "Stopped" : "Archive preparation failed",
@@ -221,10 +215,17 @@ struct playback_session::impl
 					external = prepared;
 					std::lock_guard lock(source_mutex);
 					source = prepared;
-					export_factory = [prepared] { return prepared->fork_reader(); };
+					export_factory = [prepared]
+					{
+						return prepared->fork_reader();
+					};
 				}
 			}
-			if (cancelled()) { set_status("Stopped"); return; }
+			if (cancelled())
+			{
+				set_status("Stopped");
+				return;
+			}
 			set_status("Preparing MIDI output...");
 			// A ready SYNCore with identical settings is an output-session cache:
 			// keep it alive and only reset the MIDI transport. Any real output
@@ -236,7 +237,11 @@ struct playback_session::impl
 					// Serialize this decision with Stop so preparation cannot begin
 					// after it has decided that the ready output can be retained.
 					std::lock_guard lock(audition_mutex);
-					if (cancelled()) { set_status("Stopped"); return; }
+					if (cancelled())
+					{
+						set_status("Stopped");
+						return;
+					}
 					output_transition = true;
 				}
 				if (!engine.use_silent_output())
@@ -250,8 +255,7 @@ struct playback_session::impl
 				engine.reset_syncore();
 			if (!silent)
 			{
-				if (!engine.set_syncore_preferences(synth) ||
-					!engine.set_syncore_bank_path(std::move(sound_bank)) ||
+				if (!engine.set_syncore_preferences(synth) || !engine.set_syncore_bank_path(std::move(sound_bank)) ||
 					!engine.set_device(output) || !engine.ensure_output({}))
 				{
 					if (cancelled())
@@ -308,7 +312,9 @@ struct playback_session::impl
 	}
 };
 
-playback_session::playback_session() : impl_(std::make_unique<impl>()) {}
+playback_session::playback_session() : impl_(std::make_unique<impl>())
+{
+}
 
 playback_session::~playback_session()
 {
@@ -334,20 +340,20 @@ bool playback_session::restart(bool silent, bool start_paused)
 	return start(std::move(path), std::move(source), silent, start_paused, 0, std::move(factory));
 }
 
-bool playback_session::open_external(std::shared_ptr<playback_event_source> source,
-	bool start_paused, double seek_fraction, source_factory export_factory)
+bool playback_session::open_external(std::shared_ptr<playback_event_source> source, bool start_paused,
+	double seek_fraction, source_factory export_factory)
 {
-	if (!source || !std::isfinite(seek_fraction)) return false;
-	return start({}, std::move(source), false, start_paused,
-		std::clamp(seek_fraction, 0.0, 1.0), std::move(export_factory));
+	if (!source || !std::isfinite(seek_fraction))
+		return false;
+	return start(
+		{}, std::move(source), false, start_paused, std::clamp(seek_fraction, 0.0, 1.0), std::move(export_factory));
 }
 
-bool playback_session::start(std::wstring path, std::shared_ptr<playback_event_source> source,
-	bool silent, bool start_paused, double seek_fraction, source_factory export_factory)
+bool playback_session::start(std::wstring path, std::shared_ptr<playback_event_source> source, bool silent,
+	bool start_paused, double seek_fraction, source_factory export_factory)
 {
 	if ((path.empty() && !source) || impl_->closing.load(std::memory_order_acquire) ||
-		impl_->busy.load(std::memory_order_acquire) ||
-		impl_->stop_busy.load(std::memory_order_acquire))
+		impl_->busy.load(std::memory_order_acquire) || impl_->stop_busy.load(std::memory_order_acquire))
 		return false;
 	if (impl_->worker.joinable())
 		impl_->worker.join();
@@ -374,17 +380,15 @@ bool playback_session::start(std::wstring path, std::shared_ptr<playback_event_s
 		// be undone by worker initialization. Driver enumeration stays async.
 		impl_->engine.init(false);
 		std::lock_guard lock(impl_->source_mutex);
-		const auto selected_name = impl_->device < impl_->devices.size()
-			? impl_->devices[impl_->device] : std::string{};
-		impl_->worker = std::jthread(
-			[state = impl_.get(), path = std::move(path), output = selected_name,
-			 sound_bank = impl_->bank, synth = impl_->preferences, silent, start_paused,
-			 source = std::move(source), seek_fraction]
-			(std::stop_token token) mutable
-			{
-				state->run(token, std::move(path), output, std::move(sound_bank), synth, silent, start_paused,
-					std::move(source), seek_fraction);
-			});
+		const auto selected_name =
+			impl_->device < impl_->devices.size() ? impl_->devices[impl_->device] : std::string{};
+		impl_->worker = std::jthread([state = impl_.get(), path = std::move(path), output = selected_name,
+										 sound_bank = impl_->bank, synth = impl_->preferences, silent, start_paused,
+										 source = std::move(source), seek_fraction](std::stop_token token) mutable
+		{
+			state->run(token, std::move(path), output, std::move(sound_bank), synth, silent, start_paused,
+				std::move(source), seek_fraction);
+		});
 	}
 	catch (const std::exception& exception)
 	{
@@ -397,15 +401,15 @@ bool playback_session::start(std::wstring path, std::shared_ptr<playback_event_s
 
 void playback_session::toggle_pause()
 {
-	if (!impl_->stopping && impl_->busy.load(std::memory_order_acquire) &&
-		impl_->engine.is_playing() && !impl_->engine.is_fast_forwarding())
+	if (!impl_->stopping && impl_->busy.load(std::memory_order_acquire) && impl_->engine.is_playing() &&
+		!impl_->engine.is_fast_forwarding())
 		impl_->engine.toggle_pause();
 }
 
 void playback_session::seek(double fraction)
 {
-	if (!impl_->stopping && impl_->busy.load(std::memory_order_acquire) &&
-		std::isfinite(fraction) && impl_->engine.is_playing())
+	if (!impl_->stopping && impl_->busy.load(std::memory_order_acquire) && std::isfinite(fraction) &&
+		impl_->engine.is_playing())
 		impl_->engine.seek_to(std::clamp(fraction, 0.0, 1.0));
 }
 
@@ -447,9 +451,11 @@ void playback_session::stop()
 
 void playback_session::shutdown()
 {
-	if (!impl_) return;
+	if (!impl_)
+		return;
 	std::unique_lock audition_lock(impl_->audition_mutex);
-	if (impl_->closing.exchange(true, std::memory_order_acq_rel)) return;
+	if (impl_->closing.exchange(true, std::memory_order_acq_rel))
+		return;
 	impl_->stopping = true;
 	impl_->preparation_cancel.store(true, std::memory_order_release);
 	impl_->worker.request_stop();
@@ -563,7 +569,8 @@ void playback_session::configure_synth(std::wstring bank, const syncore_preferen
 void playback_session::choose_archive_member(std::size_t index)
 {
 	std::lock_guard lock(impl_->source_mutex);
-	if (!impl_->waiting_for_member || index >= impl_->archive_members.size()) return;
+	if (!impl_->waiting_for_member || index >= impl_->archive_members.size())
+		return;
 	impl_->chosen_member = index;
 	impl_->member_changed.notify_all();
 }
@@ -586,15 +593,21 @@ std::wstring playback_session::current_path() const
 	return impl_->path;
 }
 
-std::wstring playback_session::bank_path() const { return impl_->bank; }
-syncore_preferences playback_session::synth_preferences() const { return impl_->preferences; }
+std::wstring playback_session::bank_path() const
+{
+	return impl_->bank;
+}
+syncore_preferences playback_session::synth_preferences() const
+{
+	return impl_->preferences;
+}
 
-bool playback_session::audition_note(std::uint8_t key, std::uint8_t velocity,
-	std::uint8_t channel, bool on)
+bool playback_session::audition_note(std::uint8_t key, std::uint8_t velocity, std::uint8_t channel, bool on)
 {
 	std::lock_guard lock(impl_->audition_mutex);
 	if (impl_->closing.load(std::memory_order_acquire) || impl_->stopping ||
-		impl_->stop_busy.load(std::memory_order_acquire)) return false;
+		impl_->stop_busy.load(std::memory_order_acquire))
+		return false;
 	key &= 0x7f;
 	channel &= 0x0f;
 	if (impl_->audition_preparing)
@@ -604,22 +617,25 @@ bool playback_session::audition_note(std::uint8_t key, std::uint8_t velocity,
 		impl_->audition_keys[channel * 128 + key] = on ? velocity : 0;
 		return true;
 	}
-	if (impl_->busy.load(std::memory_order_acquire) && !impl_->engine.is_playing()) return false;
+	if (impl_->busy.load(std::memory_order_acquire) && !impl_->engine.is_playing())
+		return false;
 	const bool matching_output = impl_->engine.get_current_device() == selected_device() &&
 		(impl_->engine.get_current_device() != impl_->engine.get_syncore_device_index() ||
 			(impl_->engine.get_syncore_bank_path() == impl_->bank &&
 				impl_->engine.get_syncore_preferences() == impl_->preferences));
 	// Releases still reach the old output; new idle auditions apply changed
 	// device/bank settings on the worker before sending any note-on.
-	if (impl_->engine.has_output() &&
-		(!on || impl_->busy.load(std::memory_order_acquire) || matching_output))
+	if (impl_->engine.has_output() && (!on || impl_->busy.load(std::memory_order_acquire) || matching_output))
 	{
 		impl_->engine.preview_note(channel, key, velocity, on);
 		return true;
 	}
-	if (!on || impl_->busy.load(std::memory_order_acquire)) return false;
-	if (impl_->worker.joinable()) impl_->worker.join();
-	if (impl_->stop_worker.joinable()) impl_->stop_worker.join();
+	if (!on || impl_->busy.load(std::memory_order_acquire))
+		return false;
+	if (impl_->worker.joinable())
+		impl_->worker.join();
+	if (impl_->stop_worker.joinable())
+		impl_->stop_worker.join();
 	impl_->audition_keys.fill(0);
 	impl_->audition_keys[channel * 128 + key] = velocity;
 	impl_->audition_preparing = true;
@@ -630,13 +646,11 @@ bool playback_session::audition_note(std::uint8_t key, std::uint8_t velocity,
 	{
 		impl_->engine.init(false);
 		std::lock_guard source_lock(impl_->source_mutex);
-		const auto selected_name = impl_->device < impl_->devices.size()
-			? impl_->devices[impl_->device] : std::string{};
-		impl_->worker = std::jthread([self = impl_.get(), output = selected_name,
-			bank = impl_->bank, synth = impl_->preferences](std::stop_token token) mutable
-		{
-			self->run(token, {}, output, std::move(bank), synth, false, false, {}, 0, true);
-		});
+		const auto selected_name =
+			impl_->device < impl_->devices.size() ? impl_->devices[impl_->device] : std::string{};
+		impl_->worker = std::jthread([self = impl_.get(), output = selected_name, bank = impl_->bank,
+										 synth = impl_->preferences](std::stop_token token) mutable
+		{ self->run(token, {}, output, std::move(bank), synth, false, false, {}, 0, true); });
 	}
 	catch (const std::exception& error)
 	{

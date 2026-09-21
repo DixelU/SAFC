@@ -53,9 +53,9 @@ struct midi_editor
 	{
 		tick_type start_tick;
 		tick_type end_tick;
-		std::uint8_t key;          // 0-127
-		std::uint8_t velocity;     // 1-127
-		std::uint8_t channel;      // 0-15
+		std::uint8_t key;		  // 0-127
+		std::uint8_t velocity;	 // 1-127
+		std::uint8_t channel;	  // 0-15
 		std::uint16_t track_index;  // Track identifier
 		// Stable identity minted by the editor on load/insert; selection and
 		// undo target notes through it, so it survives moves and edits
@@ -2949,7 +2949,7 @@ public:
 						if (!is_nrpn && sel_msb == 0 && sel_lsb == 0) // RPN 00,00 = pitch-bend range
 						{
 							if (cc == 0x06) data_msb = val;
-							else            data_lsb = val;
+							else			data_lsb = val;
 							if (!found || ev.tick >= best_tick)
 							{
 								best_tick = ev.tick;
@@ -3171,9 +3171,9 @@ private:
 		{
 			// Velocity 0 on a note-on would read as a note-off, clamp to 1
 			events.push_back({note.start_tick, 2,
-			    { base_type(0x90 | note.channel), note.key, std::max<base_type>(note.velocity, 1) }});
+				{ base_type(0x90 | note.channel), note.key, std::max<base_type>(note.velocity, 1) }});
 			events.push_back({note.end_tick, 0,
-			    { base_type(0x80 | note.channel), note.key, 0x40 }});
+				{ base_type(0x80 | note.channel), note.key, 0x40 }});
 		}
 		for (const auto& raw : raw_events)
 			events.push_back({raw.tick, 1, raw.bytes});
@@ -3481,7 +3481,7 @@ public:
 							p.msb = cs.sel_msb; p.lsb = cs.sel_lsb; p.is_nrpn = cs.is_nrpn;
 							p.tick = controls_[i].tick;
 							if (d1 == 0x06) { p.data_msb = d2; p.has_msb = true; }
-							else            { p.data_lsb = d2; p.has_lsb = true; }
+							else			{ p.data_lsb = d2; p.has_lsb = true; }
 							break;
 						}
 						// Data Increment/Decrement (0x60/0x61) are relative to the
@@ -3529,14 +3529,14 @@ public:
 				for (const auto& [key, p] : cs.params)
 				{
 					if (p.is_nrpn) { push_cc(ch, 0x63, p.msb, p.tick); push_cc(ch, 0x62, p.lsb, p.tick); }
-					else           { push_cc(ch, 0x65, p.msb, p.tick); push_cc(ch, 0x64, p.lsb, p.tick); }
+					else		   { push_cc(ch, 0x65, p.msb, p.tick); push_cc(ch, 0x64, p.lsb, p.tick); }
 					if (p.has_msb) push_cc(ch, 0x06, p.data_msb, p.tick);
 					if (p.has_lsb) push_cc(ch, 0x26, p.data_lsb, p.tick);
 				}
 				if (cs.had_selection)
 				{
 					if (cs.is_nrpn) { push_cc(ch, 0x63, cs.sel_msb, cs.sel_tick); push_cc(ch, 0x62, cs.sel_lsb, cs.sel_tick); }
-					else            { push_cc(ch, 0x65, cs.sel_msb, cs.sel_tick); push_cc(ch, 0x64, cs.sel_lsb, cs.sel_tick); }
+					else			{ push_cc(ch, 0x65, cs.sel_msb, cs.sel_tick); push_cc(ch, 0x64, cs.sel_lsb, cs.sel_tick); }
 				}
 			}
 
@@ -3606,8 +3606,8 @@ public:
 			tick_type tick;
 			enum { pick_off, pick_raw, pick_on } which;
 			if (off_tick <= raw_tick && off_tick <= on_tick) { which = pick_off; tick = off_tick; }
-			else if (raw_tick <= on_tick)                    { which = pick_raw; tick = raw_tick; }
-			else                                             { which = pick_on;  tick = on_tick; }
+			else if (raw_tick <= on_tick)					{ which = pick_raw; tick = raw_tick; }
+			else											 { which = pick_on;  tick = on_tick; }
 
 			const std::uint64_t time_us = advance_us_to(tick);
 

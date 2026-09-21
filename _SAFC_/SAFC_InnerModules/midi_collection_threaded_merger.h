@@ -99,7 +99,7 @@ struct midi_track_iterator
 				held[index]--;
 		}
 		else if ((track_data[cur_position] >= 0xA0 && track_data[cur_position] <= 0xBF) ||
-		         (track_data[cur_position] >= 0xE0 && track_data[cur_position] <= 0xEF))
+			(track_data[cur_position] >= 0xE0 && track_data[cur_position] <= 0xEF))
 			cur_position += 3;
 		else if (track_data[cur_position] >= 0xC0 && track_data[cur_position] <= 0xDF)
 			cur_position += 2;
@@ -651,7 +651,7 @@ private:
 								track.push_back(read_midi_byte(reader));
 						}
 						else if ((event_type >= 0x80 && event_type <= 0xBF) ||
-						         (event_type >= 0xE0 && event_type <= 0xEF))
+							(event_type >= 0xE0 && event_type <= 0xEF))
 						{
 							track.push_back(event_type);
 							track.push_back(read_midi_byte(reader));

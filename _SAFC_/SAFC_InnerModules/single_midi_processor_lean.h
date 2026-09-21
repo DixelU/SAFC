@@ -232,17 +232,19 @@ struct single_midi_processor_lean
 	{
 		if (s.selection_data.begin != 0 || s.selection_data.length != ~0ULL)
 			return false;
-		if (s.flatten)                          return false;
-		if (s.key_converter)                    return false;
-		if (s.volume_map)                       return false;
-		if (s.pitch_map)                        return false;
-		if (s.proc_details.channel_split)       return false;
-		if (s.proc_details.whole_midi_collapse) return false;
-		if (s.enable_imp_events_filter)         return false;
-		if (!s.filter.pass_tempo)               return false;
-		if (!s.filter.pass_pitch)               return false;
-		if (!s.filter.pass_notes)               return false;
-		if (!s.filter.pass_other)               return false;
+
+		if (s.flatten)						return false;
+		if (s.key_converter)					return false;
+		if (s.volume_map)					return false;
+		if (s.pitch_map)					return false;
+		if (s.proc_details.channel_split)			return false;
+		if (s.proc_details.whole_midi_collapse)			return false;
+		if (s.enable_imp_events_filter)				return false;
+		if (!s.filter.pass_tempo)				return false;
+		if (!s.filter.pass_pitch)				return false;
+		if (!s.filter.pass_notes)				return false;
+		if (!s.filter.pass_other)				return false;
+
 		return true;
 	}
 

@@ -19,12 +19,12 @@ struct generated_event
 {
 	enum class kind : std::uint8_t { note_on, note_off, control };
 
-	std::uint64_t time_us;      // absolute time from start, microseconds
-	std::uint32_t short_msg;    // packed MIDI short message; 0 = nothing to send
-	kind          k;            // drives falling-notes visuals + fast-forward skip
-	std::uint8_t  key;          // note events: 0-127 (visuals)
-	std::uint8_t  velocity;     // note_on velocity (visuals)
-	std::uint8_t  channel;      // 0-15 (visuals)
+	std::uint64_t time_us;	  // absolute time from start, microseconds
+	std::uint32_t short_msg;	// packed MIDI short message; 0 = nothing to send
+	kind		  k;			// drives falling-notes visuals + fast-forward skip
+	std::uint8_t  key;		  // note events: 0-127 (visuals)
+	std::uint8_t  velocity;	 // note_on velocity (visuals)
+	std::uint8_t  channel;	  // 0-15 (visuals)
 	std::uint16_t track_index;  // visuals colour id
 
 	generated_event()

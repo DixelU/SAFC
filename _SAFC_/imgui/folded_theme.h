@@ -4,13 +4,14 @@
 
 namespace safc::imgui_ui
 {
+inline constexpr float workspace_font_size = 17.f;
+
 // Call before NewFrame; repeated calls do not accumulate size scaling.
 void apply_theme(float scale = 1.f);
 
 // Pair every call with end_folded_window(), including when false is returned.
 // Uses rectangular ImGui window input bounds, with a custom draggable caption.
-bool begin_folded_window(const char* title, bool* open = nullptr,
-    ImGuiWindowFlags flags = 0);
+bool begin_folded_window(const char* title, bool* open = nullptr, ImGuiWindowFlags flags = 0);
 void end_folded_window();
 
 // Parent geometry while a folded window is open; ordinary ImGui geometry

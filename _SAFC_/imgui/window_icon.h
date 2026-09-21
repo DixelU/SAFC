@@ -11,15 +11,15 @@ namespace safc::imgui_ui
 class window_icon
 {
 public:
-    window_icon();
-    ~window_icon();
-    window_icon(const window_icon&) = delete;
-    window_icon& operator=(const window_icon&) = delete;
+	window_icon();
+	~window_icon();
+	window_icon(const window_icon&) = delete;
+	window_icon& operator=(const window_icon&) = delete;
 
-    bool apply(GLFWwindow* window) const noexcept;
+	bool apply(GLFWwindow* window) const noexcept;
 
 private:
-    struct impl;
-    std::unique_ptr<impl> impl_;
+	struct impl;
+	std::unique_ptr<impl> impl_;
 };
 }

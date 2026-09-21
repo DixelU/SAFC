@@ -16,7 +16,8 @@ namespace
 
 std::string utf8_path(const std::filesystem::path& path)
 {
-	const auto value = path.u8string(); return {value.begin(), value.end()};
+	const auto value = path.u8string();
+	return {value.begin(), value.end()};
 }
 
 bool same_path(const std::filesystem::path& a, const std::filesystem::path& b)
@@ -56,16 +57,36 @@ struct project_session::impl
 
 	void status(std::string stage, std::string error = {})
 	{
-		std::lock_guard lock(mutex); progress.stage = std::move(stage); progress.error = std::move(error);
+		std::lock_guard lock(mutex);
+		progress.stage = std::move(stage);
+		progress.error = std::move(error);
 	}
 };
 
-project_session::project_session() : state_(std::make_unique<impl>()) {}
-project_session::~project_session() { shutdown(); }
-bool project_session::loading() const { return state_->loading.load(std::memory_order_acquire); }
-bool project_session::merging() const { return state_->merging.load(std::memory_order_acquire); }
-std::string project_session::message() const { std::lock_guard lock(state_->mutex); return state_->message; }
-std::uint64_t project_session::id_at(std::size_t index) const { return state_->ids.at(index); }
+project_session::project_session() : state_(std::make_unique<impl>())
+{
+}
+project_session::~project_session()
+{
+	shutdown();
+}
+bool project_session::loading() const
+{
+	return state_->loading.load(std::memory_order_acquire);
+}
+bool project_session::merging() const
+{
+	return state_->merging.load(std::memory_order_acquire);
+}
+std::string project_session::message() const
+{
+	std::lock_guard lock(state_->mutex);
+	return state_->message;
+}
+std::uint64_t project_session::id_at(std::size_t index) const
+{
+	return state_->ids.at(index);
+}
 
 file_settings* project_session::find(std::uint64_t id)
 {
@@ -77,18 +98,23 @@ void project_session::set_defaults(const application_preferences& p, bool apply)
 {
 	state_->defaults = p;
 	data.detected_threads = p.processing_threads;
-	data.channels_split = p.split_channels; data.collapse_midi = p.collapse_tracks;
-	data.apply_offset_after = p.apply_offset_after; data.inplace_merge_flag = p.inplace_merge;
+	data.channels_split = p.split_channels;
+	data.collapse_midi = p.collapse_tracks;
+	data.apply_offset_after = p.apply_offset_after;
+	data.inplace_merge_flag = p.inplace_merge;
 	data.rsb_compression = p.rsb_compression;
 
 	if (!apply || merging())
 		return;
-	
+
 	for (auto& file : data.files)
 	{
-		file.bool_settings = p.processing_flags; file.channels_split = p.split_channels;
-		file.collapse_midi = p.collapse_tracks; file.apply_offset_after = p.apply_offset_after;
-		file.inplace_merge_enabled = p.inplace_merge; file.rsb_compression = p.rsb_compression;
+		file.bool_settings = p.processing_flags;
+		file.channels_split = p.split_channels;
+		file.collapse_midi = p.collapse_tracks;
+		file.apply_offset_after = p.apply_offset_after;
+		file.inplace_merge_enabled = p.inplace_merge;
+		file.rsb_compression = p.rsb_compression;
 		file.allow_sysex = p.allow_sysex;
 	}
 }
@@ -111,7 +137,8 @@ void project_session::add_files(std::vector<std::wstring> paths)
 
 	try
 	{
-		state_->loader = std::jthread([s = state_.get(), paths = std::move(paths), defaults, tempo, offset](std::stop_token stop)
+		state_->loader =
+			std::jthread([s = state_.get(), paths = std::move(paths), defaults, tempo, offset](std::stop_token stop)
 		{
 			std::vector<file_settings> loaded;
 			std::string errors;
@@ -119,24 +146,42 @@ void project_session::add_files(std::vector<std::wstring> paths)
 			{
 				for (const auto& path : paths)
 				{
-					if (stop.stop_requested()) break;
+					if (stop.stop_requested())
+						break;
 					file_settings file(path, defaults.processing_flags);
-					if (!file.is_midi) { errors += "Not an accessible MIDI: " + utf8_path(path) + "\n"; continue; }
-					file.new_tempo = tempo; file.offset_ticks = offset;
-					file.channels_split = defaults.split_channels; file.collapse_midi = defaults.collapse_tracks;
-					file.apply_offset_after = defaults.apply_offset_after; file.inplace_merge_enabled = defaults.inplace_merge;
-					file.rsb_compression = defaults.rsb_compression; file.allow_sysex = defaults.allow_sysex;
+					if (!file.is_midi)
+					{
+						errors += "Not an accessible MIDI: " + utf8_path(path) + "\n";
+						continue;
+					}
+					file.new_tempo = tempo;
+					file.offset_ticks = offset;
+					file.channels_split = defaults.split_channels;
+					file.collapse_midi = defaults.collapse_tracks;
+					file.apply_offset_after = defaults.apply_offset_after;
+					file.inplace_merge_enabled = defaults.inplace_merge;
+					file.rsb_compression = defaults.rsb_compression;
+					file.allow_sysex = defaults.allow_sysex;
 					loaded.push_back(std::move(file));
 				}
 			}
-			catch (const std::exception& error) { errors += error.what(); }
+			catch (const std::exception& error)
 			{
-				std::lock_guard lock(s->mutex); s->loaded = std::move(loaded); s->message = std::move(errors);
+				errors += error.what();
+			}
+			{
+				std::lock_guard lock(s->mutex);
+				s->loaded = std::move(loaded);
+				s->message = std::move(errors);
 			}
 			s->loading.store(false, std::memory_order_release);
 		});
 	}
-	catch (...) { state_->loading.store(false, std::memory_order_release); throw; }
+	catch (...)
+	{
+		state_->loading.store(false, std::memory_order_release);
+		throw;
+	}
 }
 
 void project_session::poll()
@@ -177,7 +222,8 @@ void project_session::remove(const std::vector<std::uint64_t>& ids)
 		if (!selected.contains(state_->ids[i]))
 			continue;
 
-		data.files.erase(data.files.begin() + i); state_->ids.erase(state_->ids.begin() + i);
+		data.files.erase(data.files.begin() + i);
+		state_->ids.erase(state_->ids.begin() + i);
 	}
 
 	data.set_global_ppqn();
@@ -193,26 +239,35 @@ bool project_session::start_merge()
 		constexpr auto limit = std::numeric_limits<std::int64_t>::max();
 
 		if (!file.new_ppqn || file.selection_start < 0 || file.group_id < 0 || !std::isfinite(file.new_tempo) ||
-			file.new_tempo < 0 || file.new_tempo > 60000000. || file.offset_ticks == std::numeric_limits<std::int64_t>::min())
+			file.new_tempo < 0 || file.new_tempo > 60000000. ||
+			file.offset_ticks == std::numeric_limits<std::int64_t>::min())
 		{
-			state_->status("Invalid processing settings", "Use positive PPQN, nonnegative selection start/group, tempo 0..60000000, and an offset above INT64_MIN."); return false;
+			state_->status("Invalid processing settings",
+				"Use positive PPQN, nonnegative selection start/group, tempo "
+				"0..60000000, and an offset above INT64_MIN.");
+			return false;
 		}
 
 		const auto effective_begin = std::max(file.selection_start, file.offset_ticks < 0 ? -file.offset_ticks : 0);
 		if ((file.selection_length > 0 && effective_begin > limit - file.selection_length) ||
-			(file.selection_length < 0 && file.selection_length < std::numeric_limits<std::int64_t>::min() + effective_begin))
+			(file.selection_length < 0 &&
+				file.selection_length < std::numeric_limits<std::int64_t>::min() + effective_begin))
 		{
-			state_->status("Invalid processing settings", "Selection arithmetic would overflow the tick range."); return false;
+			state_->status("Invalid processing settings", "Selection arithmetic would overflow the tick range.");
+			return false;
 		}
 
 		if (same_path(file.filename, data.save_path))
 		{
-			state_->status("Choose a different output", "The merge output must not overwrite an input MIDI."); return false;
+			state_->status("Choose a different output", "The merge output must not overwrite an input MIDI.");
+			return false;
 		}
 
 		if (file.w_file_name_postfix.find_first_of(L"\\/:*?\"<>|") != std::wstring::npos)
 		{
-			state_->status("Invalid intermediate suffix", "Use a filename suffix without path separators or reserved characters."); return false;
+			state_->status(
+				"Invalid intermediate suffix", "Use a filename suffix without path separators or reserved characters.");
+			return false;
 		}
 	}
 
@@ -253,7 +308,9 @@ bool project_session::start_merge()
 				const auto output = std::filesystem::absolute(snapshot.save_path);
 				work_parent = std::filesystem::weakly_canonical(output.parent_path());
 
-				work = work_parent / (L".safc-work-" + std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(GetTickCount64()));
+				work = work_parent /
+					(L".safc-work-" + std::to_wstring(GetCurrentProcessId()) + L"-" +
+						std::to_wstring(GetTickCount64()));
 
 				if (!std::filesystem::create_directory(work))
 					throw std::runtime_error("Cannot create merge work directory");
@@ -269,17 +326,20 @@ bool project_session::start_merge()
 						throw std::runtime_error("Input MIDI is no longer accessible: " + utf8_path(file.filename));
 
 					if (current.PPQN != file.old_ppqn || current.filesize != file.filesize)
-						throw std::runtime_error("Input MIDI changed since it was added; remove and add it again: " + utf8_path(file.filename));
+						throw std::runtime_error("Input MIDI changed since it was added; remove and add it again: " +
+							utf8_path(file.filename));
 
 					auto request = snapshot.files[i].build_smrp_processing_data();
-					const auto part_name = std::to_wstring(i) + L"-" + std::filesystem::path(file.filename).filename().wstring() + file.w_file_name_postfix;
+					const auto part_name = std::to_wstring(i) + L"-" +
+						std::filesystem::path(file.filename).filename().wstring() + file.w_file_name_postfix;
 
 					request->output_filename = (work / part_name).wstring();
 					requests.push_back(std::move(request));
 				}
 
 				const auto temporary_output = work / "merged.mid";
-				auto merger = std::make_shared<midi_collection_threaded_merger>(requests, snapshot.global_ppqn, temporary_output.wstring(), false);
+				auto merger = std::make_shared<midi_collection_threaded_merger>(
+					requests, snapshot.global_ppqn, temporary_output.wstring(), false);
 
 				std::stop_callback cancellation(stop, [merger] { merger->request_cancel(); });
 				{
@@ -290,16 +350,21 @@ bool project_session::start_merge()
 				auto update = [&](const char* phase)
 				{
 					merge_progress progress;
-					progress.busy = true; progress.cancelling = stop.stop_requested(); progress.stage = phase;
+					progress.busy = true;
+					progress.cancelling = stop.stop_requested();
+					progress.stage = phase;
 					progress.seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - began).count();
 
-					for (const auto& [file, buffers] : merger->snapshot_currently_processed()) if (file && buffers)
-					{
-						const auto bytes = buffers->last_input_position.load(std::memory_order_acquire);
-						const float ratio = file->settings.details.initial_filesize ? std::min(1.f, float(bytes) / file->settings.details.initial_filesize) : 0.f;
+					for (const auto& [file, buffers] : merger->snapshot_currently_processed())
+						if (file && buffers)
+						{
+							const auto bytes = buffers->last_input_position.load(std::memory_order_acquire);
+							const float ratio = file->settings.details.initial_filesize
+								? std::min(1.f, float(bytes) / file->settings.details.initial_filesize)
+								: 0.f;
 
-						progress.files.push_back({file->appearance_filename, buffers->log->get_last(), ratio});
-					}
+							progress.files.push_back({file->appearance_filename, buffers->log->get_last(), ratio});
+						}
 
 					for (const auto& item : progress.files)
 						progress.fraction += item.fraction;
@@ -357,17 +422,18 @@ bool project_session::start_merge()
 					throw std::runtime_error(merger->failure_message());
 
 				// Only a completed result replaces the destination selected by the user.
-				if (!MoveFileExW(temporary_output.c_str(), output.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
-					throw std::runtime_error("Cannot install merge output: Windows error " + std::to_string(GetLastError()));
+				if (!MoveFileExW(
+						temporary_output.c_str(), output.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+					throw std::runtime_error(
+						"Cannot install merge output: Windows error " + std::to_string(GetLastError()));
 
-				const bool retain = std::any_of(snapshot.files.begin(), snapshot.files.end(), [](const file_settings& f)
-				{
-					return !(f.bool_settings & remove_remnants);
-				});
+				const bool retain = std::any_of(snapshot.files.begin(), snapshot.files.end(),
+					[](const file_settings& f) { return !(f.bool_settings & remove_remnants); });
 
 				if (retain)
 				{
-					const auto retained = work_parent / (output.filename().wstring() + L".parts-" + std::to_wstring(GetTickCount64()));
+					const auto retained =
+						work_parent / (output.filename().wstring() + L".parts-" + std::to_wstring(GetTickCount64()));
 					// Retained intermediate files get a unique destination; never replace an existing folder.
 					if (MoveFileExW(work.c_str(), retained.c_str(), MOVEFILE_WRITE_THROUGH))
 					{
@@ -385,7 +451,8 @@ bool project_session::start_merge()
 			}
 			catch (const std::exception& error)
 			{
-				s->status(stop.stop_requested() ? "Merge cancelled" : "Merge failed", stop.stop_requested() ? "" : error.what());
+				s->status(stop.stop_requested() ? "Merge cancelled" : "Merge failed",
+					stop.stop_requested() ? "" : error.what());
 			}
 
 			{
@@ -402,7 +469,8 @@ bool project_session::start_merge()
 			if (owns_work && work.is_absolute() && work.parent_path() == work_parent &&
 				work.filename().wstring().starts_with(L".safc-work-"))
 			{
-				std::error_code error; std::filesystem::remove_all(work, error);
+				std::error_code error;
+				std::filesystem::remove_all(work, error);
 			}
 
 			{
@@ -425,13 +493,23 @@ bool project_session::start_merge()
 	return true;
 }
 
-void project_session::cancel_merge() { state_->merger.request_stop(); }
-merge_progress project_session::progress() const { std::lock_guard lock(state_->mutex); return state_->progress; }
+void project_session::cancel_merge()
+{
+	state_->merger.request_stop();
+}
+merge_progress project_session::progress() const
+{
+	std::lock_guard lock(state_->mutex);
+	return state_->progress;
+}
 void project_session::shutdown()
 {
-	state_->loader.request_stop(); state_->merger.request_stop();
-	if (state_->loader.joinable()) state_->loader.join();
-	if (state_->merger.joinable()) state_->merger.join();
+	state_->loader.request_stop();
+	state_->merger.request_stop();
+	if (state_->loader.joinable())
+		state_->loader.join();
+	if (state_->merger.joinable())
+		state_->merger.join();
 }
 
 bool project_session::run_smoke(const std::wstring& directory, std::string& report)
@@ -440,7 +518,8 @@ bool project_session::run_smoke(const std::wstring& directory, std::string& repo
 	{
 		const auto input = std::filesystem::path(directory) / "project-input.mid";
 
-		const unsigned char midi[] = {'M','T','h','d',0,0,0,6,0,0,0,1,1,0xe0,'M','T','r','k',0,0,0,13,0,0x90,60,100,0x83,0x60,0x80,60,0,0,0xff,0x2f,0};
+		const unsigned char midi[] = {'M', 'T', 'h', 'd', 0, 0, 0, 6, 0, 0, 0, 1, 1, 0xe0, 'M', 'T', 'r', 'k', 0, 0, 0,
+			13, 0, 0x90, 60, 100, 0x83, 0x60, 0x80, 60, 0, 0, 0xff, 0x2f, 0};
 
 		{
 			std::ofstream out(input, std::ios::binary);
@@ -486,7 +565,7 @@ bool project_session::run_smoke(const std::wstring& directory, std::string& repo
 		if (bytes.find(transposed) == std::string::npos)
 			throw std::runtime_error("Processing key map was not applied");
 
-		const auto original_input = [&] 
+		const auto original_input = [&]
 		{
 			std::ifstream in(input, std::ios::binary);
 			return std::string(std::istreambuf_iterator<char>(in), {});
@@ -503,7 +582,7 @@ bool project_session::run_smoke(const std::wstring& directory, std::string& repo
 		while (merging())
 			std::this_thread::sleep_for(std::chrono::milliseconds(5));
 
-		auto read_output = [&] 
+		auto read_output = [&]
 		{
 			std::ifstream in(data.save_path, std::ios::binary);
 			return std::string(std::istreambuf_iterator<char>(in), {});
@@ -527,9 +606,9 @@ bool project_session::run_smoke(const std::wstring& directory, std::string& repo
 
 		for (const auto& entry : std::filesystem::directory_iterator(directory))
 		{
-			if (!entry.path().filename().wstring().starts_with(L".safc-work-")) 
+			if (!entry.path().filename().wstring().starts_with(L".safc-work-"))
 				continue;
-			
+
 			throw std::runtime_error("Merge left a temporary work directory");
 		}
 
@@ -558,11 +637,12 @@ bool project_session::run_smoke(const std::wstring& directory, std::string& repo
 			throw std::runtime_error("Keep intermediate files option was ignored");
 
 		data.files[0].bool_settings |= std::uint32_t(remove_remnants);
-		report = "Project identity/removal, transpose merge, source/output preservation on cancel/failure, cleanup and retained intermediate files passed";
+		report = "Project identity/removal, transpose merge, source/output preservation on cancel/failure, cleanup and "
+				 "retained intermediate files passed";
 
 		return true;
 	}
-	catch (const std::exception& error) 
+	catch (const std::exception& error)
 	{
 		report = error.what();
 		return false;

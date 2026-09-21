@@ -54,9 +54,9 @@ struct simple_player
 	// consumer after queued events cross the parser/render boundary.
 	struct buffered_note
 	{
-		uint64_t start_time_us;            // note on time (immutable after creation)
-		uint64_t end_time_us;              // note off time (~0 = still held/pending)
-		uint32_t track_id;                 // (track_index << 4) | channel
+		uint64_t start_time_us;			// note on time (immutable after creation)
+		uint64_t end_time_us;			  // note off time (~0 = still held/pending)
+		uint32_t track_id;				 // (track_index << 4) | channel
 
 		buffered_note() : start_time_us(0), end_time_us(~0ULL), track_id(0) {}
 
@@ -102,7 +102,7 @@ struct simple_player
 			};
 
 			std::vector<slot> slots; // power-of-two size
-			size_t used = 0;         // occupied slots (including emptied stacks)
+			size_t used = 0;		 // occupied slots (including emptied stacks)
 
 			static size_t hash(uint32_t id)
 			{
@@ -328,7 +328,7 @@ struct simple_player
 
 	struct send_event
 	{
-		uint64_t time_us;    // target send time in microseconds from start
+		uint64_t time_us;	// target send time in microseconds from start
 		uint32_t short_msg;  // prepared MIDI short message (0 = invalid/empty)
 	};
 
@@ -510,8 +510,8 @@ struct simple_player
 		// Lookahead buffer for pre-parsed MIDI messages (SPSC; parser throttles
 		// when it gets too far ahead in time or holds too many pending events).
 		dixelu::buffered_queue_spsc<send_event> send_buffer;
-		std::atomic<bool> seeking_ff{false};        // parser is fast-forwarding (sender drains immediately)
-		std::atomic<bool> parser_done{false};       // parser finished all events
+		std::atomic<bool> seeking_ff{false};		// parser is fast-forwarding (sender drains immediately)
+		std::atomic<bool> parser_done{false};	   // parser finished all events
 		std::atomic<uint64_t> parsed_up_to_us{0};   // how far ahead the parser has reached (in us)
 		std::atomic<uint64_t> sender_position_us{0}; // current sender playback position (in us)
 		std::atomic<bool> memory_failure{false};
@@ -580,10 +580,10 @@ struct simple_player
 
 	struct tempo_cache
 	{
-		size_t current_index;      // index into time_map_mcsecs
-		tick_type base_tick;       // tick at current tempo change
-		uint64_t base_time_us;     // microseconds at current tempo change
-		uint32_t current_tempo;    // current tempo (us per quarter note)
+		size_t current_index;	  // index into time_map_mcsecs
+		tick_type base_tick;	   // tick at current tempo change
+		uint64_t base_time_us;	 // microseconds at current tempo change
+		uint32_t current_tempo;	// current tempo (us per quarter note)
 		tick_type next_change_tick; // tick of next tempo change (or max for last)
 
 		void reset()
@@ -2183,7 +2183,7 @@ struct simple_player
 				{
 					const uint8_t note = key % 12;
 					float center_offset = 0.f;
-					if (note == 1 || note == 6)       // C sharp, F sharp
+					if (note == 1 || note == 6)	   // C sharp, F sharp
 						center_offset = -sharp_ratio / 5.f;
 					else if (note == 3 || note == 10) // D sharp, A sharp
 						center_offset = sharp_ratio / 5.f;
@@ -2545,15 +2545,15 @@ struct simple_player
 
 			glVertexPointer(2, GL_FLOAT, 0, data.note_verts.data());
 			glColorPointer(4, GL_UNSIGNED_BYTE, 0, data.note_colors.data());
-			glDrawArrays(GL_QUADS, 0, white_fill_verts);                           // white fills
+			glDrawArrays(GL_QUADS, 0, white_fill_verts);						   // white fills
 
 			glVertexPointer(2, GL_FLOAT, 0, data.outline_verts.data());
 			glColorPointer(4, GL_UNSIGNED_BYTE, 0, data.outline_colors.data());
-			glDrawArrays(GL_LINES, 0, white_outline_verts);                        // white outlines
+			glDrawArrays(GL_LINES, 0, white_outline_verts);						// white outlines
 
 			glVertexPointer(2, GL_FLOAT, 0, data.note_verts.data());
 			glColorPointer(4, GL_UNSIGNED_BYTE, 0, data.note_colors.data());
-			glDrawArrays(GL_QUADS, white_fill_verts, total_fill - white_fill_verts);    // black fills
+			glDrawArrays(GL_QUADS, white_fill_verts, total_fill - white_fill_verts);	// black fills
 
 			glVertexPointer(2, GL_FLOAT, 0, data.outline_verts.data());
 			glColorPointer(4, GL_UNSIGNED_BYTE, 0, data.outline_colors.data());

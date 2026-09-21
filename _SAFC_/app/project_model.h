@@ -14,7 +14,7 @@
 #include "../SAFC_InnerModules/fast_midi_checker.h"
 
 inline constexpr std::uint32_t default_processing_flags = _BoolSettings::remove_remnants |
-    _BoolSettings::remove_empty_tracks | _BoolSettings::all_instruments_to_piano;
+	_BoolSettings::remove_empty_tracks | _BoolSettings::all_instruments_to_piano;
 struct file_settings
 {////per file settings
 	std::wstring filename;

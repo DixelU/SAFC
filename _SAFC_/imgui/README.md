@@ -109,6 +109,13 @@ unchanged. Choose an output different from the currently memory-mapped source.
 
 ## Build and run
 
+The frontend's `.clang-format` follows the existing tab indentation and Allman
+braces. Keep control flow and widget calls on separate lines. Split panel drawing
+at UI sections and keep canvas geometry separate from input handling; each
+function should make its ImGui Begin/End and Push/Pop pairs easy to follow. Use
+enums for modes and names for domain limits, hit tolerances, and shared layout
+dimensions. Preserve model IDs and the order of controls when refactoring.
+
 The frontend currently requires Windows, a C++23-capable MSVC toolchain, and an
 OpenGL 3.3 compatibility context. Initialize the submodules and use the static CRT
 vcpkg triplet. The additional frontend dependencies are `glfw3` and `imgui` with
