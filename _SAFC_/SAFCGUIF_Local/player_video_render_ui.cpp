@@ -476,8 +476,8 @@ bool read_controls(simple_player_video_settings& settings)
 		settings.video_bitrate_kbps < 64 || settings.video_bitrate_kbps > 250000 ||
 		!audio_bitrate_valid ||
 		(settings.audio_sample_rate != 44100 && settings.audio_sample_rate != 48000) ||
-		settings.tail_seconds < 0.0 || settings.tail_seconds > 60.0 ||
-		settings.visible_seconds < 0.25 || settings.visible_seconds > 60.0)
+		settings.tail_seconds < 0.0 || settings.tail_seconds > 30.0 ||
+		settings.visible_seconds < 1e-6 || settings.visible_seconds > 2.0)
 	{
 		throw_alert_warning(
 			"Render ranges: even size 16-8192, FPS 1-240, video 64-250000 kbps, "
