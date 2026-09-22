@@ -538,7 +538,7 @@ struct midi_editor_viewer : public handleable_ui_part
 
 	void draw_notes(const layout& l, tick_type view_start, tick_type view_duration,
 		std::uint8_t key_low, std::uint8_t key_high, float key_height,
-		const std::set<std::uint32_t>& selected_ids)
+		const std::set<midi_editor::note_id_type>& selected_ids)
 	{
 		const auto notes = editor->get_notes_in_range(
 			view_start, view_start + view_duration, key_low, key_high);
@@ -785,7 +785,7 @@ struct midi_editor_viewer : public handleable_ui_part
 	}
 
 	void draw_velocity_lane(const layout& l, tick_type view_start, tick_type view_duration,
-		const std::set<std::uint32_t>& selected_ids)
+		const std::set<midi_editor::note_id_type>& selected_ids)
 	{
 		const float lane_h = l.lane_top - l.lane_bottom;
 		if (lane_h <= 4.f)

@@ -422,9 +422,22 @@ void draw_workspace_background(const workspace& app, const workspace_layout& lay
 		app.birthday.active() ? IM_COL32(30, 42, 56, 255) : IM_COL32(224, 239, 247, 255),
 		"SAFC   /   MIDI WORKSTATION");
 
-	background->AddText({24 * layout.scale, layout.display.y - 29 * layout.scale},
-		app.birthday.active() ? IM_COL32(65, 87, 103, 255) : IM_COL32(136, 166, 187, 255),
-		"SAFC  /  ImGui   |   Drag headers to move panels; drag corners to resize.");
+	const std::string footer_text = "SAFC v" + app.updates.snapshot().current_version +
+		"  /  ImGui   |   Drag headers to move panels; drag corners to resize.";
+	const ImVec2 footer_position = {
+		std::min(24.f * layout.scale, layout.display.x), std::max(0.f, layout.display.y - 29.f * layout.scale)};
+	const ImVec2 footer_padding = {8.f * layout.scale, 5.f * layout.scale};
+	const ImVec2 footer_size = ImGui::CalcTextSize(footer_text.c_str());
+	const ImVec2 footer_min = {
+		std::max(0.f, footer_position.x - footer_padding.x), std::max(0.f, footer_position.y - footer_padding.y)};
+	const ImVec2 footer_max = {
+		std::min(layout.display.x, footer_position.x + footer_size.x + footer_padding.x),
+		std::min(layout.display.y, footer_position.y + footer_size.y + footer_padding.y)};
+	background->AddRectFilled(footer_min, footer_max, IM_COL32(3, 12, 21, 224), 3.f * layout.scale);
+	background->AddRect(footer_min, footer_max, IM_COL32(124, 186, 214, 220), 3.f * layout.scale);
+	background->PushClipRect(footer_min, footer_max, true);
+	background->AddText(footer_position, IM_COL32(244, 249, 252, 255), footer_text.c_str());
+	background->PopClipRect();
 }
 
 void draw_workspace_navigation(workspace& app, const workspace_layout& layout)
