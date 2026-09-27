@@ -81,20 +81,22 @@ int main()
         for (auto* window : ImGui::GetCurrentContext()->Windows)
             if (std::strstr(window->Name, "Roll panel")) roll = window;
         require(roll != nullptr, "Editor roll child window is absent.");
+        // Canvas chrome follows the font size; the lane keeps its unscaled 110 px default.
+        using safc::imgui_ui::scaled;
         const auto origin = roll->DC.CursorStartPos;
         const float size_x = roll->WorkRect.Max.x - origin.x;
-        const float size_y = roll->WorkRect.Max.y - origin.y - 34.f;
+        const float size_y = roll->WorkRect.Max.y - origin.y - scaled(34.f);
         auto baseline = std::make_unique<midi_editor>();
         require(baseline->load_file((directory / L"editor-output.mid").wstring()), "Editor baseline could not be reloaded.");
         const auto initial_count = baseline->get_note_count();
         const int low = baseline->get_view_key_low(), high = baseline->get_view_key_high();
-        const float key_height = (size_y - 24.f - 110.f - 6.f) / (high - low + 1);
+        const float key_height = (size_y - scaled(24.f) - 110.f - scaled(6.f)) / (high - low + 1);
         const auto duration = baseline->get_view_duration_ticks();
-        const float note_width = size_x - 47.f;
+        const float note_width = size_x - scaled(47.f);
         auto position = [&](double tick, int key)
         {
-            return ImVec2(origin.x + 47.f + float(tick / double(duration)) * note_width,
-                origin.y + 24.f + (high - key + .5f) * key_height);
+            return ImVec2(origin.x + scaled(47.f) + float(tick / double(duration)) * note_width,
+                origin.y + scaled(24.f) + (high - key + .5f) * key_height);
         };
         auto drag_button = [&](ImVec2 from, ImVec2 to, int button)
         {
@@ -306,7 +308,8 @@ int main()
         }
         auto* editor_content = content_window("MIDI editor");
         audit_combo(editor_content, "Tool", {"Draw / move", "Select", "Erase", "Split"}, 0);
-        audit_combo(editor_content, "Snap", {"1/4", "1/8", "1/16", "1/32", "1/64", "Off"}, 2);
+        audit_combo(editor_content, "Snap",
+            {"1/4", "1/8", "1/16", "1/32", "1/64", "1/4 triplet", "1/8 triplet", "1/16 triplet", "Off"}, 2);
         audit_combo(editor_content, "Lane", {"Velocity", "Pitch bend", "Pan", "Volume", "Tempo"}, 4);
         for (const char* label : {"BPM min", "BPM max", "20-400 BPM", "At tick", "BPM", "Insert tempo"})
             probe(editor_content->GetID(label), label);

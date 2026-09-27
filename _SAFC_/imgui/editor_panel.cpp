@@ -7,6 +7,8 @@
 #include "playback_session.h"
 #include "../SAFC_InnerModules/midi_editor.h"
 
+#include <imgui_internal.h>
+
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -56,7 +58,11 @@ constexpr int pitch_bend_center = 8192;
 constexpr double microseconds_per_minute = 60000000.;
 constexpr double minimum_tempo_bpm = microseconds_per_minute / 0xFFFFFF;
 constexpr double maximum_tempo_bpm = microseconds_per_minute;
+// The full Set Tempo range is too wide to paint; start with a musical range.
+constexpr double default_tempo_low_bpm = 20.;
+constexpr double default_tempo_high_bpm = 400.;
 constexpr tick maximum_ramp_steps = 4096;
+// Pixel sizes at the workspace font size; apply scaled() where they are used.
 constexpr float note_resize_handle_width = 7.f;
 constexpr float velocity_brush_radius = 4.f;
 
@@ -68,6 +74,11 @@ std::string utf8(const std::wstring& value)
 	std::string result(count, '\0');
 	WideCharToMultiByte(CP_UTF8, 0, value.data(), int(value.size()), result.data(), count, nullptr, nullptr);
 	return result;
+}
+
+std::string note_count(std::size_t count)
+{
+	return std::to_string(count) + (count == 1 ? " note" : " notes");
 }
 
 ImU32 note_color(unsigned track, unsigned channel, bool selected, bool ghost = false)
@@ -164,8 +175,8 @@ struct editor_panel::impl
 	lane_kind lane = lane_kind::velocity;
 	bool ghosts = true, show_lane = true, help = false;
 	float lane_height = 110.f;
-	double tempo_low = minimum_tempo_bpm;
-	double tempo_high = maximum_tempo_bpm;
+	double tempo_low = default_tempo_low_bpm;
+	double tempo_high = default_tempo_high_bpm;
 	double tempo_point = 120.;
 	tick tempo_tick = 0;
 	float scale_percent = 100.f;
@@ -206,8 +217,9 @@ struct editor_panel::impl
 
 	std::map<tick, double> control_values;
 	double anchor_value = 0;
-	bool line_gesture = false;
+	bool line_gesture = false, snap_bypass = false;
 	ImGuiMouseButton gesture_button = ImGuiMouseButton_Left;
+	double lane_hover_since = -1.;
 
 	enum class tool_kind
 	{
@@ -451,7 +463,8 @@ struct editor_panel::impl
 
 	tick snap_ticks() const
 	{
-		static constexpr int denominators[] = {3, 4, 6, 8, 12, 16, 24, 32, 0};
+		// Whole-note divisions in Snap combo order: straight, then triplets, then Off.
+		static constexpr int denominators[] = {4, 8, 16, 32, 64, 6, 12, 24, 0};
 		return denominators[snap_index] ? std::max<tick>(1, tick(document->get_ppqn()) * 4 / denominators[snap_index])
 										: 1;
 	}
@@ -459,6 +472,13 @@ struct editor_panel::impl
 	{
 		const auto cell = bypass ? tick(1) : snap_ticks();
 		return (value / cell) * cell;
+	}
+	// A drawn note keeps its picked length and reaches the end of the grid
+	// cell under the pointer; Alt follows the pointer tick instead.
+	tick draw_end() const
+	{
+		const auto cell = snap_bypass ? tick(1) : snap_ticks();
+		return std::max(anchor_tick + gesture_length, snapped(current_tick, snap_bypass) + cell);
 	}
 
 	int channel() const { return draw_channel >= 0 ? draw_channel : document->get_active_track_channel(); }
@@ -476,7 +496,7 @@ struct editor_panel::impl
 	}
 	double lane_max() const { return lane == lane_kind::pitch_bend ? pitch_bend_max : midi_value_max; }
 
-	void audition(int key)
+	void audition(int key, int note_channel = -1)
 	{
 		if (key == audition_key)
 			return;
@@ -486,7 +506,7 @@ struct editor_panel::impl
 		audition_key = key;
 		if (key >= 0)
 		{
-			audition_channel = channel();
+			audition_channel = note_channel >= 0 ? note_channel : channel();
 			playback.audition_note(
 				std::uint8_t(key), std::uint8_t(draw_velocity), std::uint8_t(audition_channel), true);
 		}
@@ -517,8 +537,7 @@ struct editor_panel::impl
 		switch (gesture)
 		{
 		case gesture_kind::draw:
-			document->insert_note(anchor_tick,
-				std::max(anchor_tick + gesture_length, snapped(current_tick) + snap_ticks()), std::uint8_t(current_key),
+			document->insert_note(anchor_tick, draw_end(), std::uint8_t(current_key),
 				std::uint8_t(draw_velocity), std::uint8_t(channel()), document->get_active_track());
 			break;
 		case gesture_kind::select:
@@ -596,6 +615,77 @@ struct editor_panel::impl
 		control_values.clear();
 		delta_tick = 0;
 		delta_key = 0;
+		snap_bypass = false;
+	}
+
+	// move_notes_op leaves out notes that would cross a score edge, which would
+	// scatter a chord; clamp to the selection bounds and skip no-op moves.
+	// key_step keeps octave transposition in whole octaves.
+	void nudge_selection(std::int64_t ticks, int keys, int key_step = 1)
+	{
+		tick begin, end;
+		std::uint8_t low, high;
+		if (!document->get_selection_bounds(begin, end, low, high))
+			return;
+
+		ticks = std::max(ticks, -std::int64_t(begin));
+		keys = std::clamp(keys, -int(low), midi_key_max - int(high)) / key_step * key_step;
+		if (ticks || keys)
+			document->move_selected_notes(ticks, keys);
+	}
+
+	void copy_selection(bool cut)
+	{
+		const auto count = document->copy_selected_notes();
+		if (cut && count)
+			document->delete_selected_notes();
+		status = count ? (cut ? "Cut " : "Copied ") + note_count(count) + "." : "Select notes to copy.";
+	}
+
+	void paste_selection()
+	{
+		const auto count = document->paste_clipboard();
+		if (!count)
+		{
+			status = "The clipboard is empty.";
+			return;
+		}
+
+		// Paste keeps the copied ticks; bring them into view when they land off-screen.
+		tick begin, end;
+		std::uint8_t low, high;
+		const auto view_start = document->get_view_start_tick(), view_duration = document->get_view_duration_ticks();
+		if (document->get_selection_bounds(begin, end, low, high) &&
+			(begin < view_start || begin - view_start >= view_duration))
+			document->set_view_range(begin, view_duration);
+		status = "Pasted " + note_count(count) + " at their copied position.";
+	}
+
+	void duplicate_selection()
+	{
+		const auto count = document->duplicate_selected();
+		status = count ? "Duplicated " + note_count(count) + "." : "Select notes to duplicate.";
+	}
+
+	void delete_selection()
+	{
+		const auto count = document->selection_count();
+		document->delete_selected_notes();
+		status = count ? "Deleted " + note_count(count) + "." : "Select notes to delete.";
+	}
+
+	void quantize_selection()
+	{
+		const auto count = document->selection_count();
+		if (!count)
+			status = "Select notes to quantize.";
+		else if (snap_ticks() <= 1)
+			status = "Choose a Snap grid to quantize.";
+		else
+		{
+			document->quantize_selected(snap_ticks());
+			status = "Quantized " + note_count(count) + ".";
+		}
 	}
 
 	void open_tool(tool_kind value)
@@ -678,7 +768,8 @@ struct editor_panel::impl
 			: tool == tool_kind::flip				  ? "Flip score"
 			: tool == tool_kind::claw				  ? "Claw machine"
 													   : "LFO";
-		ImGui::SetNextWindowSize(ImVec2(390, tool == tool_kind::flip ? 245.f : 355.f), ImGuiCond_FirstUseEver);
+		ImGui::SetNextWindowSize(
+			ImVec2(scaled(390.f), scaled(tool == tool_kind::flip ? 245.f : 355.f)), ImGuiCond_FirstUseEver);
 		bool open = tool_open;
 
 		if (begin_folded_window(title, &open))
@@ -729,7 +820,7 @@ struct editor_panel::impl
 				preview_dirty = true;
 			ImGui::Separator();
 			ImGui::BeginDisabled(preview_dirty || (tool == tool_kind::lfo && lane == lane_kind::tempo));
-			if (ImGui::Button("Accept", ImVec2(100, 0)))
+			if (ImGui::Button("Accept", ImVec2(scaled(100.f), 0)))
 			{
 				document->accept_tool_preview();
 				tool = tool_kind::none;
@@ -739,7 +830,7 @@ struct editor_panel::impl
 			ImGui::EndDisabled();
 			ImGui::SameLine();
 
-			if (ImGui::Button("Cancel", ImVec2(100, 0)))
+			if (ImGui::Button("Cancel", ImVec2(scaled(100.f), 0)))
 				open = false;
 			ImGui::EndDisabled();
 			if (busy)
@@ -749,7 +840,9 @@ struct editor_panel::impl
 
 		if (tool != tool_kind::none)
 			tool_open = open;
-		if (preview_dirty && tool_open && !busy)
+		// Wait until a slider or field is released so dragging does not restart
+		// the preview job, and the editor's progress screen, on every step.
+		if (preview_dirty && tool_open && !busy && !ImGui::IsAnyItemActive())
 			preview();
 	}
 
@@ -769,6 +862,7 @@ struct editor_panel::impl
 		if (tool != tool_kind::none)
 			return;
 
+		// Only undo/redo and moves repeat while held; the other shortcuts act once per press.
 		if (io.KeyCtrl)
 		{
 			if (ImGui::IsKeyPressed(ImGuiKey_Z))
@@ -780,75 +874,72 @@ struct editor_panel::impl
 			}
 			if (ImGui::IsKeyPressed(ImGuiKey_Y))
 				document->redo();
-			if (ImGui::IsKeyPressed(ImGuiKey_C))
-				document->copy_selected_notes();
-			if (ImGui::IsKeyPressed(ImGuiKey_X))
-			{
-				document->copy_selected_notes();
-				document->delete_selected_notes();
-			}
-			if (ImGui::IsKeyPressed(ImGuiKey_V))
-				document->paste_clipboard();
-			if (ImGui::IsKeyPressed(ImGuiKey_B))
-				document->duplicate_selected();
-			if (ImGui::IsKeyPressed(ImGuiKey_A))
+			if (ImGui::IsKeyPressed(ImGuiKey_C, false))
+				copy_selection(false);
+			if (ImGui::IsKeyPressed(ImGuiKey_X, false))
+				copy_selection(true);
+			if (ImGui::IsKeyPressed(ImGuiKey_V, false))
+				paste_selection();
+			if (ImGui::IsKeyPressed(ImGuiKey_B, false))
+				duplicate_selection();
+			if (ImGui::IsKeyPressed(ImGuiKey_A, false))
 				document->select_rect(
 					0, document->get_total_ticks() + 1, 0, midi_key_max, document->get_active_track());
-			if (ImGui::IsKeyPressed(ImGuiKey_D))
+			if (ImGui::IsKeyPressed(ImGuiKey_D, false))
 				document->clear_selection();
 			if (ImGui::IsKeyPressed(ImGuiKey_UpArrow))
-				document->move_selected_notes(0, 12);
+				nudge_selection(0, 12, 12);
 			if (ImGui::IsKeyPressed(ImGuiKey_DownArrow))
-				document->move_selected_notes(0, -12);
-			if (ImGui::IsKeyPressed(ImGuiKey_S))
+				nudge_selection(0, -12, 12);
+			if (ImGui::IsKeyPressed(ImGuiKey_S, false))
 				save(false);
-			if (ImGui::IsKeyPressed(ImGuiKey_O) && dialogs.open_midi)
+			if (ImGui::IsKeyPressed(ImGuiKey_O, false) && dialogs.open_midi)
 				request_load(dialogs.open_midi());
 		}
 		else if (io.KeyAlt)
 		{
-			if (ImGui::IsKeyPressed(ImGuiKey_V))
+			if (ImGui::IsKeyPressed(ImGuiKey_V, false))
 				ghosts = !ghosts;
-			if (ImGui::IsKeyPressed(ImGuiKey_C))
+			if (ImGui::IsKeyPressed(ImGuiKey_C, false))
 				document->change_channel_selected(std::uint8_t(channel()));
-			if (ImGui::IsKeyPressed(ImGuiKey_U))
+			if (ImGui::IsKeyPressed(ImGuiKey_U, false))
 				open_tool(tool_kind::chopper);
-			if (ImGui::IsKeyPressed(ImGuiKey_Y))
+			if (ImGui::IsKeyPressed(ImGuiKey_Y, false))
 				open_tool(tool_kind::flip);
-			if (ImGui::IsKeyPressed(ImGuiKey_W))
+			if (ImGui::IsKeyPressed(ImGuiKey_W, false))
 				open_tool(tool_kind::claw);
-			if (ImGui::IsKeyPressed(ImGuiKey_O))
+			if (ImGui::IsKeyPressed(ImGuiKey_O, false))
 				open_tool(tool_kind::lfo);
 		}
 		else
 		{
-			if (io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_C))
+			if (io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_C, false))
 				document->select_channel(std::uint8_t(channel()), document->get_active_track());
 			if (!io.KeyShift)
 			{
-				if (ImGui::IsKeyPressed(ImGuiKey_C))
+				if (ImGui::IsKeyPressed(ImGuiKey_C, false))
 					mode = edit_mode::split;
-				if (ImGui::IsKeyPressed(ImGuiKey_P))
+				if (ImGui::IsKeyPressed(ImGuiKey_P, false))
 					mode = edit_mode::draw;
-				if (ImGui::IsKeyPressed(ImGuiKey_E))
+				if (ImGui::IsKeyPressed(ImGuiKey_E, false))
 					mode = edit_mode::select;
-				if (ImGui::IsKeyPressed(ImGuiKey_D))
+				if (ImGui::IsKeyPressed(ImGuiKey_D, false))
 					mode = edit_mode::erase;
 			}
-			if (ImGui::IsKeyPressed(ImGuiKey_Delete))
-				document->delete_selected_notes();
-			if (ImGui::IsKeyPressed(ImGuiKey_Space))
+			if (ImGui::IsKeyPressed(ImGuiKey_Delete, false))
+				delete_selection();
+			if (ImGui::IsKeyPressed(ImGuiKey_Space, false))
 				play(true);
 			if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow))
-				document->move_selected_notes(-std::int64_t(snap_ticks()), 0);
+				nudge_selection(-std::int64_t(snap_ticks()), 0);
 			if (ImGui::IsKeyPressed(ImGuiKey_RightArrow))
-				document->move_selected_notes(std::int64_t(snap_ticks()), 0);
+				nudge_selection(std::int64_t(snap_ticks()), 0);
 			if (ImGui::IsKeyPressed(ImGuiKey_UpArrow))
-				document->move_selected_notes(0, 1);
+				nudge_selection(0, 1);
 			if (ImGui::IsKeyPressed(ImGuiKey_DownArrow))
-				document->move_selected_notes(0, -1);
-			if (ImGui::IsKeyPressed(ImGuiKey_Q))
-				document->quantize_selected(snap_ticks());
+				nudge_selection(0, -1);
+			if (ImGui::IsKeyPressed(ImGuiKey_Q, false))
+				quantize_selection();
 		}
 	}
 
@@ -876,6 +967,10 @@ struct editor_panel::impl
 		if (ImGui::Button("From view"))
 			play(true);
 
+		ImGui::EndDisabled();
+		ImGui::EndDisabled();
+
+		// Stop and Help work before a MIDI is open, and while a tool is open.
 		ImGui::SameLine();
 		if (ImGui::Button("Stop"))
 			playback.stop();
@@ -884,8 +979,6 @@ struct editor_panel::impl
 		if (ImGui::Button("Help"))
 			help = !help;
 
-		ImGui::EndDisabled();
-		ImGui::EndDisabled();
 		if (busy || !loaded)
 			return;
 
@@ -903,23 +996,23 @@ struct editor_panel::impl
 		ImGui::EndDisabled();
 		ImGui::SameLine();
 		if (ImGui::Button("Copy"))
-			document->copy_selected_notes();
+			copy_selection(false);
 
 		ImGui::SameLine();
 		if (ImGui::Button("Paste"))
-			document->paste_clipboard();
+			paste_selection();
 
 		ImGui::SameLine();
 		if (ImGui::Button("Duplicate"))
-			document->duplicate_selected();
+			duplicate_selection();
 
 		ImGui::SameLine();
 		if (ImGui::Button("Delete"))
-			document->delete_selected_notes();
+			delete_selection();
 
 		ImGui::SameLine();
 		if (ImGui::Button("Quantize"))
-			document->quantize_selected(snap_ticks());
+			quantize_selection();
 
 		ImGui::SameLine();
 		if (ImGui::Button("Chopper"))
@@ -945,8 +1038,8 @@ struct editor_panel::impl
 		const auto active = document->get_active_track();
 
 		ImGui::TextUnformatted("TRACKS");
-		ImGui::BeginChild(
-			"Track list", ImVec2(0, std::max(80.f, ImGui::GetContentRegionAvail().y * .38f)), ImGuiChildFlags_Borders);
+		ImGui::BeginChild("Track list", ImVec2(0, std::max(scaled(80.f), ImGui::GetContentRegionAvail().y * .38f)),
+			ImGuiChildFlags_Borders);
 
 		for (const auto& [id, info] : document->get_tracks())
 		{
@@ -975,11 +1068,17 @@ struct editor_panel::impl
 		}
 
 		ImGui::SetNextItemWidth(-1);
-		if (ImGui::InputText(
-				"##Track name", track_name.data(), track_name.size(), ImGuiInputTextFlags_EnterReturnsTrue))
-			document->set_track_name(document->get_active_track(), track_name.data());
+		const bool entered = ImGui::InputText(
+			"##Track name", track_name.data(), track_name.size(), ImGuiInputTextFlags_EnterReturnsTrue);
+		if (entered || ImGui::IsItemDeactivatedAfterEdit())
+		{
+			// Leaving the field also renames; Escape restores the old text, which is skipped here.
+			const auto found = document->get_tracks().find(std::uint16_t(named_track));
+			if (found == document->get_tracks().end() || found->second.name != track_name.data())
+				document->set_track_name(document->get_active_track(), track_name.data());
+		}
 
-		help_tip("Track name; press Enter to save the name into the MIDI.");
+		help_tip("Track name; press Enter or leave the field to save the name into the MIDI.");
 
 		ImGui::TextUnformatted("DRAW CHANNEL");
 		if (ImGui::Selectable("Follow track", draw_channel < 0))
@@ -991,7 +1090,7 @@ struct editor_panel::impl
 			ImGui::PushStyleColor(ImGuiCol_Button, note_color(active, ch, false));
 
 			const auto label = std::to_string(ch + 1);
-			if (ImGui::Button(label.c_str(), ImVec2(34, 0)))
+			if (ImGui::Button(label.c_str(), ImVec2(scaled(34.f), 0)))
 				draw_channel = ch;
 
 			if (channel() == ch)
@@ -1057,15 +1156,16 @@ struct editor_panel::impl
 
 	struct canvas_view
 	{
-		static constexpr float keyboard_width = 47.f;
-		static constexpr float ruler_height = 24.f;
-		static constexpr float divider_height = 6.f;
+		// Lane height is the user's dragged size, so its limits stay unscaled.
 		static constexpr float minimum_lane_height = 40.f;
 		static constexpr float maximum_lane_fraction = .55f;
+		const float keyboard_width = scaled(47.f);
+		const float ruler_height = scaled(24.f);
+		const float divider_height = scaled(6.f);
 
 		ImVec2 origin = ImGui::GetCursorScreenPos();
 		ImVec2 size = {std::max(100.f, ImGui::GetContentRegionAvail().x),
-			std::max(150.f, ImGui::GetContentRegionAvail().y - 34.f)};
+			std::max(150.f, ImGui::GetContentRegionAvail().y - scaled(34.f))};
 		ImVec2 roll_min, roll_max, lane_min, lane_maximum;
 		tick start, duration;
 		int low, high, keys;
@@ -1234,7 +1334,7 @@ struct editor_panel::impl
 		}
 
 		tick grid = snap_ticks();
-		while (double(grid) / double(view.duration) * view.width < 14.)
+		while (double(grid) / double(view.duration) * view.width < scaled(14.f))
 			grid *= 2;
 
 		const tick beat = std::max<tick>(1, document->get_ppqn());
@@ -1248,7 +1348,7 @@ struct editor_panel::impl
 			draw->AddLine(ImVec2(x, view.roll_min.y), ImVec2(x, view.roll_max.y),
 				bar ? IM_COL32(92, 139, 174, 170) : IM_COL32(57, 83, 104, 100));
 
-			if (bar || (grid >= beat && view.width * double(grid) / double(view.duration) > 50))
+			if (bar || (grid >= beat && view.width * double(grid) / double(view.duration) > scaled(50.f)))
 			{
 				const auto label =
 					std::to_string(position / beat / 4 + 1) + "." + std::to_string(position / beat % 4 + 1);
@@ -1330,9 +1430,8 @@ struct editor_panel::impl
 		}
 		else if (gesture == gesture_kind::draw)
 		{
-			note value(anchor_tick, std::max(anchor_tick + gesture_length, snapped(current_tick) + snap_ticks()),
-				std::uint8_t(current_key), std::uint8_t(draw_velocity), std::uint8_t(channel()),
-				document->get_active_track());
+			note value(anchor_tick, draw_end(), std::uint8_t(current_key), std::uint8_t(draw_velocity),
+				std::uint8_t(channel()), document->get_active_track());
 
 			render_note(value, false, true);
 		}
@@ -1378,6 +1477,13 @@ struct editor_panel::impl
 
 		draw->AddText(ImVec2(view.origin.x + 3, view.lane_min.y + 4), IM_COL32(144, 188, 219, 255),
 			labels[static_cast<int>(lane)]);
+		if (lane != lane_kind::velocity && lane != lane_kind::tempo)
+		{
+			// Channel controllers edit the draw channel; name it under the lane label.
+			const auto channel_label = "Ch " + std::to_string(channel() + 1);
+			draw->AddText(ImVec2(view.origin.x + 3, view.lane_min.y + 4 + ImGui::GetTextLineHeight()),
+				IM_COL32(144, 188, 219, 255), channel_label.c_str());
+		}
 		draw->PushClipRect(view.lane_min, view.lane_maximum, true);
 
 		if (lane == lane_kind::velocity)
@@ -1573,17 +1679,19 @@ struct editor_panel::impl
 			}
 			else if (found)
 			{
+				// Clicking picks the note's length and velocity for drawing; the draw
+				// channel, including Follow track, is left to the channel buttons.
 				draw_length = hit.length();
 				draw_velocity = hit.velocity;
-				draw_channel = hit.channel;
 
 				if (!document->is_note_selected(hit.id))
 					document->select_note(
 						hit.id, io.KeyCtrl ? midi_editor::select_mode::add : midi_editor::select_mode::replace);
 
 				gesture_notes = document->get_selected_notes();
-				gesture = (view.x_at(double(hit.end_tick)) - mouse.x <= note_resize_handle_width) ? gesture_kind::resize
-																								  : gesture_kind::move;
+				gesture = view.x_at(double(hit.end_tick)) - mouse.x <= scaled(note_resize_handle_width)
+					? gesture_kind::resize
+					: gesture_kind::move;
 				if (gesture == gesture_kind::resize && io.KeyCtrl)
 				{
 					std::uint8_t low_key, high_key;
@@ -1592,12 +1700,13 @@ struct editor_panel::impl
 					stretch_factor = 1.;
 				}
 
-				audition(hit.key);
+				audition(hit.key, hit.channel);
 			}
 			else
 			{
 				gesture = gesture_kind::draw;
-				anchor_tick = snapped(anchor_tick, io.KeyAlt);
+				snap_bypass = io.KeyAlt;
+				anchor_tick = snapped(anchor_tick, snap_bypass);
 				gesture_length = draw_length ? draw_length : snap_ticks();
 
 				audition(anchor_key);
@@ -1615,7 +1724,8 @@ struct editor_panel::impl
 
 			if (gesture == gesture_kind::velocity && !line_gesture)
 			{
-				const tick radius = std::max<tick>(1, tick(double(view.duration) * velocity_brush_radius / view.width));
+				const tick radius =
+					std::max<tick>(1, tick(double(view.duration) * scaled(velocity_brush_radius) / view.width));
 				paint_velocity(
 					anchor_tick > radius ? anchor_tick - radius : 0, anchor_tick + radius, anchor_value, anchor_value);
 			}
@@ -1632,6 +1742,7 @@ struct editor_panel::impl
 		const auto previous_tick = current_tick;
 		current_tick = view.tick_at(mouse.x);
 		current_key = view.key_at(mouse.y);
+		snap_bypass = io.KeyAlt;
 		if (gesture == gesture_kind::pan)
 		{
 			document->set_view_range(
@@ -1731,10 +1842,49 @@ struct editor_panel::impl
 
 		if (gesture == gesture_kind::none && in_keys && ImGui::IsMouseDown(ImGuiMouseButton_Left))
 			audition(view.key_at(mouse.y));
-		if (in_lane && gesture == gesture_kind::none)
-			ImGui::SetTooltip("Tick %llu | %s %.2f\nLeft-drag paints; right-drag draws a ramp.",
-				static_cast<unsigned long long>(view.tick_at(mouse.x)), lane == lane_kind::tempo ? "BPM" : "Value",
-				view.value_at(mouse.y));
+
+		const bool in_divider = show_lane &&
+			contains(mouse, ImVec2(view.origin.x, view.roll_max.y), ImVec2(view.roll_max.x, view.lane_min.y));
+		if (gesture == gesture_kind::divider || (hovered && gesture == gesture_kind::none && in_divider))
+			ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNS);
+		else if (gesture == gesture_kind::resize || gesture == gesture_kind::stretch ||
+			(hovered && gesture == gesture_kind::none && in_roll && over_resize_edge(view, mouse)))
+			ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
+	}
+
+	// Mirrors begin_canvas_gesture: a left press here would resize or stretch.
+	bool over_resize_edge(const canvas_view& view, ImVec2 mouse) const
+	{
+		if ((mode != edit_mode::draw && mode != edit_mode::select) || ImGui::GetIO().KeyShift)
+			return false;
+
+		note hit;
+		return document->find_note_at(view.tick_at(mouse.x), std::uint8_t(view.key_at(mouse.y)), hit, 0, 0,
+				   document->get_active_track()) &&
+			view.x_at(double(hit.end_tick)) - mouse.x <= scaled(note_resize_handle_width);
+	}
+
+	void draw_lane_tooltip(const canvas_view& view, bool hovered)
+	{
+		const auto mouse = ImGui::GetIO().MousePos;
+		const bool resting = hovered && show_lane && gesture == gesture_kind::none &&
+			!ImGui::IsMouseDown(ImGuiMouseButton_Left) && !ImGui::IsMouseDown(ImGuiMouseButton_Right) &&
+			!ImGui::IsMouseDown(ImGuiMouseButton_Middle) && contains(mouse, view.lane_min, view.lane_maximum);
+
+		// Wait for a short rest in the lane so the tooltip does not cover painting.
+		if (!resting)
+		{
+			lane_hover_since = -1.;
+			return;
+		}
+		if (lane_hover_since < 0.)
+			lane_hover_since = ImGui::GetTime();
+		if (ImGui::GetTime() - lane_hover_since < ImGui::GetStyle().HoverDelayNormal)
+			return;
+
+		ImGui::SetTooltip("Tick %llu | %s %.2f\nLeft-drag paints; right-drag draws a ramp.",
+			static_cast<unsigned long long>(view.tick_at(mouse.x)), lane == lane_kind::tempo ? "BPM" : "Value",
+			view.value_at(mouse.y));
 	}
 
 	void draw_time_scrollbar(const canvas_view& view)
@@ -1756,6 +1906,15 @@ struct editor_panel::impl
 			ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight | ImGuiButtonFlags_MouseButtonMiddle);
 		const bool hovered = ImGui::IsItemHovered();
 		const bool active = ImGui::IsItemActive();
+		// Arrows and Space edit and play the roll. Owning them while the roll is
+		// hovered, dragged or focused stops keyboard navigation from also moving
+		// focus or activating another widget; shortcuts() reads keys for any owner.
+		// Only while the editor has focus, so text fields elsewhere keep their keys.
+		if (interactive && (hovered || active || ImGui::IsItemFocused()) &&
+			ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !ImGui::GetIO().WantTextInput)
+			for (const auto key :
+				{ImGuiKey_LeftArrow, ImGuiKey_RightArrow, ImGuiKey_UpArrow, ImGuiKey_DownArrow, ImGuiKey_Space})
+				ImGui::SetKeyOwner(key, ImGui::GetItemID());
 		auto* draw = ImGui::GetWindowDrawList();
 		const ImVec2 corner(view.origin.x + view.size.x, view.origin.y + view.size.y);
 		draw->AddRectFilled(view.origin, corner, IM_COL32(6, 18, 28, 255));
@@ -1768,6 +1927,7 @@ struct editor_panel::impl
 
 		if (interactive && (hovered || active || gesture != gesture_kind::none))
 			handle_canvas_input(view, hovered);
+		draw_lane_tooltip(view, interactive && hovered);
 		if (!ImGui::IsMouseDown(ImGuiMouseButton_Left) && gesture == gesture_kind::none)
 			audition(-1);
 		draw_time_scrollbar(view);
@@ -1780,19 +1940,23 @@ struct editor_panel::impl
 			return;
 
 		ImGui::BeginDisabled(tool != tool_kind::none);
-		ImGui::SetNextItemWidth(135);
+		ImGui::SetNextItemWidth(scaled(135.f));
 		enum_combo("Tool", mode, "Draw / move\0Select\0Erase\0Split\0");
 		ImGui::SameLine();
-		ImGui::SetNextItemWidth(100);
+		ImGui::SetNextItemWidth(scaled(135.f));
+		// Order matches snap_ticks().
 		ImGui::Combo("Snap", &snap_index,
 			"1/4\0"
 			"1/8\0"
 			"1/16\0"
 			"1/32\0"
 			"1/64\0"
+			"1/4 triplet\0"
+			"1/8 triplet\0"
+			"1/16 triplet\0"
 			"Off\0");
 		ImGui::SameLine();
-		ImGui::SetNextItemWidth(125);
+		ImGui::SetNextItemWidth(scaled(125.f));
 		enum_combo("Lane", lane, "Velocity\0Pitch bend\0Pan\0Volume\0Tempo\0");
 		ImGui::SameLine();
 
@@ -1810,10 +1974,10 @@ struct editor_panel::impl
 		if (lane == lane_kind::tempo)
 		{
 
-			ImGui::SetNextItemWidth(105);
+			ImGui::SetNextItemWidth(scaled(105.f));
 			ImGui::InputDouble("BPM min", &tempo_low, 0, 0, "%.3f");
 			ImGui::SameLine();
-			ImGui::SetNextItemWidth(105);
+			ImGui::SetNextItemWidth(scaled(105.f));
 			ImGui::InputDouble("BPM max", &tempo_high, 0, 0, "%.3f");
 
 			tempo_low = std::isfinite(tempo_low) ? 
@@ -1825,15 +1989,15 @@ struct editor_panel::impl
 
 			if (ImGui::Button("20-400 BPM"))
 			{
-				tempo_low = 20.;
-				tempo_high = 400.;
+				tempo_low = default_tempo_low_bpm;
+				tempo_high = default_tempo_high_bpm;
 			}
 
 			ImGui::SameLine();
-			ImGui::SetNextItemWidth(105);
+			ImGui::SetNextItemWidth(scaled(105.f));
 			ImGui::InputScalar("At tick", ImGuiDataType_U64, &tempo_tick);
 			ImGui::SameLine();
-			ImGui::SetNextItemWidth(95);
+			ImGui::SetNextItemWidth(scaled(95.f));
 			ImGui::InputDouble("BPM", &tempo_point, 0, 0, "%.3f");
 			ImGui::SameLine();
 
@@ -1842,6 +2006,40 @@ struct editor_panel::impl
 		}
 
 		ImGui::EndDisabled();
+		draw_help();
+		ImGui::Separator();
+		const float footer = ImGui::GetTextLineHeightWithSpacing() * 2.f + scaled(8.f);
+
+		if (ImGui::BeginTable("Editor workspace", 2, ImGuiTableFlags_Resizable | ImGuiTableFlags_BordersInnerV))
+		{
+			ImGui::TableSetupColumn("Tracks", ImGuiTableColumnFlags_WidthFixed, scaled(181.f));
+			ImGui::TableSetupColumn("Roll", ImGuiTableColumnFlags_WidthStretch);
+			ImGui::TableNextColumn();
+			ImGui::BeginChild(
+				"Track controls", ImVec2(0, std::max(scaled(180.f), ImGui::GetContentRegionAvail().y - footer)));
+			ImGui::BeginDisabled(tool != tool_kind::none);
+			draw_tracks();
+			ImGui::EndDisabled();
+			ImGui::EndChild();
+			ImGui::TableNextColumn();
+
+			ImGui::BeginChild("Roll panel", 
+				ImVec2(0, std::max(scaled(180.f), ImGui::GetContentRegionAvail().y - footer)),
+				ImGuiChildFlags_None,
+				ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+			draw_canvas(tool == tool_kind::none);
+			ImGui::EndChild();
+			ImGui::EndTable();
+		}
+
+		ImGui::Text("%s | %zu notes | %zu selected | PPQN %u%s",
+			document->get_track_label(document->get_active_track()).c_str(), document->get_note_count(),
+			document->selection_count(), unsigned(document->get_ppqn()), document->is_modified() ? " | Modified" : "");
+		ImGui::TextUnformatted(status.c_str());
+	}
+
+	void draw_help()
+	{
 		if (help)
 		{
 			ImGui::TextWrapped(
@@ -1857,34 +2055,6 @@ struct editor_panel::impl
 				"Ctrl+Up/Down transposes octaves. Q quantizes. "
 				"Space plays from view. Alt+U/Y/W/O opens Chopper/Flip/Claw/LFO. Esc cancels a gesture.");
 		}
-		ImGui::Separator();
-		const float footer = ImGui::GetTextLineHeightWithSpacing() * 2.f + 8;
-
-		if (ImGui::BeginTable("Editor workspace", 2, ImGuiTableFlags_Resizable | ImGuiTableFlags_BordersInnerV))
-		{
-			ImGui::TableSetupColumn("Tracks", ImGuiTableColumnFlags_WidthFixed, 181.f);
-			ImGui::TableSetupColumn("Roll", ImGuiTableColumnFlags_WidthStretch);
-			ImGui::TableNextColumn();
-			ImGui::BeginChild("Track controls", ImVec2(0, std::max(180.f, ImGui::GetContentRegionAvail().y - footer)));
-			ImGui::BeginDisabled(tool != tool_kind::none);
-			draw_tracks();
-			ImGui::EndDisabled();
-			ImGui::EndChild();
-			ImGui::TableNextColumn();
-
-			ImGui::BeginChild("Roll panel", 
-				ImVec2(0, std::max(180.f, ImGui::GetContentRegionAvail().y - footer)),
-				ImGuiChildFlags_None,
-				ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
-			draw_canvas(tool == tool_kind::none);
-			ImGui::EndChild();
-			ImGui::EndTable();
-		}
-
-		ImGui::Text("%s | %zu notes | %zu selected | PPQN %u%s",
-			document->get_track_label(document->get_active_track()).c_str(), document->get_note_count(),
-			document->selection_count(), unsigned(document->get_ppqn()), document->is_modified() ? " | Modified" : "");
-		ImGui::TextUnformatted(status.c_str());
 	}
 
 	void draw(bool* open)
@@ -1892,9 +2062,8 @@ struct editor_panel::impl
 		poll();
 		const auto display = ImGui::GetIO().DisplaySize;
 		ImGui::SetNextWindowPos({60, 86}, ImGuiCond_FirstUseEver);
-		ImGui::SetNextWindowSize(
-			{std::min(1180.f, display.x - 84.f), std::max(420.f, std::min(790.f, display.y - 116.f))},
-			ImGuiCond_FirstUseEver);
+		ImGui::SetNextWindowSize({std::min(scaled(1180.f), display.x - 84.f),
+			std::max(scaled(420.f), std::min(scaled(790.f), display.y - 116.f))}, ImGuiCond_FirstUseEver);
 
 		if (begin_folded_window("MIDI editor", open, ImGuiWindowFlags_NoScrollWithMouse))
 		{
@@ -1927,8 +2096,11 @@ struct editor_panel::impl
 				if (!busy && document->is_file_loaded())
 					draw_document();
 				else if (!busy)
+				{
 					ImGui::TextWrapped(
 						"Open a MIDI file to begin. Unsaved edits can play and render through the shared player.");
+					draw_help();
+				}
 			}
 			if (ask_discard)
 			{

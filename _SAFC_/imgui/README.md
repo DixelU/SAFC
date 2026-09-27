@@ -78,15 +78,20 @@ The default tool draws on empty space and moves existing notes. Drag a note's
 right edge to resize; hold Ctrl on that edge to stretch the selection. Shift-drag
 adds a selection rectangle, and Shift+Alt removes notes from the selection.
 Right-click erases an active-track note or switches to a visible ghost track.
-The separate Select and Erase tools are also available.
+Clicking a note picks its length and velocity for the next drawn note; the draw
+channel changes only through its buttons. The separate Select and Erase tools
+are also available. Snap offers straight 1/4 to 1/64 grids, 1/4 to 1/16
+triplets, and Off.
 
 Middle-drag pans time. The wheel zooms around the pointer; Shift+wheel scrolls
 time. The wheel over the keyboard zooms pitch, and right-dragging the keyboard
-scrolls pitch. Alt bypasses snap for supported note gestures. The controller
-lane paints with left-drag and creates a ramp with right-drag. Its targets are
-velocity, pitch bend, pan, channel volume, and tempo; LFO targets the first four.
-The tempo lane has an adjustable logarithmic range covering MIDI's full tempo
-limits, plus exact tick/BPM entry for inserting tempo points.
+scrolls pitch. Alt bypasses snap for supported note gestures, including the end
+of a drawn note. The controller lane paints with left-drag and creates a ramp
+with right-drag. Its targets are velocity, pitch bend, pan, channel volume, and
+tempo; LFO targets the first four. Pitch bend, pan, and volume edit the draw
+channel shown under the lane label. The tempo lane has an adjustable logarithmic
+range, 20-400 BPM by default and widenable to MIDI's full tempo limits, plus
+exact tick/BPM entry for inserting tempo points.
 
 | Shortcut | Action |
 | --- | --- |
@@ -94,15 +99,18 @@ limits, plus exact tick/BPM entry for inserting tempo points.
 | Ctrl+C / X / V / B | Copy / cut / paste / duplicate |
 | Ctrl+A / Ctrl+D | Select active track / deselect |
 | Shift+C / Alt+C | Select draw channel / assign it to selection |
-| Arrow keys | Move by grid step or semitone |
-| Ctrl+Up / Ctrl+Down | Transpose by an octave |
+| Arrow keys | Move by grid step or semitone, stopping at the score and key-range edges |
+| Ctrl+Up / Ctrl+Down | Transpose by an octave when the whole selection fits |
 | Delete / Q | Delete selection / quantize |
 | Space | Play from the visible start, or stop current playback |
 | Ctrl+O / Ctrl+S | Open / save as |
 | Alt+U / Y / W / O | Chopper / Flip / Claw / LFO |
 | Alt+V / Esc | Toggle ghost tracks / cancel a gesture |
 
-A completed tool preview becomes one undo entry only after Accept. Cancel restores
+Paste restores notes at their copied ticks and scrolls the view to them when
+they land off-screen; the status line reports each clipboard, delete, and
+quantize count. A completed tool preview becomes one undo entry only after
+Accept; slider changes refresh the preview when released. Cancel restores
 its original notes, selection, and modified state. Note and controller gestures
 commit on release. Save writes to a temporary sibling and replaces the selected
 output only after successful export; a failed replacement keeps the old output
