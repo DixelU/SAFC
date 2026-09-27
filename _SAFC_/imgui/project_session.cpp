@@ -6,6 +6,8 @@
 #include <fstream>
 #include <mutex>
 #include <limits>
+#include <map>
+#include <numeric>
 #include <thread>
 #include <unordered_set>
 
@@ -40,6 +42,28 @@ bool same_path(const std::filesystem::path& a, const std::filesystem::path& b)
 
 	return _wcsicmp(first.c_str(), second.c_str()) == 0;
 }
+
+// Give processing groups only to files from first_new on, adding each (largest
+// first) to the least loaded group, so groups set on earlier files stay as is.
+void assign_new_groups(safc_data& data, std::size_t first_new)
+{
+	std::vector<std::uint64_t> load(std::max<std::size_t>(1, data.detected_threads));
+	for (std::size_t i = 0; i < first_new; ++i)
+		if (const auto group = data.files[i].group_id; group >= 0 && std::size_t(group) < load.size())
+			load[group] += data.files[i].filesize;
+
+	std::vector<std::size_t> order(data.files.size() - first_new);
+	std::iota(order.begin(), order.end(), first_new);
+	std::stable_sort(order.begin(), order.end(),
+		[&](std::size_t a, std::size_t b) { return data.files[a].filesize > data.files[b].filesize; });
+
+	for (const auto index : order)
+	{
+		const auto group = std::size_t(std::min_element(load.begin(), load.end()) - load.begin());
+		data.files[index].group_id = static_cast<std::int16_t>(group);
+		load[group] += data.files[index].filesize;
+	}
+}
 }
 
 struct project_session::impl
@@ -48,8 +72,11 @@ struct project_session::impl
 	std::atomic_bool loading{false}, merging{false};
 	mutable std::mutex mutex;
 	std::vector<file_settings> loaded;
+	std::vector<std::wstring> queued;
 	std::vector<std::uint64_t> ids;
 	std::uint64_t next_id = 1;
+	// The last generated <first file>.AfterSAFC.mid; any other path was chosen explicitly.
+	std::wstring default_save_path;
 	application_preferences defaults;
 	merge_progress progress;
 	std::string message;
@@ -77,6 +104,10 @@ bool project_session::loading() const
 bool project_session::merging() const
 {
 	return state_->merging.load(std::memory_order_acquire);
+}
+std::size_t project_session::queued() const
+{
+	return state_->queued.size();
 }
 std::string project_session::message() const
 {
@@ -121,11 +152,13 @@ void project_session::set_defaults(const application_preferences& p, bool apply)
 
 void project_session::add_files(std::vector<std::wstring> paths)
 {
-	if (loading() || merging() || paths.empty())
-		return;
-
+	auto& queued = state_->queued;
+	queued.insert(queued.end(), std::make_move_iterator(paths.begin()), std::make_move_iterator(paths.end()));
 	poll();
+}
 
+void project_session::start_loading(std::vector<std::wstring> paths)
+{
 	if (state_->loader.joinable())
 		state_->loader.join();
 
@@ -184,30 +217,50 @@ void project_session::add_files(std::vector<std::wstring> paths)
 	}
 }
 
+void project_session::update_default_save_path()
+{
+	auto& generated = state_->default_save_path;
+	const bool automatic = data.save_path.empty() || data.save_path == generated;
+
+	generated = data.files.empty() ? std::wstring() : data.files.front().filename + L".AfterSAFC.mid";
+	if (automatic)
+		data.save_path = generated;
+}
+
 void project_session::poll()
 {
+	// Sample this first: a loader that has finished has already published its files.
+	const bool idle = !loading() && !merging();
 	std::vector<file_settings> loaded;
 
 	{
 		std::lock_guard lock(state_->mutex);
 		loaded.swap(state_->loaded);
 	}
-	if (loaded.empty())
-		return;
 
-	for (auto& file : loaded)
+	if (!loaded.empty())
 	{
-		state_->ids.push_back(state_->next_id++);
-		data.files.push_back(std::move(file));
+		const auto existing = data.files.size();
+		for (auto& file : loaded)
+		{
+			state_->ids.push_back(state_->next_id++);
+			data.files.push_back(std::move(file));
+		}
+
+		const auto save = data.save_path;
+
+		data.set_global_ppqn();
+		if (existing)
+			assign_new_groups(data, existing);
+		else
+			data.resolve_subdivision_problem_group_id_assign();
+
+		data.save_path = save;
+		update_default_save_path();
 	}
 
-	const auto save = data.save_path;
-
-	data.set_global_ppqn();
-	data.resolve_subdivision_problem_group_id_assign();
-
-	if (!save.empty())
-		data.save_path = save;
+	if (idle && !state_->queued.empty())
+		start_loading(std::exchange(state_->queued, {}));
 }
 
 void project_session::remove(const std::vector<std::uint64_t>& ids)
@@ -227,6 +280,7 @@ void project_session::remove(const std::vector<std::uint64_t>& ids)
 	}
 
 	data.set_global_ppqn();
+	update_default_save_path();
 }
 
 bool project_session::start_merge()
@@ -237,38 +291,35 @@ bool project_session::start_merge()
 	for (const auto& file : data.files)
 	{
 		constexpr auto limit = std::numeric_limits<std::int64_t>::max();
+		const auto reject = [&](std::string stage, const std::string& detail)
+		{
+			state_->status(std::move(stage), file.appearance_filename + ": " + detail);
+			return false;
+		};
 
 		if (!file.new_ppqn || file.selection_start < 0 || file.group_id < 0 || !std::isfinite(file.new_tempo) ||
 			file.new_tempo < 0 || file.new_tempo > 60000000. ||
 			file.offset_ticks == std::numeric_limits<std::int64_t>::min())
-		{
-			state_->status("Invalid processing settings",
+			return reject("Invalid processing settings",
 				"Use positive PPQN, nonnegative selection start/group, tempo "
-				"0..60000000, and an offset above INT64_MIN.");
-			return false;
-		}
+				"0..60000000 BPM, and an offset above INT64_MIN.");
+
+		// Processing ignores tempos of 3 BPM or less; the CLI documents that as keeping the original.
+		if (!data.is_cli_mode && file.new_tempo > 0 && file.new_tempo <= 3)
+			return reject("Invalid processing settings", "Tempo must be 0 (keep the original) or above 3 BPM.");
 
 		const auto effective_begin = std::max(file.selection_start, file.offset_ticks < 0 ? -file.offset_ticks : 0);
 		if ((file.selection_length > 0 && effective_begin > limit - file.selection_length) ||
 			(file.selection_length < 0 &&
 				file.selection_length < std::numeric_limits<std::int64_t>::min() + effective_begin))
-		{
-			state_->status("Invalid processing settings", "Selection arithmetic would overflow the tick range.");
-			return false;
-		}
+			return reject("Invalid processing settings", "Selection arithmetic would overflow the tick range.");
 
 		if (same_path(file.filename, data.save_path))
-		{
-			state_->status("Choose a different output", "The merge output must not overwrite an input MIDI.");
-			return false;
-		}
+			return reject("Choose a different output", "The merge output must not overwrite an input MIDI.");
 
 		if (file.w_file_name_postfix.find_first_of(L"\\/:*?\"<>|") != std::wstring::npos)
-		{
-			state_->status(
+			return reject(
 				"Invalid intermediate suffix", "Use a filename suffix without path separators or reserved characters.");
-			return false;
-		}
 	}
 
 	if (state_->merger.joinable())
@@ -347,7 +398,12 @@ bool project_session::start_merge()
 					s->active = merger;
 				}
 
-				auto update = [&](const char* phase)
+				std::uint64_t total_bytes = 0;
+				for (const auto& request : requests)
+					total_bytes += request->settings.details.initial_filesize;
+
+				// Only processing is measured; later phases report a negative (indeterminate) fraction.
+				auto update = [&](const char* phase, bool measured)
 				{
 					merge_progress progress;
 					progress.busy = true;
@@ -355,22 +411,37 @@ bool project_session::start_merge()
 					progress.stage = phase;
 					progress.seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - began).count();
 
+					// Group -> (request index, bytes read) of the file it is processing.
+					std::map<std::int64_t, std::pair<std::size_t, std::uint64_t>> current;
 					for (const auto& [file, buffers] : merger->snapshot_currently_processed())
 						if (file && buffers)
 						{
-							const auto bytes = buffers->last_input_position.load(std::memory_order_acquire);
-							const float ratio = file->settings.details.initial_filesize
-								? std::min(1.f, float(bytes) / file->settings.details.initial_filesize)
-								: 0.f;
+							const auto size = file->settings.details.initial_filesize;
+							const auto read = buffers->last_input_position.load(std::memory_order_acquire);
+							const bool finished = buffers->finished.load(std::memory_order_acquire);
+							const auto bytes = finished ? size : std::min<std::uint64_t>(size, read);
+							const float ratio = size ? float(double(bytes) / size) : 0.f;
 
 							progress.files.push_back({file->appearance_filename, buffers->log->get_last(), ratio});
+							const auto index = std::find(requests.begin(), requests.end(), file) - requests.begin();
+							current[file->settings.details.group_id] = {std::size_t(index), bytes};
 						}
 
-					for (const auto& item : progress.files)
-						progress.fraction += item.fraction;
-
-					if (!progress.files.empty())
-						progress.fraction /= progress.files.size();
+					progress.fraction = -1.f;
+					if (measured)
+					{
+						// A group processes its files in request order: earlier ones are complete.
+						std::uint64_t done = 0;
+						for (std::size_t i = 0; i < requests.size(); ++i)
+						{
+							const auto group = current.find(requests[i]->settings.details.group_id);
+							if (group == current.end() || i > group->second.first)
+								continue;
+							done += i < group->second.first ? requests[i]->settings.details.initial_filesize
+								: group->second.second;
+						}
+						progress.fraction = total_bytes ? std::min(1.f, float(double(done) / total_bytes)) : 0.f;
+					}
 
 					std::lock_guard lock(s->mutex);
 					s->progress = std::move(progress);
@@ -387,7 +458,7 @@ bool project_session::start_merge()
 
 				while (!merger->is_smrp_complete())
 				{
-					update("Processing MIDI files");
+					update("Processing MIDI files", true);
 					std::this_thread::sleep_for(std::chrono::milliseconds(40));
 				}
 
@@ -400,7 +471,7 @@ bool project_session::start_merge()
 				merger->start_ri_merge();
 				while (!merger->is_ri_merge_complete())
 				{
-					update("Merging tracks");
+					update("Merging tracks", false);
 					std::this_thread::sleep_for(std::chrono::milliseconds(40));
 				}
 
@@ -412,7 +483,7 @@ bool project_session::start_merge()
 				merger->start_final_merge();
 				while (!merger->complete)
 				{
-					update("Assembling output");
+					update("Assembling output", false);
 					std::this_thread::sleep_for(std::chrono::milliseconds(40));
 				}
 

@@ -5,6 +5,7 @@
 #include <imgui.h>
 #include <array>
 #include <cfloat>
+#include <cmath>
 
 namespace safc::imgui_ui
 {
@@ -17,6 +18,9 @@ void draw_processing_flags(std::uint32_t& flags)
 		{"Enable event allowlist", enable_important_filter}};
 	for (const auto& [label, flag] : fields)
 		ImGui::CheckboxFlags(label, &flags, flag);
+	// The allowlist checkbox is the last field.
+	ImGui::SetItemTooltip("Drop whole tracks that contain none of the event types allowed below.\n"
+						  "Events inside the tracks that are kept are not filtered.");
 	if (flags & enable_important_filter)
 	{
 		ImGui::Indent();
@@ -34,8 +38,18 @@ project_panel::project_panel(project_session& project, analysis_panel& analysis,
 {
 }
 
-void project_panel::copy_processing_settings(const file_settings& file)
+bool project_panel::action_button(const char* label)
 {
+	// A new action replaces the notice left by an earlier one.
+	if (!ImGui::Button(label))
+		return false;
+	notice_.clear();
+	return true;
+}
+
+std::size_t project_panel::copy_processing_settings(const file_settings& file)
+{
+	std::size_t copied = 0;
 	for (const auto id : selected_)
 	{
 		if (id == focused_)
@@ -62,7 +76,9 @@ void project_panel::copy_processing_settings(const file_settings& file)
 		if (file.pitch_bend_map)
 			copy.pitch_bend_map = std::make_shared<mapping_panel::pitch_curve>(*file.pitch_bend_map);
 		*other = std::move(copy);
+		++copied;
 	}
+	return copied;
 }
 
 void project_panel::properties(file_settings& file)
@@ -77,7 +93,13 @@ void project_panel::properties(file_settings& file)
 	if (ImGui::Button("Edit") && edit)
 		edit(file.filename);
 	ImGui::SameLine();
-	if (ImGui::Button("Analyze / collect time map"))
+	// Opening another MIDI in the analysis panel would cancel its running export.
+	ImGui::BeginDisabled(analysis_.export_busy());
+	const bool analyze = ImGui::Button("Analyze / collect time map");
+	ImGui::EndDisabled();
+	if (analysis_.export_busy())
+		ImGui::SetItemTooltip("Wait for the analysis export to finish.");
+	if (analyze)
 	{
 		const auto id = focused_;
 		analysis_.open_file(file.filename, file.new_ppqn, file.allow_legacy_rsb_meta_interaction,
@@ -91,7 +113,7 @@ void project_panel::properties(file_settings& file)
 	}
 	if (ImGui::BeginTable("File timing", 2, ImGuiTableFlags_SizingStretchSame))
 	{
-		auto scalar = [](const char* label, ImGuiDataType type, void* value)
+		auto scalar = [](const char* label, ImGuiDataType type, void* value, const char* format = nullptr)
 		{
 			ImGui::TableNextRow();
 			ImGui::TableNextColumn();
@@ -99,20 +121,27 @@ void project_panel::properties(file_settings& file)
 			ImGui::TableNextColumn();
 			ImGui::PushID(label);
 			ImGui::SetNextItemWidth(-1);
-			const bool changed = ImGui::InputScalar("##value", type, value);
+			const bool changed = ImGui::InputScalar("##value", type, value, nullptr, nullptr, format);
 			ImGui::PopID();
 			return changed;
 		};
 		if (scalar("PPQN", ImGuiDataType_U16, &file.new_ppqn))
 			file.ppqn_manually_set = true;
-		scalar("Tempo (0 = keep)", ImGuiDataType_Double, &file.new_tempo);
+		scalar("Tempo BPM (0 = keep)", ImGuiDataType_Double, &file.new_tempo, "%.3f");
+		ImGui::SetItemTooltip("Replace every tempo event with this tempo. Use 0 to keep the original tempos;\n"
+							  "values above 0 and up to 3 BPM are rejected when merging.");
 		scalar("Offset ticks", ImGuiDataType_S64, &file.offset_ticks);
 		scalar("Selection start", ImGuiDataType_S64, &file.selection_start);
 		scalar("Length (-1 = all)", ImGuiDataType_S64, &file.selection_length);
 		scalar("Processing group", ImGuiDataType_S16, &file.group_id);
+		ImGui::SetItemTooltip("Files in the same group are processed one after another on one thread;\n"
+							  "different groups run in parallel. Added files get the least loaded groups.\n"
+							  "Balance processing groups redistributes every file by size.");
 		ImGui::EndTable();
 	}
 	ImGui::Checkbox("Apply offset after PPQN scaling", &file.apply_offset_after);
+	ImGui::SetItemTooltip("On: the offset is counted in output ticks, after PPQN conversion.\n"
+						  "Off: it is counted in this file's original ticks and scaled with them.");
 	if (!(file.bool_settings & remove_remnants))
 	{
 		std::array<char, 512> suffix{};
@@ -130,11 +159,30 @@ void project_panel::properties(file_settings& file)
 		draw_processing_flags(file.bool_settings);
 		ImGui::Separator();
 		ImGui::Checkbox("Split tracks by channel", &file.channels_split);
+		ImGui::SetItemTooltip("Split tracks that use several MIDI channels into one track per channel.");
 		ImGui::Checkbox("Collapse tracks", &file.collapse_midi);
-		ImGui::Checkbox("In-place merge", &file.inplace_merge_enabled);
+		ImGui::SetItemTooltip("Merge all tracks of this MIDI into one track\n"
+							  "(one track per channel when Split tracks by channel is on).");
+		// Processing turns in-place merge off for compressed files, so show the effective state.
+		bool inplace = file.inplace_merge_enabled && !file.rsb_compression;
+		ImGui::BeginDisabled(file.rsb_compression);
+		if (ImGui::Checkbox("In-place merge", &inplace))
+			file.inplace_merge_enabled = inplace;
+		ImGui::EndDisabled();
+		if (file.rsb_compression)
+			ImGui::SetItemTooltip("Unavailable while running-status compression is on for this file.");
+		else
+			ImGui::SetItemTooltip("Combine track 1 of every in-place MIDI into one output track, then track 2, and so\n"
+								  "on, keeping the output track count low. Slower than the regular merge.");
 		ImGui::Checkbox("Running-status compression", &file.rsb_compression);
+		ImGui::SetItemTooltip("Write note-offs as zero-velocity note-ons so running status can omit repeated\n"
+							  "status bytes, making the output smaller. Disables in-place merge for this file.");
 		ImGui::Checkbox("Legacy running-status meta interaction", &file.allow_legacy_rsb_meta_interaction);
+		ImGui::SetItemTooltip("Keep the running-status byte across meta events in the input instead of resetting it.\n"
+							  "Not standard-conforming; only for very old MIDIs that rely on it.");
 		ImGui::Checkbox("Allow SysEx", &file.allow_sysex);
+		ImGui::SetItemTooltip("Keep system exclusive events. They are dropped by default because many players\n"
+							  "handle them poorly.");
 		ImGui::Checkbox("Enable zero-velocity notes", &file.enable_zero_velocity);
 	}
 	ImGui::SeparatorText("Transform maps");
@@ -158,20 +206,63 @@ void project_panel::properties(file_settings& file)
 	ImGui::TextDisabled("Maps: keys %s | velocity %s | pitch %s | time %s", file.key_map ? "on" : "off",
 		file.volume_map ? "on" : "off", file.pitch_bend_map ? "on" : "off",
 		file.time_map.empty() ? "empty" : "collected");
-	if (ImGui::Button("Remove this file's maps"))
+	if (action_button("Remove this file's maps"))
 	{
 		file.key_map.reset();
 		file.volume_map.reset();
 		file.pitch_bend_map.reset();
 		file.time_map.clear();
 	}
-	if (ImGui::Button("Copy processing settings to selected files"))
-		copy_processing_settings(file);
+	ImGui::BeginDisabled(selected_.size() - selected_.contains(focused_) == 0);
+	if (action_button("Copy processing settings to selected files"))
+	{
+		const auto copied = copy_processing_settings(file);
+		notice_ = "Copied processing settings to " + std::to_string(copied) + (copied == 1 ? " file." : " files.");
+	}
+	ImGui::EndDisabled();
+	ImGui::SetItemTooltip(selected_.size() - selected_.contains(focused_) == 0
+			? "Select more files with Ctrl-click or Shift-click to copy this file's settings to them."
+			: "Copy this file's processing settings and maps to the other selected files.");
+}
+
+void project_panel::select(std::size_t index, std::uint64_t id)
+{
+	const auto& io = ImGui::GetIO();
+	selection_cleared_ = false;
+	if (io.KeyShift && project_.find(anchor_))
+	{
+		// Shift selects the list range from the anchor; Ctrl adds it to the selection.
+		std::size_t anchor = 0;
+		while (project_.id_at(anchor) != anchor_)
+			++anchor;
+		if (!io.KeyCtrl)
+			selected_.clear();
+		for (auto i = std::min(anchor, index); i <= std::max(anchor, index); ++i)
+			selected_.insert(project_.id_at(i));
+		focused_ = id;
+		return;
+	}
+	if (!io.KeyCtrl)
+		selected_.clear();
+	anchor_ = id;
+	if (!selected_.contains(id))
+	{
+		selected_.insert(id);
+		focused_ = id;
+		return;
+	}
+	selected_.erase(id);
+	// Keep the properties on a file that is still selected.
+	if (focused_ == id)
+	{
+		focused_ = selected_.empty() ? 0 : *selected_.begin();
+		selection_cleared_ = selected_.empty();
+	}
 }
 
 void project_panel::draw_file_list(float body_height)
 {
-	constexpr float numeric_column_width = 48.f;
+	const float numeric_column_width = scaled(48.f);
 	const auto flags = ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY | ImGuiTableFlags_Resizable;
 	if (!ImGui::BeginTable("MIDI files", 4, flags, {0, body_height}))
 		return;
@@ -194,15 +285,7 @@ void project_panel::draw_file_list(float body_height)
 			ImGui::TableNextColumn();
 			if (literal_selectable(
 					"##file", f.appearance_filename, selected_.contains(id), ImGuiSelectableFlags_SpanAllColumns))
-			{
-				if (!ImGui::GetIO().KeyCtrl)
-					selected_.clear();
-				if (selected_.contains(id))
-					selected_.erase(id);
-				else
-					selected_.insert(id);
-				focused_ = id;
-			}
+				select(static_cast<std::size_t>(i), id);
 			if (ImGui::IsItemHovered())
 				ImGui::SetTooltip("%s", f.appearance_path.c_str());
 			ImGui::TableNextColumn();
@@ -217,11 +300,8 @@ void project_panel::draw_file_list(float body_height)
 	ImGui::EndTable();
 }
 
-void project_panel::draw_columns(bool busy)
+void project_panel::draw_columns(bool busy, float body_height)
 {
-	constexpr float minimum_body_height = 160.f;
-	constexpr float footer_height = 170.f;
-	const float body_height = std::max(minimum_body_height, ImGui::GetContentRegionAvail().y - footer_height);
 	if (!ImGui::BeginTable("Project columns", 2, ImGuiTableFlags_Resizable))
 		return;
 
@@ -251,23 +331,28 @@ void project_panel::draw_file_actions(bool busy)
 	ImGui::BeginDisabled(busy);
 	try
 	{
-		if (ImGui::Button("Add MIDIs...") && dialogs_.add_midis)
+		if (action_button("Add MIDIs...") && dialogs_.add_midis)
 			project_.add_files(dialogs_.add_midis());
 		ImGui::SameLine();
 		ImGui::BeginDisabled(selected_.empty());
-		if (ImGui::Button("Remove selected"))
+		if (action_button("Remove selected"))
 		{
 			project_.remove({selected_.begin(), selected_.end()});
 			selected_.clear();
 		}
 		ImGui::EndDisabled();
 		ImGui::SameLine();
-		if (ImGui::Button("Select all"))
+		if (action_button("Select all"))
+		{
 			for (size_t i = 0; i < project_.data.files.size(); ++i)
 				selected_.insert(project_.id_at(i));
+			selection_cleared_ = false;
+		}
 		ImGui::SameLine();
-		if (ImGui::Button("Remove all"))
+		ImGui::BeginDisabled(project_.data.files.empty());
+		if (action_button("Remove all"))
 			ImGui::OpenPopup("Remove all MIDIs?");
+		ImGui::EndDisabled();
 		if (ImGui::BeginPopupModal("Remove all MIDIs?", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
 		{
 			ImGui::TextUnformatted("Remove every MIDI and its processing settings from this project?");
@@ -295,42 +380,93 @@ void project_panel::draw_file_actions(bool busy)
 
 void project_panel::draw_global_overrides()
 {
+	auto& data = project_.data;
+	// Each field shows the applied project value until the user types a different one.
+	const auto mirror = [](auto& field, auto applied, bool& edited)
+	{
+		using field_type = std::remove_reference_t<decltype(field)>;
+		if (!edited || field == static_cast<field_type>(applied))
+		{
+			field = static_cast<field_type>(applied);
+			edited = false;
+		}
+	};
+	mirror(global_ppq_, data.global_ppqn, ppq_edited_);
+	mirror(global_offset_, data.global_offset, offset_edited_);
+	mirror(global_tempo_, data.global_new_tempo, tempo_edited_);
+	// Enter in a field applies it like its Apply button.
+	const auto entered = []
+	{
+		return ImGui::IsItemDeactivatedAfterEdit() &&
+			(ImGui::IsKeyPressed(ImGuiKey_Enter) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter));
+	};
+
 	ImGui::SeparatorText("Global overrides");
-	ImGui::SetNextItemWidth(80);
-	ImGui::InputInt("PPQN", &global_ppq_, 0);
+	ImGui::SetNextItemWidth(scaled(80));
+	ppq_edited_ |= ImGui::InputInt("PPQN", &global_ppq_, 0);
+	bool apply = entered();
 	ImGui::SameLine();
-	if (ImGui::Button("Apply##PPQ"))
+	if (action_button("Apply##PPQ") || apply)
 	{
+		notice_.clear();
 		if (global_ppq_ > 0 && global_ppq_ <= 65535)
-			project_.data.set_global_ppqn(static_cast<std::uint16_t>(global_ppq_), true);
+		{
+			data.set_global_ppqn(static_cast<std::uint16_t>(global_ppq_), true);
+			ppq_edited_ = false;
+		}
+		else
+			notice_ = "Global PPQN must be 1..65535.";
 	}
 	ImGui::SameLine();
-	ImGui::SetNextItemWidth(95);
-	ImGui::InputInt("Offset", &global_offset_, 0);
+	ImGui::SetNextItemWidth(scaled(95));
+	offset_edited_ |= ImGui::InputInt("Offset", &global_offset_, 0);
+	apply = entered();
 	ImGui::SameLine();
-	if (ImGui::Button("Apply##Offset"))
-		project_.data.set_global_offset(global_offset_);
-	ImGui::SameLine();
-	ImGui::SetNextItemWidth(80);
-	ImGui::InputFloat("Tempo", &global_tempo_, 0, 0, "%.2f");
-	ImGui::SameLine();
-	if (ImGui::Button("Apply##Tempo") && std::isfinite(global_tempo_) && global_tempo_ >= 0)
-		project_.data.set_global_tempo(global_tempo_);
-	if (ImGui::Button("Auto PPQN"))
+	if (action_button("Apply##Offset") || apply)
 	{
-		project_.data.global_ppqn = 0;
-		project_.data.set_global_ppqn();
+		notice_.clear();
+		data.set_global_offset(global_offset_);
+		offset_edited_ = false;
 	}
 	ImGui::SameLine();
-	if (ImGui::Button("Balance processing groups"))
+	ImGui::SetNextItemWidth(scaled(80));
+	tempo_edited_ |= ImGui::InputFloat("Tempo BPM", &global_tempo_, 0, 0, "%.3f");
+	ImGui::SetItemTooltip("0 keeps each file's tempos; otherwise above 3 BPM.");
+	apply = entered();
+	ImGui::SameLine();
+	if (action_button("Apply##Tempo") || apply)
 	{
-		const auto save = project_.data.save_path;
-		project_.data.resolve_subdivision_problem_group_id_assign();
-		project_.data.save_path = save;
+		notice_.clear();
+		// Processing ignores tempos of 3 BPM or less, so they cannot be applied.
+		if (std::isfinite(global_tempo_) && (global_tempo_ == 0 || (global_tempo_ > 3 && global_tempo_ <= 60000000)))
+		{
+			data.set_global_tempo(global_tempo_);
+			tempo_edited_ = false;
+		}
+		else
+			notice_ = "Global tempo must be 0 (keep the original) or above 3 BPM.";
 	}
+	if (ppq_edited_ || offset_edited_ || tempo_edited_)
+		ImGui::TextDisabled("Edited global values are not applied yet; press Enter or Apply.");
+	if (action_button("Auto PPQN"))
+	{
+		data.forced_ppqn = false;
+		data.global_ppqn = 0;
+		data.set_global_ppqn();
+		ppq_edited_ = false;
+	}
+	ImGui::SetItemTooltip("Use the largest PPQN of the files, also when files are added later.");
 	ImGui::SameLine();
-	if (ImGui::Button("Remove all transform maps"))
-		for (auto& f : project_.data.files)
+	if (action_button("Balance processing groups"))
+	{
+		const auto save = data.save_path;
+		data.resolve_subdivision_problem_group_id_assign();
+		data.save_path = save;
+	}
+	ImGui::SetItemTooltip("Redistribute every file across processing groups by file size.");
+	ImGui::SameLine();
+	if (action_button("Remove all transform maps"))
+		for (auto& f : data.files)
 		{
 			f.key_map.reset();
 			f.volume_map.reset();
@@ -343,12 +479,21 @@ void project_panel::draw_merge_controls()
 {
 	try
 	{
-		if (ImGui::Button("Save as...") && dialogs_.save_midi)
+		if (action_button("Save as...") && dialogs_.save_midi)
 			if (auto path = dialogs_.save_midi(project_.data.save_path); !path.empty())
 				project_.data.save_path = std::move(path);
 		ImGui::SameLine();
+		{
+			const auto path = std::filesystem::path(project_.data.save_path).u8string();
+			const auto* text = reinterpret_cast<const char*>(path.c_str());
+			ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+			ImGui::TextWrapped("Output: %s", path.empty() ? "chosen when merging starts" : text);
+			ImGui::PopStyleColor();
+			if (!path.empty())
+				ImGui::SetItemTooltip("%s", text);
+		}
 		ImGui::BeginDisabled(project_.data.files.empty());
-		if (ImGui::Button("Start merging"))
+		if (action_button("Start merging"))
 		{
 			if (project_.data.save_path.empty() && dialogs_.save_midi)
 				project_.data.save_path = dialogs_.save_midi(L"merged.mid");
@@ -363,6 +508,7 @@ void project_panel::draw_merge_controls()
 			ImGui::TextUnformatted(reinterpret_cast<const char*>(path.c_str()));
 			if (ImGui::Button("Merge"))
 			{
+				notice_.clear();
 				project_.start_merge();
 				ImGui::CloseCurrentPopup();
 			}
@@ -385,6 +531,8 @@ void project_panel::draw_status()
 	const auto message = project_.message();
 	if (project_.loading())
 		ImGui::TextUnformatted("Checking MIDI files...");
+	if (const auto queued = project_.queued())
+		ImGui::Text("%zu MIDI(s) queued; they are added when the current job finishes.", queued);
 	if (!message.empty())
 		ImGui::TextWrapped("%s", message.c_str());
 	if (!notice_.empty())
@@ -400,7 +548,11 @@ void project_panel::draw_status()
 			ImGui::SameLine();
 			if (ImGui::Button(p.cancelling ? "Cancelling..." : "Cancel merge"))
 				project_.cancel_merge();
-			ImGui::ProgressBar(p.fraction, {-1, 0});
+			// A negative fraction marks a phase without measured progress.
+			if (p.fraction < 0)
+				ImGui::ProgressBar(-float(ImGui::GetTime()), {-1, 0});
+			else
+				ImGui::ProgressBar(p.fraction, {-1, 0});
 			for (const auto& item : p.files)
 				ImGui::TextWrapped("%s: %s (%.0f%%)", item.file.c_str(), item.message.c_str(), item.fraction * 100);
 		}
@@ -410,24 +562,31 @@ void project_panel::draw_status()
 void project_panel::draw(bool* open)
 {
 	project_.poll();
-	if (!project_.find(focused_) && !project_.data.files.empty())
+	if (project_.data.files.empty())
+		selection_cleared_ = false;
+	if (!project_.find(focused_) && !project_.data.files.empty() && !selection_cleared_)
 	{
 		focused_ = project_.id_at(0);
 		selected_.insert(focused_);
 	}
 	const bool busy = project_.loading() || project_.merging();
-	ImGui::SetNextWindowPos({24, 86}, ImGuiCond_FirstUseEver);
-	ImGui::SetNextWindowSize({1010, 700}, ImGuiCond_FirstUseEver);
-	ImGui::SetNextWindowSizeConstraints({690, 420}, {FLT_MAX, FLT_MAX});
+	ImGui::SetNextWindowPos({scaled(24), scaled(86)}, ImGuiCond_FirstUseEver);
+	ImGui::SetNextWindowSize({scaled(1010), scaled(700)}, ImGuiCond_FirstUseEver);
+	ImGui::SetNextWindowSizeConstraints({scaled(690), scaled(420)}, {FLT_MAX, FLT_MAX});
 	if (begin_folded_window("SAFC project", open))
 	{
 		draw_file_actions(busy);
-		draw_columns(busy);
+		// Leave room for the controls below the columns, as measured on the previous frame.
+		const float top = ImGui::GetCursorPosY();
+		const float footer = footer_height_ < 0 ? scaled(170.f) : footer_height_;
+		const float body_height = std::max(scaled(160.f), ImGui::GetContentRegionAvail().y - footer);
+		draw_columns(busy, body_height);
 		ImGui::BeginDisabled(busy);
 		draw_global_overrides();
 		draw_merge_controls();
 		ImGui::EndDisabled();
 		draw_status();
+		footer_height_ = ImGui::GetCursorPosY() - top - body_height;
 	}
 	end_folded_window();
 	if (auto* f = project_.find(key_mapped_); f && key_open_)

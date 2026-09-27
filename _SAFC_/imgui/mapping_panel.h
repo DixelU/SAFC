@@ -33,6 +33,8 @@ private:
 		curve_mode mode = curve_mode::point;
 		int x = 0, y = 0;
 		int first_x = -1, first_y = 0;
+		// Key of the point a point-mode drag moves, or -1 to add one.
+		int dragged = -1;
 		float degree = 1.f;
 		bool extended = false;
 		bool symmetric = true;
@@ -49,7 +51,7 @@ private:
 	void draw_curve_points(Curve& map, curve_state& state, int maximum);
 
 	template<class Curve>
-	void edit_curve_point(Curve& map, curve_state& state, int x, int y);
+	void edit_curve_point(Curve& map, curve_state& state, int x, int y, int maximum);
 
 	std::optional<::cut_and_transpose> key_clipboard_;
 	std::optional<volume_curve> volume_clipboard_;

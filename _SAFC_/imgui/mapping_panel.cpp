@@ -87,7 +87,7 @@ void draw_key_strip(ImDrawList& draw, ImVec2 origin, ImVec2 size, const ::cut_an
 			continue;
 		draw.AddLine(ImVec2(x, origin.y), ImVec2(x, far.y), IM_COL32(6, 19, 30, 200));
 	}
-	if (size.x > 650)
+	if (size.x > scaled(650))
 		for (int key = 0; key < extended_value_count; key += 12)
 		{
 			const int source = output ? key - map.transpose_val : key;
@@ -136,7 +136,7 @@ void simplify(Curve& curve)
 
 void mapping_panel::draw_key_map(const char* label, std::shared_ptr<::cut_and_transpose>& map, bool* open)
 {
-	ImGui::SetNextWindowSize(ImVec2(860, 540), ImGuiCond_FirstUseEver);
+	ImGui::SetNextWindowSize(ImVec2(scaled(860), scaled(540)), ImGuiCond_FirstUseEver);
 	if (!begin_folded_window("Cut & transpose", open))
 	{
 		end_folded_window();
@@ -175,14 +175,21 @@ void mapping_panel::draw_key_map(const char* label, std::shared_ptr<::cut_and_tr
 		*map = *key_clipboard_;
 	ImGui::EndDisabled();
 
+	// Moving one end of the cut range past the other drags it along, so the range never becomes empty.
 	int minimum = map->min_val, maximum = map->max_val, shift = map->transpose_val;
-	ImGui::SetNextItemWidth(250);
+	ImGui::SetNextItemWidth(scaled(250));
 	if (ImGui::SliderInt("First input key", &minimum, 0, extended_value_max))
+	{
 		map->min_val = static_cast<std::uint8_t>(minimum);
-	ImGui::SetNextItemWidth(250);
+		map->max_val = std::max(map->max_val, map->min_val);
+	}
+	ImGui::SetNextItemWidth(scaled(250));
 	if (ImGui::SliderInt("Last input key", &maximum, 0, extended_value_max))
+	{
 		map->max_val = static_cast<std::uint8_t>(maximum);
-	ImGui::SetNextItemWidth(250);
+		map->min_val = std::min(map->min_val, map->max_val);
+	}
+	ImGui::SetNextItemWidth(scaled(250));
 	if (ImGui::SliderInt("Transpose (semitones)", &shift, -extended_value_max, extended_value_max))
 		map->transpose_val = static_cast<std::int16_t>(shift);
 	ImGui::Checkbox("Show extended 128..255 key bank", &extended_keys_);
@@ -193,7 +200,7 @@ void mapping_panel::draw_key_map(const char* label, std::shared_ptr<::cut_and_tr
 	{
 		ImGui::PushID(bank);
 		ImGui::Text("Output (%+d semitones)", int(map->transpose_val));
-		const ImVec2 size(std::max(200.f, ImGui::GetContentRegionAvail().x), 66.f);
+		const ImVec2 size(std::max(scaled(200.f), ImGui::GetContentRegionAvail().x), scaled(66.f));
 		const ImVec2 output_origin = ImGui::GetCursorScreenPos();
 		ImGui::Dummy(size);
 		draw_key_strip(*ImGui::GetWindowDrawList(), output_origin, size, *map, bank, true);
@@ -225,13 +232,24 @@ void mapping_panel::draw_key_map(const char* label, std::shared_ptr<::cut_and_tr
 	if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !ImGui::GetIO().WantTextInput &&
 		!ImGui::IsAnyItemActive())
 	{
-		const int low = int(map->min_val) + int(ImGui::IsKeyPressed(ImGuiKey_D)) - int(ImGui::IsKeyPressed(ImGuiKey_A));
-		const int high =
-			int(map->max_val) + int(ImGui::IsKeyPressed(ImGuiKey_E)) - int(ImGui::IsKeyPressed(ImGuiKey_Q));
+		int low = std::clamp(
+			int(map->min_val) + int(ImGui::IsKeyPressed(ImGuiKey_D)) - int(ImGui::IsKeyPressed(ImGuiKey_A)),
+			0, extended_value_max);
+		int high = std::clamp(
+			int(map->max_val) + int(ImGui::IsKeyPressed(ImGuiKey_E)) - int(ImGui::IsKeyPressed(ImGuiKey_Q)),
+			0, extended_value_max);
 		const int offset =
 			int(map->transpose_val) + int(ImGui::IsKeyPressed(ImGuiKey_W)) - int(ImGui::IsKeyPressed(ImGuiKey_S));
-		map->min_val = static_cast<std::uint8_t>(std::clamp(low, 0, extended_value_max));
-		map->max_val = static_cast<std::uint8_t>(std::clamp(high, 0, extended_value_max));
+		// The key that moved drags the other end of the range along.
+		if (low > high)
+		{
+			if (low != map->min_val)
+				high = low;
+			else
+				low = high;
+		}
+		map->min_val = static_cast<std::uint8_t>(low);
+		map->max_val = static_cast<std::uint8_t>(high);
 		map->transpose_val = static_cast<std::int16_t>(std::clamp(offset, -extended_value_max, extended_value_max));
 	}
 	int kept = 0;
@@ -280,7 +298,7 @@ void mapping_panel::draw_curve_tools(Curve& map, curve_state& state, std::option
 					.template evaluate_as<value_type>(static_cast<key_type>(i), dixelu::polyline_extrapolation::linear)
 					.value_or(static_cast<value_type>(i)));
 	}
-	ImGui::SetNextItemWidth(110);
+	ImGui::SetNextItemWidth(scaled(110));
 	ImGui::InputFloat("Power", &state.degree, .1f, 1.f, "%.3f");
 	ImGui::SameLine();
 	if (maximum == extended_value_max)
@@ -325,15 +343,30 @@ void mapping_panel::draw_curve_tools(Curve& map, curve_state& state, std::option
 	if (ImGui::SmallButton("Cancel segment"))
 		state.first_x = -1;
 	ImGui::EndDisabled();
-	ImGui::TextDisabled(
-		"Click or drag to add points; segment mode replaces the interval. Right-click deletes the nearest point.");
+	ImGui::TextDisabled("Click to add a point and drag to move it; segment mode replaces the interval. Right-click "
+						"deletes the nearest point.");
 }
 
 template<class Curve>
-void mapping_panel::edit_curve_point(Curve& map, curve_state& state, int x, int y)
+void mapping_panel::edit_curve_point(Curve& map, curve_state& state, int x, int y, int maximum)
 {
 	using key_type = typename Curve::key_type;
 	using value_type = typename Curve::value_type;
+	if (state.mode == curve_mode::point)
+	{
+		// Dragging moves one point between its neighbours instead of leaving a trail of points.
+		const auto& points = map.points();
+		const auto point = state.dragged < 0 ? points.end() : points.find(static_cast<key_type>(state.dragged));
+		if (point != points.end())
+		{
+			const int low = point == points.begin() ? 0 : int(std::prev(point)->first) + 1;
+			const int high = std::next(point) == points.end() ? maximum : int(std::next(point)->first) - 1;
+			const auto key = point->first;
+			x = std::clamp(x, low, high);
+			(void)map.erase(key);
+		}
+		state.dragged = x;
+	}
 	state.x = x;
 	state.y = y;
 	if (state.mode == curve_mode::segment && state.first_x < 0)
@@ -365,7 +398,7 @@ void mapping_panel::draw_curve_canvas(Curve& map, curve_state& state, int maximu
 {
 	using key_type = typename Curve::key_type;
 	const auto origin = ImGui::GetCursorScreenPos();
-	const ImVec2 size(std::max(160.f, ImGui::GetContentRegionAvail().x), 310);
+	const ImVec2 size(std::max(scaled(160.f), ImGui::GetContentRegionAvail().x), scaled(310.f));
 	ImGui::InvisibleButton("curve_canvas", size, ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight);
 	auto* draw = ImGui::GetWindowDrawList();
 	const ImVec2 far(origin.x + size.x, origin.y + size.y);
@@ -426,9 +459,12 @@ void mapping_panel::draw_curve_canvas(Curve& map, curve_state& state, int maximu
 				(void)map.erase(static_cast<key_type>(nearest));
 			state.first_x = -1;
 		}
+		// A click on a point drags it; a click elsewhere adds a point and drags that one.
+		if (ImGui::IsItemClicked(ImGuiMouseButton_Left))
+			state.dragged = nearest;
 		if ((state.mode == curve_mode::point && ImGui::IsItemActive() && ImGui::IsMouseDown(ImGuiMouseButton_Left)) ||
 			(state.mode == curve_mode::segment && ImGui::IsItemClicked(ImGuiMouseButton_Left)))
-			edit_curve_point(map, state, x, y);
+			edit_curve_point(map, state, x, y, maximum);
 		ImGui::SetTooltip("Input %d / output %d%s", x, y, nearest >= 0 ? " (right-click to delete point)" : "");
 	}
 	draw->PopClipRect();
@@ -441,10 +477,10 @@ void mapping_panel::draw_curve_points(Curve& map, curve_state& state, int maximu
 	using key_type = typename Curve::key_type;
 	using value_type = typename Curve::value_type;
 	ImGui::Text("Input 0..%d / output 0..%d | %zu control points", maximum, maximum, map.size());
-	ImGui::SetNextItemWidth(100);
+	ImGui::SetNextItemWidth(scaled(100));
 	ImGui::InputInt("Input", &state.x);
 	ImGui::SameLine();
-	ImGui::SetNextItemWidth(100);
+	ImGui::SetNextItemWidth(scaled(100));
 	ImGui::InputInt("Output", &state.y);
 	ImGui::SameLine();
 	state.x = std::clamp(state.x, 0, maximum);
@@ -457,7 +493,7 @@ void mapping_panel::draw_curve_points(Curve& map, curve_state& state, int maximu
 	if (ImGui::CollapsingHeader("Control points"))
 	{
 		const auto& points = map.points();
-		if (ImGui::BeginChild("point_list", ImVec2(0, 140), ImGuiChildFlags_Borders))
+		if (ImGui::BeginChild("point_list", ImVec2(0, scaled(140)), ImGuiChildFlags_Borders))
 		{
 			ImGuiListClipper clipper;
 			clipper.Begin(static_cast<int>(points.size()));
@@ -486,7 +522,7 @@ template<class Curve>
 void mapping_panel::draw_curve(const char* title, const char* label, std::shared_ptr<Curve>& map, bool* open,
 	curve_state& state, std::optional<Curve>& clipboard, int maximum)
 {
-	ImGui::SetNextWindowSize(ImVec2(690, 660), ImGuiCond_FirstUseEver);
+	ImGui::SetNextWindowSize(ImVec2(scaled(690), scaled(660)), ImGuiCond_FirstUseEver);
 	if (!begin_folded_window(title, open))
 	{
 		end_folded_window();

@@ -213,8 +213,12 @@ struct single_midi_processor_2
 
 	[[nodiscard]] static pitch_lookup_table bake_pitch_map(const dixelu::midi14_polyline_lookup_table& map)
 	{
-		// Preserve the existing fallback, including its subsequent 14-bit masking.
-		return map.materialize(0x4000);
+		// Unmapped or out-of-range entries pass the bend through unchanged, as
+		// bake_volume_map does; 0x4000 would be masked to 0 (a full downward bend).
+		pitch_lookup_table result{};
+		for (std::size_t value = 0; value < result.size(); ++value)
+			result[value] = map[value].value_or(static_cast<std::uint16_t>(value));
+		return result;
 	}
 
 	inline static constexpr std::size_t tick_position = 0;

@@ -116,6 +116,8 @@ application_preferences preferences_store::load() const
 	{
 	}
 	p.processing_threads = std::clamp<std::uint16_t>(p.processing_threads, 1, 256);
+	// Two backgrounds exist (the Background combo's items).
+	p.background = std::clamp(p.background, 0, 1);
 	p.synth.sample_rate = std::clamp(p.synth.sample_rate, minimum_sample_rate, maximum_sample_rate);
 	p.synth.buffer_frames = std::clamp(p.synth.buffer_frames, minimum_buffer_frames, maximum_buffer_frames);
 	p.synth.maximum_cohorts = std::clamp(p.synth.maximum_cohorts, minimum_cohorts, maximum_cohorts);

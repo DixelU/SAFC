@@ -128,6 +128,7 @@ safc_data::safc_data()
 	global_ppqn = 0;
 	detected_threads = 1;
 	incremental_ppqn = true;
+	forced_ppqn = false;
 	inplace_merge_flag = false;
 	is_cli_mode = false;
 	collapse_midi = false;
@@ -179,10 +180,13 @@ void safc_data::set_global_ppqn(std::uint16_t new_ppqn, bool force_global_ppqn_o
 	if (!new_ppqn && force_global_ppqn_override)
 		return;
 
-	if (!force_global_ppqn_override)
+	if (force_global_ppqn_override)
+		forced_ppqn = true;
+	else
 		new_ppqn = global_ppqn;
 
-	if (!force_global_ppqn_override && (!new_ppqn || incremental_ppqn))
+	// A forced PPQN stays as chosen; otherwise raise it to the largest input PPQN.
+	if (!(forced_ppqn && new_ppqn) && (!new_ppqn || incremental_ppqn))
 	{
 		for (int i = 0; i < files.size(); i++)
 			if (new_ppqn < files[i].old_ppqn)

@@ -107,10 +107,10 @@ void check_processing_map_snapshots(const std::filesystem::path& path)
 	    "Project cut/transpose must preserve mapped key zero and the inclusive cut range.");
 	require((*settings.volume_map)[31] == 31 && (*settings.volume_map)[100] == 68 && (*settings.volume_map)[255] == 223,
 	    "Project velocity baking changed interpolation, linear extrapolation or input fallback.");
-	require((*settings.pitch_map)[0] == 0x4000 && (*settings.pitch_map)[4096] == 0 &&
+	require((*settings.pitch_map)[0] == 0 && (*settings.pitch_map)[4096] == 0 &&
 	        (*settings.pitch_map)[8192] == 8192 && (*settings.pitch_map)[12287] == 16382 &&
-	        (*settings.pitch_map)[12288] == 0x4000,
-	    "Project pitch baking changed interpolation, linear extrapolation or the 0x4000 fallback.");
+	        (*settings.pitch_map)[12288] == 12288,
+	    "Project pitch baking changed interpolation, linear extrapolation or the pass-through fallback.");
 
 	// Editing the same UI-owned objects after submission must leave the earlier
 	// request intact, while a later request must use the newly edited maps.
@@ -134,7 +134,7 @@ void check_processing_map_snapshots(const std::filesystem::path& path)
 	file.pitch_bend_map->clear();
 	const auto empty = file.build_smrp_processing_data();
 	require(!empty->settings.key_converter && (*empty->settings.volume_map)[100] == 100 &&
-	        (*empty->settings.pitch_map)[8192] == 0x4000,
+	        (*empty->settings.pitch_map)[8192] == 8192,
 	    "Enabled empty maps must retain their established velocity and pitch fallbacks.");
 }
 }

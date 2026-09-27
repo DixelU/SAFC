@@ -68,6 +68,9 @@ struct safc_data
 
 	float global_new_tempo;
 	bool incremental_ppqn;
+	// Set by an explicit global PPQN override; while set, adding or removing
+	// files keeps that PPQN instead of raising it to the largest input PPQN.
+	bool forced_ppqn;
 	bool inplace_merge_flag;
 	bool channels_split;
 	bool rsb_compression;

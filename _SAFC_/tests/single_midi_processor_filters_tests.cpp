@@ -124,8 +124,8 @@ void test_pitch_tables()
         auto bundle = processor::filters_constructor(settings);
         for (unsigned pitch = 0; pitch < 16384; ++pitch)
         {
-            const auto expected = original.at(pitch).value_or(0x4000);
-            check((*settings.pitch_map)[pitch] == expected, "pitch fallback must preserve the previous 0x4000 value");
+            const auto expected = original.at(pitch).value_or(static_cast<std::uint16_t>(pitch));
+            check((*settings.pitch_map)[pitch] == expected, "unmapped pitch bends must pass through unchanged");
             auto event = make_event(0xE0, pitch & 0x7F, pitch >> 7);
             process(event, bundle.second);
             check(event[processor::event_param1] == (expected & 0x7F)
@@ -134,7 +134,7 @@ void test_pitch_tables()
         }
         auto high_bits = make_event(0xEF, 0xFF, 0xFF);
         process(high_bits, bundle.second);
-        const auto expected = original.at(16383).value_or(0x4000);
+        const auto expected = original.at(16383).value_or(16383);
         check(high_bits[processor::event_param1] == (expected & 0x7F)
             && high_bits[processor::event_param2] == ((expected >> 7) & 0x7F),
             "input data bytes must be masked to a valid 14-bit table index");
