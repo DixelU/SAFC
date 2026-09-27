@@ -96,7 +96,7 @@ exact tick/BPM entry for inserting tempo points.
 | Shortcut | Action |
 | --- | --- |
 | Ctrl+Z / Ctrl+Y or Ctrl+Shift+Z | Undo / redo |
-| Ctrl+C / X / V / B | Copy / cut / paste / duplicate |
+| Ctrl+C / X / V / B | Copy / cut / paste at the pointer / duplicate after the selection |
 | Ctrl+A / Ctrl+D | Select active track / deselect |
 | Shift+C / Alt+C | Select draw channel / assign it to selection |
 | Arrow keys | Move by grid step or semitone, stopping at the score and key-range edges |
@@ -107,9 +107,11 @@ exact tick/BPM entry for inserting tempo points.
 | Alt+U / Y / W / O | Chopper / Flip / Claw / LFO |
 | Alt+V / Esc | Toggle ghost tracks / cancel a gesture |
 
-Paste restores notes at their copied ticks and scrolls the view to them when
-they land off-screen; the status line reports each clipboard, delete, and
-quantize count. A completed tool preview becomes one undo entry only after
+As in FL Studio's piano roll, Ctrl+V pastes the copied notes at the snapped tick
+under the pointer (Alt skips snap), keeping their keys and relative timing; the
+Paste button, or Ctrl+V with the pointer outside the notes, pastes at the first
+grid line of the view. Pasted notes stay selected for dragging. The status line
+reports each clipboard, delete, and quantize count. A completed tool preview becomes one undo entry only after
 Accept; slider changes refresh the preview when released. Cancel restores
 its original notes, selection, and modified state. Note and controller gestures
 commit on release. Save writes to a temporary sibling and replaces the selected

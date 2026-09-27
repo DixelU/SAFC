@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <optional>
 #include <chrono>
 #include <cmath>
 #include <filesystem>
@@ -220,6 +221,8 @@ struct editor_panel::impl
 	bool line_gesture = false, snap_bypass = false;
 	ImGuiMouseButton gesture_button = ImGuiMouseButton_Left;
 	double lane_hover_since = -1.;
+	// Tick under the pointer while it is over the note area; Ctrl+V pastes there.
+	std::optional<tick> pointer_tick;
 
 	enum class tool_kind
 	{
@@ -642,23 +645,21 @@ struct editor_panel::impl
 		status = count ? (cut ? "Cut " : "Copied ") + note_count(count) + "." : "Select notes to copy.";
 	}
 
-	void paste_selection()
+	// Like FL Studio's piano roll: the copied group keeps its keys and relative
+	// timing and starts at the snapped pointer tick, or at the start of the view
+	// when the pointer is not over the notes (toolbar button). Alt skips snap.
+	void paste_selection(bool at_pointer)
 	{
-		const auto count = document->paste_clipboard();
+		const bool use_pointer = at_pointer && pointer_tick.has_value();
+		const tick target = use_pointer ? snapped(*pointer_tick, ImGui::GetIO().KeyAlt)
+										: snapped(document->get_view_start_tick() + snap_ticks() - 1);
+		const auto count = document->paste_clipboard(target);
 		if (!count)
 		{
 			status = "The clipboard is empty.";
 			return;
 		}
-
-		// Paste keeps the copied ticks; bring them into view when they land off-screen.
-		tick begin, end;
-		std::uint8_t low, high;
-		const auto view_start = document->get_view_start_tick(), view_duration = document->get_view_duration_ticks();
-		if (document->get_selection_bounds(begin, end, low, high) &&
-			(begin < view_start || begin - view_start >= view_duration))
-			document->set_view_range(begin, view_duration);
-		status = "Pasted " + note_count(count) + " at their copied position.";
+		status = "Pasted " + note_count(count) + (use_pointer ? " at the pointer." : " at the start of the view.");
 	}
 
 	void duplicate_selection()
@@ -879,7 +880,7 @@ struct editor_panel::impl
 			if (ImGui::IsKeyPressed(ImGuiKey_X, false))
 				copy_selection(true);
 			if (ImGui::IsKeyPressed(ImGuiKey_V, false))
-				paste_selection();
+				paste_selection(true);
 			if (ImGui::IsKeyPressed(ImGuiKey_B, false))
 				duplicate_selection();
 			if (ImGui::IsKeyPressed(ImGuiKey_A, false))
@@ -1000,7 +1001,8 @@ struct editor_panel::impl
 
 		ImGui::SameLine();
 		if (ImGui::Button("Paste"))
-			paste_selection();
+			paste_selection(false);
+		ImGui::SetItemTooltip("Paste at the start of the view; Ctrl+V pastes at the pointer.");
 
 		ImGui::SameLine();
 		if (ImGui::Button("Duplicate"))
@@ -1906,6 +1908,9 @@ struct editor_panel::impl
 			ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight | ImGuiButtonFlags_MouseButtonMiddle);
 		const bool hovered = ImGui::IsItemHovered();
 		const bool active = ImGui::IsItemActive();
+		pointer_tick.reset();
+		if (hovered && contains(ImGui::GetIO().MousePos, view.roll_min, view.roll_max))
+			pointer_tick = view.tick_at(ImGui::GetIO().MousePos.x);
 		// Arrows and Space edit and play the roll. Owning them while the roll is
 		// hovered, dragged or focused stops keyboard navigation from also moving
 		// focus or activating another widget; shortcuts() reads keys for any owner.
@@ -2285,6 +2290,21 @@ bool editor_panel::run_smoke(const std::wstring& output_directory, std::string& 
 		model.delete_selected_notes();
 		model.undo();
 		require(model.get_note_count() == 6, "Delete undo lost a note.");
+		{
+			// Positioned paste moves the group as a whole and is one undo entry.
+			model.select_note(moved.id);
+			const auto copied = model.copy_selected_notes();
+			tick begin, end, pasted_begin, pasted_end;
+			std::uint8_t low, high, pasted_low, pasted_high;
+			require(copied && model.get_selection_bounds(begin, end, low, high), "Clipboard copy failed.");
+			require(model.paste_clipboard(tick(9600)) == copied &&
+					model.get_selection_bounds(pasted_begin, pasted_end, pasted_low, pasted_high) &&
+					pasted_begin == 9600 && pasted_end - pasted_begin == end - begin && pasted_low == low &&
+					pasted_high == high,
+				"Positioned paste did not keep the group's shape at the target tick.");
+			model.undo();
+			require(model.get_note_count() == 6, "Positioned paste did not undo as one edit.");
+		}
 		model.select_note(moved.id);
 		model.change_channel_selected(3);
 		model.change_velocity_selected(117);

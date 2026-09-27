@@ -2173,16 +2173,23 @@ public:
 	}
 
 	/**
-	 * Paste the clipboard into the active track at the original position.
-	 * Notes take the target track's primary channel (kept as copied when the
-	 * target is multi-channel) and fresh ids. The pasted notes become the new
-	 * selection, so they can be moved right away. Returns the number pasted.
+	 * Paste the clipboard into the active track. With `at`, the earliest note
+	 * starts at that tick and the rest keep their relative timing and keys;
+	 * without it, notes keep their original position. Notes take the target
+	 * track's primary channel (kept as copied when the target is multi-channel)
+	 * and fresh ids. The pasted notes become the new selection, so they can be
+	 * moved right away. Returns the number pasted.
 	 */
-	std::size_t paste_clipboard()
+	std::size_t paste_clipboard(std::optional<tick_type> at = std::nullopt)
 	{
 		std::lock_guard<std::recursive_mutex> lock(editor_mutex);
 		if (clipboard.empty())
 			return 0;
+
+		tick_type earliest = clipboard.front().start_tick;
+		for (const auto& note : clipboard)
+			earliest = (std::min)(earliest, note.start_tick);
+		const auto shift = at ? static_cast<sgtick_type>(*at) - static_cast<sgtick_type>(earliest) : 0;
 
 		std::uint8_t channel_override = 0xFF;
 		auto it = tracks.find(active_track);
@@ -2196,6 +2203,8 @@ public:
 		{
 			note.id = next_note_id++;
 			note.track_index = active_track;
+			note.start_tick = static_cast<tick_type>(static_cast<sgtick_type>(note.start_tick) + shift);
+			note.end_tick = static_cast<tick_type>(static_cast<sgtick_type>(note.end_tick) + shift);
 			if (channel_override != 0xFF)
 				note.channel = channel_override;
 			new_ids.insert(note.id);
