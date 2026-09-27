@@ -132,6 +132,8 @@ int main(int argc, char** argv)
 		reject(config, "{\"global_offset_override\":2147483648,\"files\":[" + entry + "]}", "2147483647");
 		reject(config, "{\"global_offset_override\":2,\"global_offset\":3,\"files\":[" + entry + "]}", "conflict");
 		reject(config, "{\"files\":[{" + filename + ",\"ignore_notes\":1}]}", "true or false");
+		reject(config, "{\"save_To\":" + quote(output) + ",\"files\":[" + entry + "]}", "/save_To");
+		reject(config, "{\"files\":[{" + filename + ",\"ignore_note\":true}]}", "/files/0/ignore_note");
 		reject(config, "{\"files\":[{" + filename + ",\"offset\":9223372036854775808}]}", "64-bit range");
 		reject(config, "{\"files\":[{" + filename + ",\"selection_start\":-1}]}", "within");
 		reject(config, "{\"files\":[{" + filename + ",\"selection_length\":-2}]}", "within");

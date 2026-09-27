@@ -38,6 +38,7 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <tuple>
 #include <vector>
 
 namespace ui = safc::imgui_ui;
@@ -289,7 +290,13 @@ struct workspace
 	ui::video_export_panel video;
 	ui::project_panel project_view;
 	std::wstring file, bank;
+	// A file requested while another session runs opens once that session stops.
+	std::wstring pending_file;
+	bool pending_silent{}, pending_paused = true;
 	std::string notice;
+	// Notices expire so that a stale result does not hide the current status.
+	std::string notice_shown;
+	double notice_since{};
 	syncore_preferences draft;
 	float visible_seconds = 2.5f;
 	float seek_position{};
@@ -300,6 +307,8 @@ struct workspace
 	bool restart_after_update = false;
 	int overlap_mode = 0;
 	bool test_mode = false;
+	// Font atlas and style are rebuilt between frames when the interface scale changes.
+	float dpi_scale = 1.f, applied_ui_scale = 1.f;
 	ImVec2 player_position{}, player_size{}, limiter_center{};
 
 	workspace(ui::native_dialogs d, bool test)
@@ -353,7 +362,8 @@ struct workspace
 		preferences.sound_bank = bank;
 		preferences.synth = draft;
 		preferences.video = video.settings();
-		if (!playback.snapshot().busy)
+		const bool playback_busy = playback.snapshot().busy;
+		if (!playback_busy)
 			playback.configure_synth(bank, draft);
 		const auto names = playback.device_names();
 		const auto selected = playback.selected_device();
@@ -362,7 +372,8 @@ struct workspace
 		project.set_defaults(preferences);
 		if (!test_mode)
 			preferences_store.save(preferences);
-		notice = "Preferences saved.";
+		notice = playback_busy ? "Preferences saved. SYNCore changes apply after playback stops."
+							   : "Preferences saved.";
 	}
 
 	void shutdown()
@@ -382,12 +393,49 @@ struct workspace
 		if (playback.open(path, silent, start_paused))
 		{
 			file = std::move(path);
+			pending_file.clear();
 			notice.clear();
 			player_open = true;
 			focus_player = true;
+			return;
 		}
-		else
-			notice = "Stop the current session before opening another MIDI.";
+		// Replace the running session: stop it and open the new file once idle.
+		const auto status = playback.snapshot();
+		if (!status.busy && !status.stopping)
+		{
+			notice = "Cannot open this file now.";
+			return;
+		}
+		pending_file = std::move(path);
+		pending_silent = silent;
+		pending_paused = start_paused;
+		playback.stop();
+		player_open = true;
+		focus_player = true;
+	}
+
+	void poll_pending_open(const ui::playback_snapshot& status)
+	{
+		if (pending_file.empty() || status.busy || status.stopping)
+			return;
+		auto path = std::move(pending_file);
+		pending_file.clear();
+		open_file(std::move(path), pending_silent, pending_paused);
+	}
+
+	// Called once per frame; returns the notice while it is recent enough to show.
+	const std::string& current_notice()
+	{
+		constexpr double notice_seconds = 10.0;
+		const double now = ImGui::GetTime();
+		if (notice != notice_shown)
+		{
+			notice_shown = notice;
+			notice_since = now;
+		}
+		else if (!notice.empty() && now - notice_since > notice_seconds)
+			notice.clear();
+		return notice;
 	}
 };
 
@@ -422,7 +470,7 @@ void draw_workspace_background(const workspace& app, const workspace_layout& lay
 		app.birthday.active() ? IM_COL32(30, 42, 56, 255) : IM_COL32(224, 239, 247, 255),
 		"SAFC   /   MIDI WORKSTATION");
 
-	const std::string footer_text = "SAFC v" + app.updates.snapshot().current_version +
+	const std::string footer_text = "SAFC " + app.updates.snapshot().current_version +
 		"  /  ImGui   |   Drag headers to move panels; drag corners to resize.";
 	const ImVec2 footer_position = {
 		std::min(24.f * layout.scale, layout.display.x), std::max(0.f, layout.display.y - 29.f * layout.scale)};
@@ -450,57 +498,64 @@ void draw_workspace_navigation(workspace& app, const workspace_layout& layout)
 		ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoMove |
 			ImGuiWindowFlags_NoSavedSettings);
 	ImGui::PopStyleVar(2);
-	if (ImGui::Button("Project"))
+	// Open panels are highlighted; a click opens the panel and brings it to the front.
+	auto panel_button = [](const char* label, bool open, const char* tooltip)
+	{
+		if (open)
+			ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_HeaderActive));
+		const bool pressed = ImGui::Button(label);
+		if (open)
+			ImGui::PopStyleColor();
+		ImGui::SetItemTooltip("%s", tooltip);
+		ImGui::SameLine();
+		return pressed;
+	};
+	if (panel_button("Project", app.project_open, "Add MIDIs, set processing options and merge"))
 	{
 		app.project_open = true;
 		ImGui::SetWindowFocus("SAFC project");
 	}
-	ImGui::SameLine();
-	if (ImGui::Button("Editor"))
+	if (panel_button("Editor", app.editor_open, "Piano-roll MIDI editor"))
 	{
 		app.editor_open = true;
 		ImGui::SetWindowFocus("MIDI editor");
 	}
-	ImGui::SameLine();
-	if (ImGui::Button("Analysis"))
+	if (panel_button("Analysis", app.analysis_open, "Tempo, polyphony and notes-per-second graphs"))
 	{
 		app.analysis_open = true;
 		ImGui::SetWindowFocus("MIDI analysis");
 	}
-	ImGui::SameLine();
-	if (ImGui::Button("Player"))
+	if (panel_button("Player", app.player_open, "Play MIDIs and archives"))
 	{
 		app.player_open = true;
 		app.focus_player = true;
 	}
-	ImGui::SameLine();
-	if (ImGui::Button("SYNCore"))
+	if (panel_button("SYNCore", app.synth_open, "MIDI output device and embedded synthesizer"))
 	{
 		app.synth_open = true;
 		app.focus_synth = true;
 	}
-	ImGui::SameLine();
-	if (ImGui::Button("Video export"))
+	if (panel_button("Video export", app.video_open, "Render the player view to MP4"))
 	{
 		app.video_open = true;
 		ImGui::SetWindowFocus("Player video render");
 	}
-	ImGui::SameLine();
-	if (ImGui::Button("Settings"))
+	if (panel_button("Settings", app.settings_open, "Defaults, appearance and updates"))
 	{
 		app.settings_open = true;
 		ImGui::SetWindowFocus("Application settings");
 	}
-	ImGui::SameLine();
 	if (ImGui::Button("Reset layout"))
 	{
+		// Restore positions and sizes of the panels without changing which are open.
 		app.reset_layout = true;
-		app.player_open = app.synth_open = true;
-		ImGui::SetWindowPos("SAFC project", {24, 86});
-		ImGui::SetWindowSize("SAFC project", {1010, 700});
-		ImGui::SetWindowPos("MIDI editor", {80, 86});
-		ImGui::SetWindowSize("MIDI editor", {1180, 700});
+		const float height = std::max(420.f * layout.scale, layout.display.y - layout.top - 54 * layout.scale);
+		ImGui::SetWindowPos("SAFC project", {layout.gap, layout.top});
+		ImGui::SetWindowSize("SAFC project", {std::min(1010 * layout.scale, layout.display.x - 2 * layout.gap), height});
+		ImGui::SetWindowPos("MIDI editor", {layout.gap, layout.top});
+		ImGui::SetWindowSize("MIDI editor", {layout.display.x - 2 * layout.gap, height});
 	}
+	ImGui::SetItemTooltip("Move all panels back to their initial positions");
 	if (app.updates.snapshot().phase == ui::update_phase::ready)
 	{
 		ImGui::SameLine();
@@ -549,7 +604,7 @@ void draw_player(
 	{
 		app.player_position = ui::folded_window_position();
 		app.player_size = ui::folded_window_size();
-		ImGui::BeginDisabled(status.busy);
+		ImGui::BeginDisabled(status.stopping || !app.pending_file.empty());
 		if (ImGui::Button("Open MIDI..."))
 		{
 			try
@@ -564,21 +619,33 @@ void draw_player(
 		ImGui::EndDisabled();
 		ImGui::SameLine();
 		const auto playback_path = app.playback.current_path();
-		const std::string source_label = playback_path.empty()
-			? (app.playback.current_source() ? "Editor snapshot" : "Open a MIDI or archive to begin")
+		const std::string source_label = !app.pending_file.empty()
+			? "Opening " + utf8(std::filesystem::path(app.pending_file).filename().wstring()) + "..."
+			: playback_path.empty()
+			? (app.playback.current_source() ? "Editor snapshot" : "Open a MIDI or archive (or drop one here) to begin")
 			: utf8(std::filesystem::path(playback_path).filename().wstring());
 		ImGui::TextDisabled("%s", source_label.c_str());
 		ImGui::Spacing();
-		ImGui::BeginDisabled((app.file.empty() && !app.playback.current_source()) || status.stopping ||
-			(status.busy && !status.playing));
-		if (ImGui::Button(status.playing && !status.paused ? "Pause" : "Play", {82 * layout.scale, 0}))
+		const bool can_toggle = !((app.file.empty() && !app.playback.current_source()) || status.stopping ||
+			status.seeking || (status.busy && !status.playing) || !app.pending_file.empty());
+		auto toggle_playback = [&]
 		{
 			if (status.busy)
 				app.playback.toggle_pause();
 			else if (!app.playback.restart())
 				app.open_file(app.file, false, false);
-		}
+		};
+		ImGui::BeginDisabled(!can_toggle);
+		if (ImGui::Button(status.playing && !status.paused ? "Pause" : "Play", {82 * layout.scale, 0}))
+			toggle_playback();
+		ImGui::SetItemTooltip("Play / pause (Space)");
 		ImGui::EndDisabled();
+		// Space toggles playback while the player has focus. It is left to keyboard
+		// navigation while its cursor is visible, and to an active text field.
+		const auto& io = ImGui::GetIO();
+		if (can_toggle && ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !io.WantTextInput &&
+			!io.NavVisible && !ImGui::IsAnyItemActive() && ImGui::IsKeyPressed(ImGuiKey_Space, false))
+			toggle_playback();
 		ImGui::SameLine();
 		ImGui::BeginDisabled(!status.busy || status.stopping);
 		if (ImGui::Button("Stop", {72 * layout.scale, 0}))
@@ -601,7 +668,8 @@ void draw_player(
 					: -float(ImGui::GetTime()),
 				{-1, 0});
 		}
-		if (!app.seek_editing)
+		// Keep the requested position during a seek; the player reports the old one until it completes.
+		if (!app.seek_editing && !status.seeking)
 			app.seek_position = status.duration_us
 				? static_cast<float>(static_cast<double>(status.position_us) / status.duration_us)
 				: 0.f;
@@ -634,8 +702,8 @@ void draw_player(
 			ImGui::TextWrapped("%s", status.error.c_str());
 		else if (status.busy && !status.playing)
 			ImGui::TextWrapped("%s", status.message.c_str());
-		else if (!app.notice.empty())
-			ImGui::TextWrapped("%s", app.notice.c_str());
+		else if (const auto& notice = app.current_notice(); !notice.empty())
+			ImGui::TextWrapped("%s", notice.c_str());
 		else
 			ImGui::TextDisabled("%s", status.message.c_str());
 	}
@@ -756,7 +824,15 @@ void draw_synth_settings(workspace& app, const ui::playback_snapshot& status, co
 		ImGui::EndDisabled();
 		ImGui::EndDisabled();
 		ImGui::Spacing();
-		ImGui::TextWrapped("Stop playback before changing output settings.");
+		if (status.busy)
+		{
+			ImGui::TextWrapped("Output settings are locked during playback.");
+			ImGui::BeginDisabled(status.stopping);
+			if (ImGui::Button("Stop playback"))
+				app.playback.stop();
+			ImGui::EndDisabled();
+			ImGui::SameLine();
+		}
 		if (ImGui::Button("Save preferences"))
 		{
 			try
@@ -768,8 +844,8 @@ void draw_synth_settings(workspace& app, const ui::playback_snapshot& status, co
 				app.notice = e.what();
 			}
 		}
-		if (!app.notice.empty())
-			ImGui::TextWrapped("%s", app.notice.c_str());
+		if (const auto& notice = app.current_notice(); !notice.empty())
+			ImGui::TextWrapped("%s", notice.c_str());
 		if (!app.playback.syncore_available())
 			ImGui::TextWrapped("This build does not include SYNCore.");
 	}
@@ -778,7 +854,7 @@ void draw_synth_settings(workspace& app, const ui::playback_snapshot& status, co
 
 void draw_archive_picker(workspace& app, const ui::playback_snapshot& status)
 {
-	ImGui::SetNextWindowSize({650, 390}, ImGuiCond_FirstUseEver);
+	ImGui::SetNextWindowSize({ui::scaled(650), ui::scaled(390)}, ImGuiCond_FirstUseEver);
 	bool choose_open = true;
 	if (ui::begin_folded_window("Choose archive member", &choose_open))
 	{
@@ -801,7 +877,7 @@ void draw_archive_picker(workspace& app, const ui::playback_snapshot& status)
 
 void draw_application_settings(workspace& app, GLFWwindow* window)
 {
-	ImGui::SetNextWindowSize({530, 700}, ImGuiCond_FirstUseEver);
+	ImGui::SetNextWindowSize({ui::scaled(530), ui::scaled(700)}, ImGuiCond_FirstUseEver);
 	if (ui::begin_folded_window("Application settings", &app.settings_open))
 	{
 		ImGui::SeparatorText("Updates");
@@ -848,6 +924,12 @@ void draw_application_settings(workspace& app, GLFWwindow* window)
 			}
 		}
 		ImGui::SeparatorText("Defaults for new MIDIs");
+		auto defaults_of = [](const ui::application_preferences& p)
+		{
+			return std::tuple(p.processing_flags, p.split_channels, p.collapse_tracks, p.apply_offset_after,
+				p.inplace_merge, p.rsb_compression, p.allow_sysex, p.processing_threads);
+		};
+		const auto defaults_before = defaults_of(app.preferences);
 		ui::draw_processing_flags(app.preferences.processing_flags);
 		ImGui::Checkbox("Split by channel", &app.preferences.split_channels);
 		ImGui::Checkbox("Collapse tracks", &app.preferences.collapse_tracks);
@@ -858,10 +940,13 @@ void draw_application_settings(workspace& app, GLFWwindow* window)
 		int threads = app.preferences.processing_threads;
 		if (ImGui::SliderInt("Processing threads", &threads, 1, 64))
 			app.preferences.processing_threads = static_cast<std::uint16_t>(threads);
+		// New MIDIs use the edited defaults immediately; saving only persists them.
+		if (defaults_of(app.preferences) != defaults_before)
+			app.project.set_defaults(app.preferences);
 		ImGui::SeparatorText("Appearance");
 		ImGui::Combo("Background", &app.preferences.background, "Dark blue\0Classic amber / blue\0");
-		if (ImGui::SliderFloat("Interface scale", &app.preferences.ui_scale, .8f, 1.75f, "%.2f"))
-			ImGui::GetIO().FontGlobalScale = app.preferences.ui_scale;
+		ImGui::SliderFloat("Interface scale", &app.preferences.ui_scale, .8f, 1.75f, "%.2f");
+		ImGui::SetItemTooltip("Text and control size; applied when the slider is released");
 		ImGui::TextWrapped(
 			"Window positions and sizes are saved automatically. Hold Ctrl to select several project files.");
 		try
@@ -869,16 +954,32 @@ void draw_application_settings(workspace& app, GLFWwindow* window)
 			if (ImGui::Button("Apply and save"))
 				app.save_preferences();
 			ImGui::SameLine();
-			ImGui::BeginDisabled(app.project.merging());
+			ImGui::BeginDisabled(app.project.merging() || app.project.data.files.empty());
 			if (ImGui::Button("Apply defaults to all MIDIs"))
-				app.project.set_defaults(app.preferences, true);
+				ImGui::OpenPopup("Apply defaults?");
 			ImGui::EndDisabled();
+			if (ImGui::BeginPopupModal("Apply defaults?", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+			{
+				ImGui::Text("Replace the processing settings of all %zu project MIDIs with these defaults?",
+					app.project.data.files.size());
+				if (ImGui::Button("Apply to all"))
+				{
+					app.project.set_defaults(app.preferences, true);
+					app.notice = "Defaults applied to all project MIDIs.";
+					ImGui::CloseCurrentPopup();
+				}
+				ImGui::SameLine();
+				if (ImGui::Button("Cancel"))
+					ImGui::CloseCurrentPopup();
+				ImGui::EndPopup();
+			}
 		}
 		catch (const std::exception& e)
 		{
 			app.notice = e.what();
 		}
-		ImGui::TextWrapped("%s", app.notice.c_str());
+		if (const auto& notice = app.current_notice(); !notice.empty())
+			ImGui::TextWrapped("%s", notice.c_str());
 		ImGui::SeparatorText("SAFC");
 		ImGui::TextWrapped("MIDI processing, editing, analysis, playback and video export. Dear ImGui frontend "
 						   "with the original folded panel design.");
@@ -892,6 +993,7 @@ void draw_application_settings(workspace& app, GLFWwindow* window)
 void render_workspace(workspace& app, piano_texture& piano, GLFWwindow* window)
 {
 	app.editor.poll();
+	app.poll_pending_open(app.playback.snapshot());
 	const auto status = app.playback.snapshot();
 	const workspace_layout layout;
 
@@ -1105,6 +1207,65 @@ public:
 	}
 };
 
+// Builds the font atlas at its final pixel size so that text stays sharp at every
+// interface scale. Japanese glyphs are merged for common MIDI file and track names.
+void load_fonts(float pixel_size)
+{
+	auto& io = ImGui::GetIO();
+	io.Fonts->Clear();
+	wchar_t windows_directory[MAX_PATH]{};
+	GetWindowsDirectoryW(windows_directory, MAX_PATH);
+	const auto fonts = std::filesystem::path(windows_directory) / "Fonts";
+	std::error_code error;
+	const auto main_font = fonts / "segoeui.ttf";
+	if (!std::filesystem::exists(main_font, error) ||
+		!io.Fonts->AddFontFromFileTTF(
+			utf8(main_font.wstring()).c_str(), pixel_size, nullptr, io.Fonts->GetGlyphRangesCyrillic()))
+	{
+		ImFontConfig config;
+		config.SizePixels = pixel_size;
+		io.Fonts->AddFontDefault(&config);
+		return;
+	}
+	ImFontConfig merge;
+	merge.MergeMode = true;
+	merge.OversampleH = merge.OversampleV = 1;
+	for (const auto* name : {L"YuGothM.ttc", L"meiryo.ttc", L"msgothic.ttc"})
+	{
+		const auto path = fonts / name;
+		if (std::filesystem::exists(path, error) &&
+			io.Fonts->AddFontFromFileTTF(
+				utf8(path.wstring()).c_str(), pixel_size, &merge, io.Fonts->GetGlyphRangesJapanese()))
+			break;
+	}
+}
+
+// Call between frames. The OpenGL backend recreates the font texture on NewFrame.
+void apply_interface_scale(float scale, bool recreate_texture)
+{
+	load_fonts(ui::workspace_font_size * scale);
+	if (recreate_texture)
+		ImGui_ImplOpenGL3_DestroyFontsTexture();
+	ui::apply_theme(scale);
+	ImGui::GetIO().FontGlobalScale = 1.f;
+}
+
+// Keeps the initial window inside the monitor work area; GLFW_SCALE_TO_MONITOR
+// enlarges the requested size by the monitor's DPI scale.
+void fit_window_to_work_area(GLFWwindow* window)
+{
+	auto* monitor = glfwGetPrimaryMonitor();
+	if (!monitor)
+		return;
+	int x{}, y{}, width{}, height{};
+	glfwGetMonitorWorkarea(monitor, &x, &y, &width, &height);
+	int window_width{}, window_height{};
+	glfwGetWindowSize(window, &window_width, &window_height);
+	if (width <= 0 || height <= 0 || (window_width <= width && window_height <= height))
+		return;
+	glfwMaximizeWindow(window);
+}
+
 int run(bool smoke, bool workflows, const std::filesystem::path& capture_path, const std::wstring& initial_file,
 	std::filesystem::path& restart_path)
 {
@@ -1119,7 +1280,8 @@ int run(bool smoke, bool workflows, const std::filesystem::path& capture_path, c
 	glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
 	glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_COMPAT_PROFILE);
 	glfwWindowHint(GLFW_SCALE_TO_MONITOR, smoke ? GLFW_FALSE : GLFW_TRUE);
-	glfwWindowHint(GLFW_VISIBLE, smoke ? GLFW_FALSE : GLFW_TRUE);
+	// Shown after its size is adjusted to the monitor.
+	glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
 	ui::window_icon application_icon;
 	auto* window = glfwCreateWindow(1400, 850, "SAFC", nullptr, nullptr);
 	if (!window)
@@ -1131,7 +1293,12 @@ int run(bool smoke, bool workflows, const std::filesystem::path& capture_path, c
 	} window_lifetime{window};
 	if (!application_icon.apply(window))
 		std::cerr << "Unable to load the embedded SAFC window icon\n";
-	glfwSetWindowSizeLimits(window, 1000, 650, GLFW_DONT_CARE, GLFW_DONT_CARE);
+	glfwSetWindowSizeLimits(window, 800, 560, GLFW_DONT_CARE, GLFW_DONT_CARE);
+	if (!smoke)
+	{
+		fit_window_to_work_area(window);
+		glfwShowWindow(window);
+	}
 	glfwMakeContextCurrent(window);
 	glfwSwapInterval(smoke ? 0 : 1);
 	IMGUI_CHECKVERSION();
@@ -1158,15 +1325,7 @@ int run(bool smoke, bool workflows, const std::filesystem::path& capture_path, c
 	}
 	float scale_x{}, scale_y{};
 	glfwGetWindowContentScale(window, &scale_x, &scale_y);
-	const float scale = smoke ? 1.f : std::clamp(scale_x, 1.f, 2.f);
-	wchar_t windows_directory[MAX_PATH]{};
-	GetWindowsDirectoryW(windows_directory, MAX_PATH);
-	const auto font_path = std::filesystem::path(windows_directory) / "Fonts" / "segoeui.ttf";
-	if (!io.Fonts->AddFontFromFileTTF(utf8(font_path.wstring()).c_str(), ui::workspace_font_size * scale, nullptr,
-			io.Fonts->GetGlyphRangesCyrillic()))
-		io.Fonts->AddFontDefault();
-	ui::apply_theme(scale);
-	io.FontGlobalScale = 1.f; // Font atlas already contains the requested DPI size.
+	const float dpi_scale = smoke ? 1.f : std::clamp(scale_x, 1.f, 3.f);
 	if (!ImGui_ImplGlfw_InitForOpenGL(window, true))
 		throw std::runtime_error("ImGui GLFW backend failed");
 	struct platform_guard
@@ -1180,7 +1339,10 @@ int run(bool smoke, bool workflows, const std::filesystem::path& capture_path, c
 		~renderer_guard() { ImGui_ImplOpenGL3_Shutdown(); }
 	} renderer_lifetime;
 	workspace app(make_dialogs(window), smoke);
-	io.FontGlobalScale = app.preferences.ui_scale;
+	app.dpi_scale = dpi_scale;
+	app.applied_ui_scale = app.preferences.ui_scale;
+	// The font atlas and style already contain the DPI and interface scale.
+	apply_interface_scale(dpi_scale * app.applied_ui_scale, false);
 	piano_texture piano;
 	glfwSetWindowUserPointer(window, &app);
 	glfwSetDropCallback(window, [](GLFWwindow* w, int count, const char** paths)
@@ -1189,6 +1351,7 @@ int run(bool smoke, bool workflows, const std::filesystem::path& capture_path, c
 		try
 		{
 			std::vector<std::wstring> midis;
+			int ignored = 0;
 			for (int i = 0; i < count; ++i)
 			{
 				auto path = wide(paths[i]);
@@ -1198,7 +1361,12 @@ int run(bool smoke, bool workflows, const std::filesystem::path& capture_path, c
 					midis.push_back(std::move(path));
 				else if (i == 0)
 					app.open_file(std::move(path));
+				else
+					++ignored;
 			}
+			if (ignored)
+				app.notice = "Only the first dropped archive is opened; " + std::to_string(ignored) +
+					" other non-MIDI file(s) were ignored.";
 			if (!midis.empty())
 			{
 				app.project.add_files(std::move(midis));
@@ -1246,6 +1414,12 @@ int run(bool smoke, bool workflows, const std::filesystem::path& capture_path, c
 		{
 			glfwWaitEventsTimeout(.1);
 			continue;
+		}
+		// Rebuild fonts after the scale slider is released, never inside a frame.
+		if (app.preferences.ui_scale != app.applied_ui_scale && !ImGui::IsAnyItemActive())
+		{
+			app.applied_ui_scale = app.preferences.ui_scale;
+			apply_interface_scale(app.dpi_scale * app.applied_ui_scale, true);
 		}
 		ImGui_ImplOpenGL3_NewFrame();
 		ImGui_ImplGlfw_NewFrame();

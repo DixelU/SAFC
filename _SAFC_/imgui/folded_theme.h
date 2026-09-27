@@ -6,7 +6,19 @@ namespace safc::imgui_ui
 {
 inline constexpr float workspace_font_size = 17.f;
 
-// Call before NewFrame; repeated calls do not accumulate size scaling.
+// Combined DPI and interface scale of the current font. Multiply fixed layout
+// dimensions by this so they follow the text size.
+inline float ui_scale()
+{
+	return ImGui::GetFontSize() / workspace_font_size;
+}
+inline float scaled(float pixels)
+{
+	return pixels * ui_scale();
+}
+
+// Call before NewFrame; repeated calls do not accumulate size scaling. Only the
+// style is scaled: build the font atlas at workspace_font_size * scale.
 void apply_theme(float scale = 1.f);
 
 // Pair every call with end_folded_window(), including when false is returned.

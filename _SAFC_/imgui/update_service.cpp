@@ -114,6 +114,10 @@ std::vector<std::byte> download(
 	const auto deadline = clock_type::now() + std::chrono::minutes(3);
 	internet_handle session{WinHttpOpen(
 		L"SAFC-Updater/2", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0)};
+	// Automatic proxy discovery requires Windows 8.1; older systems use the WinHTTP default.
+	if (!session.value)
+		session.value = WinHttpOpen(
+			L"SAFC-Updater/2", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
 	if (!session.value)
 		throw std::runtime_error(win_error("Cannot open HTTPS session"));
 	if (!WinHttpSetTimeouts(

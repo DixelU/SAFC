@@ -41,7 +41,9 @@ that session; closing the greeting dismisses it until the next launch.
 - **Player:** use normal MIDI files or compressed/nested archive sources; choose
   a member when an archive contains several candidates. Select a MIDI device or
   embedded SYNCore, play, pause, stop, seek, adjust the logarithmic visible-time
-  range, and choose simulated lag or the existing overlap modes.
+  range, and choose simulated lag or the existing overlap modes. Space toggles
+  play/pause while the player is focused. Opening another file while a session
+  runs stops that session and opens the new file.
 - **MIDI editor:** load/save/export MIDI, select tracks and draw channels, rename
   tracks, draw/erase/move/resize/stretch notes, edit velocity and controllers,
   copy/paste/duplicate, quantize, and undo/redo. Chopper, Flip, Claw, and LFO retain
@@ -58,7 +60,9 @@ that session; closing the greeting dismisses it until the next launch.
   render on owned workers with progress, preview frames, and cancellation.
   Regular files, selected archive members, and editor snapshots use independent
   audio/video readers.
-- **Settings:** apply processing defaults, choose appearance and interface scale,
+- **Settings:** apply processing defaults (new MIDIs use edited defaults at once;
+  applying them to existing MIDIs asks first), choose appearance and interface
+  scale (fonts and controls are rebuilt at the chosen size),
   configure SYNCore, and explicitly save preferences. Automatic updates check
   published stable releases and download a newer version in the background.
   A prepared update installs when SAFC closes normally; **Restart to update**
@@ -203,7 +207,8 @@ GUI. The same applies through either executable name:
 
 Relative paths resolve from the current working directory. `--help` describes
 all supported settings and ranges. Inputs and overrides are validated before a
-merge starts, signed 64-bit per-file tick values retain their integer precision,
+merge starts, unknown or misspelled keys are rejected (keys beginning with `$` or
+`_` are ignored for schemas and comments), signed 64-bit per-file tick values retain their integer precision,
 and output cannot replace an input MIDI. Normal CLI runs read saved defaults and
 do not write preferences. A MIDI filename argument opens the interactive
 workspace; the normal picker and drop path add MIDIs to the project.

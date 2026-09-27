@@ -122,8 +122,8 @@ void apply_theme(float scale)
 	colors[ImGuiCol_TabSelected] = colors[ImGuiCol_Header];
 	colors[ImGuiCol_TextSelectedBg] = {0.14f, 0.56f, 0.79f, 0.45f};
 	colors[ImGuiCol_NavCursor] = {0.35f, 0.86f, 1.f, 1.f};
+	// Fonts are built at their final pixel size by the caller.
 	style.ScaleAllSizes(scale);
-	ImGui::GetIO().FontGlobalScale = scale;
 }
 
 bool begin_folded_window(const char* title, bool* open, ImGuiWindowFlags flags)

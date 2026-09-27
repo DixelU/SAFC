@@ -6,15 +6,18 @@
 #include "project_session.h"
 #include "../JSON/JSON.h"
 
+#include <algorithm>
 #include <charconv>
 #include <chrono>
 #include <cmath>
 #include <fstream>
+#include <initializer_list>
 #include <iostream>
 #include <limits>
 #include <map>
 #include <optional>
 #include <stdexcept>
+#include <string_view>
 #include <thread>
 
 namespace safc::imgui_ui
@@ -46,6 +49,20 @@ std::wstring decode_utf8(std::string bytes)
 [[noreturn]] void invalid(const std::wstring& field, const std::string& reason)
 {
 	throw std::runtime_error(utf8(field) + ": " + reason);
+}
+
+// A misspelled key would otherwise fall back to a default silently. Keys that
+// start with '$' or '_' are left for schemas and comments.
+void reject_unknown_keys(const JSONObject& object, std::initializer_list<std::wstring_view> known,
+	std::initializer_list<std::wstring_view> more, const std::wstring& prefix)
+{
+	for (const auto& [key, value] : object)
+	{
+		if (!key.empty() && (key.front() == L'$' || key.front() == L'_'))
+			continue;
+		if (std::ranges::find(known, key) == known.end() && std::ranges::find(more, key) == more.end())
+			invalid(prefix + L"/" + key, "is not a supported setting (see --help)");
+	}
 }
 
 // SimpleJSON stores numbers as double. Retain their source lexemes so tick
@@ -353,6 +370,10 @@ void load_cli_config(const std::wstring& path, project_session& project, bool lo
 	if (!root || !root->IsObject())
 		throw std::runtime_error("Config must be a JSON object.");
 	const auto& object = root->AsObject();
+	reject_unknown_keys(object,
+		{L"global_ppq_override", L"global_tempo_override", L"global_offset_override", L"global_offset", L"save_to",
+			L"files"},
+		{}, {});
 	const config_reader reader{lexemes.values};
 	const auto global_ppq = reader.integer(object, L"global_ppq_override", {}, 1, UINT16_MAX);
 	const auto global_tempo = reader.number(object, L"global_tempo_override", {}, 60000000);
@@ -386,6 +407,12 @@ void load_cli_config(const std::wstring& path, project_session& project, bool lo
 		if (!value->IsObject())
 			invalid(prefix, "must be an object");
 		const auto& object = value->AsObject();
+		reject_unknown_keys(object,
+			{L"filename", L"ppq_override", L"tempo_override", L"offset", L"selection_start", L"selection_length"},
+			{L"ignore_notes", L"ignore_pitches", L"ignore_tempos", L"ignore_other", L"piano_only", L"remove_remnants",
+				L"remove_empty_tracks", L"channel_split", L"collapse_midi", L"apply_offset_after", L"rsb_compression",
+				L"ignore_meta_rsb", L"inplace_mergable", L"allow_sysex", L"enable_zero_velocity"},
+			prefix);
 		entry_settings entry;
 		const auto filename = reader.path(object, L"filename", prefix);
 		if (!filename)
