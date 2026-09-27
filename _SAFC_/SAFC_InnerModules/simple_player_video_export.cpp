@@ -212,7 +212,7 @@ void validate_settings(const simple_player_video_settings& settings,
 		throw std::runtime_error("AAC sample rate must be 44100 or 48000 Hz");
 	if (!std::isfinite(settings.tail_seconds) || settings.tail_seconds < 0.0 ||
 		settings.tail_seconds > 60.0 || !std::isfinite(settings.visible_seconds) ||
-		settings.visible_seconds < 0.25 || settings.visible_seconds > 60.0)
+		settings.visible_seconds < 0.01 || settings.visible_seconds > 60.0)
 		throw std::runtime_error("tail and visible seconds are outside the supported range");
 	if (preferences.sample_rate < 8000 || preferences.sample_rate > 192000)
 		throw std::runtime_error("SYNCore sample rate is outside the supported range");

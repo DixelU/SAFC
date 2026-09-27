@@ -72,8 +72,8 @@ std::string settings_problem(const simple_player_video_settings& settings, const
 		return "AAC sample rate must be 44100 or 48000 Hz";
 	if (!std::isfinite(settings.tail_seconds) || settings.tail_seconds < 0.0 || settings.tail_seconds > 60.0)
 		return "Tail seconds must be from 0 to 60";
-	if (!std::isfinite(settings.visible_seconds) || settings.visible_seconds < 0.25 || settings.visible_seconds > 60.0)
-		return "Visible seconds must be from 0.25 to 60";
+	if (!std::isfinite(settings.visible_seconds) || settings.visible_seconds < 0.01 || settings.visible_seconds > 60.0)
+		return "Visible seconds must be from 0.01 to 60";
 	if (preferences.sample_rate < 8000 || preferences.sample_rate > 192000 || preferences.buffer_frames < 256 ||
 		preferences.buffer_frames > 1048576 || preferences.maximum_cohorts == 0 ||
 		preferences.maximum_cohorts > 1048576 || preferences.render_threads > 64)
@@ -241,24 +241,34 @@ struct video_export_panel::impl
 	{
 		if (ImGui::BeginTable("Render settings", 2, ImGuiTableFlags_SizingStretchSame))
 		{
-			const auto integer = [](const char* label, std::uint32_t& value)
+			// Labels get rows of their own. A table carries the text baseline of a
+			// cell's last line into the next cell of the row, so a right-hand label
+			// would drop to its left neighbour's field text and shift the column down.
+			const auto labels = [](const char* left, const char* right)
+			{
+				ImGui::TableNextRow();
+				ImGui::TableNextColumn();
+				ImGui::TextUnformatted(left);
+				if (right)
+				{
+					ImGui::TableNextColumn();
+					ImGui::TextUnformatted(right);
+				}
+				ImGui::TableNextRow();
+			};
+			const auto integer = [](const char* id, std::uint32_t& value)
 			{
 				ImGui::TableNextColumn();
-				ImGui::PushID(label);
-				ImGui::TextUnformatted(label);
 				ImGui::SetNextItemWidth(-1);
-				ImGui::InputScalar("##value", ImGuiDataType_U32, &value);
-				ImGui::PopID();
+				ImGui::InputScalar(id, ImGuiDataType_U32, &value);
 			};
 			// The AAC encoder accepts only these values.
-			const auto choice = [](const char* label, std::uint32_t& value, std::initializer_list<std::uint32_t> options)
+			const auto choice = [](const char* id, std::uint32_t& value, std::initializer_list<std::uint32_t> options)
 			{
 				ImGui::TableNextColumn();
-				ImGui::PushID(label);
-				ImGui::TextUnformatted(label);
 				ImGui::SetNextItemWidth(-1);
 				const auto preview = std::to_string(value);
-				if (ImGui::BeginCombo("##value", preview.c_str()))
+				if (ImGui::BeginCombo(id, preview.c_str()))
 				{
 					for (const auto option : options)
 					{
@@ -270,32 +280,36 @@ struct video_export_panel::impl
 					}
 					ImGui::EndCombo();
 				}
-				ImGui::PopID();
 			};
 			// Clamp only once editing ends, so typing is not rewritten mid-value.
-			const auto seconds = [](const char* label, const char* id, double& value, double step, double fast,
-									 double minimum)
+			const auto seconds = [](const char* id, double& value, double step, double fast, double minimum)
 			{
 				ImGui::TableNextColumn();
-				ImGui::TextUnformatted(label);
 				ImGui::SetNextItemWidth(-1);
 				ImGui::InputDouble(id, &value, step, fast, "%.3f");
 				if (!ImGui::IsItemActive())
 					value = std::isfinite(value) ? std::clamp(value, minimum, 60.0) : minimum;
 			};
-			integer("Width", settings.width);
-			integer("Height", settings.height);
-			integer("FPS", settings.fps);
-			integer("Video kbps", settings.video_bitrate_kbps);
-			choice("AAC kbps", settings.audio_bitrate_kbps, {96, 128, 160, 192});
-			choice("AAC Hz", settings.audio_sample_rate, {44100, 48000});
-			seconds("Visible seconds", "##visible_seconds", settings.visible_seconds, .05, .25, .25);
-			seconds("Tail seconds", "##tail_seconds", settings.tail_seconds, .5, 1, 0);
+			labels("Width", "Height");
+			integer("##width", settings.width);
+			integer("##height", settings.height);
+			labels("FPS", "Video kbps");
+			integer("##fps", settings.fps);
+			integer("##video_kbps", settings.video_bitrate_kbps);
+			labels("AAC kbps", "AAC Hz");
+			choice("##aac_kbps", settings.audio_bitrate_kbps, {96, 128, 160, 192});
+			choice("##aac_hz", settings.audio_sample_rate, {44100, 48000});
+			labels("Visible seconds", "Tail seconds");
+			seconds("##visible_seconds", settings.visible_seconds, .01, .1, .01);
+			seconds("##tail_seconds", settings.tail_seconds, .5, 1, 0);
+			labels("Overlaps", nullptr);
+			ImGui::TableNextColumn();
+			ImGui::SetNextItemWidth(-1);
+			int overlap = settings.remove_overlaps <= 1 ? settings.remove_overlaps : 2;
+			if (ImGui::Combo("##overlaps", &overlap, "Naive removal\0Realtime removal\0Draw all\0"))
+				settings.remove_overlaps = overlap == 2 ? 0xff : static_cast<std::uint8_t>(overlap);
 			ImGui::EndTable();
 		}
-		int overlap = settings.remove_overlaps <= 1 ? settings.remove_overlaps : 2;
-		if (ImGui::Combo("Overlaps", &overlap, "Naive removal\0Realtime removal\0Draw all\0"))
-			settings.remove_overlaps = overlap == 2 ? 0xff : static_cast<std::uint8_t>(overlap);
 	}
 };
 

@@ -117,6 +117,7 @@ void project_panel::properties(file_settings& file)
 		{
 			ImGui::TableNextRow();
 			ImGui::TableNextColumn();
+			ImGui::AlignTextToFramePadding();
 			ImGui::TextUnformatted(label);
 			ImGui::TableNextColumn();
 			ImGui::PushID(label);

@@ -276,6 +276,9 @@ public:
 	}
 };
 
+// Time range shown by the player view; its slider is logarithmic.
+constexpr float min_visible_seconds = .01f, max_visible_seconds = 2.5f;
+
 struct workspace
 {
 	ui::native_dialogs dialogs;
@@ -298,7 +301,7 @@ struct workspace
 	std::string notice_shown;
 	double notice_since{};
 	syncore_preferences draft;
-	float visible_seconds = 2.5f;
+	float visible_seconds = .2f;
 	float seek_position{};
 	bool seek_editing{}, player_open = true, synth_open = true, reset_layout = true;
 	bool focus_player{}, focus_synth{};
@@ -681,16 +684,29 @@ void draw_player(
 			app.playback.seek(app.seek_position);
 		ImGui::EndDisabled();
 
+		// The status line is chosen and measured first, so the view leaves exactly the
+		// height of the controls below it and they stay at the bottom of the panel.
+		const std::string* status_line = &status.message;
+		bool status_wrapped = true;
+		if (!status.error.empty())
+			status_line = &status.error;
+		else if (status.busy && !status.playing)
+			status_line = &status.message;
+		else if (const auto& notice = app.current_notice(); !notice.empty())
+			status_line = &notice;
+		else
+			status_wrapped = false;
 		auto size = ImGui::GetContentRegionAvail();
-		size.y = std::max(100.f * layout.scale, size.y - 83 * layout.scale);
+		const float status_height =
+			ImGui::CalcTextSize(status_line->c_str(), nullptr, false, status_wrapped ? size.x : -1.f).y;
+		const float controls_height =
+			ImGui::GetStyle().ItemSpacing.y + ImGui::GetFrameHeightWithSpacing() + status_height;
+		size.y = std::max(100.f * layout.scale, size.y - controls_height);
 		size.x = std::max(1.f, size.x);
 		ImGui::Image(piano.render(app.playback, size, app.visible_seconds), size, {0, 1}, {1, 0});
 		ImGui::SetNextItemWidth(190 * layout.scale);
-		float viewport_power = std::log2(app.visible_seconds * 1000000.f);
-		char viewport_label[64];
-		snprintf(viewport_label, sizeof(viewport_label), "%.6g s", app.visible_seconds);
-		if (ImGui::SliderFloat("Visible seconds", &viewport_power, 0.f, 30.f, viewport_label))
-			app.visible_seconds = std::exp2(viewport_power) / 1000000.f;
+		ImGui::SliderFloat("Visible seconds", &app.visible_seconds, min_visible_seconds, max_visible_seconds,
+			"%.3g s", ImGuiSliderFlags_Logarithmic | ImGuiSliderFlags_AlwaysClamp);
 		ImGui::SameLine();
 		bool visuals_changed = ImGui::Checkbox("Simulate lag", &app.simulate_lag);
 		ImGui::SameLine();
@@ -698,14 +714,10 @@ void draw_player(
 		visuals_changed |= ImGui::Combo("Overlap", &app.overlap_mode, "Naive removal\0Realtime removal\0Draw all\0");
 		if (visuals_changed)
 			app.playback.set_visual_options(app.simulate_lag, static_cast<std::uint8_t>(app.overlap_mode));
-		if (!status.error.empty())
-			ImGui::TextWrapped("%s", status.error.c_str());
-		else if (status.busy && !status.playing)
-			ImGui::TextWrapped("%s", status.message.c_str());
-		else if (const auto& notice = app.current_notice(); !notice.empty())
-			ImGui::TextWrapped("%s", notice.c_str());
+		if (status_wrapped)
+			ImGui::TextWrapped("%s", status_line->c_str());
 		else
-			ImGui::TextDisabled("%s", status.message.c_str());
+			ImGui::TextDisabled("%s", status_line->c_str());
 	}
 	ui::end_folded_window();
 }
