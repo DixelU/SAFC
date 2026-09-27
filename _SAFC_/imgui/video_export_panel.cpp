@@ -11,6 +11,7 @@
 #include <atomic>
 #include <cmath>
 #include <cstring>
+#include <cwctype>
 #include <filesystem>
 #include <mutex>
 #include <stdexcept>
@@ -43,6 +44,41 @@ std::string display_path(const std::wstring& path)
 float fraction(std::uint64_t value, std::uint64_t total)
 {
 	return total ? static_cast<float>(std::clamp(static_cast<double>(value) / total, 0.0, 1.0)) : 0.f;
+}
+
+bool midi_extension(const std::wstring& path)
+{
+	auto extension = std::filesystem::path(path).extension().wstring();
+	std::transform(extension.begin(), extension.end(), extension.begin(),
+		[](wchar_t c) { return static_cast<wchar_t>(std::towlower(c)); });
+	return extension == L".mid" || extension == L".midi";
+}
+
+// Mirrors validate_settings() in simple_player_video_export.cpp, so invalid
+// settings are reported before the save dialog instead of after it.
+std::string settings_problem(const simple_player_video_settings& settings, const syncore_preferences& preferences)
+{
+	if (settings.width < 16 || settings.width > 8192 || settings.height < 16 || settings.height > 8192 ||
+		(settings.width & 1U) || (settings.height & 1U))
+		return "Width and height must be even values from 16 to 8192";
+	if (settings.fps < 1 || settings.fps > 240)
+		return "FPS must be from 1 to 240";
+	if (settings.video_bitrate_kbps < 64 || settings.video_bitrate_kbps > 250000)
+		return "Video bitrate must be from 64 to 250000 kbps";
+	if (settings.audio_bitrate_kbps != 96 && settings.audio_bitrate_kbps != 128 &&
+		settings.audio_bitrate_kbps != 160 && settings.audio_bitrate_kbps != 192)
+		return "AAC bitrate must be 96, 128, 160, or 192 kbps";
+	if (settings.audio_sample_rate != 44100 && settings.audio_sample_rate != 48000)
+		return "AAC sample rate must be 44100 or 48000 Hz";
+	if (!std::isfinite(settings.tail_seconds) || settings.tail_seconds < 0.0 || settings.tail_seconds > 60.0)
+		return "Tail seconds must be from 0 to 60";
+	if (!std::isfinite(settings.visible_seconds) || settings.visible_seconds < 0.25 || settings.visible_seconds > 60.0)
+		return "Visible seconds must be from 0.25 to 60";
+	if (preferences.sample_rate < 8000 || preferences.sample_rate > 192000 || preferences.buffer_frames < 256 ||
+		preferences.buffer_frames > 1048576 || preferences.maximum_cohorts == 0 ||
+		preferences.maximum_cohorts > 1048576 || preferences.render_threads > 64)
+		return "Apply valid SYNCore settings before rendering";
+	return {};
 }
 }
 
@@ -148,16 +184,18 @@ struct video_export_panel::impl
 	void draw_preview(const video_export_snapshot& current)
 	{
 		upload_preview();
-		ImGui::TextWrapped(
-			"Source: %s", display_path(current.busy ? current.source_path : playback.current_path()).c_str());
+		const auto path = current.busy ? current.source_path : playback.current_path();
+		const bool has_source = current.busy || !path.empty() || playback.current_source();
+		ImGui::TextWrapped("Source: %s", has_source ? display_path(path).c_str() : "none");
 		if (texture && texture_width && texture_height)
 		{
-			const float width = ImGui::GetContentRegionAvail().x;
-			ImGui::Image(static_cast<ImTextureID>(texture), {width, width * texture_height / texture_width});
+			// The preview is at most 320 px wide; never upscale it past the UI scale.
+			const float scale = std::max(0.f, std::min(ImGui::GetContentRegionAvail().x / texture_width, ui_scale()));
+			ImGui::Image(static_cast<ImTextureID>(texture), {texture_width * scale, texture_height * scale});
 		}
 		else
 		{
-			ImGui::BeginChild("Preview", {0, 180}, ImGuiChildFlags_Borders);
+			ImGui::BeginChild("Preview", {0, scaled(180)}, ImGuiChildFlags_Borders);
 			ImGui::TextDisabled("Rendered frames appear here");
 			ImGui::EndChild();
 		}
@@ -181,6 +219,24 @@ struct video_export_panel::impl
 			ImGui::TextWrapped("Output: %s", display_path(current.output_path).c_str());
 	}
 
+	// Why a render cannot start from the current player source, or empty.
+	static std::string source_problem(const std::shared_ptr<playback_event_source>& source,
+		const playback_session::source_factory& factory, const std::wstring& path, const playback_snapshot& playback)
+	{
+		if (!simple_player_video_export_available())
+			return "This build does not include SYNCore video export";
+		if (source && !factory)
+			return "This event source cannot create independent export readers; save it as MIDI first";
+		if (!source && path.empty())
+			return "No source - open a MIDI in the player or play from the editor";
+		if (playback.busy && !playback.playing && !factory)
+			return "Wait for source preparation before exporting";
+		// A failed or cancelled archive leaves only its path; it is not a MIDI.
+		if (!source && !factory && !midi_extension(path))
+			return "Prepare the archive in the player first.";
+		return {};
+	}
+
 	void draw_settings()
 	{
 		if (ImGui::BeginTable("Render settings", 2, ImGuiTableFlags_SizingStretchSame))
@@ -194,20 +250,47 @@ struct video_export_panel::impl
 				ImGui::InputScalar("##value", ImGuiDataType_U32, &value);
 				ImGui::PopID();
 			};
+			// The AAC encoder accepts only these values.
+			const auto choice = [](const char* label, std::uint32_t& value, std::initializer_list<std::uint32_t> options)
+			{
+				ImGui::TableNextColumn();
+				ImGui::PushID(label);
+				ImGui::TextUnformatted(label);
+				ImGui::SetNextItemWidth(-1);
+				const auto preview = std::to_string(value);
+				if (ImGui::BeginCombo("##value", preview.c_str()))
+				{
+					for (const auto option : options)
+					{
+						const auto text = std::to_string(option);
+						if (ImGui::Selectable(text.c_str(), option == value))
+							value = option;
+						if (option == value)
+							ImGui::SetItemDefaultFocus();
+					}
+					ImGui::EndCombo();
+				}
+				ImGui::PopID();
+			};
+			// Clamp only once editing ends, so typing is not rewritten mid-value.
+			const auto seconds = [](const char* label, const char* id, double& value, double step, double fast,
+									 double minimum)
+			{
+				ImGui::TableNextColumn();
+				ImGui::TextUnformatted(label);
+				ImGui::SetNextItemWidth(-1);
+				ImGui::InputDouble(id, &value, step, fast, "%.3f");
+				if (!ImGui::IsItemActive())
+					value = std::isfinite(value) ? std::clamp(value, minimum, 60.0) : minimum;
+			};
 			integer("Width", settings.width);
 			integer("Height", settings.height);
 			integer("FPS", settings.fps);
 			integer("Video kbps", settings.video_bitrate_kbps);
-			integer("AAC kbps", settings.audio_bitrate_kbps);
-			integer("AAC Hz", settings.audio_sample_rate);
-			ImGui::TableNextColumn();
-			ImGui::TextUnformatted("Visible seconds");
-			ImGui::SetNextItemWidth(-1);
-			ImGui::InputDouble("##visible_seconds", &settings.visible_seconds, .05, .25, "%.3f");
-			ImGui::TableNextColumn();
-			ImGui::TextUnformatted("Tail seconds");
-			ImGui::SetNextItemWidth(-1);
-			ImGui::InputDouble("##tail_seconds", &settings.tail_seconds, .5, 1, "%.3f");
+			choice("AAC kbps", settings.audio_bitrate_kbps, {96, 128, 160, 192});
+			choice("AAC Hz", settings.audio_sample_rate, {44100, 48000});
+			seconds("Visible seconds", "##visible_seconds", settings.visible_seconds, .05, .25, .25);
+			seconds("Tail seconds", "##tail_seconds", settings.tail_seconds, .5, 1, 0);
 			ImGui::EndTable();
 		}
 		int overlap = settings.remove_overlaps <= 1 ? settings.remove_overlaps : 2;
@@ -254,15 +337,9 @@ bool video_export_panel::start_export(std::wstring output_path)
 	auto factory = impl_->playback.export_source_factory();
 	auto source_path = impl_->playback.current_path();
 	const auto playback = impl_->playback.snapshot();
-	std::string unavailable;
-	if (!simple_player_video_export_available())
-		unavailable = "This build does not include SYNCore video export";
-	else if (source && !factory)
-		unavailable = "This event source cannot create independent export readers; save it as MIDI first";
-	else if (!source && source_path.empty())
-		unavailable = "Open a MIDI or prepare editor playback before exporting";
-	else if (playback.busy && !playback.playing && !factory)
-		unavailable = "Wait for source preparation before exporting";
+	auto unavailable = impl_->source_problem(source, factory, source_path, playback);
+	if (unavailable.empty())
+		unavailable = settings_problem(impl_->settings, impl_->playback.synth_preferences());
 	if (!unavailable.empty())
 	{
 		std::lock_guard lock(impl_->mutex);
@@ -363,9 +440,10 @@ void video_export_panel::draw(bool* open)
 {
 	if (impl_->closed || (open && !*open))
 		return;
-	ImGui::SetNextWindowPos({90, 86}, ImGuiCond_FirstUseEver);
+	ImGui::SetNextWindowPos({scaled(90), scaled(86)}, ImGuiCond_FirstUseEver);
 	ImGui::SetNextWindowSize(
-		{600, std::max(420.f, std::min(730.f, ImGui::GetIO().DisplaySize.y - 116.f))}, ImGuiCond_FirstUseEver);
+		{scaled(600), std::max(scaled(420), std::min(scaled(730), ImGui::GetIO().DisplaySize.y - scaled(116)))},
+		ImGuiCond_FirstUseEver);
 	if (begin_folded_window("Player video render", open))
 	{
 		const auto current = snapshot();
@@ -376,8 +454,17 @@ void video_export_panel::draw(bool* open)
 		ImGui::BeginDisabled(current.busy);
 		impl_->draw_settings();
 		ImGui::TextWrapped("Uses applied SYNCore settings. Audio and video render independently from playback.");
-		ImGui::BeginDisabled(!simple_player_video_export_available());
-		if (ImGui::Button("Render MP4", {150, 0}) && impl_->dialogs.save_video)
+		// Validate before the save dialog, so it is never shown for a render that cannot start.
+		std::string problem;
+		if (!current.busy)
+		{
+			problem = impl_->source_problem(impl_->playback.current_source(),
+				impl_->playback.export_source_factory(), impl_->playback.current_path(), impl_->playback.snapshot());
+			if (problem.empty())
+				problem = settings_problem(impl_->settings, impl_->playback.synth_preferences());
+		}
+		ImGui::BeginDisabled(!problem.empty());
+		if (ImGui::Button("Render MP4", {scaled(150), 0}) && impl_->dialogs.save_video)
 		{
 			auto suggestion = std::filesystem::path(impl_->playback.current_path());
 			if (suggestion.empty())
@@ -402,6 +489,12 @@ void video_export_panel::draw(bool* open)
 		if (ImGui::Button("Cancel render"))
 			cancel();
 		ImGui::EndDisabled();
+		if (!problem.empty())
+		{
+			ImGui::PushTextWrapPos(0);
+			ImGui::TextDisabled("%s", problem.c_str());
+			ImGui::PopTextWrapPos();
+		}
 	}
 	end_folded_window();
 }

@@ -48,6 +48,8 @@ public:
 	playback_session(const playback_session&) = delete;
 	playback_session& operator=(const playback_session&) = delete;
 
+	// open/restart/open_external return false while snapshot().busy (including a
+	// paused run). To replace a run: stop(), then retry once snapshot().busy is false.
 	bool open(std::wstring path, bool silent = false, bool start_paused = true);
 	bool restart(bool silent = false, bool start_paused = false);
 	using source_factory = std::function<std::shared_ptr<playback_event_source>()>;
@@ -69,6 +71,8 @@ public:
 	void shutdown();
 	playback_snapshot snapshot();
 
+	// Output settings are copied when a run or idle audition starts; changing them
+	// during a run affects only the next one (stop, then restart/open to apply).
 	std::vector<std::string> device_names() const;
 	void select_device(std::size_t index);
 	std::size_t selected_device() const;

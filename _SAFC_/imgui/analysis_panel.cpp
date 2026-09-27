@@ -11,6 +11,7 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -321,6 +322,7 @@ struct analysis_panel::impl
 	{
 		if (exporting && !exporting->done.load(std::memory_order_acquire))
 			return;
+		message.clear();
 		if (!dialogs.save_data)
 		{
 			message = "No save dialog is configured.";
@@ -391,8 +393,10 @@ struct analysis_panel::impl
 	{
 		ImGui::TextUnformatted(label);
 		const ImVec2 origin = ImGui::GetCursorScreenPos();
-		const ImVec2 size(std::max(180.f, ImGui::GetContentRegionAvail().x), 135);
+		const ImVec2 size(std::max(scaled(180), ImGui::GetContentRegionAvail().x), scaled(135));
 		ImGui::InvisibleButton(id, size, ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonMiddle);
+		// The wheel zooms this plot; keep it from also scrolling the window.
+		ImGui::SetItemKeyOwner(ImGuiKey_MouseWheelY);
 		auto* draw = ImGui::GetWindowDrawList();
 		const ImVec2 corner(origin.x + size.x, origin.y + size.y);
 		draw->AddRectFilled(origin, corner, IM_COL32(7, 19, 30, 255));
@@ -458,29 +462,38 @@ struct analysis_panel::impl
 				selected_tick = input_tick = tick;
 			if (ImGui::IsItemHovered() && ImGui::GetIO().MouseWheel != 0)
 			{
-				const double new_span = span * std::pow(.8, ImGui::GetIO().MouseWheel);
+				const double limit = view_limit(data);
+				const double new_span =
+					std::clamp(span * std::pow(.8, ImGui::GetIO().MouseWheel), seconds_axis ? .000001 : 1., limit);
 				const double anchor = view_start + span * ratio;
-				view_start = std::max(0., anchor - new_span * ratio);
-				view_end = view_start + std::max(seconds_axis ? .000001 : 1., new_span);
+				view_start = std::clamp(anchor - new_span * ratio, 0., limit - new_span);
+				view_end = view_start + new_span;
 			}
 			if (ImGui::IsItemActive() && ImGui::IsMouseDown(ImGuiMouseButton_Middle))
 			{
 				const double delta = -ImGui::GetIO().MouseDelta.x / size.x * span;
-				const double next = std::max(0., view_start + delta);
+				const double next = std::clamp(view_start + delta, 0., std::max(0., view_limit(data) - span));
 				view_end += next - view_start;
 				view_start = next;
 			}
 		}
 		draw->PopClipRect();
 		draw->AddRect(origin, corner, IM_COL32(63, 113, 151, 255));
-		const auto text = "max " + std::to_string(maximum);
-		draw->AddText(ImVec2(origin.x + 5, origin.y + 3), color, text.c_str());
+		char text[48];
+		std::snprintf(text, sizeof(text), "max %.6g", maximum);
+		draw->AddText(ImVec2(origin.x + 5, origin.y + 3), color, text);
+	}
+
+	// End of the horizontal data range in the current axis unit.
+	double view_limit(const analysis_result& data) const
+	{
+		return std::max(1., seconds_axis ? data.duration_seconds : double(data.last_tick));
 	}
 
 	void fit_view(const analysis_result& data)
 	{
 		view_start = 0;
-		view_end = std::max(1., seconds_axis ? data.duration_seconds : double(data.last_tick));
+		view_end = view_limit(data);
 	}
 
 	void draw_summary(const analysis_result& data)
@@ -516,21 +529,22 @@ struct analysis_panel::impl
 		if (!auto_scale)
 		{
 			ImGui::SameLine();
-			ImGui::SetNextItemWidth(100);
+			ImGui::SetNextItemWidth(scaled(100));
 			ImGui::InputDouble("Maximum", &manual_max, 0, 0, "%.1f");
 		}
-		ImGui::SetNextItemWidth(145);
+		ImGui::SetNextItemWidth(scaled(145));
 		ImGui::InputDouble("From", &view_start, 0, 0, "%.3f");
 		ImGui::SameLine();
-		ImGui::SetNextItemWidth(145);
+		ImGui::SetNextItemWidth(scaled(145));
 		ImGui::InputDouble("To", &view_end, 0, 0, "%.3f");
 		ImGui::SameLine();
 		if (ImGui::Button("Fit all"))
 		{
 			fit_view(data);
 		}
-		view_start = std::isfinite(view_start) ? std::max(0., view_start) : 0;
-		view_end = std::isfinite(view_end) ? std::max(view_start + .000001, view_end) : view_start + 1;
+		const double limit = view_limit(data);
+		view_start = std::isfinite(view_start) ? std::clamp(view_start, 0., limit - .000001) : 0;
+		view_end = std::isfinite(view_end) ? std::min(limit, std::max(view_start + .000001, view_end)) : limit;
 		ImGui::TextDisabled("Wheel: zoom at cursor | middle-drag: pan | click: select tick (exact values in tooltip)");
 		if (show_tempo)
 			plot("##tempo-plot", "Tempo (BPM)", data.tempo_plot, data.source->tempo_map, IM_COL32(230, 123, 143, 255),
@@ -548,8 +562,9 @@ struct analysis_panel::impl
 	void draw_time_conversion(const analysis_result& data)
 	{
 		ImGui::SeparatorText("Tick / time conversion");
-		ImGui::SetNextItemWidth(170);
+		ImGui::SetNextItemWidth(scaled(170));
 		ImGui::InputScalar("Ticks", ImGuiDataType_S64, &input_tick);
+		input_tick = std::max<std::int64_t>(0, input_tick);
 		ImGui::SameLine();
 		if (ImGui::Button("Ticks -> time"))
 		{
@@ -564,7 +579,7 @@ struct analysis_panel::impl
 			else
 				conversion = std::to_string(input_seconds) + " seconds";
 		}
-		ImGui::SetNextItemWidth(170);
+		ImGui::SetNextItemWidth(scaled(170));
 		ImGui::InputDouble("Seconds", &input_seconds, 0, 0, "%.6f");
 		ImGui::SameLine();
 		if (ImGui::Button("Time -> ticks"))
@@ -581,10 +596,10 @@ struct analysis_panel::impl
 		ImGui::SeparatorText("Export");
 		const bool export_running = exporting && !exporting->done.load(std::memory_order_acquire);
 		ImGui::BeginDisabled(export_running);
-		ImGui::SetNextItemWidth(75);
+		ImGui::SetNextItemWidth(scaled(75));
 		ImGui::InputText("Delimiter", delimiter.data(), delimiter.size());
 		ImGui::SameLine();
-		ImGui::SetNextItemWidth(115);
+		ImGui::SetNextItemWidth(scaled(115));
 		ImGui::Combo("Format", &export_format, "CSV\0ATRAW (binary)\0");
 		if (ImGui::Button("Export tempo CSV"))
 			start_export(data, export_kind::tempo_csv);
@@ -604,8 +619,6 @@ struct analysis_panel::impl
 			if (export_running && ImGui::Button("Cancel export"))
 				export_worker.request_stop();
 		}
-		if (!message.empty())
-			ImGui::TextWrapped("%s", message.c_str());
 	}
 };
 
@@ -750,17 +763,20 @@ void analysis_panel::cancel_export()
 void analysis_panel::draw(bool* open)
 {
 	const auto display = ImGui::GetIO().DisplaySize;
-	ImGui::SetNextWindowPos({60, 86}, ImGuiCond_FirstUseEver);
-	ImGui::SetNextWindowSize({std::min(910.f, display.x - 84.f), std::max(420.f, std::min(790.f, display.y - 116.f))},
+	ImGui::SetNextWindowPos({scaled(60), scaled(86)}, ImGuiCond_FirstUseEver);
+	ImGui::SetNextWindowSize({std::min(scaled(910), display.x - scaled(84)),
+								 std::max(scaled(420), std::min(scaled(790), display.y - scaled(116)))},
 		ImGuiCond_FirstUseEver);
 	if (!begin_folded_window("MIDI analysis", open))
 	{
 		end_folded_window();
 		return;
 	}
-	ImGui::BeginDisabled(busy());
+	// Opening another MIDI joins the export worker, which would cancel it.
+	ImGui::BeginDisabled(busy() || export_busy());
 	if (ImGui::Button("Open MIDI...") && impl_->dialogs.open_midi)
 	{
+		impl_->message.clear();
 		try
 		{
 			if (auto path = impl_->dialogs.open_midi(); !path.empty())

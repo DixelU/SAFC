@@ -144,7 +144,14 @@ struct playback_session::impl
 		scoped_alert_sink sink(alerts);
 		std::stop_callback cancellation(token, [this]
 		{
-			preparation_cancel.store(true, std::memory_order_release);
+			{
+				// Publish under the member wait's mutex, so a worker between its
+				// predicate check and wait() cannot miss this wakeup. Stop and
+				// shutdown request this with audition_mutex held; the lock order
+				// audition_mutex -> source_mutex matches audition_note().
+				std::lock_guard lock(source_mutex);
+				preparation_cancel.store(true, std::memory_order_release);
+			}
 			member_changed.notify_all();
 			engine.cancel_playback();
 		});
@@ -401,8 +408,10 @@ bool playback_session::start(std::wstring path, std::shared_ptr<playback_event_s
 
 void playback_session::toggle_pause()
 {
+	// A seek owns the pause state from its request until fast-forward ends: the
+	// restart re-applies the pre-seek pause state, so a toggle there is lost.
 	if (!impl_->stopping && impl_->busy.load(std::memory_order_acquire) && impl_->engine.is_playing() &&
-		!impl_->engine.is_fast_forwarding())
+		!impl_->engine.is_seeking())
 		impl_->engine.toggle_pause();
 }
 
