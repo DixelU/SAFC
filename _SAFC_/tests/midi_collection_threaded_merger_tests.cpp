@@ -127,6 +127,8 @@ void test_merge(const fs::path& directory, unsigned inplace_files,
     check(!fs::exists(inplace_path) && !fs::exists(regular_path),
         "final merge must consume or remove its intermediate files");
     for (const auto& input : inputs)
+        check(!fs::exists(input->output_path()), "merge must remove processed remnant files");
+    for (const auto& input : inputs)
         check(read_file(input->filename) == source, "merge must leave source files unchanged");
 }
 }

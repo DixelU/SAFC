@@ -879,7 +879,10 @@ private:
 			if (file_input.failed()) throw std::runtime_error("Regular merge input read failed");
 			track_count += pd.tracks_count;
 			if (pd.settings.proc_details.remove_remnants)
+			{
+				file_input.close(); // Windows refuses to delete a file that is still open
 				_wremove(src.c_str());
+			}
 		}
 
 		out.seekp(10, std::ios::beg);
