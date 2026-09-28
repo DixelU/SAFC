@@ -158,17 +158,8 @@ safsyn::PhaseSettings phase_settings_from_preferences(
 	case syncore_phase_mode::coherent:
 		phase.mode = safsyn::PhaseMode::Coherent;
 		break;
-	case syncore_phase_mode::random_polarity:
-		phase.mode = safsyn::PhaseMode::RandomPolarity;
-		break;
 	case syncore_phase_mode::analytic:
 		phase.mode = safsyn::PhaseMode::Analytic;
-		break;
-	case syncore_phase_mode::smooth_field:
-		phase.mode = safsyn::PhaseMode::SmoothField;
-		break;
-	case syncore_phase_mode::independent_bins:
-		phase.mode = safsyn::PhaseMode::IndependentBins;
 		break;
 	}
 	return phase;

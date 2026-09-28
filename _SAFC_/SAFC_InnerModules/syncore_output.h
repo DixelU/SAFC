@@ -5,14 +5,19 @@
 #include <optional>
 #include <string>
 
+// Values are persisted as SYNCORE_PHASE_MODE and must stay stable.
 enum class syncore_phase_mode : std::uint32_t
 {
-	coherent,
-	random_polarity,
-	analytic,
-	smooth_field,
-	independent_bins,
+	coherent = 0,
+	analytic = 2,
 };
+
+// 1, 3 and 4 were retired polarity/FFT decorrelation modes; they continue as
+// analytic. Unknown values fall back to direct sampling.
+inline syncore_phase_mode syncore_phase_mode_from_stored(std::uint32_t value) noexcept
+{
+	return value >= 1 && value <= 4 ? syncore_phase_mode::analytic : syncore_phase_mode::coherent;
+}
 
 enum class syncore_send_result { queued, full, unavailable };
 

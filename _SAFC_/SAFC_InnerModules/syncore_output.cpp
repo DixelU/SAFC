@@ -149,17 +149,8 @@ bool syncore_output::start(const std::wstring& bank_path,
 		case syncore_phase_mode::coherent:
 			options.playback.phase.mode = safsyn::PhaseMode::Coherent;
 			break;
-		case syncore_phase_mode::random_polarity:
-			options.playback.phase.mode = safsyn::PhaseMode::RandomPolarity;
-			break;
 		case syncore_phase_mode::analytic:
 			options.playback.phase.mode = safsyn::PhaseMode::Analytic;
-			break;
-		case syncore_phase_mode::smooth_field:
-			options.playback.phase.mode = safsyn::PhaseMode::SmoothField;
-			break;
-		case syncore_phase_mode::independent_bins:
-			options.playback.phase.mode = safsyn::PhaseMode::IndependentBins;
 			break;
 		}
 		// Publish the session only after start() has created its delivery thread.

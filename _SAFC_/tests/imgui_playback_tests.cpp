@@ -241,7 +241,7 @@ void audition_preparation_checks(const std::wstring& bank, const fs::path& direc
     ui::playback_session playback;
     ui::editor_panel editor(playback, {});
     syncore_preferences preferences;
-    preferences.phase_mode = syncore_phase_mode::independent_bins;
+    preferences.phase_mode = syncore_phase_mode::analytic;
     preferences.render_threads = 1;
     playback.configure_synth(bank, preferences);
     const auto started = std::chrono::steady_clock::now();

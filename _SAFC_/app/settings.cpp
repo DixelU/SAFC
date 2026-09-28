@@ -276,8 +276,7 @@ void restore_reg_settings()
 	try
 	{
 		const auto value = settings::regestry_access.GetDwordValue(L"SYNCORE_PHASE_MODE");
-		if (value <= static_cast<std::uint32_t>(syncore_phase_mode::independent_bins))
-			saved_syncore_preferences.phase_mode = static_cast<syncore_phase_mode>(value);
+		saved_syncore_preferences.phase_mode = syncore_phase_mode_from_stored(value);
 	}
 	catch (...) {}
 	try

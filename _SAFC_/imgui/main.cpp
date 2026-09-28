@@ -813,12 +813,11 @@ void draw_synth_settings(workspace& app, const ui::playback_snapshot& status, co
 		ImGui::Checkbox("Limiter", &app.draft.limiter_enabled);
 		const auto a = ImGui::GetItemRectMin(), b = ImGui::GetItemRectMax();
 		app.limiter_center = {(a.x + b.x) * .5f, (a.y + b.y) * .5f};
-		constexpr const char* phases[] = {
-			"Direct sampling", "Random polarity", "Analytic", "Smooth field", "Independent bins"};
-		int phase = static_cast<int>(app.draft.phase_mode);
+		constexpr const char* phases[] = {"Direct sampling", "Analytic"};
+		int phase = app.draft.phase_mode == syncore_phase_mode::analytic ? 1 : 0;
 		ImGui::SetNextItemWidth(-1);
 		if (ImGui::Combo("##phase", &phase, phases, IM_ARRAYSIZE(phases)))
-			app.draft.phase_mode = static_cast<syncore_phase_mode>(phase);
+			app.draft.phase_mode = phase == 1 ? syncore_phase_mode::analytic : syncore_phase_mode::coherent;
 		ImGui::TextDisabled("0 render threads = automatic");
 		ImGui::Spacing();
 		if (ImGui::Button("Apply to next playback", {-1, 0}))

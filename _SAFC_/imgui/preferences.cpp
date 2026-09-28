@@ -122,8 +122,7 @@ application_preferences preferences_store::load() const
 	p.synth.buffer_frames = std::clamp(p.synth.buffer_frames, minimum_buffer_frames, maximum_buffer_frames);
 	p.synth.maximum_cohorts = std::clamp(p.synth.maximum_cohorts, minimum_cohorts, maximum_cohorts);
 	p.synth.render_threads = std::min(p.synth.render_threads, maximum_render_threads);
-	if (p.synth.phase_mode > syncore_phase_mode::independent_bins)
-		p.synth.phase_mode = syncore_phase_mode::coherent;
+	p.synth.phase_mode = syncore_phase_mode_from_stored(static_cast<std::uint32_t>(p.synth.phase_mode));
 	p.synth.output_gain_db = std::isfinite(p.synth.output_gain_db)
 		? std::clamp(p.synth.output_gain_db, minimum_gain_db, maximum_gain_db)
 		: syncore_preferences{}.output_gain_db;
