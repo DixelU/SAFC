@@ -176,7 +176,7 @@ void sort_notes(std::vector<event>& events)
 }
 
 template<bool split>
-void test_selection(const fs::path& directory, bool compression, bool collapse, bool convert, bool after)
+void test_selection(const fs::path& directory, bool compression, bool collapse, bool convert, bool after, bool on_disk)
 {
     const auto input = directory / "selection.mid";
     std::vector<event> first, second, expected;
@@ -225,6 +225,7 @@ void test_selection(const fs::path& directory, bool compression, bool collapse, 
     settings.proc_details.whole_midi_collapse = collapse;
     settings.proc_details.channel_split = split;
     settings.proc_details.apply_offset_after = after;
+    settings.proc_details.force_disk_buffers = on_disk;
     settings.legacy.rsb_compression = compression;
     check(!single_midi_processor_lean::can_handle(settings), "selections must use the feature-rich processor");
     processor::message_buffers logs;
@@ -246,7 +247,7 @@ bytes read_file(const fs::path& path)
 
 // Meta and SysEx records carry their own size field inside the event buffer.
 // A selection covering the whole track must serialize them byte for byte.
-void test_meta_passthrough(const fs::path& directory, bool collapse)
+void test_meta_passthrough(const fs::path& directory, bool collapse, bool on_disk)
 {
     const auto input = directory / "meta.mid";
     const bytes track{
@@ -271,6 +272,7 @@ void test_meta_passthrough(const fs::path& directory, bool collapse)
     settings.proc_details.whole_midi_collapse = collapse;
     settings.proc_details.channel_split = false;
     settings.proc_details.apply_offset_after = false;
+    settings.proc_details.force_disk_buffers = on_disk;
     check(!single_midi_processor_lean::can_handle(settings), "selections must use the feature-rich processor");
     processor::message_buffers logs;
     processor::sync_processing<false>(*data, logs);
@@ -292,12 +294,16 @@ int main(int argc, char** argv)
             for (const bool collapse : {false, true})
                 for (const bool convert : {false, true})
                     for (const bool after : {false, true})
-                    {
-                        test_selection<false>(directory, compression, collapse, convert, after);
-                        test_selection<true>(directory, compression, collapse, convert, after);
-                    }
+                        for (const bool on_disk : {false, true})
+                        {
+                            test_selection<false>(directory, compression, collapse, convert, after, on_disk);
+                            test_selection<true>(directory, compression, collapse, convert, after, on_disk);
+                        }
         for (const bool collapse : {false, true})
-            test_meta_passthrough(directory, collapse);
+            for (const bool on_disk : {false, true})
+                test_meta_passthrough(directory, collapse, on_disk);
+        for (const auto& entry : fs::directory_iterator(directory))
+            check(entry.path().extension() != ".tmp", "on-disk buffers must be removed with their owners");
         std::cout << "PASS: selected MIDI retains ordered, balanced note pairs across collapse, channels, compression, and timing transforms\n";
     }
     catch (const std::exception& error)

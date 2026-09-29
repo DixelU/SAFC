@@ -23,6 +23,7 @@
 #include <function_ref.h>
 #include <polyline_converter.h>
 #include "cut_and_transpose.h"
+#include "spillable_allocator.h"
 
 #include "single_midi_info_collector.h"
 
@@ -45,6 +46,7 @@ enum class log_event_type : uint8_t
 	track_size_mismatch,
 	meta_too_large,
 	internal_buffer_corruption,
+	buffer_on_disk,
 };
 
 struct log_event
@@ -89,6 +91,8 @@ struct log_event
 			return "Meta too large (size: " + std::to_string(e.param1) + ")";
 		case log_event_type::internal_buffer_corruption:
 			return "Internal buffer corruption - " + std::to_string(e.param1) + " ~ " + std::to_string(e.param2);
+		case log_event_type::buffer_on_disk:
+			return "Not enough memory: using on-disk buffers (size: " + std::to_string(e.param1) + ")";
 		default:
 			return "";
 		}
@@ -319,7 +323,9 @@ struct single_midi_processor_2
 		}
 	};
 
-	using data_iterator = std::vector<base_type>::iterator;
+	// Event and track buffers move to temporary files when memory runs out
+	using buffer_type = std::vector<base_type, spillable_allocator<base_type>>;
+	using data_iterator = buffer_type::iterator;
 
 	/* returns false if event was disabled */
 	using event_transforming_filter = dixelu::function_ref<
@@ -447,6 +453,8 @@ struct single_midi_processor_2
 			bool channel_split;
 			bool whole_midi_collapse;
 			bool force_delta_overflow_correction = true;
+			// Keeps every large buffer in a temporary file next to the output
+			bool force_disk_buffers = false;
 
 			constexpr static std::array<base_type, 4> dummy_event = { 0xFF, 0x7F, 0x01, 0x00 };
 		};
@@ -490,10 +498,11 @@ struct single_midi_processor_2
 		std::atomic_uint64_t tracks_count;
 	};
 
+	template<typename allocator_type>
 	FORCEDINLINE static void ostream_write(
-		std::vector<base_type>& vec,
-		const std::vector<base_type>::iterator& beg, 
-		const std::vector<base_type>::iterator& end, 
+		std::vector<base_type, allocator_type>& vec,
+		const typename std::vector<base_type, allocator_type>::iterator& beg,
+		const typename std::vector<base_type, allocator_type>::iterator& end,
 		std::ostream& out, const std::atomic_bool* cancel = nullptr)
 	{
 		if (beg == end)
@@ -520,18 +529,21 @@ struct single_midi_processor_2
 		}
 	}
 
-	FORCEDINLINE static void ostream_write(std::vector<base_type>& vec, std::ostream& out,
+	template<typename allocator_type>
+	FORCEDINLINE static void ostream_write(std::vector<base_type, allocator_type>& vec, std::ostream& out,
 		const std::atomic_bool* cancel = nullptr)
 	{
 		ostream_write(vec, vec.begin(), vec.end(), out, cancel);
 	}
 
-	FORCEDINLINE static uint8_t push_vlv(uint32_t value, std::vector<base_type>& vec)
+	template<typename allocator_type>
+	FORCEDINLINE static uint8_t push_vlv(uint32_t value, std::vector<base_type, allocator_type>& vec)
 	{
 		return push_vlv_s(value, vec);
 	};
 
-	FORCEDINLINE static uint8_t push_vlv_s(tick_type s_value, std::vector<base_type>& vec)
+	template<typename allocator_type>
+	FORCEDINLINE static uint8_t push_vlv_s(tick_type s_value, std::vector<base_type, allocator_type>& vec)
 	{
 		constexpr uint8_t $7byte_mask = 0x7F, max_size = 11, $7byte_mask_size = 7;
 		constexpr uint8_t $adjacent7byte_mask = ~$7byte_mask;
@@ -586,8 +598,8 @@ struct single_midi_processor_2
 
 #define SAFC_S2B_PUSH_BACK
 #define SAFC_S2B_HACK_RESIZE
-	template<typename T>
-	FORCEDINLINE static size_t push_back(std::vector<base_type>& vec, const T& value)
+	template<typename T, typename allocator_type>
+	FORCEDINLINE static size_t push_back(std::vector<base_type, allocator_type>& vec, const T& value)
 	{
 		constexpr auto type_size = sizeof(T);
 		auto current_index = vec.size();
@@ -670,9 +682,9 @@ struct single_midi_processor_2
 			__copy_T_to_array<_head>(storage, head_value);
 		}
 
-		template<typename... _variadic_types>
+		template<typename allocator_type, typename... _variadic_types>
 		FORCEDINLINE void static copy_back(
-			std::vector<base_type>& vec,
+			std::vector<base_type, allocator_type>& vec,
 			_variadic_types... types)
 		{
 			auto total_size = __total_size(types...);
@@ -684,10 +696,11 @@ struct single_midi_processor_2
 		}
 	};
 
+	template<typename allocator_type>
 	FORCEDINLINE static void copy_back(
-		std::vector<base_type>& vec,
-		const std::vector<base_type>::iterator& begin,
-		const std::vector<base_type>::iterator& end, 
+		std::vector<base_type, allocator_type>& vec,
+		const data_iterator& begin,
+		const data_iterator& end,
 		const size_t expected_size)
 	{
 #ifdef SAFC_S2B_HACK_RESIZE
@@ -724,27 +737,27 @@ struct single_midi_processor_2
 #endif
 	}
 
-	template<typename T>
-	FORCEDINLINE static T& get_value(std::vector<base_type>& vec, size_t index)
+	template<typename T, typename allocator_type>
+	FORCEDINLINE static T& get_value(std::vector<base_type, allocator_type>& vec, size_t index)
 	{
 		return *(T*)&vec[index];
 	}
 
 	template<typename T>
-	FORCEDINLINE static T& get_value(const std::vector<base_type>::iterator& vec, size_t index)
+	FORCEDINLINE static T& get_value(const data_iterator& vec, size_t index)
 	{
 		return *(T*)&vec[index];
 	}
 
-	template<typename T>
-	FORCEDINLINE static bool is_valid_index(std::vector<base_type>& vec, size_t index)
+	template<typename T, typename allocator_type>
+	FORCEDINLINE static bool is_valid_index(std::vector<base_type, allocator_type>& vec, size_t index)
 	{
 		return index + sizeof(T) <= vec.size();
 	}
 
 	struct data_buffers
 	{
-		std::vector<base_type> data_buffer;
+		buffer_type data_buffer;
 		std::vector<base_type> meta_buffer;
 	};
 
@@ -1072,7 +1085,7 @@ struct single_midi_processor_2
 	using filter_table = std::array<filter_list, 16>;
 
 	inline static bool process_buffer(
-		std::vector<base_type>& data_buffer,
+		buffer_type& data_buffer,
 		const filter_table& filters,
 		single_track_data& std_ref,
 		message_buffers& buffers)
@@ -1134,7 +1147,7 @@ struct single_midi_processor_2
 	   through a heap, so extra memory is one merge_run per run. */
 	template<typename visitor_type>
 	inline static bool visit_in_tick_order(
-		std::vector<base_type>& data_buffer,
+		buffer_type& data_buffer,
 		message_buffers& buffers,
 		visitor_type&& visitor)
 	{
@@ -1246,11 +1259,11 @@ struct single_midi_processor_2
 	}
 
 	inline static bool sort_buffer(
-		std::vector<base_type>& data_buffer,
+		buffer_type& data_buffer,
 		single_track_data& std_ref,
 		message_buffers& buffers)
 	{
-		std::vector<base_type> sorted_data_buffer;
+		buffer_type sorted_data_buffer(data_buffer.get_allocator());
 		sorted_data_buffer.reserve(data_buffer.size());
 
 		auto visitor = [&sorted_data_buffer](const data_iterator& cur)
@@ -1804,11 +1817,15 @@ struct single_midi_processor_2
 	{
 		static constexpr bool fill_empty_track_with_at_least_one_event = false;
 
-		std::vector<uint8_t> data;
+		buffer_type data;
 		tick_type prev_tick;
-		inline std::vector<uint8_t>& get_vec(uint8_t)
+		inline buffer_type& get_vec(uint8_t)
 		{
 			return data;
+		}
+		inline void set_allocator(const buffer_type::allocator_type& allocator)
+		{
+			data = buffer_type(allocator);
 		}
 		inline void swap(track_data<false>& track)
 		{
@@ -1871,11 +1888,16 @@ struct single_midi_processor_2
 		track_data<false> data[16]{};
 		uint8_t last_channel{0};
 
-		inline std::vector<uint8_t>& get_vec(uint8_t channel)
+		inline buffer_type& get_vec(uint8_t channel)
 		{
 			if (channel == 0xFF)
 				channel = last_channel;
 			return data[channel].get_vec(channel);
+		}
+		inline void set_allocator(const buffer_type::allocator_type& allocator)
+		{
+			for (auto& singleData : data)
+				singleData.set_allocator(allocator);
 		}
 		inline void swap_zero_and_channel(uint8_t channel)
 		{
@@ -2007,7 +2029,7 @@ struct single_midi_processor_2
 	   which are merged while writing instead of being sorted beforehand */
 	template<bool compression, bool channels_split>
 	inline static bool write_track(
-		std::vector<base_type>& data_buffer,
+		buffer_type& data_buffer,
 		single_track_data& std_ref,
 		message_buffers& buffers,
 		processing_data& settings_data,
@@ -2164,7 +2186,7 @@ struct single_midi_processor_2
 	}
 		
 	static void post_processing(
-		std::vector<base_type>& data_buffer,
+		buffer_type& data_buffer,
 		const single_track_data& std_ref,
 		const processing_data& settings)
 	{
@@ -2179,9 +2201,17 @@ struct single_midi_processor_2
 		loggers.check_cancelled();
 		loggers.processing = true;
 
+		// Declared first: every spillable buffer refers to it until destroyed
+		spill_settings spill;
+		spill.directory = std::filesystem::path(data.output_path()).parent_path();
+		spill.force_spill = data.settings.proc_details.force_disk_buffers;
+
 		std::vector<std::vector<tick_type>> polyphony_stacks(4096);
 		data_buffers track_buffers;
 		track_data<channels_split> write_buffer;
+
+		track_buffers.data_buffer = buffer_type(buffer_type::allocator_type(&spill));
+		write_buffer.set_allocator(buffer_type::allocator_type(&spill));
 
 		for (auto& el : polyphony_stacks)
 			el.reserve(1000);
@@ -2206,7 +2236,14 @@ struct single_midi_processor_2
 		file_output.put(data.settings.new_ppqn >> 8);
 		file_output.put(data.settings.new_ppqn & 0xFF);
 
+		// Collapsed tracks share one buffer. Reserving the largest possible
+		// expansion (3 file bytes per note record) keeps it from being moved,
+		// which for an on-disk buffer would mean copying the whole file.
+		if (data.settings.proc_details.whole_midi_collapse)
+			track_buffers.data_buffer.reserve(file_input.size() * expected_size(0x80) / 3);
+
 		tick_type track_counter = 0;
+		tick_type reported_spilled_bytes = 0;
 		single_track_data track_processing_data;
 
 		while (file_input.good())
@@ -2216,6 +2253,12 @@ struct single_midi_processor_2
 				track_buffers.data_buffer.clear();
 
 			bool is_readable = put_data_in_buffer(file_input, track_buffers, loggers, data.settings, polyphony_stacks);
+
+			if (const tick_type spilled_bytes = spill.spilled_bytes; spilled_bytes > reported_spilled_bytes)
+			{
+				reported_spilled_bytes = spilled_bytes;
+				(*loggers.warning) << log_event{log_event_type::buffer_on_disk, spilled_bytes};
+			}
 
 			track_processing_data.selection_data.clear();
 			track_processing_data.selection_data.frontal_tempo =

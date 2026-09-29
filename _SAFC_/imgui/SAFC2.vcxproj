@@ -204,6 +204,7 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="..\SAFC_InnerModules\spillable_allocator.h" />
     <ClInclude Include="analysis_panel.h" />
     <ClInclude Include="cli.h" />
     <ClInclude Include="editor_panel.h" />
@@ -264,19 +265,14 @@
     <Import Project="$(VcpkgRoot)\scripts\buildsystems\msbuild\vcpkg.targets" Condition="'$(_ZVcpkgCurrentInstalledDir)' == '' and Exists('$(VcpkgRoot)\scripts\buildsystems\msbuild\vcpkg.targets')" />
   </ImportGroup>
   <Target Name="SAFC2CheckDependencies" BeforeTargets="PrepareForBuild">
-    <Error Condition="'$(VcpkgPropsImported)' != 'true' or '$(_ZVcpkgCurrentInstalledDir)' == '' or '$(VcpkgEnabled)' == 'false'"
-           Text="SAFC2 requires vcpkg MSBuild integration. Run vcpkg integrate install, set VCPKG_ROOT, or pass /p:VcpkgRoot=the-vcpkg-directory." />
-    <Error Condition="!Exists('$(SAFCRepositoryRoot)utility\include\buffered_block_list.h')"
-           Text="SAFC2 is missing the utility submodule. Run git submodule update --init --recursive." />
-    <Error Condition="'$(SAFCEnableSYNCore)' == 'true' and (!Exists('$(SAFCRepositoryRoot)SYNCore\SAFSYN\windows_synth.cpp') or !Exists('$(SAFCRepositoryRoot)SYNCore\third_party\utility\include\long_uint.h'))"
-           Text="SAFC2 is missing SYNCore or its utility submodule. Run git submodule update --init --recursive, or build without embedded audio using /p:SAFCEnableSYNCore=false." />
+    <Error Condition="'$(VcpkgPropsImported)' != 'true' or '$(_ZVcpkgCurrentInstalledDir)' == '' or '$(VcpkgEnabled)' == 'false'" Text="SAFC2 requires vcpkg MSBuild integration. Run vcpkg integrate install, set VCPKG_ROOT, or pass /p:VcpkgRoot=the-vcpkg-directory." />
+    <Error Condition="!Exists('$(SAFCRepositoryRoot)utility\include\buffered_block_list.h')" Text="SAFC2 is missing the utility submodule. Run git submodule update --init --recursive." />
+    <Error Condition="'$(SAFCEnableSYNCore)' == 'true' and (!Exists('$(SAFCRepositoryRoot)SYNCore\SAFSYN\windows_synth.cpp') or !Exists('$(SAFCRepositoryRoot)SYNCore\third_party\utility\include\long_uint.h'))" Text="SAFC2 is missing SYNCore or its utility submodule. Run git submodule update --init --recursive, or build without embedded audio using /p:SAFCEnableSYNCore=false." />
     <ItemGroup>
       <_SAFC2RequiredHeader Include="imgui.h;imgui_impl_glfw.h;imgui_impl_opengl3.h;GLFW\glfw3.h;archive.h;zstd.h;boost\container\deque.hpp" />
       <_SAFC2RequiredLibrary Include="$(SAFC2VcpkgLibraries)" />
     </ItemGroup>
-    <Error Condition="!Exists('$(_ZVcpkgCurrentInstalledDir)include\%(_SAFC2RequiredHeader.Identity)')"
-           Text="Missing vcpkg header %(_SAFC2RequiredHeader.Identity) for $(VcpkgTriplet). Install imgui[glfw-binding,opengl3-binding], glfw3, libarchive, zstd and boost-container for this static triplet." />
-    <Error Condition="!Exists('$(_ZVcpkgCurrentInstalledDir)$(_ZVcpkgConfigSubdir)lib\%(_SAFC2RequiredLibrary.Identity)')"
-           Text="Missing vcpkg library %(_SAFC2RequiredLibrary.Identity) for $(VcpkgTriplet) $(Configuration). Install the matching static Debug and Release dependency libraries." />
+    <Error Condition="!Exists('$(_ZVcpkgCurrentInstalledDir)include\%(_SAFC2RequiredHeader.Identity)')" Text="Missing vcpkg header %(_SAFC2RequiredHeader.Identity) for $(VcpkgTriplet). Install imgui[glfw-binding,opengl3-binding], glfw3, libarchive, zstd and boost-container for this static triplet." />
+    <Error Condition="!Exists('$(_ZVcpkgCurrentInstalledDir)$(_ZVcpkgConfigSubdir)lib\%(_SAFC2RequiredLibrary.Identity)')" Text="Missing vcpkg library %(_SAFC2RequiredLibrary.Identity) for $(VcpkgTriplet) $(Configuration). Install the matching static Debug and Release dependency libraries." />
   </Target>
 </Project>

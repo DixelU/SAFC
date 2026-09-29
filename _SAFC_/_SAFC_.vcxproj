@@ -356,6 +356,7 @@
     <ClInclude Include="SAFC_InnerModules\playback_event_source.h" />
     <ClInclude Include="SAFC_InnerModules\simple_player.h" />
     <ClInclude Include="SAFC_InnerModules\simple_player_video_export.h" />
+    <ClInclude Include="SAFC_InnerModules\spillable_allocator.h" />
     <ClInclude Include="SAFC_InnerModules\syncore_output.h" />
     <ClInclude Include="SAFC_InnerModules\include_all.h" />
     <ClInclude Include="SAFC_InnerModules\single_midi_info_collector.h" />

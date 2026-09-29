@@ -64,7 +64,7 @@ void check_note_pair(const processor::filter_table& filters,
     std::uint8_t key, cut_and_transpose::result_type expected)
 {
     const auto event_size = processor::expected_size(std::uint8_t(0x90));
-    std::vector<std::uint8_t> events(2 * event_size);
+    processor::buffer_type events(2 * event_size);
     for (int index = 0; index < 2; ++index)
     {
         const auto event = events.begin() + index * event_size;

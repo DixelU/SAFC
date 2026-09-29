@@ -260,6 +260,9 @@
     <ClInclude Include="..\..\SYNCore\SAFSYN\windows_synth.h">
       <Filter>SYNCore</Filter>
     </ClInclude>
+    <ClInclude Include="..\SAFC_InnerModules\spillable_allocator.h">
+      <Filter>Processing and playback</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="..\_SAFC_.rc">

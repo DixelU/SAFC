@@ -7,7 +7,7 @@
 namespace
 {
 using processor = single_midi_processor_2;
-using bytes = std::vector<std::uint8_t>;
+using bytes = processor::buffer_type;
 
 void check(bool condition, const char* message)
 {
@@ -358,6 +358,40 @@ void test_ppq_conversion()
         }
 }
 
+void test_disk_buffers()
+{
+    spill_settings spill;
+    spill.force_spill = true;
+    {
+        bytes buffer{bytes::allocator_type(&spill)};
+        bytes expected;
+        // Growth moves the content between mappings several times
+        for (std::uint32_t index = 0; index < (1u << 20); ++index)
+        {
+            const auto value = static_cast<std::uint8_t>(index * 2654435761u >> 24);
+            processor::push_back(buffer, value);
+            expected.push_back(value);
+        }
+        check(spill.spilled_blocks_count == 1 && spill.spilled_bytes >= buffer.size(),
+            "a forced buffer must live in exactly one mapping after growth");
+        check(buffer == expected, "on-disk buffers must retain their content across growth");
+
+        bytes other{bytes::allocator_type(&spill)};
+        other.swap(buffer);
+        check(buffer.empty() && other == expected, "on-disk buffers must swap as ordinary vectors");
+
+        processor::single_track_data track;
+        processor::message_buffers logs;
+        auto events = make_note_pair();
+        bytes disk_events(events.begin(), events.end(), bytes::allocator_type(&spill));
+        disk_events.reserve(8192);
+        check(processor::sort_buffer(disk_events, track, logs) && disk_events == events,
+            "sorting must keep using the allocator of its buffer");
+    }
+    check(spill.spilled_blocks_count == 0 && spill.spilled_bytes == 0,
+        "destroyed buffers must release their mappings");
+}
+
 void test_tick_order_merge()
 {
     // Mixed record sizes, disabled events, and many short runs (including
@@ -505,6 +539,7 @@ int main()
         test_importance_tables();
         test_selection_sort_order();
         test_tick_order_merge();
+        test_disk_buffers();
         test_ppq_conversion();
         test_selection_timing();
         test_selection_flattening();
