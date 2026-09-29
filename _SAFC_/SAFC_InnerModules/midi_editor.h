@@ -973,7 +973,7 @@ struct midi_editor
 			const single_midi_processor_2::data_iterator& cur,
 			single_midi_processor_2::single_track_data& std_ref) -> bool
 		{
-			const auto& tick = single_midi_processor_2::get_value<tick_type>(cur,
+			const auto& tick = single_midi_processor_2::get_value<single_midi_processor_2::stored_tick_type>(cur,
 				single_midi_processor_2::tick_position);
 			const auto& type = single_midi_processor_2::get_value<base_type>(cur,
 				single_midi_processor_2::event_type);
@@ -990,8 +990,8 @@ struct midi_editor
 						tick >= note.start_tick && tick <= note.end_tick)
 					{
 						// Disable this event
-						auto& ref_tick = single_midi_processor_2::get_value<tick_type>(
-							begin, single_midi_processor_2::get_value<tick_type>(cur,
+						auto& ref_tick = single_midi_processor_2::get_value<single_midi_processor_2::stored_tick_type>(
+							begin, single_midi_processor_2::get_value<single_midi_processor_2::stored_ref_type>(cur,
 								single_midi_processor_2::event_param3));
 						ref_tick = single_midi_processor_2::disable_tick;
 						return false;
@@ -1013,7 +1013,7 @@ struct midi_editor
 			const single_midi_processor_2::data_iterator& cur,
 			single_midi_processor_2::single_track_data& std_ref) -> bool
 		{
-			const auto& tick = single_midi_processor_2::get_value<tick_type>(cur,
+			const auto& tick = single_midi_processor_2::get_value<single_midi_processor_2::stored_tick_type>(cur,
 				single_midi_processor_2::tick_position);
 			const auto& type = single_midi_processor_2::get_value<base_type>(cur,
 				single_midi_processor_2::event_type);

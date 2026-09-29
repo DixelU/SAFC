@@ -61,7 +61,7 @@ struct midi_editor_processor_integration
 			if (!editor)
 				return true;
 
-			auto& tick = single_midi_processor_2::get_value<tick_type>(
+			auto& tick = single_midi_processor_2::get_value<single_midi_processor_2::stored_tick_type>(
 				cur, single_midi_processor_2::tick_position);
 			const auto& type = single_midi_processor_2::get_value<base_type>(
 				cur, single_midi_processor_2::event_type);
@@ -82,8 +82,8 @@ struct midi_editor_processor_integration
 					if ((type & 0xF0) == 0x90)
 					{
 						// For note-on, also disable the paired note-off
-						auto& ref_tick = single_midi_processor_2::get_value<tick_type>(
-							begin, single_midi_processor_2::get_value<tick_type>(
+						auto& ref_tick = single_midi_processor_2::get_value<single_midi_processor_2::stored_tick_type>(
+							begin, single_midi_processor_2::get_value<single_midi_processor_2::stored_ref_type>(
 								cur, single_midi_processor_2::event_param3));
 						ref_tick = single_midi_processor_2::disable_tick;
 					}
@@ -200,7 +200,7 @@ struct midi_editor_processor_integration
 			const single_midi_processor_2::data_iterator& cur,
 			single_midi_processor_2::single_track_data& std_ref)
 		{
-			auto& tick = single_midi_processor_2::get_value<tick_type>(
+			auto& tick = single_midi_processor_2::get_value<single_midi_processor_2::stored_tick_type>(
 				cur, single_midi_processor_2::tick_position);
 			const auto& type = single_midi_processor_2::get_value<base_type>(
 				cur, single_midi_processor_2::event_type);
@@ -221,8 +221,8 @@ struct midi_editor_processor_integration
 							// Disable event
 							if ((type & 0xF0) == 0x90)
 							{
-								auto& ref_tick = single_midi_processor_2::get_value<tick_type>(
-									begin, single_midi_processor_2::get_value<tick_type>(
+								auto& ref_tick = single_midi_processor_2::get_value<single_midi_processor_2::stored_tick_type>(
+									begin, single_midi_processor_2::get_value<single_midi_processor_2::stored_ref_type>(
 										cur, single_midi_processor_2::event_param3));
 								ref_tick = single_midi_processor_2::disable_tick;
 							}
@@ -382,7 +382,7 @@ make_note_delete_filter(
 		single_midi_processor_2::single_track_data& std_ref) -> bool
 	{
 		const auto& tick = single_midi_processor_2::get_value<
-			single_midi_processor_2::tick_type>(
+			single_midi_processor_2::stored_tick_type>(
 				cur, single_midi_processor_2::tick_position);
 		const auto& type = single_midi_processor_2::get_value<
 			single_midi_processor_2::base_type>(
@@ -404,13 +404,13 @@ make_note_delete_filter(
 					if ((type & 0xF0) == 0x90)
 					{
 						auto& ref = single_midi_processor_2::get_value<
-							single_midi_processor_2::tick_type>(
+							single_midi_processor_2::stored_tick_type>(
 								begin, single_midi_processor_2::get_value<
-									single_midi_processor_2::tick_type>(
+									single_midi_processor_2::stored_ref_type>(
 										cur, single_midi_processor_2::event_param3));
 						ref = single_midi_processor_2::disable_tick;
 					}
-					auto& mutable_tick = const_cast<single_midi_processor_2::tick_type&>(tick);
+					auto& mutable_tick = const_cast<single_midi_processor_2::stored_tick_type&>(tick);
 					mutable_tick = single_midi_processor_2::disable_tick;
 					return false;
 				}
@@ -434,7 +434,7 @@ make_velocity_change_filter(
 		single_midi_processor_2::single_track_data& std_ref) -> bool
 	{
 		auto& tick = single_midi_processor_2::get_value<
-			single_midi_processor_2::tick_type>(
+			single_midi_processor_2::stored_tick_type>(
 				cur, single_midi_processor_2::tick_position);
 		const auto& type = single_midi_processor_2::get_value<
 			single_midi_processor_2::base_type>(

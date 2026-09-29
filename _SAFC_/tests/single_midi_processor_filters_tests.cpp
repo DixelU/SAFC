@@ -30,7 +30,7 @@ bytes make_event(std::uint8_t type, std::uint8_t param1 = 60, std::uint8_t param
     const bool tempo = meta && param1 == 0x51;
     bytes event(meta || sysex ? processor::event_meta_raw - sysex + 1 + 3 * tempo
         : processor::expected_size(type));
-    processor::get_value<processor::tick_type>(event, 0) = 10;
+    processor::get_value<processor::stored_tick_type>(event, 0) = 10;
     event[processor::event_type] = type;
     event[processor::event_param1] = param1;
     if (meta || sysex)
@@ -55,8 +55,8 @@ bytes make_note_pair(std::uint8_t channel = 0, std::uint8_t velocity = 64)
 {
     auto events = make_event(0x90 | channel, 60, velocity);
     auto off = make_event(0x80 | channel, 60, 45);
-    processor::get_value<processor::tick_type>(off, 0) = 11;
-    processor::get_value<processor::tick_type>(events, processor::event_param3) = events.size();
+    processor::get_value<processor::stored_tick_type>(off, 0) = 11;
+    processor::get_value<processor::stored_ref_type>(events, processor::event_param3) = events.size();
     events.insert(events.end(), off.begin(), off.end());
     return events;
 }
@@ -95,14 +95,14 @@ void test_volume_tables()
             const auto off = events.begin() + processor::expected_size(std::uint8_t(0x90));
             if (!expected)
             {
-                check(processor::get_value<processor::tick_type>(events, 0) == processor::disable_tick
-                    && processor::get_value<processor::tick_type>(off, 0) == processor::disable_tick,
+                check(processor::get_value<processor::stored_tick_type>(events, 0) == processor::disable_tick
+                    && processor::get_value<processor::stored_tick_type>(off, 0) == processor::disable_tick,
                     "zero mapped velocity must reject both events");
             }
             else
             {
-                check(processor::get_value<processor::tick_type>(events, 0) == 10
-                    && processor::get_value<processor::tick_type>(off, 0) == 11, "valid volume mappings must retain notes");
+                check(processor::get_value<processor::stored_tick_type>(events, 0) == 10
+                    && processor::get_value<processor::stored_tick_type>(off, 0) == 11, "valid volume mappings must retain notes");
                 check(events[processor::event_param2] == expected, "note-on must use the baked velocity");
                 check(off[processor::event_param2] == 45, "volume mapping must preserve note-off velocity");
             }
@@ -180,8 +180,8 @@ void test_filter_order_and_lifetime()
         auto events = make_note_pair();
         process(events, moved.second);
         const auto off = events.begin() + processor::expected_size(std::uint8_t(0x90));
-        check(processor::get_value<processor::tick_type>(events, 0) == (after ? 23 : 26)
-            && processor::get_value<processor::tick_type>(off, 0) == (after ? 25 : 28),
+        check(processor::get_value<processor::stored_tick_type>(events, 0) == (after ? 23 : 26)
+            && processor::get_value<processor::stored_tick_type>(off, 0) == (after ? 25 : 28),
             "moving the filter bundle must preserve callable lifetimes and timing settings");
         check(events[processor::event_param1] == 72 && off[processor::event_param1] == 72,
             "both events must be transposed before compression");
@@ -196,8 +196,8 @@ void test_filter_order_and_lifetime()
     auto events = make_note_pair();
     process(events, rejected.second);
     const auto off = events.begin() + processor::expected_size(std::uint8_t(0x90));
-    check(processor::get_value<processor::tick_type>(events, 0) == processor::disable_tick
-        && processor::get_value<processor::tick_type>(off, 0) == processor::disable_tick,
+    check(processor::get_value<processor::stored_tick_type>(events, 0) == processor::disable_tick
+        && processor::get_value<processor::stored_tick_type>(off, 0) == processor::disable_tick,
         "rejected note pairs must stop their pipelines");
     check(off[processor::event_type] == 0x80, "a disabled note-off must not reach the compression filter");
 
@@ -207,7 +207,7 @@ void test_filter_order_and_lifetime()
     auto selected = processor::filters_constructor(settings);
     auto control = make_event(0xB0);
     process(control, selected.second);
-    check(processor::get_value<processor::tick_type>(control, 0) == processor::disable_tick,
+    check(processor::get_value<processor::stored_tick_type>(control, 0) == processor::disable_tick,
         "selection must evaluate the original tick before offset conversion");
 }
 
@@ -267,7 +267,7 @@ void test_importance_tables()
     auto filtered = processor::filters_constructor(settings);
     events = make_note_pair();
     process(events, filtered.second, track);
-    check(track.has_important_events && processor::get_value<processor::tick_type>(events, 0) == processor::disable_tick,
+    check(track.has_important_events && processor::get_value<processor::stored_tick_type>(events, 0) == processor::disable_tick,
         "importance classification must retain its position before class-specific rejection");
 }
 
@@ -296,11 +296,11 @@ void test_selection_timing()
                     {
                         auto events = make_note_pair();
                         const auto off = events.begin() + processor::expected_size(std::uint8_t(0x90));
-                        processor::get_value<processor::tick_type>(events, 0) = start;
-                        processor::get_value<processor::tick_type>(off, 0) = 30;
+                        processor::get_value<processor::stored_tick_type>(events, 0) = start;
+                        processor::get_value<processor::stored_tick_type>(off, 0) = 30;
                         process(events, bundle.second);
-                        check(processor::get_value<processor::tick_type>(events, 0) == transform(std::max(start, 10))
-                            && processor::get_value<processor::tick_type>(off, 0) == transform(19),
+                        check(processor::get_value<processor::stored_tick_type>(events, 0) == transform(std::max(start, 10))
+                            && processor::get_value<processor::stored_tick_type>(off, 0) == transform(19),
                             "selection must retain both clipped endpoints regardless of offset or PPQ conversion");
                     }
                 }
@@ -319,8 +319,8 @@ void test_selection_sort_order()
             for (int key = 0; key < 64; ++key)
             {
                 auto event = make_event((endpoint ? 0x80 : 0x90) | source_track, key);
-                processor::get_value<processor::tick_type>(event, 0) = endpoint ? 30 : (source_track ? 15 : 19);
-                processor::get_value<processor::tick_type>(event, processor::event_param3)
+                processor::get_value<processor::stored_tick_type>(event, 0) = endpoint ? 30 : (source_track ? 15 : 19);
+                processor::get_value<processor::stored_ref_type>(event, processor::event_param3)
                     = (source_track * 128 + (1 - endpoint) * 64 + key) * event.size();
                 events.insert(events.end(), event.begin(), event.end());
             }
@@ -329,12 +329,74 @@ void test_selection_sort_order()
     const auto event_size = processor::expected_size(std::uint8_t(0x90));
     for (const int tick : {15, 19})
         for (auto event = events.begin(); event != events.end(); event += event_size)
-            if (processor::get_value<processor::tick_type>(event, 0) == tick)
+            if (processor::get_value<processor::stored_tick_type>(event, 0) == tick)
                 expected.insert(expected.end(), event, event + event_size);
     processor::single_track_data track;
     processor::message_buffers logs;
     check(processor::sort_buffer(events, track, logs), "selected events must sort successfully");
     check(events == expected, "events at the same selected tick must retain source order, including note-on before note-off");
+}
+
+void test_ppq_conversion()
+{
+    using uint128_t = dixelu::long_uint<0>;
+    const processor::tick_type ticks[] = {0, 1, 479, 480, 481, 0xFFFFFFFFull, 1ull << 32, (1ull << 32) + 1,
+        (3ull << 32) - 1, 3ull << 32, (1ull << 40) + 12345, (1ull << 47) - 1, 1ull << 47};
+    const processor::ppq_type ppqs[] = {1, 2, 3, 96, 480, 960, 1000, 32767, 65535};
+    for (const auto from : ppqs)
+        for (const auto to : ppqs)
+        {
+            processor::tick_type previous = 0;
+            for (const auto tick : ticks)
+            {
+                const auto converted = processor::convert_ppq(tick, from, to);
+                const auto expected = (uint128_t(tick) * to) / from;
+                check(uint128_t(converted) == expected, "PPQ conversion must equal the exact floored ratio");
+                check(converted >= previous, "PPQ conversion must be monotonic across the 32-bit boundary");
+                previous = converted;
+            }
+        }
+}
+
+void test_tick_order_merge()
+{
+    // Mixed record sizes, disabled events, and many short runs (including
+    // descents inside a "track") must match a stable sort by tick.
+    std::uint32_t random = 12345;
+    const auto next = [&random]() { return (random = random * 1664525u + 1013904223u) >> 8; };
+    for (const int runs : {1, 2, 7, 300})
+    {
+        bytes events;
+        std::vector<std::pair<processor::tick_type, bytes>> expected_events;
+        for (int run = 0; run < runs; ++run)
+        {
+            processor::tick_type tick = next() % 50;
+            const int count = next() % 40;
+            for (int index = 0; index < count; ++index)
+            {
+                tick += next() % 3;
+                auto event = (next() & 1) ? make_event(0xB0, next() & 0x7F, next() & 0x7F)
+                    : (next() & 1) ? make_event(0xFF, 0x51) : make_event(0x90, next() & 0x7F);
+                const bool disabled = next() % 5 == 0;
+                processor::get_value<processor::stored_tick_type>(event, 0) = disabled ? processor::disable_tick : tick;
+                if (!disabled)
+                    expected_events.emplace_back(tick, event);
+                events.insert(events.end(), event.begin(), event.end());
+            }
+        }
+        std::stable_sort(expected_events.begin(), expected_events.end(),
+            [](const auto& lhs, const auto& rhs) { return lhs.first < rhs.first; });
+        bytes expected;
+        for (const auto& [tick, event] : expected_events)
+            expected.insert(expected.end(), event.begin(), event.end());
+        processor::single_track_data track;
+        processor::message_buffers logs;
+        const bool sorted = processor::sort_buffer(events, track, logs);
+        check(sorted == !events.empty() || expected.empty(), "non-empty buffers must merge successfully");
+        if (sorted)
+            check(events == expected, "merged runs must equal a stable sort of the enabled events");
+        check(logs.error->get_last_event().type == log_event_type::none, "merging must not report corruption");
+    }
 }
 
 void test_selection_flattening()
@@ -348,11 +410,11 @@ void test_selection_flattening()
     auto bundle = processor::filters_constructor(settings);
     auto events = make_note_pair();
     const auto off = events.begin() + processor::expected_size(std::uint8_t(0x90));
-    processor::get_value<processor::tick_type>(events, 0) = 15;
-    processor::get_value<processor::tick_type>(off, 0) = 30;
+    processor::get_value<processor::stored_tick_type>(events, 0) = 15;
+    processor::get_value<processor::stored_tick_type>(off, 0) = 30;
     process(events, bundle.second);
-    check(processor::get_value<processor::tick_type>(events, 0) == 30
-        && processor::get_value<processor::tick_type>(off, 0) == 38,
+    check(processor::get_value<processor::stored_tick_type>(events, 0) == 30
+        && processor::get_value<processor::stored_tick_type>(off, 0) == 38,
         "selection must retain a cut note-off after its note-on has been tempo-flattened");
 }
 
@@ -377,11 +439,11 @@ void test_selection_rejected_notes()
         {
             auto events = make_note_pair();
             const auto off = events.begin() + processor::expected_size(std::uint8_t(0x90));
-            processor::get_value<processor::tick_type>(events, 0) = start;
-            processor::get_value<processor::tick_type>(off, 0) = 30;
+            processor::get_value<processor::stored_tick_type>(events, 0) = start;
+            processor::get_value<processor::stored_tick_type>(off, 0) = 30;
             process(events, bundle.second);
-            check(processor::get_value<processor::tick_type>(events, 0) == processor::disable_tick
-                && processor::get_value<processor::tick_type>(off, 0) == processor::disable_tick,
+            check(processor::get_value<processor::stored_tick_type>(events, 0) == processor::disable_tick
+                && processor::get_value<processor::stored_tick_type>(off, 0) == processor::disable_tick,
                 "selection must not retain either endpoint of a rejected note");
         }
     }
@@ -391,12 +453,13 @@ void test_flattening_large_spans()
 {
     auto settings = make_settings();
     settings.flatten = true;
-    constexpr processor::tick_type span = 1ULL << 60;
+    // Stored ticks are 48 bits wide; keep begin + span representable.
+    constexpr processor::tick_type span = 1ULL << 46;
     constexpr std::uint32_t tempo = 500000;
     settings.tempo.tempo_override_value = tempo;
     using uint128_t = dixelu::long_uint<0>;
     // Both map entries come from the same tempo used for flattening, so ticks
-    // must stay unchanged even when interpolation needs more than 128 bits.
+    // must stay unchanged even when interpolation products exceed 64 bits.
     for (const processor::tick_type begin : {processor::tick_type{0}, span})
     {
         settings.original_time_map.clear();
@@ -407,9 +470,9 @@ void test_flattening_large_spans()
         {
             const auto expected_tick = begin + delta;
             auto event = make_event(0xB0);
-            processor::get_value<processor::tick_type>(event, 0) = expected_tick;
+            processor::get_value<processor::stored_tick_type>(event, 0) = expected_tick;
             process(event, bundle.second);
-            check(processor::get_value<processor::tick_type>(event, 0) == expected_tick,
+            check(processor::get_value<processor::stored_tick_type>(event, 0) == expected_tick,
                 "flattening must preserve wide interpolation products before division");
         }
     }
@@ -422,11 +485,11 @@ void test_empty_selection()
     auto bundle = processor::filters_constructor(settings);
     auto events = make_note_pair();
     const auto off = events.begin() + processor::expected_size(std::uint8_t(0x90));
-    processor::get_value<processor::tick_type>(events, 0) = 0;
-    processor::get_value<processor::tick_type>(off, 0) = 30;
+    processor::get_value<processor::stored_tick_type>(events, 0) = 0;
+    processor::get_value<processor::stored_tick_type>(off, 0) = 30;
     process(events, bundle.second);
-    check(processor::get_value<processor::tick_type>(events, 0) == processor::disable_tick
-        && processor::get_value<processor::tick_type>(off, 0) == processor::disable_tick,
+    check(processor::get_value<processor::stored_tick_type>(events, 0) == processor::disable_tick
+        && processor::get_value<processor::stored_tick_type>(off, 0) == processor::disable_tick,
         "an empty selection must reject spanning notes instead of placing note-off before note-on");
 }
 }
@@ -441,6 +504,8 @@ int main()
         test_filter_order_and_lifetime();
         test_importance_tables();
         test_selection_sort_order();
+        test_tick_order_merge();
+        test_ppq_conversion();
         test_selection_timing();
         test_selection_flattening();
         test_flattening_large_spans();

@@ -160,13 +160,7 @@ struct single_midi_processor_lean
 
 	FORCEDINLINE static tick_type convert_ppq(tick_type value, ppq_type from, ppq_type to)
 	{
-		if (from == to)
-			return value;
-
-		constexpr auto radix = 1ull << 32;
-		auto hi = value >> 32;
-		auto lo = value & (~0u);
-		return (hi * to / from) * radix + (lo * to / from);
+		return single_midi_processor_2::convert_ppq(value, from, to);
 	}
 
 	FORCEDINLINE static tick_type compute_new_abs_tick(

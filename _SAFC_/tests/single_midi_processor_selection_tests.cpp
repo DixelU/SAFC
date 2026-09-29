@@ -236,6 +236,49 @@ void test_selection(const fs::path& directory, bool compression, bool collapse, 
     sort_notes(expected);
     check(actual == expected, "serialized notes must match the expected clipped pitches, channels, velocities, and ticks");
 }
+
+bytes read_file(const fs::path& path)
+{
+    std::ifstream input(path, std::ios::binary);
+    check(input.is_open(), "processed MIDI must exist");
+    return bytes(std::istreambuf_iterator<char>(input), {});
+}
+
+// Meta and SysEx records carry their own size field inside the event buffer.
+// A selection covering the whole track must serialize them byte for byte.
+void test_meta_passthrough(const fs::path& directory, bool collapse)
+{
+    const auto input = directory / "meta.mid";
+    const bytes track{
+        0x00, 0xFF, 0x51, 0x03, 0x07, 0xA1, 0x20,
+        0x00, 0xFF, 0x03, 0x04, 'T', 'e', 's', 't',
+        0x05, 0x90, 0x3C, 0x40,
+        0x05, 0x80, 0x3C, 0x00,
+        0x00, 0xF0, 0x03, 0x7E, 0x7F, 0xF7,
+        0x03, 0xFF, 0x51, 0x03, 0x03, 0xD0, 0x90,
+        0x00, 0xFF, 0x2F, 0x00};
+    write_midi(input, {track});
+
+    auto data = std::make_unique<processor::processing_data>();
+    data->filename = input.wstring();
+    data->postfix = L".processed.mid";
+    auto& settings = data->settings;
+    settings.old_ppqn = settings.new_ppqn = 480;
+    settings.offset = 0;
+    settings.filter.pass_sysex = true;
+    settings.selection_data = processor::settings_obj::selection(0, 1000);
+    settings.proc_details.remove_empty_tracks = true;
+    settings.proc_details.whole_midi_collapse = collapse;
+    settings.proc_details.channel_split = false;
+    settings.proc_details.apply_offset_after = false;
+    check(!single_midi_processor_lean::can_handle(settings), "selections must use the feature-rich processor");
+    processor::message_buffers logs;
+    processor::sync_processing<false>(*data, logs);
+    check(logs.finished && !logs.processing && logs.error->get_last_event().type == log_event_type::none,
+        "meta processing must finish without errors");
+    check(read_file(data->filename + data->postfix) == read_file(input),
+        "meta, SysEx, and note events must pass through an all-covering selection unchanged");
+}
 }
 
 int main(int argc, char** argv)
@@ -253,6 +296,8 @@ int main(int argc, char** argv)
                         test_selection<false>(directory, compression, collapse, convert, after);
                         test_selection<true>(directory, compression, collapse, convert, after);
                     }
+        for (const bool collapse : {false, true})
+            test_meta_passthrough(directory, collapse);
         std::cout << "PASS: selected MIDI retains ordered, balanced note pairs across collapse, channels, compression, and timing transforms\n";
     }
     catch (const std::exception& error)

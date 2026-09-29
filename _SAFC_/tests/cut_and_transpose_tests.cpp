@@ -68,11 +68,11 @@ void check_note_pair(const processor::filter_table& filters,
     for (int index = 0; index < 2; ++index)
     {
         const auto event = events.begin() + index * event_size;
-        processor::get_value<processor::tick_type>(event, processor::tick_position) = 10 + index;
+        processor::get_value<processor::stored_tick_type>(event, processor::tick_position) = 10 + index;
         processor::get_value<std::uint8_t>(event, processor::event_type) = index ? 0x80 : 0x90;
         processor::get_value<std::uint8_t>(event, processor::event_param1) = key;
         processor::get_value<std::uint8_t>(event, processor::event_param2) = 64;
-        processor::get_value<processor::tick_type>(event, processor::event_param3) = (1 - index) * event_size;
+        processor::get_value<processor::stored_ref_type>(event, processor::event_param3) = (1 - index) * event_size;
     }
 
     processor::single_track_data track;
@@ -82,7 +82,7 @@ void check_note_pair(const processor::filter_table& filters,
     for (int index = 0; index < 2; ++index)
     {
         const auto event = events.begin() + index * event_size;
-        const auto tick = processor::get_value<processor::tick_type>(event, processor::tick_position);
+        const auto tick = processor::get_value<processor::stored_tick_type>(event, processor::tick_position);
         if (expected == cut_and_transpose::rejected)
             check(tick == processor::disable_tick, "rejection must disable both note-on and note-off");
         else
