@@ -196,6 +196,30 @@ int main()
         key(ImGuiKey_Z, true);
         saved = save();
         require(saved->get_note_count() == initial_count + 1, "Native delete undo did not restore the note.");
+        saved.reset();
+
+        // Esc and a right-click on empty space only deselect: a following Delete
+        // has nothing to remove. A plain click first proves the note gets selected.
+        const auto note_at = position(double(moved->start_tick) + double(moved->length()) * .25, moved->key);
+        const auto empty_at = position(double(duration) * .9, 100);
+        drag(note_at, note_at);
+        key(ImGuiKey_Delete, false);
+        saved = save();
+        require(saved->get_note_count() == initial_count, "Native click did not select the note under it.");
+        saved.reset();
+        key(ImGuiKey_Z, true);
+        drag(note_at, note_at);
+        key(ImGuiKey_Escape, false);
+        key(ImGuiKey_Delete, false);
+        saved = save();
+        require(saved->get_note_count() == initial_count + 1, "Native Esc did not clear the selection.");
+        saved.reset();
+        drag(note_at, note_at);
+        drag_button(empty_at, empty_at, 1);
+        key(ImGuiKey_Delete, false);
+        saved = save();
+        require(saved->get_note_count() == initial_count + 1,
+            "Native right-click on empty space did not clear the selection.");
 
         // Track metadata is user data, including literal ImGui label delimiters.
         // Renaming a track must not alter its selectable ID or alias another row.
@@ -316,7 +340,7 @@ int main()
 
         editor.shutdown();
         playback.shutdown();
-        std::cout << "Native ImGui swept erase, split, draw, move, keyboard undo/redo/delete, atomic Save, stable track IDs, four tool ID audits and silent transport passed.\n";
+        std::cout << "Native ImGui swept erase, split, draw, move, keyboard undo/redo/delete, Esc and right-click deselect, atomic Save, stable track IDs, four tool ID audits and silent transport passed.\n";
         return 0;
     }
     catch (const std::exception& error)

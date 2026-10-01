@@ -218,6 +218,81 @@ void check_literal_combo()
         "Long combo preview paints over the native arrow button.");
 }
 
+// Locates a caption control through ImGui hit testing, without duplicating
+// the folded chrome's layout, and clicks it.
+template<class Draw>
+void click_caption_control(ImGuiWindow* window, const char* label, Draw&& draw)
+{
+    const auto id = window->GetID(label);
+    auto& io = ImGui::GetIO();
+    for (float x = window->Pos.x + window->Size.x - 2.f; x > window->Pos.x; x -= 3.f)
+    {
+        const ImVec2 point{x, window->Pos.y + 14.f};
+        io.AddMousePosEvent(point.x, point.y); frame(draw);
+        if (ImGui::GetHoveredID() != id) continue;
+        click(point, draw);
+        return;
+    }
+    throw std::runtime_error(std::string("Folded caption control is unreachable: ") + label);
+}
+
+void check_folded_maximize()
+{
+    const ImVec2 position{120.f, 140.f}, size{420.f, 300.f}, area_position{8.f, 60.f}, area_size{900.f, 700.f};
+    bool open = true, fixed_open = true;
+    const auto draw = [&]
+    {
+        ImGui::SetNextWindowPos(position, ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSize(size, ImGuiCond_FirstUseEver);
+        ui::begin_folded_window("Maximize fixture", &open);
+        ui::end_folded_window();
+        ImGui::SetNextWindowPos({960.f, 820.f}, ImGuiCond_FirstUseEver);
+        ui::begin_folded_window("Fixed-size fixture", &fixed_open, ImGuiWindowFlags_NoResize);
+        ui::end_folded_window();
+    };
+    frame(draw); frame(draw);
+    auto* window = ImGui::FindWindowByName("Maximize fixture");
+    auto* fixed = ImGui::FindWindowByName("Fixed-size fixture");
+    require(window && fixed, "Folded maximize fixtures were not submitted.");
+    const auto placed = [&](ImVec2 at, ImVec2 extent)
+    {
+        return window->Pos.x == at.x && window->Pos.y == at.y && window->Size.x == extent.x &&
+            window->Size.y == extent.y;
+    };
+    require(placed(position, size), "The folded fixture ignored its initial placement.");
+    require(probe_item_id(window->GetID("##folded-maximize"), draw) == 1,
+        "The maximize button is missing or shares its ID.");
+    require(probe_item_id(fixed->GetID("##folded-maximize"), draw) == 0,
+        "A fixed-size folded window offers a maximize button.");
+
+    click_caption_control(window, "##folded-maximize", draw);
+    const auto* viewport = ImGui::GetMainViewport();
+    require(placed(viewport->WorkPos, viewport->WorkSize), "Maximize did not fill the main viewport by default.");
+    require(open && (window->Flags & ImGuiWindowFlags_NoMove) && (window->Flags & ImGuiWindowFlags_NoSavedSettings),
+        "A maximized window closed, stayed movable, or would save its maximized placement.");
+    ui::set_maximized_window_area(area_position, area_size);
+    frame(draw);
+    require(placed(area_position, area_size), "A maximized window did not follow the workspace area.");
+    click_caption_control(window, "##folded-maximize", draw);
+    require(placed(position, size) && !(window->Flags & ImGuiWindowFlags_NoMove),
+        "Restore did not return the window to its previous placement.");
+
+    // A double click on the caption maximizes too; Reset layout restores every window.
+    auto& io = ImGui::GetIO();
+    click({position.x + 40.f, position.y + 14.f}, draw);
+    io.AddMouseButtonEvent(ImGuiMouseButton_Left, true); frame(draw);
+    io.AddMouseButtonEvent(ImGuiMouseButton_Left, false); frame(draw);
+    frame(draw);
+    require(placed(area_position, area_size), "Double-clicking the caption did not maximize the window.");
+    ImGui::NewFrame();
+    ui::restore_maximized_windows();
+    draw();
+    ImGui::Render();
+    frame(draw);
+    require(placed(position, size), "Restoring all maximized windows left one maximized.");
+    ui::set_maximized_window_area({}, {});
+}
+
 std::filesystem::path write_midi_fixture()
 {
     const auto directory = std::filesystem::current_path() /
@@ -296,10 +371,11 @@ int main()
         check_detector();
         check_literal_rows();
         check_literal_combo();
+        check_folded_maximize();
         check_project_rows_and_properties();
         std::cout << "PASS: conflict detector negative control, duplicate endpoint names, literal ##/### labels, "
             "multiline row layout, stable renamed row IDs, literal combo previews, native row clicks, "
-            "duplicate project files, and per-file property IDs\n";
+            "folded window maximize/restore, duplicate project files, and per-file property IDs\n";
         return 0;
     }
     catch (const std::exception& error)

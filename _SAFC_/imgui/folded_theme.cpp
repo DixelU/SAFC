@@ -1,5 +1,7 @@
 #include "folded_theme.h"
 
+#include <imgui_internal.h>
+
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -17,6 +19,78 @@ struct folded_frame
 	ImVec2 size;
 };
 thread_local std::vector<folded_frame> folded_frames;
+
+enum class window_placement
+{
+	normal,
+	maximized,
+	// Leaves the maximized area on the next Begin.
+	restoring
+};
+
+// Placement lives in each window's own ImGui storage, so it follows the context.
+const ImGuiID placement_key = ImHashStr("##folded-placement");
+const ImGuiID restore_position_key = ImHashStr("##folded-restore-position");
+const ImGuiID restore_size_key = ImHashStr("##folded-restore-size");
+// An empty size selects the main viewport.
+thread_local ImVec2 maximized_position, maximized_size;
+
+window_placement placement_of(ImGuiWindow* window)
+{
+	return window ? static_cast<window_placement>(window->StateStorage.GetInt(placement_key))
+				  : window_placement::normal;
+}
+
+void set_placement(ImGuiWindow& window, window_placement placement)
+{
+	window.StateStorage.SetInt(placement_key, static_cast<int>(placement));
+}
+
+ImVec2 stored_vector(ImGuiWindow& window, ImGuiID key)
+{
+	return {window.StateStorage.GetFloat(key), window.StateStorage.GetFloat(key + 1)};
+}
+
+void store_vector(ImGuiWindow& window, ImGuiID key, ImVec2 value)
+{
+	window.StateStorage.SetFloat(key, value.x);
+	window.StateStorage.SetFloat(key + 1, value.y);
+}
+
+void maximize(ImGuiWindow& window)
+{
+	store_vector(window, restore_position_key, window.Pos);
+	store_vector(window, restore_size_key, window.SizeFull);
+	// A maximized window is not saved, so its layout entry must hold this placement.
+	if (auto* settings = ImGui::FindWindowSettingsByWindow(&window))
+	{
+		settings->Pos = ImVec2ih(window.Pos);
+		settings->Size = ImVec2ih(window.SizeFull);
+	}
+	set_placement(window, window_placement::maximized);
+}
+
+void draw_maximize_icon(ImDrawList& draw, ImVec2 center, float scale, ImU32 color, bool maximized)
+{
+	const float thickness = 1.5f * scale;
+	if (!maximized)
+	{
+		const float half = 5.f * scale;
+		draw.AddRect({center.x - half, center.y - half}, {center.x + half, center.y + half}, color, 0.f,
+			ImDrawFlags_None, thickness);
+		draw.AddLine({center.x - half, center.y - half + thickness}, {center.x + half, center.y - half + thickness},
+			color, thickness);
+		return;
+	}
+	// Two stacked outlines: the front one, and the visible corner of the one behind.
+	const float outer = 5.f * scale;
+	const float inner = 2.f * scale;
+	draw.AddRect({center.x - outer, center.y - inner}, {center.x + inner, center.y + outer}, color, 0.f,
+		ImDrawFlags_None, thickness);
+	const ImVec2 behind[] = {{center.x - inner, center.y - inner}, {center.x - inner, center.y - outer},
+		{center.x + outer, center.y - outer}, {center.x + outer, center.y + inner}, {center.x + inner, center.y + inner}};
+	draw.AddPolyline(behind, IM_ARRAYSIZE(behind), color, ImDrawFlags_None, thickness);
+}
 
 void draw_chrome(ImDrawList& draw, ImVec2 pos, ImVec2 size, float caption, float scale, bool focused, bool resizeable)
 {
@@ -128,6 +202,26 @@ void apply_theme(float scale)
 
 bool begin_folded_window(const char* title, bool* open, ImGuiWindowFlags flags)
 {
+	const bool can_maximize = (flags & ImGuiWindowFlags_NoResize) == 0;
+	ImGuiWindow* existing = can_maximize ? ImGui::FindWindowByName(title) : nullptr;
+	const window_placement placement = placement_of(existing);
+	if (placement == window_placement::restoring)
+	{
+		ImGui::SetNextWindowPos(stored_vector(*existing, restore_position_key), ImGuiCond_Always);
+		ImGui::SetNextWindowSize(stored_vector(*existing, restore_size_key), ImGuiCond_Always);
+		set_placement(*existing, window_placement::normal);
+	}
+	const bool maximized = placement == window_placement::maximized;
+	if (maximized)
+	{
+		const auto* viewport = ImGui::GetMainViewport();
+		const bool custom_area = maximized_size.x > 0.f && maximized_size.y > 0.f;
+		ImGui::SetNextWindowPos(custom_area ? maximized_position : viewport->WorkPos, ImGuiCond_Always);
+		ImGui::SetNextWindowSize(custom_area ? maximized_size : viewport->WorkSize, ImGuiCond_Always);
+		// The saved layout keeps the placement to restore.
+		flags |= ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoSavedSettings;
+	}
+
 	ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.f, 0.f, 0.f, 0.f));
 	ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.f);
 	const bool visible = ImGui::Begin(title, nullptr,
@@ -151,41 +245,71 @@ bool begin_folded_window(const char* title, bool* open, ImGuiWindowFlags flags)
 	draw_chrome(draw, pos, size, caption, scale, ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows),
 		(flags & ImGuiWindowFlags_NoResize) == 0);
 
-	const float close_width = open ? caption : 0.f;
+	// Caption buttons fill caption-wide slots counted from the right edge.
+	const int maximize_slot = open ? 1 : 0;
+	const float buttons_width = caption * float(maximize_slot + (can_maximize ? 1 : 0));
 	ImGui::SetCursorScreenPos({pos.x + 2.f * scale, pos.y + 4.f * scale});
 	ImGui::InvisibleButton(
-		"##folded-caption", {std::max(1.f, size.x - close_width - 4.f * scale), caption - 4.f * scale});
+		"##folded-caption", {std::max(1.f, size.x - buttons_width - 4.f * scale), caption - 4.f * scale});
 	const bool dragging =
 		!(flags & ImGuiWindowFlags_NoMove) && ImGui::IsItemActive() && ImGui::IsMouseDragging(ImGuiMouseButton_Left);
+	bool toggle_maximized =
+		can_maximize && ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left);
 	const char* label_end = std::strstr(title, "##");
 	if (!label_end)
 		label_end = title + std::strlen(title);
 	const ImVec2 text_size = ImGui::CalcTextSize(title, label_end);
-	const ImVec4 title_clip = {pos.x + 10.f * scale, pos.y, maximum.x - close_width - 6.f * scale, pos.y + caption};
+	const ImVec4 title_clip = {pos.x + 10.f * scale, pos.y, maximum.x - buttons_width - 6.f * scale, pos.y + caption};
 	draw.AddText(nullptr, 0.f,
 		{std::max(title_clip.x, pos.x + (size.x - text_size.x) * 0.5f), pos.y + (caption - text_size.y) * 0.5f + scale},
 		ImGui::GetColorU32(ImGuiCol_Text), title, label_end, 0.f, &title_clip);
 
-	if (open)
+	struct caption_button_state
 	{
-		ImGui::SetCursorScreenPos({maximum.x - caption + 2.f * scale, pos.y + 5.f * scale});
+		bool pressed;
+		ImVec2 center;
+		ImU32 color;
+	};
+	const auto caption_button = [&](const char* id, int slot, const char* tooltip) -> caption_button_state
+	{
 		const float button_size = caption - 8.f * scale;
+		const ImVec2 corner = {maximum.x - caption * float(slot + 1) + 2.f * scale, pos.y + 5.f * scale};
+		ImGui::SetCursorScreenPos(corner);
 		ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 0.f);
 		ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.f, 0.f, 0.f, 0.f));
-		if (ImGui::Button("##folded-close", {button_size, button_size}))
-			*open = false;
+		const bool pressed = ImGui::Button(id, {button_size, button_size});
 		ImGui::PopStyleColor();
 		ImGui::PopStyleVar();
-		const ImVec2 center = {maximum.x - caption * 0.5f - 2.f * scale, pos.y + 5.f * scale + button_size * 0.5f};
-		const ImU32 color = ImGui::GetColorU32(ImGui::IsItemHovered() ? ImGuiCol_Text : ImGuiCol_Separator);
+		const bool hovered = ImGui::IsItemHovered();
+		if (hovered)
+			ImGui::SetTooltip("%s", tooltip);
+		return {pressed, {corner.x + button_size * 0.5f, corner.y + button_size * 0.5f},
+			ImGui::GetColorU32(hovered ? ImGuiCol_Text : ImGuiCol_Separator)};
+	};
+	if (open)
+	{
+		const auto close = caption_button("##folded-close", 0, "Close");
+		if (close.pressed)
+			*open = false;
 		const float radius = 6.f * scale;
-		draw.AddLine(center, {center.x, center.y + radius}, color, 2.f * scale);
-		draw.AddLine(center, {center.x - radius, center.y - radius * 0.55f}, color, 2.f * scale);
-		draw.AddLine(center, {center.x + radius, center.y - radius * 0.55f}, color, 2.f * scale);
-		if (ImGui::IsItemHovered())
-			ImGui::SetTooltip("Close");
+		draw.AddLine(close.center, {close.center.x, close.center.y + radius}, close.color, 2.f * scale);
+		draw.AddLine(close.center, {close.center.x - radius, close.center.y - radius * 0.55f}, close.color,
+			2.f * scale);
+		draw.AddLine(close.center, {close.center.x + radius, close.center.y - radius * 0.55f}, close.color,
+			2.f * scale);
+	}
+	if (can_maximize)
+	{
+		const auto button = caption_button("##folded-maximize", maximize_slot, maximized ? "Restore" : "Maximize");
+		toggle_maximized |= button.pressed;
+		draw_maximize_icon(draw, button.center, scale, button.color, maximized);
 	}
 	ImGui::PopClipRect();
+	// Takes effect on the next Begin, which places the window before its content.
+	if (toggle_maximized && maximized)
+		set_placement(*ImGui::GetCurrentWindow(), window_placement::restoring);
+	else if (toggle_maximized)
+		maximize(*ImGui::GetCurrentWindow());
 
 	// Apply at the end of caption submission so its hit target stays coherent.
 	if (dragging)
@@ -218,6 +342,24 @@ void end_folded_window()
 		ImGui::EndChild();
 	folded_frames.pop_back();
 	ImGui::End();
+}
+
+void set_maximized_window_area(ImVec2 position, ImVec2 size)
+{
+	maximized_position = position;
+	maximized_size = size;
+}
+
+void restore_maximized_windows()
+{
+	for (ImGuiWindow* window : ImGui::GetCurrentContext()->Windows)
+	{
+		if (placement_of(window) == window_placement::normal)
+			continue;
+		ImGui::SetWindowPos(window, stored_vector(*window, restore_position_key), ImGuiCond_Always);
+		ImGui::SetWindowSize(window, stored_vector(*window, restore_size_key), ImGuiCond_Always);
+		set_placement(*window, window_placement::normal);
+	}
 }
 
 ImVec2 folded_window_position()

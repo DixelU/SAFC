@@ -3057,6 +3057,33 @@ public:
 		return result;
 	}
 
+	/**
+	 * Latest controller point before `tick`: the value still held at that tick
+	 * when no later point replaces it. Relies on raw events staying tick-sorted.
+	 */
+	std::optional<channel_control_point> get_channel_control_point_before(
+		std::uint16_t track, std::uint8_t channel, control_lane lane, tick_type tick) const
+	{
+		std::lock_guard<std::recursive_mutex> lock(editor_mutex);
+
+		auto it = raw_track_events.find(track);
+		if (it == raw_track_events.end())
+			return std::nullopt;
+
+		const auto& events = it->second;
+		auto ev = std::lower_bound(events.begin(), events.end(), tick,
+			[](const raw_event& event, tick_type t) { return event.tick < t; });
+		while (ev != events.begin())
+		{
+			--ev;
+			std::uint16_t value = 0;
+			if (decode_control_event(*ev, lane, channel, value))
+				return channel_control_point{ev->tick, std::uint8_t(channel & 0x0F), value};
+		}
+
+		return std::nullopt;
+	}
+
 	void set_channel_control_point(
 		std::uint16_t track,
 		std::uint8_t channel,
@@ -3119,6 +3146,23 @@ public:
 		}
 
 		return result;
+	}
+
+	/** Latest tempo point before `tick`: the tempo still in effect at that tick. */
+	std::optional<std::pair<tick_type, double>> get_tempo_point_before(tick_type tick) const
+	{
+		std::lock_guard<std::recursive_mutex> lock(editor_mutex);
+
+		auto it = std::lower_bound(tempo_events.begin(), tempo_events.end(), tick,
+			[](const auto& event, tick_type t) { return event.first < t; });
+		while (it != tempo_events.begin())
+		{
+			--it;
+			if (it->second)
+				return std::pair{it->first, 60000000.0 / double(it->second)};
+		}
+
+		return std::nullopt;
 	}
 
 	void set_tempo_point(tick_type tick, double bpm)

@@ -221,6 +221,7 @@ struct editor_panel::impl
 	bool line_gesture = false, snap_bypass = false;
 	ImGuiMouseButton gesture_button = ImGuiMouseButton_Left;
 	double lane_hover_since = -1.;
+	bool popup_was_open = false;
 	// Tick under the pointer while it is over the note area; Ctrl+V pastes there.
 	std::optional<tick> pointer_tick;
 
@@ -498,6 +499,20 @@ struct editor_panel::impl
 		}
 	}
 	double lane_max() const { return lane == lane_kind::pitch_bend ? pitch_bend_max : midi_value_max; }
+	// Latest point of the tempo or controller lane before `position`; its value still applies there.
+	std::optional<std::pair<tick, double>> lane_point_before(tick position) const
+	{
+		if (lane == lane_kind::velocity)
+			return std::nullopt;
+		if (lane == lane_kind::tempo)
+			return document->get_tempo_point_before(position);
+
+		const auto point = document->get_channel_control_point_before(
+			document->get_active_track(), std::uint8_t(channel()), control_lane(), position);
+		if (!point)
+			return std::nullopt;
+		return std::pair{point->tick, double(point->value)};
+	}
 
 	void audition(int key, int note_channel = -1)
 	{
@@ -550,6 +565,12 @@ struct editor_panel::impl
 			break;
 		case gesture_kind::erase:
 		{
+			// As in FL Studio, an erase stroke over empty space drops the selection.
+			if (erased_notes.empty())
+			{
+				deselect();
+				break;
+			}
 			std::vector<midi_editor::note_id_type> ids(erased_notes.begin(), erased_notes.end());
 			const auto count = document->erase_notes(std::move(ids));
 			if (count)
@@ -660,6 +681,15 @@ struct editor_panel::impl
 			return;
 		}
 		status = "Pasted " + note_count(count) + (use_pointer ? " at the pointer." : " at the start of the view.");
+	}
+
+	void deselect()
+	{
+		const auto count = document->selection_count();
+		if (!count)
+			return;
+		document->clear_selection();
+		status = "Deselected " + note_count(count) + ".";
 	}
 
 	void duplicate_selection()
@@ -850,13 +880,20 @@ struct editor_panel::impl
 	void shortcuts()
 	{
 		auto& io = ImGui::GetIO();
+		// Esc that has just closed a combo or popup must not also drop the selection.
+		const bool popup_closed = popup_was_open;
+		popup_was_open = ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopup);
 		if (!ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) || io.WantTextInput ||
 			ImGui::IsAnyItemActive() || busy)
 			return;
 
 		if (ImGui::IsKeyPressed(ImGuiKey_Escape))
 		{
-			finish_gesture(false);
+			// A gesture in progress owns Esc; otherwise it deselects, except under a tool preview.
+			if (gesture != gesture_kind::none)
+				finish_gesture(false);
+			else if (tool == tool_kind::none && !popup_closed && !popup_was_open)
+				deselect();
 			return;
 		}
 
@@ -887,7 +924,7 @@ struct editor_panel::impl
 				document->select_rect(
 					0, document->get_total_ticks() + 1, 0, midi_key_max, document->get_active_track());
 			if (ImGui::IsKeyPressed(ImGuiKey_D, false))
-				document->clear_selection();
+				deselect();
 			if (ImGui::IsKeyPressed(ImGuiKey_UpArrow))
 				nudge_selection(0, 12, 12);
 			if (ImGui::IsKeyPressed(ImGuiKey_DownArrow))
@@ -1017,6 +1054,13 @@ struct editor_panel::impl
 			quantize_selection();
 
 		ImGui::SameLine();
+		ImGui::BeginDisabled(!document->has_selection());
+		if (ImGui::Button("Deselect"))
+			deselect();
+		ImGui::EndDisabled();
+		ImGui::SetItemTooltip("Clear the selection; also Esc, Ctrl+D, or a right-click on empty space.");
+
+		ImGui::SameLine();
 		if (ImGui::Button("Chopper"))
 			open_tool(tool_kind::chopper);
 
@@ -1135,15 +1179,18 @@ struct editor_panel::impl
 	{
 		const auto begin = std::min(first, last), end = std::max(first, last);
 		const bool selected_only = document->has_selection();
+		const tick view_start = document->get_view_start_tick();
 
 		for (const auto& value : document->get_notes_in_range(begin, end + 1))
 		{
-			if (value.track_index != document->get_active_track() || value.start_tick < begin ||
-				value.start_tick > end || (selected_only && !document->is_note_selected(value.id)))
+			// A note held from before the view is painted where its stem is drawn: at the left edge.
+			const tick position = std::max(value.start_tick, view_start);
+			if (value.track_index != document->get_active_track() || position < begin || position > end ||
+				(selected_only && !document->is_note_selected(value.id)))
 				continue;
 
 			const double fraction =
-				first == last ? 1. : (double(value.start_tick) - double(first)) / (double(last) - double(first));
+				first == last ? 1. : (double(position) - double(first)) / (double(last) - double(first));
 			const auto next = std::uint8_t(
 				std::clamp<long>(std::lround(first_value + (last_value - first_value) * fraction), 1, midi_value_max));
 
@@ -1263,9 +1310,10 @@ struct editor_panel::impl
 
 			const float x0 = view.x_at(double(value.start_tick));
 			const float x1 = std::max(x0 + 2.f, view.x_at(double(value.end_tick)));
-			const float note_y = view.y_at(value.key);
-			const float y0 = note_y + .5f;
-			const float y1 = note_y + std::max(2.f, view.key_height - .5f);
+			// The whole key row counts, as for a click: the drawn note is inset by
+			// half a pixel, a large share of a row in the full-keyboard view.
+			const float y0 = view.y_at(value.key);
+			const float y1 = y0 + std::max(2.f, view.key_height);
 			if (segment_intersects_rect(first, last, ImVec2(x0, y0), ImVec2(x1, y1)))
 				erased_notes.insert(value.id);
 		}
@@ -1497,7 +1545,10 @@ struct editor_panel::impl
 
 				const auto pending_velocity = velocities.find(value.id);
 
-				const float x = view.x_at(double(value.start_tick)),
+				// A note held from before the view keeps its stem at the left edge,
+				// capped by a flag as wide as the brush instead of a dot.
+				const bool held = value.start_tick < view.start;
+				const float x = held ? view.lane_min.x + 1.f : view.x_at(double(value.start_tick)),
 					y = view.lane_y(pending_velocity == velocities.end()
 						? value.velocity
 						: pending_velocity->second.new_velocity);
@@ -1505,7 +1556,10 @@ struct editor_panel::impl
 				const auto color = note_color(value.track_index, value.channel, document->is_note_selected(value.id));
 
 				draw->AddLine(ImVec2(x, view.lane_maximum.y), ImVec2(x, y), color, 2.f);
-				draw->AddCircleFilled(ImVec2(x, y), 3.f, color);
+				if (held)
+					draw->AddLine(ImVec2(x, y), ImVec2(x + scaled(velocity_brush_radius), y), color, 2.f);
+				else
+					draw->AddCircleFilled(ImVec2(x, y), 3.f, color);
 			}
 		}
 		else
@@ -1523,8 +1577,17 @@ struct editor_panel::impl
 					points.emplace_back(value.tick, value.value);
 			}
 
+			// The value set before the view still applies: its line enters at the
+			// left edge, without the dot of a point that is on screen.
+			const auto held = lane_point_before(view.start);
+
 			ImVec2 previous{};
 			bool first = true;
+			if (held)
+			{
+				previous = ImVec2(view.lane_min.x, view.lane_y(held->second));
+				first = false;
+			}
 			for (const auto& [position, value] : points)
 			{
 				const ImVec2 point(view.x_at(double(position)), view.lane_y(value));
@@ -1884,9 +1947,17 @@ struct editor_panel::impl
 		if (ImGui::GetTime() - lane_hover_since < ImGui::GetStyle().HoverDelayNormal)
 			return;
 
-		ImGui::SetTooltip("Tick %llu | %s %.2f\nLeft-drag paints; right-drag draws a ramp.",
-			static_cast<unsigned long long>(view.tick_at(mouse.x)), lane == lane_kind::tempo ? "BPM" : "Value",
-			view.value_at(mouse.y));
+		const tick hovered_tick = view.tick_at(mouse.x);
+		const char* unit = lane == lane_kind::tempo ? "BPM" : "Value";
+		// The point at or before the pointer, which may lie outside the view.
+		if (const auto held = lane_point_before(hovered_tick + 1))
+			ImGui::SetTooltip("Tick %llu | %s %.2f\nIn effect here: %.2f, set at tick %llu\n"
+							  "Left-drag paints; right-drag draws a ramp.",
+				static_cast<unsigned long long>(hovered_tick), unit, view.value_at(mouse.y), held->second,
+				static_cast<unsigned long long>(held->first));
+		else
+			ImGui::SetTooltip("Tick %llu | %s %.2f\nLeft-drag paints; right-drag draws a ramp.",
+				static_cast<unsigned long long>(hovered_tick), unit, view.value_at(mouse.y));
 	}
 
 	void draw_time_scrollbar(const canvas_view& view)
@@ -2050,15 +2121,18 @@ struct editor_panel::impl
 			ImGui::TextWrapped(
 				"Draw: left-drag empty space. Move: drag a note. Resize: drag its right edge; Ctrl stretches the "
 				"selection. Shift-drag selects; Shift+Alt removes. Right-drag erases every note crossed between "
-				"frames, or selects a ghost track when pressed on one. Split: drag a vertical or diagonal cut line; "
+				"frames, or selects a ghost track when pressed on one; over empty space it deselects. "
+				"Split: drag a vertical or diagonal cut line; "
 				"each note is divided where the line crosses its middle, and its shorter piece is selected. "
 				"Middle-drag pans; wheel zooms. Alt bypasses snap. Wheel on keys zooms pitch; right-drag keys scrolls. "
-				"Controller lane: left paints, right draws a ramp.");
+				"Controller lane: left paints, right draws a ramp; a value set before the view enters from its "
+				"left edge.");
 			ImGui::TextWrapped(
 				"Ctrl+Z/Y undo/redo; Ctrl+C/X/V/B copy/cut/paste/duplicate; Ctrl+A/D select track/deselect; Shift+C "
 				"selects channel; Alt+C assigns channel. P/E/D/C choose Draw/Select/Erase/Split. Arrows move; "
 				"Ctrl+Up/Down transposes octaves. Q quantizes. "
-				"Space plays from view. Alt+U/Y/W/O opens Chopper/Flip/Claw/LFO. Esc cancels a gesture.");
+				"Space plays from view. Alt+U/Y/W/O opens Chopper/Flip/Claw/LFO. Esc cancels a gesture, or "
+				"deselects.");
 		}
 	}
 
@@ -2317,6 +2391,17 @@ bool editor_panel::run_smoke(const std::wstring& output_directory, std::string& 
 		state.finish_gesture(true);
 		require(model.get_channel_control_points(0, 3, lane_type::pitch_bend, 0, 121).size() == 2,
 			"Pitch lane did not commit a batch.");
+		{
+			// A view starting after a point still shows the value that point left in effect.
+			const auto at_start = state.lane_point_before(0), after_first = state.lane_point_before(120),
+				after_last = state.lane_point_before(100000);
+			require(!at_start && after_first && after_first->first == 0 && after_first->second == 8192. &&
+					after_last && after_last->first == 120 && after_last->second == 12000.,
+				"Pitch lane lost the value held from before the view.");
+			state.draw_channel = 4;
+			require(!state.lane_point_before(100000), "Pitch lane borrowed another channel's held value.");
+			state.draw_channel = 3;
+		}
 		model.undo();
 		require(model.get_channel_control_points(0, 3, lane_type::pitch_bend, 0, 121).empty(),
 			"Controller undo was not one transaction.");
@@ -2326,6 +2411,21 @@ bool editor_panel::run_smoke(const std::wstring& output_directory, std::string& 
 		state.gesture = impl::gesture_kind::control;
 		state.finish_gesture(true);
 		require(model.get_tempo_points(240, 481).size() == 2, "Tempo lane did not retain points.");
+		{
+			const auto held = state.lane_point_before(481);
+			require(held && held->first == 480 && std::abs(held->second - 160.) < .01,
+				"Tempo lane lost the tempo held from before the view.");
+		}
+		{
+			// An erase stroke over empty space, like Esc and Ctrl+D, only drops the selection.
+			const auto count = model.get_note_count();
+			model.select_rect(0, model.get_total_ticks() + 1, 0, midi_key_max, 0);
+			require(model.has_selection(), "Selection fixture is empty.");
+			state.gesture = impl::gesture_kind::erase;
+			state.finish_gesture(true);
+			require(!model.has_selection() && model.get_note_count() == count,
+				"An empty erase stroke did not just clear the selection.");
+		}
 		model.set_track_name(0, "ImGui smoke piano");
 		model.select_rect(0, model.get_total_ticks() + 1, 0, 127, 0);
 		const auto baseline = model.get_all_notes();

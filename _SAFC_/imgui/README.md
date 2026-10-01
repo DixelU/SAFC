@@ -18,7 +18,10 @@ texture. No SAFGUIF widget tree or GLUT event loop is used by the new applicatio
 
 Use the workspace navigation to open or hide panels. Hiding a panel leaves its
 document and running job alive. Drag folded captions to move panels and corners
-to resize them; **Reset layout** restores the initial arrangement.
+to resize them. The button beside the close symbol, or a double click on the
+caption, maximizes a resizeable panel between the navigation row and the footer;
+the same action restores its previous placement, which is also the one kept in
+the saved layout. **Reset layout** restores the initial arrangement.
 
 Launching on August 31 (local time) shows the SAFC birthday greeting, counting
 years since the first release in 2018. The light birthday background lasts for
@@ -77,7 +80,8 @@ that session; closing the greeting dismisses it until the next launch.
 The default tool draws on empty space and moves existing notes. Drag a note's
 right edge to resize; hold Ctrl on that edge to stretch the selection. Shift-drag
 adds a selection rectangle, and Shift+Alt removes notes from the selection.
-Right-click erases an active-track note or switches to a visible ghost track.
+Right-click erases an active-track note or switches to a visible ghost track;
+over empty space it clears the selection, as do Esc, Ctrl+D, and **Deselect**.
 Clicking a note picks its length and velocity for the next drawn note; the draw
 channel changes only through its buttons. The separate Select and Erase tools
 are also available. Snap offers straight 1/4 to 1/64 grids, 1/4 to 1/16
@@ -91,7 +95,11 @@ with right-drag. Its targets are velocity, pitch bend, pan, channel volume, and
 tempo; LFO targets the first four. Pitch bend, pan, and volume edit the draw
 channel shown under the lane label. The tempo lane has an adjustable logarithmic
 range, 20-400 BPM by default and widenable to MIDI's full tempo limits, plus
-exact tick/BPM entry for inserting tempo points.
+exact tick/BPM entry for inserting tempo points. A controller or tempo value set
+before the visible range still applies, so its line enters at the lane's left
+edge, and the lane tooltip names the point in effect under the pointer. A note
+held from before the view keeps its velocity stem at that edge, capped by a
+short flag instead of a dot.
 
 | Shortcut | Action |
 | --- | --- |
@@ -105,7 +113,7 @@ exact tick/BPM entry for inserting tempo points.
 | Space | Play from the visible start, or stop current playback |
 | Ctrl+O / Ctrl+S | Open / save as |
 | Alt+U / Y / W / O | Chopper / Flip / Claw / LFO |
-| Alt+V / Esc | Toggle ghost tracks / cancel a gesture |
+| Alt+V / Esc | Toggle ghost tracks / cancel a gesture, or deselect |
 
 As in FL Studio's piano roll, Ctrl+V pastes the copied notes at the snapped tick
 under the pointer (Alt skips snap), keeping their keys and relative timing; the
@@ -291,7 +299,7 @@ ctest --test-dir build/imgui -R '^safc-imgui-' --output-on-failure
 | `safc-imgui-workflows` | Project/editor/analysis workflow integration and workspace capture |
 | `safc-imgui-editor` | Owned load, note/controller gestures, tools, save/reload, destination preservation, real ImGui input, stable track IDs, expanded tool/combo ID checks and silent playback |
 | `safc-imgui-analysis` | Tempo integration, graph peaks, exact CSV/ATRAW exports, native map rendering, graph/checkbox ID isolation and clicks, cancellation and invalid input |
-| `safc-imgui-widget-ids` | Conflict-detector negative control, duplicate names, literal `##`/`###` labels, multiline rows, native selection and per-file property IDs |
+| `safc-imgui-widget-ids` | Conflict-detector negative control, duplicate names, literal `##`/`###` labels, multiline rows, native selection, folded window maximize/restore and per-file property IDs |
 | `safc-imgui-mapping-ids` | All map windows, extended keyboard banks, numeric step buttons, expanded points, segment mode and disabled branches |
 | `safc-imgui-mapping-layout` | Fixed canvas bounds through native segment start, completion, cancellation and restart for velocity and pitch maps |
 | `safc-imgui-key-map` | Shifted output piano, octave alignment, fixed source keys, cut highlighting, extreme transpositions and native bank-aware cut dragging |

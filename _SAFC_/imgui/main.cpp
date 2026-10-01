@@ -474,7 +474,7 @@ void draw_workspace_background(const workspace& app, const workspace_layout& lay
 		"SAFC   /   MIDI WORKSTATION");
 
 	const std::string footer_text = "SAFC " + app.updates.snapshot().current_version +
-		"  /  ImGui   |   Drag headers to move panels; drag corners to resize.";
+		"  /  ImGui   |   Drag headers to move panels; drag corners to resize; double-click a header to maximize.";
 	const ImVec2 footer_position = {
 		std::min(24.f * layout.scale, layout.display.x), std::max(0.f, layout.display.y - 29.f * layout.scale)};
 	const ImVec2 footer_padding = {8.f * layout.scale, 5.f * layout.scale};
@@ -551,6 +551,7 @@ void draw_workspace_navigation(workspace& app, const workspace_layout& layout)
 	if (ImGui::Button("Reset layout"))
 	{
 		// Restore positions and sizes of the panels without changing which are open.
+		ui::restore_maximized_windows();
 		app.reset_layout = true;
 		const float height = std::max(420.f * layout.scale, layout.display.y - layout.top - 54 * layout.scale);
 		ImGui::SetWindowPos("SAFC project", {layout.gap, layout.top});
@@ -1008,6 +1009,11 @@ void render_workspace(workspace& app, piano_texture& piano, GLFWwindow* window)
 	const auto status = app.playback.snapshot();
 	const workspace_layout layout;
 
+	// Maximized panels fill the workspace between the navigation row and the footer.
+	const float maximized_margin = 8.f * layout.scale;
+	const float footer_reserve = 40.f * layout.scale;
+	ui::set_maximized_window_area({maximized_margin, layout.top},
+		{layout.display.x - 2.f * maximized_margin, layout.display.y - layout.top - footer_reserve});
 	draw_workspace_background(app, layout);
 	draw_workspace_navigation(app, layout);
 	if (app.reset_layout && !layout.split)

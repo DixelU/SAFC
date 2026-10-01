@@ -23,8 +23,14 @@ void apply_theme(float scale = 1.f);
 
 // Pair every call with end_folded_window(), including when false is returned.
 // Uses rectangular ImGui window input bounds, with a custom draggable caption.
+// Resizeable windows get a maximize button; double-clicking the caption toggles it too.
 bool begin_folded_window(const char* title, bool* open = nullptr, ImGuiWindowFlags flags = 0);
 void end_folded_window();
+
+// Area filled by maximized folded windows; the main viewport until it is set.
+void set_maximized_window_area(ImVec2 position, ImVec2 size);
+// Returns every maximized folded window to the placement it had before.
+void restore_maximized_windows();
 
 // Parent geometry while a folded window is open; ordinary ImGui geometry
 // queries inside begin/end refer to its scrolling content child.
