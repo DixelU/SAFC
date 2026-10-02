@@ -80,8 +80,9 @@ that session; closing the greeting dismisses it until the next launch.
 The default tool draws on empty space and moves existing notes. Drag a note's
 right edge to resize; hold Ctrl on that edge to stretch the selection. Shift-drag
 adds a selection rectangle, and Shift+Alt removes notes from the selection.
-Right-click erases an active-track note or switches to a visible ghost track;
-over empty space it clears the selection, as do Esc, Ctrl+D, and **Deselect**.
+Right-click erases an active-track note; over empty space it clears the
+selection, as do Esc, Ctrl+D, and **Deselect**. As in FL Studio, a double
+right-click on a visible ghost note switches to its track.
 Clicking a note picks its length and velocity for the next drawn note; the draw
 channel changes only through its buttons. The separate Select and Erase tools
 are also available. Snap offers straight 1/4 to 1/64 grids, 1/4 to 1/16

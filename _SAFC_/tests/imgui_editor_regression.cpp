@@ -139,6 +139,49 @@ int main()
         require(saved->get_note_count() == initial_count, "Native swept erase was not one undo step.");
         saved.reset();
 
+        // FL-style ghost switch: only a double right-click on a ghost note makes
+        // its track active. A switch is observed through the next right-click,
+        // which erases the note once it belongs to the active track.
+        const auto fixture_notes = baseline->get_all_notes();
+        const auto ghost = std::find_if(fixture_notes.begin(), fixture_notes.end(),
+            [](const auto& value) { return value.track_index != 0; });
+        require(ghost != fixture_notes.end(), "Editor fixture has no ghost-track note.");
+        const auto ghost_at = position(double(ghost->start_tick) + double(ghost->length()) * .5, ghost->key);
+        const auto right_click = [&](ImVec2 at) { drag_button(at, at, 1); };
+        // Outlast ImGui's double-click window so the next press starts a new click.
+        const auto settle = [&] { for (int i = 0; i < 30; ++i) frame(); };
+        // Three slow clicks: were any of them to switch, a later one would erase.
+        for (int click = 0; click < 3; ++click)
+        {
+            settle();
+            right_click(ghost_at);
+        }
+        saved = save();
+        require(saved->get_note_count() == initial_count,
+            "A single right-click on a ghost note switched to its track.");
+        saved.reset();
+        settle();
+        right_click(ghost_at);
+        right_click(ghost_at);
+        settle();
+        right_click(ghost_at);
+        saved = save();
+        require(saved->get_note_count() == initial_count - 1,
+            "A double right-click on a ghost note did not switch to its track.");
+        saved.reset();
+        key(ImGuiKey_Z, true);
+        // Return to the first track the same way; the gestures below edit it.
+        const auto first_track_at = position(240., 60);
+        settle();
+        right_click(first_track_at);
+        right_click(first_track_at);
+        settle();
+        right_click(ghost_at);
+        saved = save();
+        require(saved->get_note_count() == initial_count,
+            "A double right-click did not switch back from the ghost track.");
+        saved.reset();
+
         // FL-style Split uses the dragged line's intersection with each note's
         // horizontal middle. A cut near tick 120 leaves the shorter left piece selected.
         key(ImGuiKey_C, false);
@@ -340,7 +383,7 @@ int main()
 
         editor.shutdown();
         playback.shutdown();
-        std::cout << "Native ImGui swept erase, split, draw, move, keyboard undo/redo/delete, Esc and right-click deselect, atomic Save, stable track IDs, four tool ID audits and silent transport passed.\n";
+        std::cout << "Native ImGui swept erase, ghost double right-click, split, draw, move, keyboard undo/redo/delete, Esc and right-click deselect, atomic Save, stable track IDs, four tool ID audits and silent transport passed.\n";
         return 0;
     }
     catch (const std::exception& error)

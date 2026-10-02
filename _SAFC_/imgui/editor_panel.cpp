@@ -213,6 +213,8 @@ struct editor_panel::impl
 	midi_editor::select_mode selection_mode = midi_editor::select_mode::add;
 	std::vector<note> gesture_notes;
 	std::unordered_set<midi_editor::note_id_type> erased_notes;
+	// Whether the previous erase stroke crossed no note; gates the ghost double-click.
+	bool last_erase_was_empty = false;
 	std::vector<std::pair<midi_editor::note_id_type, tick>> split_cuts;
 	std::map<midi_editor::note_id_type, velocity_entry> velocities;
 
@@ -566,7 +568,8 @@ struct editor_panel::impl
 		case gesture_kind::erase:
 		{
 			// As in FL Studio, an erase stroke over empty space drops the selection.
-			if (erased_notes.empty())
+			last_erase_was_empty = erased_notes.empty();
+			if (last_erase_was_empty)
 			{
 				deselect();
 				break;
@@ -1703,7 +1706,11 @@ struct editor_panel::impl
 			const auto key = std::uint8_t(view.key_at(mouse.y));
 			const bool active_note = document->find_note_at(
 				position, key, hit, 0, 0, document->get_active_track());
-			if (!active_note && ghosts && document->find_note_at(position, key, hit))
+			// As in FL Studio, a double right-click on a ghost note switches to its
+			// track. The first click must have erased nothing: otherwise deleting a
+			// note stacked over a ghost with two quick clicks would also switch.
+			if (!active_note && ghosts && last_erase_was_empty &&
+				ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Right) && document->find_note_at(position, key, hit))
 				document->set_active_track(std::uint8_t(hit.track_index));
 			else
 			{
@@ -2121,7 +2128,7 @@ struct editor_panel::impl
 			ImGui::TextWrapped(
 				"Draw: left-drag empty space. Move: drag a note. Resize: drag its right edge; Ctrl stretches the "
 				"selection. Shift-drag selects; Shift+Alt removes. Right-drag erases every note crossed between "
-				"frames, or selects a ghost track when pressed on one; over empty space it deselects. "
+				"frames; over empty space it deselects. Double right-click a ghost note to switch to its track. "
 				"Split: drag a vertical or diagonal cut line; "
 				"each note is divided where the line crosses its middle, and its shorter piece is selected. "
 				"Middle-drag pans; wheel zooms. Alt bypasses snap. Wheel on keys zooms pitch; right-drag keys scrolls. "

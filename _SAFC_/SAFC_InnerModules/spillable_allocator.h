@@ -53,7 +53,9 @@ struct spillable_memory
 		void* file;
 		void* mapping;
 	};
-	static_assert(sizeof(block_header) == 32);
+	// The payload follows the header and must keep malloc's alignment
+	// (32 bytes on x64, 24 on x86).
+	static_assert(sizeof(block_header) % alignof(std::max_align_t) == 0);
 
 	[[nodiscard]] static void* allocate(std::size_t size, spill_settings* settings)
 	{

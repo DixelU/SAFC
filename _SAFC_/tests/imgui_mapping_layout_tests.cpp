@@ -42,7 +42,9 @@ ImRect canvas_bounds(ImGuiWindow* content)
         bounds.Add(vertex.pos);
         ++vertices;
     }
-    require(vertices == 4 && bounds.GetHeight() == 310.f, "Could not identify the rendered curve canvas: "
+    // The canvas height follows the font size, like the rest of the panel.
+    require(vertices == 4 && std::abs(bounds.GetHeight() - safc::imgui_ui::scaled(310.f)) < .01f,
+        "Could not identify the rendered curve canvas: "
         + std::to_string(vertices) + " background vertices, height " + std::to_string(bounds.GetHeight()) + ".");
     return bounds;
 }
