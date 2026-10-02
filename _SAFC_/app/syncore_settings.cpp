@@ -168,6 +168,7 @@ static void persist_syncore_preferences()
 	settings::regestry_access.SetStringValue(L"SYNCORE_GAIN_DB",
 		std::to_wstring(saved_syncore_preferences.output_gain_db));
 	settings::regestry_access.SetDwordValue(L"SYNCORE_LIMITER", saved_syncore_preferences.limiter_enabled);
+	settings::regestry_access.SetDwordValue(L"SYNCORE_SHED_NOTES", saved_syncore_preferences.shed_quiet_notes);
 	settings::regestry_access.Close();
 }
 

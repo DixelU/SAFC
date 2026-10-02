@@ -30,6 +30,8 @@ struct syncore_preferences
 	syncore_phase_mode phase_mode = syncore_phase_mode::coherent;
 	double output_gain_db = -12.0;
 	bool limiter_enabled = true;
+	// Realtime playback only: drop the quietest notes instead of falling behind.
+	bool shed_quiet_notes = false;
 
 	bool operator==(const syncore_preferences&) const = default;
 };

@@ -814,6 +814,9 @@ void draw_synth_settings(workspace& app, const ui::playback_snapshot& status, co
 		ImGui::Checkbox("Limiter", &app.draft.limiter_enabled);
 		const auto a = ImGui::GetItemRectMin(), b = ImGui::GetItemRectMax();
 		app.limiter_center = {(a.x + b.x) * .5f, (a.y + b.y) * .5f};
+		ImGui::Checkbox("Shed quiet notes when overloaded", &app.draft.shed_quiet_notes);
+		ImGui::SetItemTooltip("Realtime playback only. When the synth falls behind, the quietest\n"
+							  "notes are dropped so audio keeps up instead of stuttering.");
 		constexpr const char* phases[] = {"Direct sampling", "Analytic"};
 		int phase = app.draft.phase_mode == syncore_phase_mode::analytic ? 1 : 0;
 		ImGui::SetNextItemWidth(-1);

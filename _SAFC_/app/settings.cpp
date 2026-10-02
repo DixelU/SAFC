@@ -292,6 +292,12 @@ void restore_reg_settings()
 			settings::regestry_access.GetDwordValue(L"SYNCORE_LIMITER") != 0;
 	}
 	catch (...) {}
+	try
+	{
+		saved_syncore_preferences.shed_quiet_notes =
+			settings::regestry_access.GetDwordValue(L"SYNCORE_SHED_NOTES") != 0;
+	}
+	catch (...) {}
 	load_player_video_render_settings();
 	if (player)
 	{

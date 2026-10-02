@@ -142,6 +142,7 @@ bool syncore_output::start(const std::wstring& bank_path,
 		options.playback.buffer_frames = preferences.buffer_frames;
 		options.playback.maximum_cohorts = preferences.maximum_cohorts;
 		options.playback.render_threads = preferences.render_threads;
+		options.playback.shed_notes = preferences.shed_quiet_notes;
 		options.playback.mastering.output_gain_db = preferences.output_gain_db;
 		options.playback.mastering.limiter_enabled = preferences.limiter_enabled;
 		switch (preferences.phase_mode)

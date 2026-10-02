@@ -80,8 +80,8 @@ In the player, select **SYNCore (embedded)** from the output list to use its
 built-in sine instrument. Open **Settings... > SYNCore...** to choose an SF2/SFZ
 bank (which also selects the embedded output), return to the built-in sine, and
 configure sample rate, buffering, cohort limit, render threads, phase mode,
-output gain, and the limiter. These preferences and the bank path are restored
-on the next run. Player playback, editor playback, and editor note audition all
+output gain, the limiter, and overload shedding. These preferences and the bank
+path are restored on the next run. Player playback, editor playback, and editor note audition all
 share the selected output. MP4 export uses the same SYNCore bank and synthesis
 preferences; its separate AAC rate controls only the encoded audio stream.
 MP4 export also uses the player's overlap removal mode (Overlaps drawn, Naive OR,
@@ -92,6 +92,12 @@ Embedded file playback waits for MIDI queue capacity so dense bursts preserve
 held notes and later controller automation. Sustained overload can delay playback;
 Stop and Pause interrupt capacity waits. Natural completion releases the notes
 and lets their decay finish.
+
+**Shed quiet notes when overloaded** (off by default) trades completeness for
+timing in realtime playback: once the synth has used up half of its audio
+buffer, the quietest notes are dropped, loudest last, until it catches up.
+Controllers, program changes, and pitch bends are never dropped. MP4 export
+always renders every note.
 
 ## SAST Tools 
 

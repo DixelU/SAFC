@@ -152,15 +152,19 @@ try
         }
 
         auto preferences = store.load();
+        require(!preferences.synth.shed_quiet_notes, "Missing SYNCore shedding flag keeps lossless playback");
         preferences.video.width = 1920;
         for (const bool enabled : {false, true})
         {
             preferences.automatic_updates = enabled;
+            preferences.synth.shed_quiet_notes = !enabled;
             store.save(preferences);
             require(read_dword(key.value, L"AUTOUPDATECHECK") == static_cast<DWORD>(enabled), "Full preferences save must persist update flag");
+            require(read_dword(key.value, L"SYNCORE_SHED_NOTES") == static_cast<DWORD>(!enabled), "Full preferences save must persist the SYNCore shedding flag");
             const auto loaded = store.load();
             require(loaded.automatic_updates == enabled && loaded.video.width == 1920 && loaded.sound_bank == bank,
                 "Full preferences reload preserves the update flag and other settings");
+            require(loaded.synth.shed_quiet_notes == !enabled, "Full preferences reload preserves the SYNCore shedding flag");
         }
     }
     require(isolated.restore(), "Restore HKCU override and remove only the private test subtree");

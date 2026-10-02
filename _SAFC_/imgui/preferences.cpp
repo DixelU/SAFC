@@ -81,6 +81,7 @@ application_preferences preferences_store::load() const
 	number(L"SYNCORE_RENDER_THREADS", p.synth.render_threads);
 	number(L"SYNCORE_PHASE_MODE", p.synth.phase_mode);
 	number(L"SYNCORE_LIMITER", p.synth.limiter_enabled);
+	number(L"SYNCORE_SHED_NOTES", p.synth.shed_quiet_notes);
 	number(L"PLAYER_RENDER_WIDTH", p.video.width);
 	number(L"PLAYER_RENDER_HEIGHT", p.video.height);
 	number(L"PLAYER_RENDER_FPS", p.video.fps);
@@ -153,6 +154,7 @@ void preferences_store::save(const application_preferences& p) const
 	key.SetDwordValue(L"SYNCORE_RENDER_THREADS", p.synth.render_threads);
 	key.SetDwordValue(L"SYNCORE_PHASE_MODE", static_cast<std::uint32_t>(p.synth.phase_mode));
 	key.SetDwordValue(L"SYNCORE_LIMITER", p.synth.limiter_enabled);
+	key.SetDwordValue(L"SYNCORE_SHED_NOTES", p.synth.shed_quiet_notes);
 	key.SetStringValue(L"SYNCORE_GAIN_DB", std::to_wstring(p.synth.output_gain_db));
 	key.SetDwordValue(L"PLAYER_RENDER_WIDTH", p.video.width);
 	key.SetDwordValue(L"PLAYER_RENDER_HEIGHT", p.video.height);
