@@ -939,8 +939,8 @@ struct simple_player
 		state.pause_position_us.store(pause_position, std::memory_order_release);
 		state.paused.store(true, std::memory_order_release);
 
-		// Silence all notes immediately
-		all_notes_off();
+		// Silence all notes immediately, but keep the channel state for resume
+		all_notes_off(false);
 	}
 
 	// Resume playback from paused position
@@ -3114,7 +3114,10 @@ private:
 		}
 	}
 
-	void all_notes_off_channel(uint8_t channel)
+	// reset_controllers: seek and stop rebuild channel state from the start of
+	// the file, so CC121 is wanted there. Pause resumes mid-stream and must keep
+	// pitch bend, volume, pan, etc. - nothing would replay them.
+	void all_notes_off_channel(uint8_t channel, bool reset_controllers = true)
 	{
 		if (!has_output()) [[unlikely]]
 			return;
@@ -3122,7 +3125,8 @@ private:
 		channel &= 0x0F;
 
 		send_output_message(make_smsg(0xB0 | channel, 120));
-		send_output_message(make_smsg(0xB0 | channel, 121));
+		if (reset_controllers)
+			send_output_message(make_smsg(0xB0 | channel, 121));
 		send_output_message(make_smsg(0xB0 | channel, 123));
 	}
 
@@ -3163,10 +3167,10 @@ private:
 		return true;
 	}
 
-	void all_notes_off()
+	void all_notes_off(bool reset_controllers = true)
 	{
 		for (uint8_t c = 0; c < 16; c++)
-			all_notes_off_channel(c);
+			all_notes_off_channel(c, reset_controllers);
 	}
 
 	inline static uint32_t make_smsg(uint8_t prog, uint8_t arg1, uint8_t arg2 = 0)
