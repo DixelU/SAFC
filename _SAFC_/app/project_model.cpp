@@ -168,9 +168,13 @@ void safc_data::resolve_subdivision_problem_group_id_assign(std::uint16_t thread
 	for (int i = 0; i < sizes.size(); i++)
 		sum_size.push_back((current_total += sizes[i].filesize));
 
+	const std::int64_t total_size = sum_size.back();
+
 	for (int i = 0; i < sum_size.size(); i++)
 	{
-		files[sizes[i].id].group_id = (std::uint16_t)(ceil(((float)sum_size[i] / ((float)sum_size.back())) * threads_count) - 1.);
+		// ceil(sum / total * threads) - 1, in integers
+		const std::int64_t scaled = sum_size[i] * threads_count;
+		files[sizes[i].id].group_id = (std::uint16_t)(scaled > 0 ? (scaled - 1) / total_size : 0);
 		std::cout << "Thread " << files[sizes[i].id].group_id << ": " << sizes[i].filesize << ":\t" << sizes[i].id << std::endl;
 	}
 }
