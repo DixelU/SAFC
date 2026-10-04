@@ -33,6 +33,8 @@ struct spill_settings
 	std::size_t minimal_spilled_size = 64ull << 20;
 	// Physical memory that a heap block must leave available to the system.
 	std::size_t memory_headroom = 1ull << 30;
+	// Disk space that a spilled block must leave free on its drive.
+	std::uint64_t disk_headroom = 2ull << 30;
 	// Directory of the backing files. Empty means the system temporary directory.
 	std::filesystem::path directory;
 	// Puts every block of at least a page on disk, whatever the memory state.
@@ -40,6 +42,16 @@ struct spill_settings
 
 	std::atomic_uint64_t spilled_bytes{0};
 	std::atomic_uint64_t spilled_blocks_count{0};
+};
+
+// A spilled block would leave its drive almost full. Failing the job is far
+// better than filling the drive, which can stall the whole system.
+struct spill_space_exhausted : std::bad_alloc
+{
+	const char* what() const noexcept override
+	{
+		return "Not enough free disk space for temporary processing buffers";
+	}
 };
 
 // Heap blocks while memory lasts, temporary file mappings after that. Every
@@ -137,6 +149,12 @@ private:
 			std::filesystem::temp_directory_path(error) : settings.directory;
 		if (error)
 			throw std::bad_alloc{};
+
+		ULARGE_INTEGER free_bytes{};
+		if (GetDiskFreeSpaceExW(directory.c_str(), &free_bytes, nullptr, nullptr) &&
+			(free_bytes.QuadPart < settings.disk_headroom ||
+				block_size > free_bytes.QuadPart - settings.disk_headroom))
+			throw spill_space_exhausted{};
 
 		const auto filename = directory / (L"safc-buffer-" +
 			std::to_wstring(GetCurrentProcessId()) + L"-" +

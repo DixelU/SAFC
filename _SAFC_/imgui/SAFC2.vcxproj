@@ -213,6 +213,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\SAFC_InnerModules\spillable_allocator.h" />
+    <ClInclude Include="..\SAFC_InnerModules\midi_track_collapse_handler.h" />
     <ClInclude Include="analysis_panel.h" />
     <ClInclude Include="cli.h" />
     <ClInclude Include="editor_panel.h" />

@@ -263,6 +263,9 @@
     <ClInclude Include="..\SAFC_InnerModules\spillable_allocator.h">
       <Filter>Processing and playback</Filter>
     </ClInclude>
+    <ClInclude Include="..\SAFC_InnerModules\midi_track_collapse_handler.h">
+      <Filter>Processing and playback</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="..\_SAFC_.rc">

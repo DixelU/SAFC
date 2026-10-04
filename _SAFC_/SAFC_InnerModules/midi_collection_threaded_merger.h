@@ -536,8 +536,11 @@ private:
 		{
 			auto& s = streams.emplace_back(std::make_unique<midi_file_reader>(
 				pdata->output_path()));
+
 			s->set_cancellation(&cancellation_requested_);
-			if (!s->is_open() || s->size() < 14) throw std::runtime_error("Cannot read processed MIDI for in-place merge");
+			if (!s->is_open() || s->size() < 14)
+				throw std::runtime_error("Cannot read processed MIDI for in-place merge");
+
 			for (int i = 0; i < 14; i++)
 				static_cast<void>(read_midi_byte(*s));
 		}

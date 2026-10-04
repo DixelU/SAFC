@@ -195,6 +195,9 @@
     <ClInclude Include="SAFC_InnerModules\spillable_allocator.h">
       <Filter>Файлы заголовков\MIDI Processing</Filter>
     </ClInclude>
+    <ClInclude Include="SAFC_InnerModules\midi_track_collapse_handler.h">
+      <Filter>Файлы заголовков\MIDI Processing</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="SAFCGUIF_Local\midi_editor_tools_ui.cpp">

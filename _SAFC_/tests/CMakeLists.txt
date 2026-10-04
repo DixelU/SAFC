@@ -80,4 +80,15 @@ if(SAFC_BUILD_PROCESSOR_TESTS)
     add_test(NAME safc-midi-merger COMMAND safc-midi-merger-tests
         "${CMAKE_CURRENT_BINARY_DIR}/midi-merger-test-data")
     set_tests_properties(safc-midi-merger PROPERTIES TIMEOUT 30)
+
+    add_executable(safc-midi-collapse-handler-tests midi_track_collapse_handler_tests.cpp)
+    target_include_directories(safc-midi-collapse-handler-tests PRIVATE
+        "${CMAKE_CURRENT_LIST_DIR}/../../utility/include")
+    target_compile_features(safc-midi-collapse-handler-tests PRIVATE cxx_std_23)
+    if(MSVC)
+        target_compile_options(safc-midi-collapse-handler-tests PRIVATE /permissive- /EHsc /W4)
+    endif()
+    add_test(NAME safc-midi-collapse-handler COMMAND safc-midi-collapse-handler-tests
+        "${CMAKE_CURRENT_BINARY_DIR}/midi-collapse-handler-test-data")
+    set_tests_properties(safc-midi-collapse-handler PROPERTIES TIMEOUT 30)
 endif()

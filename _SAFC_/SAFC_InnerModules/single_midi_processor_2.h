@@ -24,6 +24,7 @@
 #include <polyline_converter.h>
 #include "cut_and_transpose.h"
 #include "spillable_allocator.h"
+#include "midi_track_collapse_handler.h"
 
 #include "single_midi_info_collector.h"
 
@@ -47,6 +48,7 @@ enum class log_event_type : uint8_t
 	meta_too_large,
 	internal_buffer_corruption,
 	buffer_on_disk,
+	collapsing_tracks,
 };
 
 struct log_event
@@ -61,40 +63,42 @@ struct log_event
 	{
 		switch (e.type)
 		{
-		case log_event_type::empty_buffer:
-			return "Empty buffer";
-		case log_event_type::preparing_buffer:
-			return "Preparing buffer (size: " + std::to_string(e.param1) + ")";
-		case log_event_type::sorting_buffer:
-			return "Sorting buffer (elements: " + std::to_string(e.param1) + ")";
-		case log_event_type::copying_buffer:
-			return "Copying buffer (elements: " + std::to_string(e.param1) + ")";
-		case log_event_type::tracks_processed:
-			return std::to_string(e.param1) + " tracks processed. (" + std::to_string(e.param2) + ") new.";
-		case log_event_type::processing_failed:
-			return "Something went wrong during processing";
-		case log_event_type::sorting_failed:
-			return "Something went wrong during sorting";
-		case log_event_type::off_of_non_on_note:
-			return std::to_string(e.param1) + ": OFF of nonON Note: " + std::to_string(e.param2);
-		case log_event_type::incorrect_note_ref:
-			return std::to_string(e.param1) + ": Incorrect index of note reference " + std::to_string(e.param2);
-		case log_event_type::unexpected_zero_rsb:
-			return std::to_string(e.param1) + ": Unexpected 0 RSB";
-		case log_event_type::unknown_event_type:
-			return std::to_string(e.param1) + ": Unknown event type " + std::to_string(e.param2);
-		case log_event_type::unexpected_end_of_buffer:
-			return "B*" + std::to_string(e.param1) + ": unexpected end of buffer";
-		case log_event_type::track_size_mismatch:
-			return "Track size mismatch (expected " + std::to_string(e.param1) + ", got " + std::to_string(e.param2) + ")";
-		case log_event_type::meta_too_large:
-			return "Meta too large (size: " + std::to_string(e.param1) + ")";
-		case log_event_type::internal_buffer_corruption:
-			return "Internal buffer corruption - " + std::to_string(e.param1) + " ~ " + std::to_string(e.param2);
-		case log_event_type::buffer_on_disk:
-			return "Not enough memory: using on-disk buffers (size: " + std::to_string(e.param1) + ")";
-		default:
-			return "";
+			case log_event_type::empty_buffer:
+				return "Empty buffer";
+			case log_event_type::preparing_buffer:
+				return "Preparing buffer (size: " + std::to_string(e.param1) + ")";
+			case log_event_type::sorting_buffer:
+				return "Sorting buffer (elements: " + std::to_string(e.param1) + ")";
+			case log_event_type::copying_buffer:
+				return "Copying buffer (elements: " + std::to_string(e.param1) + ")";
+			case log_event_type::tracks_processed:
+				return std::to_string(e.param1) + " tracks processed. (" + std::to_string(e.param2) + ") new.";
+			case log_event_type::processing_failed:
+				return "Something went wrong during processing";
+			case log_event_type::sorting_failed:
+				return "Something went wrong during sorting";
+			case log_event_type::off_of_non_on_note:
+				return std::to_string(e.param1) + ": OFF of nonON Note: " + std::to_string(e.param2);
+			case log_event_type::incorrect_note_ref:
+				return std::to_string(e.param1) + ": Incorrect index of note reference " + std::to_string(e.param2);
+			case log_event_type::unexpected_zero_rsb:
+				return std::to_string(e.param1) + ": Unexpected 0 RSB";
+			case log_event_type::unknown_event_type:
+				return std::to_string(e.param1) + ": Unknown event type " + std::to_string(e.param2);
+			case log_event_type::unexpected_end_of_buffer:
+				return "B*" + std::to_string(e.param1) + ": unexpected end of buffer";
+			case log_event_type::track_size_mismatch:
+				return "Track size mismatch (expected " + std::to_string(e.param1) + ", got " + std::to_string(e.param2) + ")";
+			case log_event_type::meta_too_large:
+				return "Meta too large (size: " + std::to_string(e.param1) + ")";
+			case log_event_type::internal_buffer_corruption:
+				return "Internal buffer corruption - " + std::to_string(e.param1) + " ~ " + std::to_string(e.param2);
+			case log_event_type::buffer_on_disk:
+				return "Not enough memory: using on-disk buffers (size: " + std::to_string(e.param1) + ")";
+			case log_event_type::collapsing_tracks:
+				return "Collapsing " + std::to_string(e.param1) + " tracks";
+			default:
+				return "";
 		}
 	}
 };
@@ -362,19 +366,20 @@ struct single_midi_processor_2
 
 		using logger_t = singleline_logger;
 
-		message_buffers(bool is_console_oriented = false):
 			log(is_console_oriented ? 
-				std::make_shared<printing_logger>() : 
+		message_buffers(bool is_console_oriented = false) :
+			log(is_console_oriented ?
+				std::make_shared<printing_logger>() :
 				std::make_shared<logger_t>()),
-			warning(is_console_oriented ? 
-				std::make_shared<printing_logger>() : 
+			warning(is_console_oriented ?
+				std::make_shared<printing_logger>() :
 				std::make_shared<logger_t>()),
-			error(is_console_oriented ? 
-				std::make_shared<printing_logger>() : 
+			error(is_console_oriented ?
+				std::make_shared<printing_logger>() :
 				std::make_shared<logger_t>()),
 			last_input_position(0),
 			processing(false),
-			finished(false)		
+			finished(false)
 		{
 		}
 	};
@@ -415,7 +420,7 @@ struct single_midi_processor_2
 		{
 			double tempo_multiplier;
 			metasize_type tempo_override_value;
-			tempo_override():
+			tempo_override() :
 				tempo_override_value(single_track_data::selection::default_tempo), tempo_multiplier(1)
 			{
 			}
@@ -423,7 +428,7 @@ struct single_midi_processor_2
 			{
 				tempo_override_value = static_cast<metasize_type>(60000000. / tempo);
 			}
-			inline metasize_type process(metasize_type a) const 
+			inline metasize_type process(metasize_type a) const
 			{
 				if (tempo_override_value != single_track_data::selection::default_tempo)
 					return tempo_override_value;
@@ -511,7 +516,7 @@ struct single_midi_processor_2
 		const auto* bytes = reinterpret_cast<const char*>(vec.data()) + (beg - vec.begin());
 		auto size = end - beg;
 		if (!cancel)
-		{ 
+		{
 			out.write(bytes, size);
 			return;
 		}
@@ -560,7 +565,8 @@ struct single_midi_processor_2
 			value >>= $7byte_mask_size;
 			if (stack_end - stack != 1)
 				*stack |= $adjacent7byte_mask;
-		} while (value);
+		}
+		while (value);
 
 		auto stack_size = static_cast<uint8_t>(stack_end - stack);
 
@@ -628,7 +634,7 @@ struct single_midi_processor_2
 
 		template<typename T>
 		static void __copy_T_to_array(
-			base_type* storage, 
+			base_type* storage,
 			const typename std::enable_if<std::is_same<T, raw_storage>::value, T>::type& value)
 		{
 			std::memcpy(storage, value.ptr, value.size);
@@ -636,7 +642,7 @@ struct single_midi_processor_2
 
 		template<typename T>
 		static void __copy_T_to_array(
-			base_type* storage, 
+			base_type* storage,
 			const typename std::enable_if<(!std::is_same<T, raw_storage>::value), T>::type& value)
 		{
 			*(T*)(storage) = value;
@@ -794,14 +800,14 @@ struct single_midi_processor_2
 
 		const auto back_note_event_inserter =
 			[&buffers](decltype(current_polyphony)& current_polyphony,
-				decltype(current_tick)& current_tick, 
+				decltype(current_tick)& current_tick,
 				decltype(data_buffer)& data_buffer)
 		{
 			for (size_t idx = 0; idx < current_polyphony.size(); idx++)
 			{
 				auto& cur_note_stack = current_polyphony[idx];
 				const base_type note = idx & 0xF;
-				const base_type key = (idx >> 4)&0xFF;
+				const base_type key = (idx >> 4) & 0xFF;
 
 				while (cur_note_stack.size())
 				{
@@ -848,7 +854,7 @@ struct single_midi_processor_2
 
 				if (command < 0xF0 || command == 0xFF)
 					param_buffer = read_midi_byte(file_input);
-				else 
+				else
 					param_buffer = 0xFF;
 			}
 
@@ -863,145 +869,145 @@ struct single_midi_processor_2
 
 			switch (command >> 4)
 			{
-			case 0x8: case 0x9:
-			{
-				base_type com = command;
-				base_type key = param_buffer;
-				base_type vel = read_midi_byte(file_input);
-				tick_type reference = disable_tick;
-
-				if (!settings.legacy.enable_zero_velocity) [[likely]]
-					com ^= ((!bool(vel) & bool(com & 0x10)) << 4);
-				else if (!vel && bool(com & 0x10))
-					vel = 1;
-
-				std::uint16_t key_polyindex = (com & 0xF) | (((std::uint16_t)key) << 4);
-				bool polyphony_error = false;
-				auto& current_polyphony_object = current_polyphony[key_polyindex];
-
-				if (com & 0x10)
-					current_polyphony_object.push_back(current_index); // hot smh
-				else if (current_polyphony_object.size())
+				case 0x8: case 0x9:
 				{
-					reference = current_polyphony_object.back();
-					current_polyphony_object.pop_back(); // hot smh
-					auto other_note_reference = reference + event_param3;
-					if (true || is_valid_index<stored_ref_type>(data_buffer, other_note_reference)) [[likely]]
-						get_value<stored_ref_type>(data_buffer, other_note_reference) = current_index;
+					base_type com = command;
+					base_type key = param_buffer;
+					base_type vel = read_midi_byte(file_input);
+					tick_type reference = disable_tick;
+
+					if (!settings.legacy.enable_zero_velocity) [[likely]]
+						com ^= ((!bool(vel) & bool(com & 0x10)) << 4);
+					else if (!vel && bool(com & 0x10))
+						vel = 1;
+
+					std::uint16_t key_polyindex = (com & 0xF) | (((std::uint16_t)key) << 4);
+					bool polyphony_error = false;
+					auto& current_polyphony_object = current_polyphony[key_polyindex];
+
+					if (com & 0x10)
+						current_polyphony_object.push_back(current_index); // hot smh
+					else if (current_polyphony_object.size())
+					{
+						reference = current_polyphony_object.back();
+						current_polyphony_object.pop_back(); // hot smh
+						auto other_note_reference = reference + event_param3;
+						if (true || is_valid_index<stored_ref_type>(data_buffer, other_note_reference)) [[likely]]
+							get_value<stored_ref_type>(data_buffer, other_note_reference) = current_index;
+						else
+						{
+							polyphony_error = true;
+							(*buffers.warning) << log_event{log_event_type::incorrect_note_ref, file_input.position(), (uint64_t)other_note_reference};
+						}
+					}
 					else
 					{
 						polyphony_error = true;
-						(*buffers.warning) << log_event{log_event_type::incorrect_note_ref, file_input.position(), (uint64_t)other_note_reference};
+						++noteoff_misses;
+						(*buffers.warning) << log_event{log_event_type::off_of_non_on_note, file_input.position(), (uint64_t)noteoff_misses};
 					}
+
+					if (polyphony_error) [[unlikely]]
+					{
+						data_buffer.resize(current_index);
+						continue;
+					}
+
+					copy_back_traits::copy_back(data_buffer, stored_tick_type(current_tick), com, key, vel, stored_ref_type(reference));
+
+					break;
 				}
-				else
+				case 0xA: case 0xB: case 0xE:
 				{
-					polyphony_error = true;
-					++noteoff_misses;
-					(*buffers.warning) << log_event{log_event_type::off_of_non_on_note, file_input.position(), (uint64_t)noteoff_misses};
-				}
+					base_type com = command;
+					base_type p1 = param_buffer;
+					base_type p2 = read_midi_byte(file_input);
 
-				if (polyphony_error) [[unlikely]]
+					copy_back_traits::copy_back(data_buffer, stored_tick_type(current_tick), com, p1, p2);
+
+					break;
+				}
+				case 0xC: case 0xD:
 				{
-					data_buffer.resize(current_index);
-					continue;
+					base_type com = command;
+					base_type p1 = param_buffer;
+
+					copy_back_traits::copy_back(data_buffer, stored_tick_type(current_tick), com, p1);
+
+					break;
 				}
-
-				copy_back_traits::copy_back(data_buffer, stored_tick_type(current_tick), com, key, vel, stored_ref_type(reference));
-
-				break;
-			}
-			case 0xA: case 0xB: case 0xE:
-			{
-				base_type com = command;
-				base_type p1 = param_buffer;
-				base_type p2 = read_midi_byte(file_input);
-
-				copy_back_traits::copy_back(data_buffer, stored_tick_type(current_tick), com, p1, p2);
-
-				break;
-			}
-			case 0xC: case 0xD:
-			{
-				base_type com = command;
-				base_type p1 = param_buffer;
-
-				copy_back_traits::copy_back(data_buffer, stored_tick_type(current_tick), com, p1);
-
-				break;
-			}
-			case 0xF:
-			{
-				base_type com = command;
-				base_type type = param_buffer;
-
-				is_going &= !(type == 0x2F && com == 0xFF);
-				if (!settings.legacy.ignore_meta_rsb)
-					rsb = 0;
-
-				if (!is_going)
+				case 0xF:
 				{
-					// ignore the end of track event;
-					continue;
+					base_type com = command;
+					base_type type = param_buffer;
+
+					is_going &= !(type == 0x2F && com == 0xFF);
+					if (!settings.legacy.ignore_meta_rsb)
+						rsb = 0;
+
+					if (!is_going)
+					{
+						// ignore the end of track event;
+						continue;
+					}
+
+					//if(com == 0xFF) // damn sysex broke it all >:c
+						//push_back<base_type>(data_buffer, type);
+
+					// 6 tick  1 type  1 metatype (except when sysex)  1 vlv size  4 size  ...<raw meta>~vlv+data
+
+					tick_type raw_length = get_vlv(file_input);
+					// The record stores exactly 4 size bytes; a wider type shifts the raw data.
+					metasize_type length;
+
+					if (raw_length > 0x7FFFFFFF) [[unlikely]]
+					{
+						is_good = false;
+						(*buffers.error) << log_event{log_event_type::meta_too_large, file_input.position(), raw_length};
+						length = 0x7FFFFFFF;
+					}
+					else
+						length = static_cast<metasize_type>(raw_length);
+
+					auto encoded_length = push_vlv_s(length, meta_buffer);
+
+					for (std::size_t i = 0; i < raw_length; ++i)
+						meta_buffer.push_back(read_midi_byte(file_input));
+					length += encoded_length;
+
+					if (com == 0xFF) [[likely]]
+					{
+						copy_back_traits::copy_back(
+							data_buffer,
+							stored_tick_type(current_tick),
+							com,
+							type,
+							encoded_length,
+							length,
+							copy_back_traits::raw_storage{
+								meta_buffer.data(), length});
+					}
+					else
+					{
+						copy_back_traits::copy_back(
+							data_buffer,
+							stored_tick_type(current_tick),
+							com,
+							encoded_length,
+							length,
+							copy_back_traits::raw_storage{
+								meta_buffer.data(), length});
+					}
+
+					meta_buffer.clear();
+
+					break;
 				}
-
-				//if(com == 0xFF) // damn sysex broke it all >:c
-					//push_back<base_type>(data_buffer, type);
-
-				// 6 tick  1 type  1 metatype (except when sysex)  1 vlv size  4 size  ...<raw meta>~vlv+data
-
-				tick_type raw_length = get_vlv(file_input);
-				// The record stores exactly 4 size bytes; a wider type shifts the raw data.
-				metasize_type length;
-
-				if (raw_length > 0x7FFFFFFF) [[unlikely]]
+				default:
 				{
-					is_good = false;
-					(*buffers.error) << log_event{log_event_type::meta_too_large, file_input.position(), raw_length};
-					length = 0x7FFFFFFF;
+					(*buffers.error) << log_event{log_event_type::unknown_event_type, file_input.position(), (uint64_t)command};
+					break;
 				}
-				else
-					length = static_cast<metasize_type>(raw_length);
-
-				auto encoded_length = push_vlv_s(length, meta_buffer);
-
-				for (std::size_t i = 0; i < raw_length; ++i)
-					meta_buffer.push_back(read_midi_byte(file_input));
-				length += encoded_length;
-
-				if (com == 0xFF) [[likely]]
-				{
-					copy_back_traits::copy_back(
-						data_buffer,
-						stored_tick_type(current_tick),
-						com,
-						type,
-						encoded_length,
-						length,
-						copy_back_traits::raw_storage{
-							meta_buffer.data(), length});
-				}
-				else
-				{
-					copy_back_traits::copy_back(
-						data_buffer,
-						stored_tick_type(current_tick),
-						com,
-						encoded_length,
-						length,
-						copy_back_traits::raw_storage{
-							meta_buffer.data(), length});
-				}
-
-				meta_buffer.clear();
-
-				break;
-			}
-			default:
-			{
-				(*buffers.error) << log_event{log_event_type::unknown_event_type, file_input.position(), (uint64_t)command};
-				break;
-			}
 			}
 		}
 
@@ -1016,16 +1022,16 @@ struct single_midi_processor_2
 		switch (v >> 4)
 		{
 			//MH_CASE(0xA0) : MH_CASE(0xB0) : MH_CASE(0xE0) :
-		case 0xA: case 0xB: case 0xE:
-			return std::ptrdiff_t(tick_size) + 3ll;
-			//MH_CASE(0x80) : MH_CASE(0x90) :
-		case 0x8: case 0x9:
-			return std::ptrdiff_t(tick_size) + 3ll + (std::ptrdiff_t(reference_size) * !ready_for_write);
-			//MH_CASE(0xC0) : MH_CASE(0xD0) :
-		case 0xC: case 0xD:
-			return std::ptrdiff_t(tick_size) + 2ll;
-		default:
-			return -1ll;
+			case 0xA: case 0xB: case 0xE:
+				return std::ptrdiff_t(tick_size) + 3ll;
+				//MH_CASE(0x80) : MH_CASE(0x90) :
+			case 0x8: case 0x9:
+				return std::ptrdiff_t(tick_size) + 3ll + (std::ptrdiff_t(reference_size) * !ready_for_write);
+				//MH_CASE(0xC0) : MH_CASE(0xD0) :
+			case 0xC: case 0xD:
+				return std::ptrdiff_t(tick_size) + 2ll;
+			default:
+				return -1ll;
 		}
 	}
 
@@ -1053,14 +1059,14 @@ struct single_midi_processor_2
 		const auto& type = cur[event_type];
 		auto size = expected_size<ready_for_write>(type);
 		if (size > 0)
-			return { size, 0, 0 };
+			return {size, 0, 0};
 
 		// 6 tick  1 type  1 metatype (when not sysex)  _1 vlv size_  4 size  ...<raw meta>~vlv+data	
 		bool is_sysex = type != 0xFF;
 		const auto& meta_size = get_value<metasize_type>(cur, event_param3 - is_sysex);
 
-		return 
-		{ 
+		return
+		{
 			std::ptrdiff_t(event_param2 - is_sysex),
 			std::ptrdiff_t(event_meta_raw - is_sysex),
 			std::ptrdiff_t(event_meta_raw - is_sysex + meta_size)
@@ -1182,7 +1188,7 @@ struct single_midi_processor_2
 				{
 					if (runs.size())
 						runs.back().end = i;
-					runs.push_back({ tick, i, i });
+					runs.push_back({tick, i, i});
 				}
 				previous_tick = tick;
 				++events_count;
@@ -1316,159 +1322,159 @@ struct single_midi_processor_2
 
 			switch (channelless_type)
 			{
-			case 0x90:
-			case 0x80:
-			{
-				if (!filter.pass_notes) [[unlikely]]
+				case 0x90:
+				case 0x80:
 				{
+					if (!filter.pass_notes) [[unlikely]]
+					{
+						tick = disable_tick;
+						return false;
+					}
+
+					bool is_note_on = channelless_type & 0x10;
+
+					auto& reference_event_pair = get_value<stored_ref_type>(cur, event_param3);
+					auto& reference_event_tick = get_value<stored_tick_type>(begin, reference_event_pair);
+					bool trim_condition =
+						(is_note_on && before_selection && (
+							reference_event_tick >= selection_data.begin &&
+							reference_event_tick != disable_tick)
+							) ||
+						// The paired note-on has already passed selection and may now
+						// have an offset/PPQ/flattened tick. Only its enabled state is
+						// meaningful here; comparing it to a source tick can drop the pair.
+						(!is_note_on && after_selection && (reference_event_tick != disable_tick));
+
+					if (!trim_condition)
+					{
+						reference_event_tick = disable_tick;
+						tick = disable_tick;
+						return false;
+					}
+
+					if (is_note_on)
+					{
+						auto& volume = get_value<base_type>(cur, event_param2);
+						volume = 1;
+						tick = selection_data.begin;
+					}
+					else
+					{
+						tick = selection_data.end - 1;
+					}
+
+					return true;
+					break;
+				}
+				default:
+				{
+					if (before_selection)
+					{
+						switch (channelless_type)
+						{
+							case 0xA0:
+							case 0xB0:
+							{
+								if (!filter.pass_other)
+									break;
+
+								const auto& param1 = get_value<base_type>(cur, event_param1);
+								const auto& param2 = get_value<base_type>(cur, event_param2);
+								const std::uint16_t key = (type << 8) | (param1);
+								auto& data = std_ref.selection_data.key_events_at_selection_front[key];
+								data = param2;
+								break;
+							}
+							case 0xC0:
+							{
+								if (filter.piano_only) [[likely]]
+									break;
+
+								[[fallthrough]];
+							}
+							case 0xD0:
+							{
+								if (!filter.pass_other)
+									break;
+
+								const auto& param = get_value<base_type>(cur, event_param1);
+								const std::uint16_t key = (type << 8);
+								auto& data = std_ref.selection_data.channel_events_at_selection_front[key];
+								data.field1 = param;
+								data.field2_is_set = false;
+
+								break;
+							}
+							case 0xE0:
+							{
+								if (!filter.pass_pitch)
+									break;
+
+								const auto& param1 = get_value<base_type>(cur, event_param1);
+								const auto& param2 = get_value<base_type>(cur, event_param2);
+								const std::uint16_t key = (type << 8);
+								auto& data = std_ref.selection_data.channel_events_at_selection_front[key];
+								data.field1 = param1;
+								data.field2 = param2;
+								data.field2_is_set = true;
+
+								break;
+							}
+							case 0xF0:
+							{
+								if (type != 0xFF) [[unlikely]] break;
+								const auto& meta_subtype = get_value<base_type>(cur, event_param1);
+
+								// 6 tick  1 type  1 metatype  1 vlv size  4 size  ...<raw meta>~vlv+data
+								//const auto& vlv_size = get_value<base_type>(cur, event_param3);
+
+								switch (meta_subtype)
+								{
+									case 0x51:
+									{
+										if (!filter.pass_tempo)
+											break;
+
+										constexpr auto base_position = get_meta_param_index(1, 0);
+										const auto& tempo_byte1 = get_value<base_type>(cur, base_position + 0);
+										const auto& tempo_byte2 = get_value<base_type>(cur, base_position + 1);
+										const auto& tempo_byte3 = get_value<base_type>(cur, base_position + 2);
+
+										std_ref.selection_data.frontal_tempo = (tempo_byte1 << 16) | (tempo_byte2 << 8) | tempo_byte3;
+										break;
+									}
+									[[unlikely]] case 0x0A:
+									{
+										if (!filter.pass_other)
+											break;
+
+										constexpr auto base_position = get_meta_param_index(1, 0);
+
+										const auto& size = get_value<base_type>(cur, base_position);
+										if (size != 0x8 && size != 0xB) [[unlikely]]
+											break;
+
+										const auto& signature = get_value<base_type>(cur, base_position + 1);
+										if (signature) [[unlikely]]
+											break;
+
+										std_ref.selection_data.frontal_color_event.is_empty = false;
+										std_ref.selection_data.frontal_color_event.size = size;
+										std_ref.selection_data.frontal_color_event.data[0] = signature;
+										for (size_t i = 1; i < size; ++i)
+											std_ref.selection_data.frontal_color_event.data[i] = get_value<base_type>(cur, base_position + i);
+										break;
+									}
+									default:
+										break;
+								}
+								break;
+							}
+						}
+					}
+
 					tick = disable_tick;
-					return false;
 				}
-
-				bool is_note_on = channelless_type & 0x10;
-
-				auto& reference_event_pair = get_value<stored_ref_type>(cur, event_param3);
-				auto& reference_event_tick = get_value<stored_tick_type>(begin, reference_event_pair);
-				bool trim_condition = 
-					(is_note_on && before_selection && (
-						reference_event_tick >= selection_data.begin && 
-						reference_event_tick != disable_tick)
-					) ||
-					// The paired note-on has already passed selection and may now
-					// have an offset/PPQ/flattened tick. Only its enabled state is
-					// meaningful here; comparing it to a source tick can drop the pair.
-					(!is_note_on && after_selection && (reference_event_tick != disable_tick));
-
-				if (!trim_condition)
-				{
-					reference_event_tick = disable_tick;
-					tick = disable_tick;
-					return false;
-				}
-
-				if (is_note_on)
-				{
-					auto& volume = get_value<base_type>(cur, event_param2);
-					volume = 1;
-					tick = selection_data.begin;
-				}
-				else
-				{
-					tick = selection_data.end - 1;
-				}
-
-				return true;
-				break;
-			}
-			default:
-			{
-				if (before_selection)
-				{
-					switch (channelless_type)
-					{
-					case 0xA0:
-					case 0xB0:
-					{
-						if (!filter.pass_other)
-							break;
-
-						const auto& param1 = get_value<base_type>(cur, event_param1);
-						const auto& param2 = get_value<base_type>(cur, event_param2);
-						const std::uint16_t key = (type << 8) | (param1);
-						auto& data = std_ref.selection_data.key_events_at_selection_front[key];
-						data = param2;
-						break;
-					}
-					case 0xC0:
-					{
-						if (filter.piano_only) [[likely]]
-							break;
-
-						[[fallthrough]];
-					}
-					case 0xD0:
-					{
-						if (!filter.pass_other)
-							break;
-
-						const auto& param = get_value<base_type>(cur, event_param1);
-						const std::uint16_t key = (type << 8);
-						auto& data = std_ref.selection_data.channel_events_at_selection_front[key];
-						data.field1 = param;
-						data.field2_is_set = false;
-
-						break;
-					}
-					case 0xE0:
-					{
-						if (!filter.pass_pitch)
-							break;
-
-						const auto& param1 = get_value<base_type>(cur, event_param1);
-						const auto& param2 = get_value<base_type>(cur, event_param2);
-						const std::uint16_t key = (type << 8);
-						auto& data = std_ref.selection_data.channel_events_at_selection_front[key];
-						data.field1 = param1;
-						data.field2 = param2;
-						data.field2_is_set = true;
-
-						break;
-					}
-					case 0xF0:
-					{
-						if (type != 0xFF) [[unlikely]] break;
-						const auto& meta_subtype = get_value<base_type>(cur, event_param1);
-
-						// 6 tick  1 type  1 metatype  1 vlv size  4 size  ...<raw meta>~vlv+data
-						//const auto& vlv_size = get_value<base_type>(cur, event_param3);
-
-						switch (meta_subtype)
-						{
-						case 0x51:
-						{
-							if (!filter.pass_tempo)
-								break;
-
-							constexpr auto base_position = get_meta_param_index(1, 0);
-							const auto& tempo_byte1 = get_value<base_type>(cur, base_position + 0);
-							const auto& tempo_byte2 = get_value<base_type>(cur, base_position + 1);
-							const auto& tempo_byte3 = get_value<base_type>(cur, base_position + 2);
-
-							std_ref.selection_data.frontal_tempo = (tempo_byte1 << 16) | (tempo_byte2 << 8) | tempo_byte3;
-							break;
-						}
-						[[unlikely]] case 0x0A:
-						{
-							if (!filter.pass_other)
-								break;
-
-							constexpr auto base_position = get_meta_param_index(1, 0);
-
-							const auto& size = get_value<base_type>(cur, base_position);
-							if (size != 0x8 && size != 0xB) [[unlikely]]
-								break;
-
-							const auto& signature = get_value<base_type>(cur, base_position + 1);
-							if (signature) [[unlikely]]
-								break;
-
-							std_ref.selection_data.frontal_color_event.is_empty = false;
-							std_ref.selection_data.frontal_color_event.size = size;
-							std_ref.selection_data.frontal_color_event.data[0] = signature;
-							for(size_t i = 1; i < size; ++i)
-								std_ref.selection_data.frontal_color_event.data[i] = get_value<base_type>(cur, base_position + i);
-							break;
-						}
-						default:
-							break;
-						}
-						break;
-					}
-					}
-				}
-
-				tick = disable_tick;
-			}
 
 			}
 
@@ -1476,7 +1482,7 @@ struct single_midi_processor_2
 		};
 
 		auto program_transform = [filtering = settings.filter]
-		(const data_iterator& begin, const data_iterator& end, const data_iterator& cur, single_track_data& std_ref) -> bool 
+		(const data_iterator& begin, const data_iterator& end, const data_iterator& cur, single_track_data& std_ref) -> bool
 		{
 			auto& tick = get_value<stored_tick_type>(cur, tick_position);
 			//const auto& type = get_value<base_type>(cur, event_type);
@@ -1522,10 +1528,10 @@ struct single_midi_processor_2
 			return true;
 		};
 
-		auto key_transform = [ filtering = settings.filter,
+		auto key_transform = [filtering = settings.filter,
 			cat = settings.key_converter ? settings.key_converter->bake() : cut_and_transpose(0, 255, 0).bake(),
-			vm = settings.volume_map ]
-		(const data_iterator& begin, const data_iterator& end, const data_iterator& cur, single_track_data& std_ref) -> bool
+			vm = settings.volume_map]
+			(const data_iterator& begin, const data_iterator& end, const data_iterator& cur, single_track_data& std_ref) -> bool
 		{
 			auto& tick = get_value<stored_tick_type>(cur, tick_position);
 			const auto& type = get_value<base_type>(cur, event_type);
@@ -1574,7 +1580,7 @@ struct single_midi_processor_2
 			return true;
 		};
 
-		auto meta_transform = [ filtering = settings.filter, tempo = settings.tempo ]
+		auto meta_transform = [filtering = settings.filter, tempo = settings.tempo]
 		(const data_iterator& begin, const data_iterator& end, const data_iterator& cur, single_track_data& std_ref) -> bool
 		{
 			auto& tick = get_value<stored_tick_type>(cur, tick_position);
@@ -1621,7 +1627,7 @@ struct single_midi_processor_2
 					break;
 				}
 				case 0xFF:
-				default: 
+				default:
 					if (!filtering.pass_other)
 						tick = disable_tick;
 			}
@@ -1629,7 +1635,7 @@ struct single_midi_processor_2
 			return tick != disable_tick;
 		};
 
-		auto others_transform = [ filtering = settings.filter ]
+		auto others_transform = [filtering = settings.filter]
 		(const data_iterator& begin, const data_iterator& end, const data_iterator& cur, single_track_data& std_ref) -> bool
 		{
 			auto& tick = get_value<stored_tick_type>(cur, tick_position);
@@ -1645,10 +1651,10 @@ struct single_midi_processor_2
 
 		auto tick_positive_linear_transform =
 			[old_ppqn = settings.old_ppqn,
-			 new_ppqn = settings.new_ppqn, 
-			 offset = settings.offset,
-			 apply_offset_after = settings.proc_details.apply_offset_after]
-		(const data_iterator& begin, const data_iterator& end, const data_iterator& cur, single_track_data& std_ref) -> bool
+			new_ppqn = settings.new_ppqn,
+			offset = settings.offset,
+			apply_offset_after = settings.proc_details.apply_offset_after]
+			(const data_iterator& begin, const data_iterator& end, const data_iterator& cur, single_track_data& std_ref) -> bool
 		{
 			auto& tick = get_value<stored_tick_type>(cur, tick_position);
 
@@ -1662,7 +1668,7 @@ struct single_midi_processor_2
 			}
 
 			sgtick_type new_tick = sgtick_type(tick) + offset;
-			if(new_tick < 0)
+			if (new_tick < 0)
 				return (tick = disable_tick), false;
 
 			if (old_ppqn != new_ppqn)
@@ -1712,7 +1718,7 @@ struct single_midi_processor_2
 			old_ppqn = settings.old_ppqn,
 			new_ppqn = settings.new_ppqn,
 			target_tempo_val = settings.tempo.tempo_override_value]
-		(const data_iterator& begin, const data_iterator& end, const data_iterator& cur, single_track_data& std_ref) -> bool
+			(const data_iterator& begin, const data_iterator& end, const data_iterator& cur, single_track_data& std_ref) -> bool
 		{
 			auto& tick = get_value<stored_tick_type>(cur, tick_position);
 			if (tick == disable_tick)
@@ -1779,7 +1785,7 @@ struct single_midi_processor_2
 			pipeline.reserve(common_filters.size() + 2);
 			pipeline.insert(pipeline.end(), common_filters.begin(), common_filters.end());
 		}
-		
+
 		if (settings.key_converter || settings.volume_map || !settings.filter.pass_notes)
 		{
 			filters[0x8].emplace_back(std::get<3>(*storage));
@@ -1849,13 +1855,14 @@ struct single_midi_processor_2
 		{
 			data.reserve(size);
 		}
-		inline void dump(std::ostream& out, bool disallow_empty_tracks, const std::atomic_bool* cancel = nullptr)
+		// Returns the bytes written, chunk headers included
+		inline std::uint64_t dump(std::ostream& out, bool disallow_empty_tracks, const std::atomic_bool* cancel = nullptr)
 		{
 			if (disallow_empty_tracks && data.empty())
-				return;
+				return 0;
 
-			constexpr base_type ending[] = { 0x0, 0xFF, 0x2F, 0x0 };
-			constexpr base_type placeholder[] = { 0x0, 0xFF, 0x01, 0x0 };
+			constexpr base_type ending[] = {0x0, 0xFF, 0x2F, 0x0};
+			constexpr base_type placeholder[] = {0x0, 0xFF, 0x01, 0x0};
 
 			const size_t ending_size =
 				sizeof(ending) +
@@ -1872,12 +1879,13 @@ struct single_midi_processor_2
 			header[6] = (size_plus_ending >> 8) & 0xFF;
 			header[7] = (size_plus_ending) & 0xFF;
 
-			out.write((const char*) &header[0], sizeof(header));
+			out.write((const char*)&header[0], sizeof(header));
 			ostream_write(data, out, cancel);
 			if (fill_empty_track_with_at_least_one_event && data.empty())
 				out.write((const char*)&placeholder[0], sizeof(placeholder));
 
 			out.write((const char*)&ending[0], sizeof(ending));
+			return sizeof(header) + size_plus_ending;
 		}
 		inline void swap_zero_and_channel(uint8_t) { return; }
 	};
@@ -1922,10 +1930,12 @@ struct single_midi_processor_2
 				channel = last_channel;
 			return data[channel].get_tick(channel);
 		}
-		inline void dump(std::ostream& out, bool disallow_empty_tracks, const std::atomic_bool* cancel = nullptr)
+		inline std::uint64_t dump(std::ostream& out, bool disallow_empty_tracks, const std::atomic_bool* cancel = nullptr)
 		{
+			std::uint64_t written = 0;
 			for (auto& singleData : data)
-				singleData.dump(out, disallow_empty_tracks, cancel);
+				written += singleData.dump(out, disallow_empty_tracks, cancel);
+			return written;
 		}
 		inline void reserve(uint64_t size)
 		{
@@ -1939,7 +1949,7 @@ struct single_midi_processor_2
 		tick_type selection_front_tick,
 		single_track_data& std_ref,
 		message_buffers& buffers,
-		track_data<channels_split>& out_buffer, 
+		track_data<channels_split>& out_buffer,
 		bool& had_non_meta_events)
 	{
 		if (std_ref.selection_data.frontal_tempo != single_track_data::selection::default_tempo)
@@ -1970,7 +1980,7 @@ struct single_midi_processor_2
 			track_data.push_back(0xFF);
 			track_data.push_back(0x0A);
 			track_data.push_back(std_ref.selection_data.frontal_color_event.size);
-			for(int i = 0; i < std_ref.selection_data.frontal_color_event.size; ++i)
+			for (int i = 0; i < std_ref.selection_data.frontal_color_event.size; ++i)
 				track_data.push_back(std_ref.selection_data.frontal_color_event.data[i]);
 		}
 		std_ref.selection_data.frontal_color_event.is_empty = true;
@@ -2019,14 +2029,12 @@ struct single_midi_processor_2
 
 			track_data.push_back(event_kind);
 			track_data.push_back(data.field1);
-			if(data.field2_is_set)
+			if (data.field2_is_set)
 				track_data.push_back(data.field2);
 		}
 		std_ref.selection_data.channel_events_at_selection_front.clear();
 	}
 
-	/* tick_ordered: buffer holds several tick-ordered runs (collapsed tracks)
-	   which are merged while writing instead of being sorted beforehand */
 	template<bool compression, bool channels_split>
 	inline static bool write_track(
 		buffer_type& data_buffer,
@@ -2034,7 +2042,7 @@ struct single_midi_processor_2
 		message_buffers& buffers,
 		processing_data& settings_data,
 		track_data<channels_split>& out_buffer,
-		bool tick_ordered = false)
+		bool delta_overflow_correction)
 	{
 		constexpr uint32_t deltatime_standard_limit = (1 << (7 * 4)) - 1;
 		out_buffer.clear();
@@ -2048,10 +2056,11 @@ struct single_midi_processor_2
 
 		bool first_tick = settings_data.settings.selection_data.enable_selection_front;
 
-		auto write_selection_front_wrap = [&]() {
+		auto write_selection_front_wrap = [&]()
+		{
 			if (first_tick) [[unlikely]]
 			{
-				auto original_front_tick = 
+				auto original_front_tick =
 					sgtick_type(settings_data.settings.selection_data.begin) + settings_data.settings.offset;
 
 				original_front_tick = (original_front_tick < 0) ? 0 : original_front_tick;
@@ -2067,13 +2076,14 @@ struct single_midi_processor_2
 					selection_front_tick,
 					std_ref,
 					buffers,
-					out_buffer, 
+					out_buffer,
 					had_non_meta_events);
 				first_tick = false;
 			}
 		};
 
-		auto write_event = [&](const data_iterator& db_current) {
+		auto write_event = [&](const data_iterator& db_current)
+		{
 			const tick_type tick = get_value<stored_tick_type>(db_current, tick_position);
 			if (tick == disable_tick)
 				return;
@@ -2097,7 +2107,7 @@ struct single_midi_processor_2
 			auto& track_data = out_buffer.get_vec(channel);
 			auto delta = tick - prev_tick;
 
-			if (settings_data.settings.proc_details.force_delta_overflow_correction)
+			if (delta_overflow_correction)
 			{
 				while (delta > deltatime_standard_limit) [[unlikely]]
 				{
@@ -2126,15 +2136,15 @@ struct single_midi_processor_2
 
 			if (!compression)
 			{
-				copy_back(track_data, 
-					db_current + event_type, 
-					db_current + actual_event_size[0], 
+				copy_back(track_data,
+					db_current + event_type,
+					db_current + actual_event_size[0],
 					actual_event_size[0] - event_type);
 
-				if(actual_event_size[1] != actual_event_size[2])
+				if (actual_event_size[1] != actual_event_size[2])
 					copy_back(track_data,
-						db_current + actual_event_size[1], 
-						db_current + actual_event_size[2], 
+						db_current + actual_event_size[1],
+						db_current + actual_event_size[2],
 						actual_event_size[2] - actual_event_size[1]);
 			}
 			else
@@ -2158,12 +2168,7 @@ struct single_midi_processor_2
 			first_tick = false;
 		};
 
-		if (tick_ordered)
-		{
-			if (size && !visit_in_tick_order(data_buffer, buffers, write_event))
-				(*buffers.error) << log_event{log_event_type::sorting_failed};
-		}
-		else while (i < size)
+		while (i < size)
 		{
 			buffers.check_cancelled();
 			std::size_t di = 0;
@@ -2184,7 +2189,7 @@ struct single_midi_processor_2
 
 		return true;
 	}
-		
+
 	static void post_processing(
 		buffer_type& data_buffer,
 		const single_track_data& std_ref,
@@ -2194,16 +2199,25 @@ struct single_midi_processor_2
 			data_buffer.clear();
 	}
 
-	template<bool channels_split>
-	static void sync_processing(processing_data& data, message_buffers& loggers)
+	// How one pass writes the processed tracks
+	struct track_pass
 	{
-		message_buffers::processing_guard completion{loggers};
-		loggers.check_cancelled();
-		loggers.processing = true;
+		bool remove_empty_tracks;
+		bool delta_overflow_correction;
+		// Collapsing reads the data twice; this pass then reports half of the progress
+		bool first_of_two = false;
+		// Receives the extent of every track written
+		std::vector<midi_track_collapse_handler::track_extent>* extents = nullptr;
+	};
 
+	// Reads, processes and writes every track in turn; returns the track count
+	template<bool channels_split>
+	static tick_type process_tracks(processing_data& data, message_buffers& loggers,
+		const std::filesystem::path& output_path, const track_pass& pass)
+	{
 		// Declared first: every spillable buffer refers to it until destroyed
 		spill_settings spill;
-		spill.directory = std::filesystem::path(data.output_path()).parent_path();
+		spill.directory = output_path.parent_path();
 		spill.force_spill = data.settings.proc_details.force_disk_buffers;
 
 		std::vector<std::vector<tick_type>> polyphony_stacks(4096);
@@ -2224,8 +2238,11 @@ struct single_midi_processor_2
 
 		midi_file_reader file_input(data.filename);
 		file_input.set_cancellation(&loggers.cancel_requested);
-		if (!file_input.is_open() || file_input.size() < 14) throw std::runtime_error("Cannot read MIDI input");
-		std::ofstream file_output(data.output_path(), std::ios::binary | std::ios::out);
+
+		if (!file_input.is_open() || file_input.size() < 14)
+			throw std::runtime_error("Cannot read MIDI input");
+
+		std::ofstream file_output(output_path, std::ios::binary | std::ios::out);
 		file_output.exceptions(std::ios::failbit | std::ios::badbit);
 
 		for (int i = 0; i < 12 && file_input.good(); i++)
@@ -2236,21 +2253,15 @@ struct single_midi_processor_2
 		file_output.put(data.settings.new_ppqn >> 8);
 		file_output.put(data.settings.new_ppqn & 0xFF);
 
-		// Collapsed tracks share one buffer. Reserving the largest possible
-		// expansion (3 file bytes per note record) keeps it from being moved,
-		// which for an on-disk buffer would mean copying the whole file.
-		if (data.settings.proc_details.whole_midi_collapse)
-			track_buffers.data_buffer.reserve(file_input.size() * expected_size(0x80) / 3);
-
 		tick_type track_counter = 0;
 		tick_type reported_spilled_bytes = 0;
+		std::uint64_t output_position = 14;
 		single_track_data track_processing_data;
 
 		while (file_input.good())
 		{
 			loggers.check_cancelled();
-			if(!data.settings.proc_details.whole_midi_collapse)
-				track_buffers.data_buffer.clear();
+			track_buffers.data_buffer.clear();
 
 			bool is_readable = put_data_in_buffer(file_input, track_buffers, loggers, data.settings, polyphony_stacks);
 
@@ -2264,17 +2275,7 @@ struct single_midi_processor_2
 			track_processing_data.selection_data.frontal_tempo =
 				data.settings.tempo.tempo_override_value;
 
-			bool buffer_should_be_processed =
-				(!data.settings.proc_details.whole_midi_collapse || !file_input.good()) &&
-				track_buffers.data_buffer.size();
-
-			// Collapsed tracks are merged by tick while being written
-			bool merge_data_buffer_flag =
-				data.settings.proc_details.whole_midi_collapse && !file_input.good();
-			bool data_buffer_is_dumpable =
-				!data.settings.proc_details.whole_midi_collapse || !file_input.good();
-
-			if (buffer_should_be_processed)
+			if (track_buffers.data_buffer.size())
 			{
 				bool successful_processing =
 					process_buffer(track_buffers.data_buffer, filter_bundle.second, track_processing_data, loggers);
@@ -2285,38 +2286,34 @@ struct single_midi_processor_2
 					post_processing(track_buffers.data_buffer, track_processing_data, data);
 			}
 
-			size_t current_count;
+			if (data.settings.legacy.rsb_compression)
+				write_track<true, channels_split>(
+					track_buffers.data_buffer,
+					track_processing_data,
+					loggers,
+					data,
+					write_buffer,
+					pass.delta_overflow_correction);
+			else
+				write_track<false, channels_split>(
+					track_buffers.data_buffer,
+					track_processing_data,
+					loggers,
+					data,
+					write_buffer,
+					pass.delta_overflow_correction);
 
-			if (data_buffer_is_dumpable)
-			{
-				if (data.settings.legacy.rsb_compression)
-					write_track<true, channels_split>(
-						track_buffers.data_buffer,
-						track_processing_data,
-						loggers,
-						data,
-						write_buffer,
-						merge_data_buffer_flag);
-				else
-					write_track<false, channels_split>(
-						track_buffers.data_buffer,
-						track_processing_data,
-						loggers,
-						data,
-						write_buffer,
-						merge_data_buffer_flag);
-			}
+			const auto current_count = write_buffer.count(pass.remove_empty_tracks);
+			track_counter += current_count;
 
-			current_count = write_buffer.count(data.settings.proc_details.remove_empty_tracks);
+			const auto written = write_buffer.dump(file_output, pass.remove_empty_tracks, &loggers.cancel_requested);
+			if constexpr (!channels_split)
+				if (pass.extents && written)
+					pass.extents->push_back({output_position + 8, written - 8});
+			output_position += written;
+			write_buffer.clear();
 
-			if (data_buffer_is_dumpable)
-			{
-				track_counter += current_count;
-				write_buffer.dump(file_output, data.settings.proc_details.remove_empty_tracks, &loggers.cancel_requested);
-				write_buffer.clear();
-			}
-
-			loggers.last_input_position = file_input.position();
+			loggers.last_input_position = pass.first_of_two ? file_input.position() / 2 : file_input.position();
 			(*loggers.log) << log_event{log_event_type::tracks_processed, (uint64_t)track_counter, (uint64_t)current_count};
 		}
 
@@ -2332,7 +2329,64 @@ struct single_midi_processor_2
 
 		file_output.close();
 
-		data.tracks_count = track_counter;
+		return track_counter;
+	}
+
+	// Post-processing behind "Collapse tracks": merges the already processed
+	// tracks of the output by tick, from a mapping of that file, and replaces
+	// the output with the result. Neither memory nor on-disk buffers ever have
+	// to hold the whole MIDI.
+	static tick_type collapse_processed_tracks(processing_data& data, message_buffers& loggers,
+		const std::vector<midi_track_collapse_handler::track_extent>& extents)
+	{
+		(*loggers.log) << log_event{log_event_type::collapsing_tracks, extents.size()};
+
+		std::error_code size_error;
+		const auto half_progress = std::filesystem::file_size(data.filename, size_error) / 2;
+
+		midi_track_collapse_handler::options options;
+		options.channel_split = data.settings.proc_details.channel_split;
+		options.running_status = data.settings.legacy.rsb_compression;
+		options.delta_overflow_correction = data.settings.proc_details.force_delta_overflow_correction;
+		options.remove_empty_tracks = data.settings.proc_details.remove_empty_tracks;
+		options.cancel = &loggers.cancel_requested;
+
+		if (!size_error)
+		{
+			options.progress = [&loggers, half_progress](std::uint64_t done, std::uint64_t total)
+			{
+				const double ratio = total ? static_cast<double>(done) / static_cast<double>(total) : 1.;
+				loggers.last_input_position = half_progress + static_cast<std::uint64_t>(half_progress * ratio);
+			};
+		}
+
+		return midi_track_collapse_handler::collapse_in_place(data.output_path(), extents, options);
+	}
+
+	template<bool channels_split>
+	static void sync_processing(processing_data& data, message_buffers& loggers)
+	{
+		message_buffers::processing_guard completion{loggers};
+		loggers.check_cancelled();
+		loggers.processing = true;
+
+		const auto& details = data.settings.proc_details;
+
+		// Processing always runs first and writes the output
+		if (!details.whole_midi_collapse)
+			data.tracks_count = process_tracks<channels_split>(data, loggers, data.output_path(),
+				{details.remove_empty_tracks, details.force_delta_overflow_correction});
+		else
+		{
+			// Collapsing follows, so the processed tracks are written for it: one
+			// per input track (it splits channels itself), none empty, and deltas
+			// of any width (it corrects overflowing ones in its own output).
+			std::vector<midi_track_collapse_handler::track_extent> extents;
+			process_tracks<false>(data, loggers, data.output_path(), {true, false, true, &extents});
+
+			// Then the processed output is collapsed
+			data.tracks_count = collapse_processed_tracks(data, loggers, extents);
+		}
 
 		loggers.processing = false;
 		loggers.finished = true;
