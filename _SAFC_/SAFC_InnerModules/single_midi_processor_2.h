@@ -366,7 +366,6 @@ struct single_midi_processor_2
 
 		using logger_t = singleline_logger;
 
-			log(is_console_oriented ? 
 		message_buffers(bool is_console_oriented = false) :
 			log(is_console_oriented ?
 				std::make_shared<printing_logger>() :
