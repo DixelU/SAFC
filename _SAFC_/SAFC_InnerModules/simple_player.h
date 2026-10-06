@@ -1760,6 +1760,9 @@ struct simple_player
 
 			// Wait in bounded slices so Stop, Pause, and a new seek remain
 			// responsive even when the next event is seconds or hours away.
+			// SYNCore plays each event at its due time, so the spacing survives
+			// this thread waking up late.
+			std::optional<std::chrono::steady_clock::time_point> due;
 			while (!state.stop_requested &&
 				!state.paused.load(std::memory_order_acquire))
 			{
@@ -1767,6 +1770,7 @@ struct simple_player
 				const uint64_t target_us = ev.time_us > clock.start_offset_us
 					? ev.time_us - clock.start_offset_us : 0;
 				const int64_t target_elapsed_us = clamp_to_i64(target_us);
+				due = clock.start_time + std::chrono::microseconds(target_elapsed_us);
 				auto elapsed = std::chrono::steady_clock::now() - clock.start_time;
 				cached_elapsed_us = std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count();
 				if (cached_elapsed_us >= target_elapsed_us)
@@ -1786,7 +1790,7 @@ struct simple_player
 				continue;
 
 			// send the event
-			if (ev.short_msg != 0 && !send_playback_message(ev.short_msg, ev.tick.value_or(ev.time_us)))
+			if (ev.short_msg != 0 && !send_playback_message(ev.short_msg, ev.tick.value_or(ev.time_us), due))
 				continue;
 
 			state.send_buffer.pop();
@@ -3130,7 +3134,9 @@ private:
 		send_output_message(make_smsg(0xB0 | channel, 123));
 	}
 
-	bool send_playback_message(uint32_t message, std::optional<uint64_t> tick = {})
+	// due: when the event should sound; without one SYNCore times it by arrival.
+	bool send_playback_message(uint32_t message, std::optional<uint64_t> tick = {},
+		std::optional<std::chrono::steady_clock::time_point> due = {})
 	{
 		if (!syncore.active())
 			return send_output_message(message);
@@ -3141,7 +3147,7 @@ private:
 			if (!state.seeking_ff.load(std::memory_order_acquire) &&
 				state.paused.load(std::memory_order_acquire))
 				return false;
-			switch (syncore.try_send_short_message(message, tick))
+			switch (syncore.try_send_short_message(message, tick, due))
 			{
 			case syncore_send_result::queued:
 				return true;

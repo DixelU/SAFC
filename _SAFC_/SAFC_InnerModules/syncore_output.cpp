@@ -327,7 +327,8 @@ bool syncore_output::active() const noexcept
 }
 
 syncore_send_result syncore_output::try_send_short_message(std::uint32_t message,
-	std::optional<std::uint64_t> tick) noexcept
+	std::optional<std::uint64_t> tick,
+	std::optional<std::chrono::steady_clock::time_point> due) noexcept
 {
 #ifdef SAFC_WITH_SYNCORE
 	std::shared_ptr<safsyn::WindowsSynth> synth;
@@ -338,7 +339,7 @@ syncore_send_result syncore_output::try_send_short_message(std::uint32_t message
 		synth = impl_->synth;
 	}
 	if (synth)
-		switch (synth->try_send_short_message(message, tick))
+		switch (synth->try_send_short_message(message, tick, due))
 		{
 		case safsyn::MidiEnqueueResult::Queued: return syncore_send_result::queued;
 		case safsyn::MidiEnqueueResult::Full: return syncore_send_result::full;
@@ -347,6 +348,7 @@ syncore_send_result syncore_output::try_send_short_message(std::uint32_t message
 #else
 	(void)message;
 	(void)tick;
+	(void)due;
 #endif
 	return syncore_send_result::unavailable;
 }

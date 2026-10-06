@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -66,8 +67,11 @@ public:
 	void stop() noexcept;
 	void panic() noexcept;
 	bool send_short_message(std::uint32_t message) noexcept;
+	// due: when the event should sound. SYNCore keeps the spacing between due
+	// times even if the sender wakes up late; without one it times by arrival.
 	syncore_send_result try_send_short_message(std::uint32_t message,
-		std::optional<std::uint64_t> tick = {}) noexcept;
+		std::optional<std::uint64_t> tick = {},
+		std::optional<std::chrono::steady_clock::time_point> due = {}) noexcept;
 	bool active() const noexcept;
 	syncore_runtime_status status() const;
 
