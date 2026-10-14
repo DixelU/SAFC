@@ -62,8 +62,8 @@
     <TargetName>SAFC</TargetName>
     <LinkIncremental>false</LinkIncremental>
     <LocalDebuggerWorkingDirectory>$(OutDir)</LocalDebuggerWorkingDirectory>
-    <SAFC2VcpkgLibraries Condition="'$(Configuration)' == 'Debug'">imguid.lib;glfw3.lib;archive.lib;zstd.lib;zlibd.lib;bz2d.lib;lz4d.lib;lzma.lib;libcrypto.lib</SAFC2VcpkgLibraries>
-    <SAFC2VcpkgLibraries Condition="'$(Configuration)' == 'Release'">imgui.lib;glfw3.lib;archive.lib;zstd.lib;zlib.lib;bz2.lib;lz4.lib;lzma.lib;libcrypto.lib</SAFC2VcpkgLibraries>
+    <SAFC2VcpkgLibraries Condition="'$(Configuration)' == 'Debug'">imguid.lib;glfw3.lib;archive.lib;zstd.lib;zlibd.lib;bz2d.lib;lz4d.lib;lzma.lib</SAFC2VcpkgLibraries>
+    <SAFC2VcpkgLibraries Condition="'$(Configuration)' == 'Release'">imgui.lib;glfw3.lib;archive.lib;zstd.lib;zlib.lib;bz2.lib;lz4.lib;lzma.lib</SAFC2VcpkgLibraries>
     <SYNCorePreprocessorDefinitions Condition="'$(SAFCEnableSYNCore)' == 'true'">SAFC_WITH_SYNCORE=1;</SYNCorePreprocessorDefinitions>
   </PropertyGroup>
   <ItemDefinitionGroup>
