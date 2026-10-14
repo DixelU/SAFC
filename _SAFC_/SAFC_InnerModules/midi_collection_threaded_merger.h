@@ -5,6 +5,7 @@
 void throw_alert_error(std::string&& AlertText);
 void throw_alert_warning(std::string&& AlertText);
 
+#include <algorithm>
 #include <set>
 #include <atomic>
 #include <exception>
@@ -45,6 +46,17 @@ struct midi_track_iterator
 		return total;
 	}
 
+	std::uint32_t read_vlv()
+	{
+		std::uint32_t value = 0, last_byte = 0;
+		do
+		{
+			last_byte = track_data[cur_position++];
+			value = (value << 7) | (last_byte & 0x7F);
+		} while (last_byte & 0x80);
+		return value;
+	}
+
 	void advance_single_event()
 	{
 		if (cancellation && cancellation->load(std::memory_order_relaxed)) throw midi_processing_cancelled{};
@@ -54,14 +66,7 @@ struct midi_track_iterator
 			return;
 		}
 
-		std::uint32_t delta_time = 0, last_byte = 0;
-		do
-		{
-			last_byte = track_data[cur_position++];
-			delta_time = (delta_time << 7) | (last_byte & 0x7F);
-		} while (last_byte & 0x80);
-
-		cur_tick += delta_time;
+		cur_tick += read_vlv();
 		if (track_data[cur_position] == 0xFF)
 		{
 			cur_position++;
@@ -72,28 +77,26 @@ struct midi_track_iterator
 			}
 			else
 			{
-				std::uint32_t size = 0, last_byte = 0;
 				cur_position++;
-
-				do
-				{
-					last_byte = track_data[cur_position++];
-					size = (size << 7) | (last_byte & 0x7F);
-				} while (last_byte & 0x80);
-
-				for (std::uint32_t index = 0; index < size; index++)
-					cur_position++;
+				const auto size = read_vlv();
+				cur_position += size;
 			}
+		}
+		else if (track_data[cur_position] == 0xF0 || track_data[cur_position] == 0xF7)
+		{
+			cur_position++;
+			const auto size = read_vlv();
+			cur_position += size;
 		}
 		else if (track_data[cur_position] >= 0x80 && track_data[cur_position] <= 0x9F)
 		{
 			std::uint16_t ftd = track_data[cur_position++];
 			std::uint16_t key = track_data[cur_position++];
-
-			cur_position++; // velocity
+			std::uint8_t velocity = track_data[cur_position++];
 			std::uint16_t index = (key << 4) | (ftd & 0xF);
 
-			if (ftd & 0x10)
+			// A zero-velocity note-on releases a note like a note-off does
+			if ((ftd & 0x10) && velocity)
 				held[index]++;
 			else if (held[index] > 0)
 				held[index]--;
@@ -104,8 +107,9 @@ struct midi_track_iterator
 		else if (track_data[cur_position] >= 0xC0 && track_data[cur_position] <= 0xDF)
 			cur_position += 2;
 		else
-			throw_alert_error("DTI Failure at " + std::to_string(cur_position) + ". Type: " +
-				std::to_string(track_data[cur_position]) + ". Tell developer about it and give him source midi\n");
+			// Splitting cannot continue past an event it cannot measure
+			throw std::runtime_error("Cannot split merged track: unknown event type " +
+				std::to_string(track_data[cur_position]) + " at byte " + std::to_string(cur_position));
 	}
 
 	bool advance_to_position(std::int64_t position)
@@ -115,24 +119,27 @@ struct midi_track_iterator
 		return processing;
 	}
 
+	// Appends complete events at the current tick: note-offs for every held note
+	// (to end a chunk), or note-ons that restart them (to begin the next chunk).
+	// A chunk begins at tick 0, so its restart also carries the time to the current tick.
 	void emit_held_notes(std::vector<std::uint8_t>& out, bool output_noteon_wall)
 	{
 		constexpr std::uint32_t delta_trunk_edge = 0xF000000;
-		std::uint64_t local_tick = cur_tick;
+		std::uint64_t delta = output_noteon_wall ? cur_tick : 0;
 
-		while (output_noteon_wall && local_tick > delta_trunk_edge)
+		auto push_empty_text = [&out](std::uint64_t text_delta)
 		{
-			single_midi_processor_2::push_vlv_s(delta_trunk_edge, out);
+			single_midi_processor_2::push_vlv_s(text_delta, out);
 			out.push_back(0xFF);
 			out.push_back(0x01);
 			out.push_back(0x00);
-			local_tick -= delta_trunk_edge;
-		}
+		};
 
-		if (output_noteon_wall)
-			single_midi_processor_2::push_vlv_s(local_tick, out);
-		else
-			out.push_back(0);
+		while (delta > delta_trunk_edge)
+		{
+			push_empty_text(delta_trunk_edge);
+			delta -= delta_trunk_edge;
+		}
 
 		for (int i = 0; i < 4096; i++)
 		{
@@ -140,16 +147,18 @@ struct midi_track_iterator
 			while (key)
 			{
 				if (cancellation && cancellation->load(std::memory_order_relaxed)) throw midi_processing_cancelled{};
+				single_midi_processor_2::push_vlv_s(delta, out);
+				delta = 0;
 				out.push_back((0x10 * output_noteon_wall) | (i & 0xF) | 0x80);
 				out.push_back(i >> 4);
 				out.push_back(1);
-				out.push_back(0);
 				key--;
 			}
 		}
 
-		if (!out.empty())
-			out.pop_back();
+		// Without a held note to carry it, the time goes on an empty text event
+		if (delta)
+			push_empty_text(delta);
 	}
 };
 
@@ -167,6 +176,11 @@ struct midi_collection_threaded_merger :
 	std::atomic_bool complete{ false };
 	std::atomic_uint64_t inplace_track_count{ 0 };
 	std::atomic_uint64_t regular_track_count{ 0 };
+
+	// An in-place merged track too long for one MTrk chunk is cut into chunks of
+	// about this many bytes. Tests lower it to cut tracks without gigabytes of data.
+	static constexpr std::uint64_t default_inplace_split_edge = 0x7F000000;
+	std::uint64_t inplace_split_edge = default_inplace_split_edge;
 
 	midi_collection_threaded_merger(
 		std::vector<proc_data_ptr> processing_data,
@@ -722,14 +736,8 @@ private:
 			if (track.empty())
 				continue;
 
-			if (track.size() > 0xFFFFFFFFu)
-			{
-				std::osyncstream(std::cout) << "TrackSize overflow!!!\n";
-				track.clear();
-				continue;
-			}
-
-			constexpr std::uint32_t split_edge = 0x7F000000;
+			// Every chunk, including the notes held across its edges, must fit a 32-bit length
+			const std::uint64_t split_edge = std::clamp<std::uint64_t>(inplace_split_edge, 1, default_inplace_split_edge);
 			if (track.size() / 2 > split_edge)
 			{
 				std::int64_t total_shift = split_edge;
@@ -771,7 +779,7 @@ private:
 					dti.emit_held_notes(front_edge, true);
 				}
 
-				std::uint64_t total_size = front_edge.size() + (dti.cur_position - prev_edge);
+				std::uint64_t total_size = front_edge.size() + (track.size() - prev_edge);
 				out << "MTrk";
 				out.put((char)(total_size >> 24));
 				out.put((char)(total_size >> 16));

@@ -186,7 +186,7 @@ void run_cli(int argc, char** argv)
 
 		auto remove_empty_tracks = object.find(L"remove_empty_tracks");
 		if (remove_empty_tracks != object.end())
-			g_data.files[index].set_bool_setting(_BoolSettings::all_instruments_to_piano, remove_empty_tracks->second->AsBool());
+			g_data.files[index].set_bool_setting(_BoolSettings::remove_empty_tracks, remove_empty_tracks->second->AsBool());
 
 		auto channel_split = object.find(L"channel_split");
 		if (channel_split != object.end())
