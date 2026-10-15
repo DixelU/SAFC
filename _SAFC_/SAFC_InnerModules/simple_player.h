@@ -1677,11 +1677,10 @@ struct simple_player
 	// During seek fast-forward (seeking_ff == true), drains buffer immediately
 	SIMPLE_PLAYER_FORCE_NO_INLINE void sender_thread_func()
 	{
-		// Cached clock reading: dense same-tick bursts send thousands of
-		// already-due events back to back; for those the clock isn't
-		// re-queried and the position isn't re-published.
-		constexpr int64_t clock_unknown = std::numeric_limits<int64_t>::min();
-		int64_t cached_elapsed_us = clock_unknown;
+		// A previous absolute clock reading is a lower bound on the current
+		// time. Reuse it for already-due bursts, while still reading the mutable
+		// playback origin for every event so a resume or seek cannot stale it.
+		auto cached_now = std::chrono::steady_clock::time_point::min();
 		uint64_t last_published_us = ~0ULL;
 
 		while (!state.stop_requested)
@@ -1689,9 +1688,6 @@ struct simple_player
 			// Fast-forward mode: drain buffer immediately, no timing
 			if (state.seeking_ff.load(std::memory_order_acquire))
 			{
-				// Parser resets start_time/start_offset_us when FF completes,
-				// so any cached clock reading is stale.
-				cached_elapsed_us = clock_unknown;
 				last_published_us = ~0ULL;
 
 				if (!state.send_buffer.empty())
@@ -1719,10 +1715,6 @@ struct simple_player
 
 				if (state.stop_requested)
 					break;
-
-				// Resume: resume() updated start_offset_us and reset start_time,
-				// so the cached clock reading is stale.
-				cached_elapsed_us = clock_unknown;
 			}
 
 			if (state.stop_requested)
@@ -1771,8 +1763,11 @@ struct simple_player
 					? ev.time_us - clock.start_offset_us : 0;
 				const int64_t target_elapsed_us = clamp_to_i64(target_us);
 				due = clock.start_time + std::chrono::microseconds(target_elapsed_us);
-				auto elapsed = std::chrono::steady_clock::now() - clock.start_time;
-				cached_elapsed_us = std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count();
+				if (cached_now >= *due)
+					break;
+				cached_now = std::chrono::steady_clock::now();
+				const auto elapsed = cached_now - clock.start_time;
+				const int64_t cached_elapsed_us = std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count();
 				if (cached_elapsed_us >= target_elapsed_us)
 					break;
 

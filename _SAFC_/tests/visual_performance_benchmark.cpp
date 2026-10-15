@@ -52,6 +52,35 @@ void player_overlap_benchmark()
     }
 }
 
+void player_sender_benchmark()
+{
+    for (const size_t events : {10000u, 1000000u})
+    {
+        std::vector<double> times;
+        for (unsigned repetition = 0; repetition < 8; ++repetition)
+        {
+            auto player = std::make_unique<simple_player>();
+            player->use_silent_output();
+            // Isolate the real sender loop: initialize its otherwise-private
+            // queue before starting it, with no concurrent parser or renderer.
+            auto& state = const_cast<simple_player::playback_state&>(player->get_state());
+            state.reset();
+            state.start_offset_us = 0;
+            state.start_time = clock_type::now();
+            state.parser_done.store(true);
+            for (size_t i = 0; i < events; ++i)
+                state.send_buffer.push({0, 0x643c90, 0});
+            const auto started = clock_type::now();
+            player->sender_thread_func();
+            const double elapsed = std::chrono::duration<double, std::milli>(clock_type::now() - started).count();
+            if (!state.send_buffer.empty()) throw std::runtime_error("Sender did not drain the burst");
+            if (repetition) times.push_back(elapsed);
+        }
+        std::sort(times.begin(), times.end());
+        std::cout << "sender_burst," << events << ',' << times[times.size() / 2] << ',' << events << '\n';
+    }
+}
+
 void write_fixture(const std::filesystem::path& path)
 {
     std::ofstream file(path, std::ios::binary);
@@ -117,6 +146,11 @@ int wmain(int argc, wchar_t** argv)
     try
     {
         std::cout << std::fixed << std::setprecision(4) << "case,items,median_ms,checksum_or_indices\n";
+        if (argc > 1 && std::wstring_view(argv[1]) == L"--sender")
+        {
+            player_sender_benchmark();
+            return 0;
+        }
         player_overlap_benchmark();
         const auto path = argc > 1 ? std::filesystem::path(argv[1]) :
             std::filesystem::current_path() / "visual-benchmark.mid";
