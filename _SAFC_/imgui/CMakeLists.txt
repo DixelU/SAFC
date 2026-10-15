@@ -67,6 +67,8 @@ option(SAFC_BUILD_VISUAL_BENCHMARKS "Build player/editor CPU benchmarks" OFF)
 if(SAFC_BUILD_VISUAL_BENCHMARKS)
 	add_executable(safc-visual-benchmark ../tests/visual_performance_benchmark.cpp)
 	target_link_libraries(safc-visual-benchmark PRIVATE safc_imgui_core)
+	add_executable(safc-editor-load-benchmark ../tests/editor_load_benchmark.cpp)
+	target_link_libraries(safc-editor-load-benchmark PRIVATE safc_imgui_core)
 endif()
 
 if(BUILD_TESTING)
