@@ -2173,8 +2173,14 @@ struct simple_player
 			glGetIntegerv(GL_BLEND_SRC, &blend_src);
 			glGetIntegerv(GL_BLEND_DST, &blend_dst);
 			const bool blend_was_enabled = glIsEnabled(GL_BLEND) == GL_TRUE;
+			GLboolean color_mask[4] = {GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE};
+			glGetBooleanv(GL_COLOR_WRITEMASK, color_mask);
 
-			// The vertex alpha is the border scale, not fill transparency.
+			// The vertex alpha is the border scale, not fill transparency, and
+			// it must not reach the framebuffer: the ImGui frontend composites
+			// the piano texture with its alpha, so the target keeps the alpha
+			// it was cleared with.
+			glColorMask(color_mask[0], color_mask[1], color_mask[2], GL_FALSE);
 			glDisable(GL_BLEND);
 			draw_ranges();
 
@@ -2187,6 +2193,7 @@ struct simple_player
 				glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 			}
 
+			glColorMask(color_mask[0], color_mask[1], color_mask[2], color_mask[3]);
 			glBlendFunc(static_cast<GLenum>(blend_src), static_cast<GLenum>(blend_dst));
 			if (blend_was_enabled)
 				glEnable(GL_BLEND);
