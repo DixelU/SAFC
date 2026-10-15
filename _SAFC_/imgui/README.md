@@ -291,7 +291,7 @@ Build the default test targets, then run:
 
 ```powershell
 cmake --build build/imgui
-ctest --test-dir build/imgui -R '^safc-imgui-' --output-on-failure
+ctest --test-dir build/imgui -R '^safc-(imgui-|visual-algorithms)' --output-on-failure
 ```
 
 | CTest name | Coverage |
@@ -305,6 +305,8 @@ ctest --test-dir build/imgui -R '^safc-imgui-' --output-on-failure
 | `safc-imgui-mapping-layout` | Fixed canvas bounds through native segment start, completion, cancellation and restart for velocity and pitch maps |
 | `safc-imgui-key-map` | Shifted output piano, octave alignment, fixed source keys, cut highlighting, extreme transpositions and native bank-aware cut dragging |
 | `safc-imgui-playback` | External sources, nested/archive member selection, cancellation, replay and actual short sine-based MP4 rendering |
+| `safc-imgui-piano-render` | Real OpenGL pixels in all overlap modes; catches the x86 diagonal-border regression |
+| `safc-visual-algorithms` | Exact overlap fragments/order against the original algorithm and editor display snapshots through filtering, selection, edits, undo and redo |
 | `safc-imgui-cli` | JSON validation, integer precision, input identity and processing output |
 | `safc-imgui-update` | Stable release/architecture selection, bounded extraction, offline staging, cancellation, replacement of a running local fixture, rollback and backup retention |
 | `safc-imgui-update-preferences` | Legacy update opt-out import and persistence in an isolated temporary registry subtree |
@@ -338,3 +340,46 @@ frame, but are not a guarantee for arbitrary black-MIDI density. MIDI source
 replacement during editor Save is deliberately rejected while that source is
 memory mapped. MP4 export remains dependent on Windows Media Foundation and an
 available OpenGL compatibility renderer.
+
+## Player and editor performance
+
+The default player overlap pass uses the existing start-time ordering to merge
+covered intervals with a stack. It runs in linear time instead of shifting a
+growing interval vector for every note. Fragment colors and drawing order stay
+the same; this also applies when the shared player draws video-export frames.
+
+The ImGui editor takes one reusable visible-note snapshot per frame, including
+selection flags. The roll and velocity lane share it, avoiding duplicate range
+queries, a temporary selection tree, and a mutex acquisition for each velocity
+stem. Notes outside the pitch view still appear in the velocity lane. Hidden
+ghost tracks are filtered before copying. The snapshot is refreshed each frame,
+so edits and selection changes need no cache-invalidation machinery.
+
+Enable the optional CPU benchmark in an existing CMake build:
+
+```powershell
+cmake -S . -B build/imgui -DSAFC_BUILD_VISUAL_BENCHMARKS=ON
+cmake --build build/imgui --target safc-visual-benchmark
+```
+
+Run `safc-visual-benchmark` from a writable output directory. With no argument it
+writes a 65,536-note synthetic MIDI there; an optional MIDI path measures that
+file's opening editor view. Each case reports the median of 15 warmed samples.
+The player cases time overlap removal alone; editor cases time CPU frame
+generation, excluding loading and GPU submission.
+
+Measured on 2026-10-15 with MSVC 19.51, x64 Release, pinned to logical CPU 0:
+
+| Case | Before (ms) | After (ms) |
+| --- | ---: | ---: |
+| Player overlap, 1,000 disjoint spans on one key | 0.0455 | 0.0016 |
+| Player overlap, 10,000 spans | 6.6292 | 0.0158 |
+| Player overlap, 50,000 spans | 185.9320 | 0.0826 |
+| Dense editor frame, 572,296 vertices | 8.3807 | 5.5001 |
+| Hypernova opening editor view, 5,988 vertices | 0.0533 | 0.0474 |
+
+Synthetic figures are the medians of three alternating before/after runs;
+Hypernova used one pair. Baseline was `d58f013`. Editor vertex/index counts and
+overlap checksums matched. The large player gain is an intentionally extreme
+overlap-stage case, not a whole-player frame-rate claim. Hypernova's opening
+view is sparse and does not establish performance across the full song.

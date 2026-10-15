@@ -1726,6 +1726,32 @@ public:
 		return result;
 	}
 
+	struct display_note
+	{
+		piano_note note;
+		bool selected;
+	};
+
+	// One reusable snapshot serves the roll, selection highlights and velocity
+	// lane. Copy under one lock; drawing never holds a model lock per note.
+	void get_display_notes(std::vector<display_note>& result,
+		tick_type start_tick, tick_type end_tick,
+		std::uint8_t key_low = 0, std::uint8_t key_high = 127,
+		std::uint16_t track_filter = all_tracks) const
+	{
+		std::lock_guard<std::recursive_mutex> lock(editor_mutex);
+		result.clear();
+		for_each_note_intersecting(start_tick, end_tick, [&](const piano_note& note)
+		{
+			if (note.key >= key_low && note.key <= key_high &&
+				(track_filter == all_tracks || note.track_index == track_filter))
+				result.push_back({note, selected_notes.contains(note.id)});
+		});
+		if (!edited_notes.empty())
+			std::sort(result.begin(), result.end(),
+				[](const display_note& a, const display_note& b) { return a.note < b.note; });
+	}
+
 	/**
 	 * Get notes at a specific time slice (for vertical selection)
 	 */

@@ -212,6 +212,7 @@ struct editor_panel::impl
 	double stretch_factor = 1.;
 	midi_editor::select_mode selection_mode = midi_editor::select_mode::add;
 	std::vector<note> gesture_notes;
+	std::vector<midi_editor::display_note> display_notes;
 	std::unordered_set<midi_editor::note_id_type> erased_notes;
 	// Whether the previous erase stroke crossed no note; gates the ghost double-click.
 	bool last_erase_was_empty = false;
@@ -1412,21 +1413,18 @@ struct editor_panel::impl
 				break;
 		}
 
-		const auto visible = document->get_notes_in_range(
-			view.start, view.start + view.duration, std::uint8_t(view.low), std::uint8_t(view.high));
-		const auto selected = document->get_selected_ids_in_range(
-			view.start, view.start + view.duration, std::uint8_t(view.low), std::uint8_t(view.high));
 		draw->PushClipRect(view.roll_min, view.roll_max, true);
 
 		auto render_note =
-			[&](const note& value, bool ghost, bool preview, double first = -1., double last = -1., int pitch = -1)
+			[&](const note& value, bool selected, bool ghost, bool preview,
+				double first = -1., double last = -1., int pitch = -1)
 		{
 			const float x0 = view.x_at(first >= 0 ? first : double(value.start_tick));
 			const float x1 = std::max(x0 + 2.f, view.x_at(last >= 0 ? last : double(value.end_tick)));
 			const float y0 = view.y_at(pitch >= 0 ? pitch : value.key);
 			const ImVec2 a(x0, y0 + .5f), b(x1, y0 + std::max(2.f, view.key_height - .5f));
 			const auto color =
-				note_color(value.track_index, value.channel, preview || selected.contains(value.id), ghost);
+				note_color(value.track_index, value.channel, preview || selected, ghost);
 			draw->AddRectFilled(a, b, color, 1.f);
 			if (view.key_height >= 5 && x1 - x0 >= 5)
 				draw->AddRect(a, b, preview ? IM_COL32_WHITE : IM_COL32(5, 17, 28, 155), 1.f);
@@ -1434,22 +1432,22 @@ struct editor_panel::impl
 
 		if (ghosts)
 		{
-			for (const auto& value : visible)
+			for (const auto& [value, selected] : display_notes)
 			{
-				if (value.track_index == document->get_active_track())
+				if (value.track_index == document->get_active_track() || value.key < view.low || value.key > view.high)
 					continue;
 
-				render_note(value, true, false);
+				render_note(value, selected, true, false);
 			}
 		}
-		for (const auto& value : visible)
+		for (const auto& [value, selected] : display_notes)
 		{
-			if (value.track_index != document->get_active_track())
+			if (value.track_index != document->get_active_track() || value.key < view.low || value.key > view.high)
 				continue;
 			if (gesture == gesture_kind::erase && erased_notes.contains(value.id))
 				continue;
 
-			render_note(value, false, false);
+			render_note(value, selected, false, false);
 		}
 
 		if (gesture == gesture_kind::move || gesture == gesture_kind::resize || gesture == gesture_kind::stretch)
@@ -1478,7 +1476,7 @@ struct editor_panel::impl
 						(last - static_cast<double>(stretch_begin)) * stretch_factor;
 				}
 
-				render_note(value, false, true, first, last, std::clamp(pitch, 0, midi_key_max));
+				render_note(value, false, false, true, first, last, std::clamp(pitch, 0, midi_key_max));
 			}
 		}
 		else if (gesture == gesture_kind::draw)
@@ -1486,7 +1484,7 @@ struct editor_panel::impl
 			note value(anchor_tick, draw_end(), std::uint8_t(current_key), std::uint8_t(draw_velocity),
 				std::uint8_t(channel()), document->get_active_track());
 
-			render_note(value, false, true);
+			render_note(value, false, false, true);
 		}
 		else if (gesture == gesture_kind::select)
 		{
@@ -1541,7 +1539,7 @@ struct editor_panel::impl
 
 		if (lane == lane_kind::velocity)
 		{
-			for (const auto& value : document->get_notes_in_range(view.start, view.start + view.duration))
+			for (const auto& [value, selected] : display_notes)
 			{
 				if (value.track_index != document->get_active_track())
 					continue;
@@ -1556,7 +1554,7 @@ struct editor_panel::impl
 						? value.velocity
 						: pending_velocity->second.new_velocity);
 
-				const auto color = note_color(value.track_index, value.channel, document->is_note_selected(value.id));
+				const auto color = note_color(value.track_index, value.channel, selected);
 
 				draw->AddLine(ImVec2(x, view.lane_maximum.y), ImVec2(x, y), color, 2.f);
 				if (held)
@@ -1982,6 +1980,10 @@ struct editor_panel::impl
 	void draw_canvas(bool interactive)
 	{
 		const canvas_view view(*this);
+		const bool velocity_lane = show_lane && lane == lane_kind::velocity;
+		document->get_display_notes(display_notes, view.start, view.start + view.duration,
+			std::uint8_t(velocity_lane ? 0 : view.low), std::uint8_t(velocity_lane ? 127 : view.high),
+			ghosts ? midi_editor::all_tracks : document->get_active_track());
 		ImGui::InvisibleButton("Piano roll canvas", view.size,
 			ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight | ImGuiButtonFlags_MouseButtonMiddle);
 		const bool hovered = ImGui::IsItemHovered();

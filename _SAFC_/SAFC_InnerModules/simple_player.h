@@ -2302,49 +2302,29 @@ struct simple_player
 		data.covered_intervals.clear();
 		data.covered_intervals.reserve(data.key_note_spans.size());
 
-		auto add_covered_interval = [&](float begin_y, float end_y)
-		{
-			if (begin_y >= end_y)
-				return;
-
-			auto insert_it = data.covered_intervals.begin();
-			while (insert_it != data.covered_intervals.end() && insert_it->end_y < begin_y)
-				++insert_it;
-
-			float merged_begin = begin_y;
-			float merged_end = end_y;
-			while (insert_it != data.covered_intervals.end() && insert_it->begin_y <= merged_end)
-			{
-				merged_begin = std::min(merged_begin, insert_it->begin_y);
-				merged_end = std::max(merged_end, insert_it->end_y);
-				insert_it = data.covered_intervals.erase(insert_it);
-			}
-
-			data.covered_intervals.insert(insert_it, {merged_begin, merged_end});
-		};
-
+		// Notes arrive in start-time order. Walking backwards lets the covered
+		// intervals form a stack, earliest at the back: each is pushed/popped
+		// once instead of shifting the entire interval list for every note.
 		for (auto it = data.key_note_spans.rbegin(); it != data.key_note_spans.rend(); ++it)
 		{
+			if (it->begin_y >= it->end_y)
+				continue;
 			float cursor = it->begin_y;
-			for (const auto& covered : data.covered_intervals)
+			float merged_end = it->end_y;
+			while (!data.covered_intervals.empty() &&
+				data.covered_intervals.back().begin_y <= it->end_y)
 			{
-				if (covered.end_y <= cursor)
-					continue;
-				if (covered.begin_y >= it->end_y)
-					break;
-
+				const auto covered = data.covered_intervals.back();
 				if (covered.begin_y > cursor)
 					emit_span(cursor, std::min(covered.begin_y, it->end_y), it->color);
-
 				cursor = std::max(cursor, covered.end_y);
-				if (cursor >= it->end_y)
-					break;
+				merged_end = std::max(merged_end, covered.end_y);
+				data.covered_intervals.pop_back();
 			}
 
 			if (cursor < it->end_y)
 				emit_span(cursor, it->end_y, it->color);
-
-			add_covered_interval(it->begin_y, it->end_y);
+			data.covered_intervals.push_back({it->begin_y, merged_end});
 		}
 	}
 
