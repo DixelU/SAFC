@@ -67,7 +67,8 @@ dominate the retained range the ring compacts, so a long held note cannot
 pin what came after it. Key colours come from per-key monotone stacks that
 admit notes as time passes and find the latest-started sounding note without
 walking spans. The outline pass darkens quad edges to a quarter of what they
-cover and is skipped above `draw_data::gpu_outline_note_limit` notes.
+cover; `draw_data::gpu_outline_note_limit` can cap it per ring and is
+unlimited by default.
 
 `draw_data::gpu_notes_enabled` (default on) selects the path. The CPU path
 remains for contexts without buffer objects and is the one the overlap

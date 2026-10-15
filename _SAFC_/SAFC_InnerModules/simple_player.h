@@ -1944,8 +1944,10 @@ struct simple_player
 		// objects are unavailable, the CPU path rebuilds geometry per frame.
 		// The overlap removal modes apply to the CPU path only.
 		bool gpu_notes_enabled = true;
-		// A ring retaining more notes than this is drawn without outlines.
-		size_t gpu_outline_note_limit = size_t{1} << 18;
+		// Optional cap: a ring retaining more notes than this is drawn without
+		// outlines. Unlimited by default, like the CPU path; a ring also holds
+		// the parser's lookahead, so dense files exceed any modest value at once.
+		size_t gpu_outline_note_limit = (std::numeric_limits<size_t>::max)();
 
 		struct gpu_note_vertex { float x, y; uint8_t r, g, b, a; };
 		struct gpu_note_mirror
