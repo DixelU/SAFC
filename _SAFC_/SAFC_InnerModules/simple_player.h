@@ -2032,6 +2032,11 @@ struct simple_player
 				: -static_cast<float>(static_cast<double>(epoch_us - time_us) * 1e-6);
 		}
 
+		// The border pass draws each quad's edges with the vertex colour scaled
+		// by this alpha (source-only blend), so overlapping borders overwrite
+		// each other instead of compounding. A quarter, like the CPU path.
+		static constexpr uint8_t gpu_outline_alpha = 0x40;
+
 		// Four vertices for one note: left edge full colour, right edge shaded,
 		// the same gradient the CPU path emits. Expired notes become a point.
 		void write_note_quad(const visuals_viewport::note_record& note, uint64_t epoch_us,
@@ -2052,10 +2057,11 @@ struct simple_player
 				: seconds_since(note.end_time_us, epoch_us);
 			const uint32_t color = rotate(0xFF7F008F, note.track_id);
 			const uint8_t r = uint8_t(color >> 24), g = uint8_t(color >> 16), b = uint8_t(color >> 8);
-			out[0] = {lx, y0, r, g, b, 0xFF};
-			out[1] = {lx, y1, r, g, b, 0xFF};
-			out[2] = {rx, y1, scale<0.5f>(r), scale<0.5f>(g), scale<0.5f>(b), 0xFF};
-			out[3] = {rx, y0, scale<0.5f>(r), scale<0.5f>(g), scale<0.5f>(b), 0xFF};
+			constexpr uint8_t a = gpu_outline_alpha;
+			out[0] = {lx, y0, r, g, b, a};
+			out[1] = {lx, y1, r, g, b, a};
+			out[2] = {rx, y1, scale<0.5f>(r), scale<0.5f>(g), scale<0.5f>(b), a};
+			out[3] = {rx, y0, scale<0.5f>(r), scale<0.5f>(g), scale<0.5f>(b), a};
 		}
 
 		// Uploads the records in 'count' consecutive slots starting at
@@ -2136,8 +2142,10 @@ struct simple_player
 			bool outlines = false;
 		};
 
-		// Fills, then (within the outline limit) the edges darkened to a
-		// quarter of what they cover, like the CPU path's border colour.
+		// Opaque fills, then (within the outline limit) the quad edges in the
+		// vertex colour scaled by its alpha: a quarter of the note colour, the
+		// CPU path's border colour. The scale uses only the source colour, so
+		// borders that share pixels overwrite rather than darken each other.
 		void draw_gpu_ring(const gpu_ring_draw& ring) const
 		{
 			if (ring.count == 0 || ring.buffer == 0)
@@ -2160,27 +2168,30 @@ struct simple_player
 					remaining -= run;
 				}
 			};
+
+			GLint blend_src = GL_SRC_ALPHA, blend_dst = GL_ONE_MINUS_SRC_ALPHA;
+			glGetIntegerv(GL_BLEND_SRC, &blend_src);
+			glGetIntegerv(GL_BLEND_DST, &blend_dst);
+			const bool blend_was_enabled = glIsEnabled(GL_BLEND) == GL_TRUE;
+
+			// The vertex alpha is the border scale, not fill transparency.
+			glDisable(GL_BLEND);
 			draw_ranges();
 
 			if (ring.outlines)
 			{
-				GLint blend_src = GL_SRC_ALPHA, blend_dst = GL_ONE_MINUS_SRC_ALPHA;
-				glGetIntegerv(GL_BLEND_SRC, &blend_src);
-				glGetIntegerv(GL_BLEND_DST, &blend_dst);
-				const bool blend_was_enabled = glIsEnabled(GL_BLEND) == GL_TRUE;
-				glDisableClientState(GL_COLOR_ARRAY);
-				glColor4f(0.25f, 0.25f, 0.25f, 1.f);
 				glEnable(GL_BLEND);
-				glBlendFunc(GL_DST_COLOR, GL_ZERO);
+				glBlendFunc(GL_SRC_ALPHA, GL_ZERO);
 				glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
 				draw_ranges();
 				glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
-				glBlendFunc(static_cast<GLenum>(blend_src), static_cast<GLenum>(blend_dst));
-				if (!blend_was_enabled)
-					glDisable(GL_BLEND);
-				glColor4f(1.f, 1.f, 1.f, 1.f);
-				glEnableClientState(GL_COLOR_ARRAY);
 			}
+
+			glBlendFunc(static_cast<GLenum>(blend_src), static_cast<GLenum>(blend_dst));
+			if (blend_was_enabled)
+				glEnable(GL_BLEND);
+			else
+				glDisable(GL_BLEND);
 		}
 
 		// Six faces per key, three shadow quads per black key, and three case/rail

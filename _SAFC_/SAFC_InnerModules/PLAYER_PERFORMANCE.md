@@ -66,9 +66,11 @@ Expired notes are marked dead and released from the ring tail; when the dead
 dominate the retained range the ring compacts, so a long held note cannot
 pin what came after it. Key colours come from per-key monotone stacks that
 admit notes as time passes and find the latest-started sounding note without
-walking spans. The outline pass darkens quad edges to a quarter of what they
-cover; `draw_data::gpu_outline_note_limit` can cap it per ring and is
-unlimited by default.
+walking spans. The outline pass redraws the quad edges in the vertex colour
+scaled by its alpha, a quarter like the CPU path's border; the scale uses the
+source colour only, so borders sharing pixels overwrite instead of
+compounding. `draw_data::gpu_outline_note_limit` can cap the pass per ring and
+is unlimited by default.
 
 `draw_data::gpu_notes_enabled` (default on) selects the path. The CPU path
 remains for contexts without buffer objects and is the one the overlap
