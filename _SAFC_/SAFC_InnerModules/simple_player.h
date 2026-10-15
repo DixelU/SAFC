@@ -2060,8 +2060,8 @@ struct simple_player
 			constexpr uint8_t a = gpu_outline_alpha;
 			out[0] = {lx, y0, r, g, b, a};
 			out[1] = {lx, y1, r, g, b, a};
-			out[2] = {rx, y1, scale<0.5f>(r), scale<0.5f>(g), scale<0.5f>(b), a};
-			out[3] = {rx, y0, scale<0.5f>(r), scale<0.5f>(g), scale<0.5f>(b), a};
+			out[2] = {rx, y1, scale<0.75f>(r), scale<0.75f>(g), scale<0.75f>(b), a};
+			out[3] = {rx, y0, scale<0.75f>(r), scale<0.75f>(g), scale<0.75f>(b), a};
 		}
 
 		// Uploads the records in 'count' consecutive slots starting at
