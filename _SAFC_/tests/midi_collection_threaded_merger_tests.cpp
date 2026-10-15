@@ -265,6 +265,42 @@ void test_split(const fs::path& directory)
     }
 }
 
+// Long silences must not slow an in-place merge down: stepping through them one
+// tick at a time made these tracks take minutes, while jumping from event to event
+// takes no time. The merged track must still hold every source event at its tick.
+void test_long_gaps(const fs::path& directory)
+{
+    fs::create_directories(directory);
+    constexpr std::uint64_t gap = 0x0FFFFF00; // close to the longest delta time a MIDI file holds
+
+    std::vector<fs::path> inputs;
+    std::vector<bytes> source_tracks;
+    for (std::uint8_t file = 0; file < 3; ++file)
+    {
+        std::vector<bytes> tracks;
+        for (std::uint8_t index = 0; index < 32; ++index)
+        {
+            // Offsets interleave the files' events within each merged track
+            const std::uint64_t start = file * 7 + index;
+            const std::uint8_t channel = index & 0xF;
+            const std::uint8_t key = 40 + file;
+            tracks.push_back(track_body({{start, {std::uint8_t(0x90 | channel), key, 100}},
+                {start + gap - file * 3, {std::uint8_t(0x80 | channel), key, 0}},
+                {start + 2 * gap - file * 5, {0xFF, 0x06, 0x01, std::uint8_t('a' + file)}}}));
+        }
+        inputs.push_back(directory / (std::string(1, char('a' + file)) + ".mid"));
+        write_file(inputs.back(), midi_file(tracks));
+        source_tracks.insert(source_tracks.end(), tracks.begin(), tracks.end());
+    }
+
+    std::uint64_t reported = 0;
+    const auto merged = read_content(merge_in_place(directory, inputs, merger::default_inplace_split_edge, reported));
+    const auto source = read_content(midi_file(source_tracks));
+    check(merged.chunks == 32 && reported == 32, "an in-place merge keeps one track per source track index");
+    check(merged.events == source.events, "an in-place merge must keep every event at its tick");
+    check(merged.note_changes == source.note_changes, "an in-place merge must keep every note at its tick");
+}
+
 void test_merge(const fs::path& directory, unsigned inplace_files,
     unsigned regular_files, std::uint16_t ppqn)
 {
@@ -380,6 +416,16 @@ int main(int argc, char** argv)
     catch (const std::exception& error)
     {
         std::cerr << "FAIL: split: " << error.what() << '\n';
+        ++failures;
+    }
+    try
+    {
+        test_long_gaps(fs::path(argv[1]) / "long-gaps");
+        std::cout << "PASS: long gaps\n";
+    }
+    catch (const std::exception& error)
+    {
+        std::cerr << "FAIL: long gaps: " << error.what() << '\n';
         ++failures;
     }
     return failures ? 1 : 0;

@@ -603,6 +603,8 @@ private:
 				check_cancelled();
 				active_track = false;
 				active_stream = false;
+				// Ticks until the earliest pending event of any stream (0 while none is pending)
+				std::int64_t ticks_to_next_event = 0;
 
 				for (std::size_t i = 0; i < streams.size(); i++)
 				{
@@ -717,7 +719,8 @@ private:
 					if (delta_time > 0)
 					{
 						active_track = true;
-						delta_time--;
+						if (!ticks_to_next_event || delta_time < ticks_to_next_event)
+							ticks_to_next_event = delta_time;
 					}
 				}
 
@@ -730,7 +733,15 @@ private:
 					track.push_back(0x00);
 				}
 
-				in_track_delta++;
+				// Jump straight to the next event: stepping through the gap one tick at a time
+				// costs ticks * files per track, which runs for hours on long or high-PPQ songs
+				if (active_track)
+				{
+					for (auto& delta_time : delta_times)
+						if (delta_time > 0)
+							delta_time -= ticks_to_next_event;
+					in_track_delta += ticks_to_next_event;
+				}
 			}
 
 			if (track.empty())
