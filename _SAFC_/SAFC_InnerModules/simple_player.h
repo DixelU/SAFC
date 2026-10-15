@@ -22,6 +22,7 @@
 #include <list>
 #include <memory>
 #include <unordered_map>
+#include <span>
 
 #include <memory_mapped_file_reader.h>
 
@@ -517,6 +518,9 @@ struct simple_player
 		std::atomic<uint64_t> sender_position_us{0}; // current sender playback position (in us)
 		std::atomic<bool> memory_failure{false};
 		std::atomic<uint64_t> pending_start_lead_in_us{0};
+		// Bumped by every set_playback_clock(); the sender re-reads the clock
+		// snapshot under its mutex only when this changed.
+		std::atomic<uint32_t> clock_generation{0};
 
 		// Lookahead limits: parser throttles when too far ahead
 		static constexpr uint64_t max_lookahead_us = 5000000;  // 5 seconds max lookahead
@@ -1675,13 +1679,93 @@ struct simple_player
 
 	// Sender thread: sends pre-parsed events with precise timing
 	// During seek fast-forward (seeking_ff == true), drains buffer immediately
+	//
+	// Events sharing a timestamp form a run. The thread waits once per run and
+	// hands the whole run to the output in one call, so a dense same-tick burst
+	// costs one clock read and one synth reference per run instead of per event.
 	SIMPLE_PLAYER_FORCE_NO_INLINE void sender_thread_func()
 	{
-		// Cached clock reading: dense same-tick bursts send thousands of
-		// already-due events back to back; for those the clock isn't
-		// re-queried and the position isn't re-published.
-		constexpr int64_t clock_unknown = std::numeric_limits<int64_t>::min();
-		int64_t cached_elapsed_us = clock_unknown;
+		// Up to this many same-time events go to the output in one call.
+		constexpr size_t run_limit = 1024;
+		std::vector<syncore_short_message> run;
+		run.reserve(run_limit);
+
+		// The clock snapshot is copied under its mutex only after something
+		// changed it (resume, seek completion), tracked by a generation counter.
+		playback_clock_snapshot clock{};
+		uint32_t clock_generation = ~0u;
+		auto refresh_clock = [&]()
+		{
+			const uint32_t generation = state.clock_generation.load(std::memory_order_acquire);
+			if (generation != clock_generation)
+			{
+				clock = read_playback_clock();
+				clock_generation = generation;
+			}
+		};
+
+		// Collects the run at the queue front: the events whose time_us equals
+		// the front's (any time while fast-forwarding). Stops before an empty
+		// message so that entry is popped on its own.
+		auto gather_run = [&](bool any_time)
+		{
+			run.clear();
+			uint64_t run_time = 0;
+			for (auto it = state.send_buffer.begin(); it != state.send_buffer.end(); ++it)
+			{
+				if (run.empty())
+					run_time = it->time_us;
+				else if (!any_time && it->time_us != run_time)
+					break;
+				if (it->short_msg == 0)
+					break;
+				run.push_back({it->short_msg, it->tick.value_or(it->time_us)});
+				if (run.size() == run_limit)
+					break;
+			}
+		};
+
+		// Sends the run and returns the accepted prefix length. The remainder
+		// stays queued: a pause waits for resume, a full synth queue is retried
+		// after a short sleep, and a stopped synth stops playback. Dropping a
+		// dense burst through the live-input API would trigger panic recovery
+		// and erase held carriers, so the file sender waits for capacity.
+		auto send_run = [&](std::optional<std::chrono::steady_clock::time_point> due)
+		{
+			if (!syncore.active())
+			{
+				for (const auto& entry : run)
+					send_output_message(entry.message);
+				return run.size();
+			}
+			size_t sent = 0;
+			while (sent < run.size() && !state.stop_requested.load(std::memory_order_acquire))
+			{
+				if (!state.seeking_ff.load(std::memory_order_acquire) &&
+					state.paused.load(std::memory_order_acquire))
+					break;
+				syncore_send_result last = syncore_send_result::queued;
+				sent += syncore.try_send_short_messages(
+					std::span<const syncore_short_message>(run).subspan(sent), due, last);
+				if (sent == run.size())
+					break;
+				if (last == syncore_send_result::unavailable)
+				{
+					set_last_output_error("SYNCore stopped while sending MIDI");
+					state.stop_requested.store(true, std::memory_order_release);
+					break;
+				}
+				std::this_thread::sleep_for(std::chrono::milliseconds(1));
+			}
+			return sent;
+		};
+
+		auto pop_front_events = [&](size_t count)
+		{
+			for (size_t i = 0; i < count; ++i)
+				state.send_buffer.pop();
+		};
+
 		uint64_t last_published_us = ~0ULL;
 
 		while (!state.stop_requested)
@@ -1689,17 +1773,19 @@ struct simple_player
 			// Fast-forward mode: drain buffer immediately, no timing
 			if (state.seeking_ff.load(std::memory_order_acquire))
 			{
-				// Parser resets start_time/start_offset_us when FF completes,
-				// so any cached clock reading is stale.
-				cached_elapsed_us = clock_unknown;
+				// Parser resets the clock when FF completes; the generation
+				// counter makes the next timed run re-read it.
 				last_published_us = ~0ULL;
 
 				if (!state.send_buffer.empty())
 				{
-					auto& ev = state.send_buffer.front();
-					if (ev.short_msg != 0 && !send_playback_message(ev.short_msg, ev.tick.value_or(ev.time_us)))
+					if (state.send_buffer.front().short_msg == 0)
+					{
+						state.send_buffer.pop();
 						continue;
-					state.send_buffer.pop();
+					}
+					gather_run(true);
+					pop_front_events(send_run({}));
 					continue;
 				}
 
@@ -1719,10 +1805,6 @@ struct simple_player
 
 				if (state.stop_requested)
 					break;
-
-				// Resume: resume() updated start_offset_us and reset start_time,
-				// so the cached clock reading is stale.
-				cached_elapsed_us = clock_unknown;
 			}
 
 			if (state.stop_requested)
@@ -1747,15 +1829,21 @@ struct simple_player
 				continue;
 			}
 
-			auto& ev = state.send_buffer.front();
+			const auto& front = state.send_buffer.front();
+			if (front.short_msg == 0)
+			{
+				state.send_buffer.pop();
+				continue;
+			}
+			const uint64_t run_time_us = front.time_us;
 
 			// update current position for UI and parser throttling
 			// (only when it changes - events in a burst share one timestamp)
-			if (ev.time_us != last_published_us)
+			if (run_time_us != last_published_us)
 			{
-				last_published_us = ev.time_us;
-				state.current_time_us = ev.time_us;
-				state.sender_position_us.store(ev.time_us, std::memory_order_release);
+				last_published_us = run_time_us;
+				state.current_time_us = run_time_us;
+				state.sender_position_us.store(run_time_us, std::memory_order_release);
 			}
 
 			// Wait in bounded slices so Stop, Pause, and a new seek remain
@@ -1766,17 +1854,18 @@ struct simple_player
 			while (!state.stop_requested &&
 				!state.paused.load(std::memory_order_acquire))
 			{
-				const auto clock = read_playback_clock();
-				const uint64_t target_us = ev.time_us > clock.start_offset_us
-					? ev.time_us - clock.start_offset_us : 0;
+				refresh_clock();
+				const uint64_t target_us = run_time_us > clock.start_offset_us
+					? run_time_us - clock.start_offset_us : 0;
 				const int64_t target_elapsed_us = clamp_to_i64(target_us);
 				due = clock.start_time + std::chrono::microseconds(target_elapsed_us);
-				auto elapsed = std::chrono::steady_clock::now() - clock.start_time;
-				cached_elapsed_us = std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count();
-				if (cached_elapsed_us >= target_elapsed_us)
+				const auto elapsed = std::chrono::steady_clock::now() - clock.start_time;
+				const int64_t elapsed_us =
+					std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count();
+				if (elapsed_us >= target_elapsed_us)
 					break;
 
-				const auto wait_us = target_elapsed_us - cached_elapsed_us;
+				const auto wait_us = target_elapsed_us - elapsed_us;
 				if (wait_us > 200)
 					std::this_thread::sleep_for(std::chrono::microseconds(
 						(std::min)(wait_us - 20, int64_t{5'000})));
@@ -1789,11 +1878,9 @@ struct simple_player
 			if (state.paused.load(std::memory_order_acquire))
 				continue;
 
-			// send the event
-			if (ev.short_msg != 0 && !send_playback_message(ev.short_msg, ev.tick.value_or(ev.time_us), due))
-				continue;
-
-			state.send_buffer.pop();
+			// send the run
+			gather_run(false);
+			pop_front_events(send_run(due));
 		}
 	}
 
@@ -2635,6 +2722,7 @@ private:
 		state.start_offset_us = start_offset_us;
 		state.start_time = std::chrono::steady_clock::now() +
 			std::chrono::microseconds(clamp_to_i64(lead_in_us));
+		state.clock_generation.fetch_add(1, std::memory_order_release);
 	}
 
 	void set_playback_clock_from_pending_lead(uint64_t start_offset_us)

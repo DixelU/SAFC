@@ -321,6 +321,55 @@ bool syncore_output::send_short_message(std::uint32_t message) noexcept
 #endif
 }
 
+std::size_t syncore_output::try_send_short_messages(
+	std::span<const syncore_short_message> messages,
+	std::optional<std::chrono::steady_clock::time_point> due,
+	syncore_send_result& last) noexcept
+{
+	last = syncore_send_result::queued;
+#ifdef SAFC_WITH_SYNCORE
+	std::shared_ptr<safsyn::WindowsSynth> synth;
+	{
+		std::lock_guard lock(impl_->synth_mutex);
+		if (!impl_->active.load(std::memory_order_acquire))
+		{
+			last = syncore_send_result::unavailable;
+			return 0;
+		}
+		synth = impl_->synth;
+	}
+	if (!synth)
+	{
+		last = syncore_send_result::unavailable;
+		return 0;
+	}
+	std::size_t sent = 0;
+	for (const auto& entry : messages)
+	{
+		switch (synth->try_send_short_message(entry.message, entry.tick, due))
+		{
+		case safsyn::MidiEnqueueResult::Queued:
+			++sent;
+			continue;
+		case safsyn::MidiEnqueueResult::Full:
+			last = syncore_send_result::full;
+			return sent;
+		case safsyn::MidiEnqueueResult::Unavailable:
+			last = syncore_send_result::unavailable;
+			return sent;
+		}
+		last = syncore_send_result::unavailable;
+		return sent;
+	}
+	return sent;
+#else
+	(void)messages;
+	(void)due;
+	last = syncore_send_result::unavailable;
+	return 0;
+#endif
+}
+
 bool syncore_output::active() const noexcept
 {
 	return impl_->active.load(std::memory_order_acquire);

@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 
 // Values are persisted as SYNCORE_PHASE_MODE and must stay stable.
@@ -21,6 +22,13 @@ inline syncore_phase_mode syncore_phase_mode_from_stored(std::uint32_t value) no
 }
 
 enum class syncore_send_result { queued, full, unavailable };
+
+// One element of a same-time run the file sender hands to the synth at once.
+struct syncore_short_message
+{
+	std::uint32_t message = 0;
+	std::optional<std::uint64_t> tick;
+};
 
 struct syncore_preferences
 {
@@ -72,6 +80,13 @@ public:
 	syncore_send_result try_send_short_message(std::uint32_t message,
 		std::optional<std::uint64_t> tick = {},
 		std::optional<std::chrono::steady_clock::time_point> due = {}) noexcept;
+	// Queues messages from the front of the span, all with the same due time,
+	// while holding the synth reference once instead of once per message.
+	// Returns how many were queued; 'last' says why a shorter prefix stopped
+	// (full or unavailable) and is 'queued' when every message went through.
+	std::size_t try_send_short_messages(std::span<const syncore_short_message> messages,
+		std::optional<std::chrono::steady_clock::time_point> due,
+		syncore_send_result& last) noexcept;
 	bool active() const noexcept;
 	syncore_runtime_status status() const;
 
