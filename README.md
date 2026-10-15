@@ -93,6 +93,15 @@ held notes and later controller automation. Sustained overload can delay playbac
 Stop and Pause interrupt capacity waits. Natural completion releases the notes
 and lets their decay finish.
 
+The player keeps its falling notes in GPU buffer objects and uploads only the
+notes that arrived or ended since the last frame, scans tracks in parallel
+when a file is opened, and seeks from checkpoints instead of replaying from the
+start. **Parallel decode** in the player panel additionally decodes plain MIDI
+files on a thread pool for the next open; files whose track layout cannot be
+verified keep the repair-tolerant serial parser. See
+[PLAYER_PERFORMANCE.md](./_SAFC_/SAFC_InnerModules/PLAYER_PERFORMANCE.md) for the
+measurements and design.
+
 **Shed quiet notes when overloaded** (off by default) trades completeness for
 timing in realtime playback: once the synth has used up half of its audio
 buffer, the quietest notes are dropped, loudest last, until it catches up.
