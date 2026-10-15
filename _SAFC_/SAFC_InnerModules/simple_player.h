@@ -29,6 +29,7 @@
 #include "single_midi_processor_2.h"
 #include "single_midi_info_collector.h"
 #include "midi_track_scanner.h"
+#include "player_visuals.h"
 #include "playback_event_source.h"
 #include "syncore_output.h"
 
@@ -37,6 +38,13 @@
 #include <buffered_queue_spsc.h>
 // __declspec(noinline)
 // __declspec(noinline)
+
+#ifndef GL_ARRAY_BUFFER
+#define GL_ARRAY_BUFFER 0x8892
+#endif
+#ifndef GL_DYNAMIC_DRAW
+#define GL_DYNAMIC_DRAW 0x88E8
+#endif
 
 // lock-free SPSC slab-based queue
 // Producer (parser): push, back
@@ -68,265 +76,8 @@ struct simple_player
 		}
 	};
 
-	// Visuals viewport: manages notes display and keyboard state
-	// lock-free SPSC: parser thread pushes notes, render thread reads state
-	struct visuals_viewport
-	{
-		static constexpr size_t key_count = 128;
-		static constexpr size_t note_list_slab_bytes = 1u << 8;
-		using note_list = dixelu::buffered_block_list<buffered_note, note_list_slab_bytes>;
-
-		struct queued_visual_event
-		{
-			uint64_t time_us;
-			uint32_t track_id;
-			uint8_t key;
-			bool note_on;
-		};
-
-		// Pending note tracking entry - points to a list note awaiting its note_off
-		// Only accessed by the visual consumer - no synchronization needed
-		// Per-track_id LIFO stacks of pending notes per key.
-		// Flat open-addressing hash table (linear probing, power-of-two size):
-		// a lookup is one probe into a contiguous array instead of
-		// unordered_map's bucket->node pointer chase, and emptied stacks keep
-		// their slot and capacity, so steady-state playback doesn't allocate.
-		// Visual-consumer-private
-		struct pending_list
-		{
-			// track_id is (track_index << 4) | channel and never reaches ~0u
-			static constexpr uint32_t empty_id = ~0u;
-
-			struct slot
-			{
-				uint32_t track_id = empty_id;
-				std::vector<buffered_note*> stack; // LIFO of notes awaiting note_off
-			};
-
-			std::vector<slot> slots; // power-of-two size
-			size_t used = 0;		 // occupied slots (including emptied stacks)
-
-			static size_t hash(uint32_t id)
-			{
-				// Fibonacci hash: track_ids are dense sequential ints
-				return static_cast<size_t>((id * 0x9E3779B97F4A7C15ull) >> 32);
-			}
-
-			// Returns the slot holding track_id, or the empty slot where it
-			// belongs. Load factor stays below 3/4, so the probe terminates.
-			slot* find_slot(uint32_t track_id)
-			{
-				const size_t mask = slots.size() - 1;
-				size_t i = hash(track_id) & mask;
-				while (slots[i].track_id != track_id && slots[i].track_id != empty_id)
-					i = (i + 1) & mask;
-				return &slots[i];
-			}
-
-			void grow()
-			{
-				std::vector<slot> old(slots.empty() ? 16 : slots.size() * 2);
-				old.swap(slots);
-				for (auto& s : old)
-					if (s.track_id != empty_id)
-						*find_slot(s.track_id) = std::move(s);
-			}
-
-			void push(uint32_t track_id, buffered_note* ptr)
-			{
-				if (used * 4 >= slots.size() * 3)
-					grow();
-
-				slot* s = find_slot(track_id);
-				if (s->track_id == empty_id)
-				{
-					s->track_id = track_id;
-					++used;
-				}
-				s->stack.push_back(ptr);
-			}
-
-			buffered_note* find_and_remove(uint32_t track_id)
-			{
-				if (slots.empty())
-					return nullptr;
-
-				slot* s = find_slot(track_id);
-				if (s->track_id == empty_id || s->stack.empty())
-					return nullptr;
-
-				buffered_note* result = s->stack.back();
-				s->stack.pop_back();
-				return result;
-			}
-
-			void clear()
-			{
-				slots.clear();
-				used = 0;
-			}
-		};
-
-		// The parser publishes compact events through one SPSC queue. The visual
-		// consumer drains them into per-key block lists, so list mutation, pending
-		// matching, reclamation and iteration all stay on one thread. Lists are
-		// allocated lazily to avoid the pool's default per-container slab cost.
-		dixelu::buffered_queue_spsc<queued_visual_event> queued_events;
-		std::array<std::unique_ptr<note_list>, key_count> falling_notes;
-
-		// Per-key pending note trackers for note_off matching
-		// Visual-consumer-private
-		std::array<pending_list, key_count> pending;
-
-		// Mutex held by render thread during cull+iteration and by playback_thread during reset().
-		// Prevents data race between visuals.reset() (clear) and concurrent render iteration.
-		mutable std::mutex access_mutex;
-
-		// Generate unique track_id from track index and channel
-		static uint32_t make_color_id(size_t track_index, uint8_t channel)
-		{
-			return static_cast<uint32_t>((track_index << 4) | (channel & 0x0F));
-		}
-
-		// Extract track index from track_id
-		static size_t get_track_from_track_id(uint32_t track_id)
-		{
-			return track_id >> 4;
-		}
-
-		// Extract channel from track_id
-		static uint8_t get_channel_from_track_id(uint32_t track_id)
-		{
-			return static_cast<uint8_t>(track_id & 0x0F);
-		}
-
-		void apply_visual_event(const queued_visual_event& event)
-		{
-			if (event.note_on)
-			{
-				auto& notes = falling_notes[event.key];
-				if (!notes)
-					notes = std::make_unique<note_list>();
-
-				buffered_note& note = notes->emplace_back(
-					event.time_us, ~0ULL, event.track_id);
-				try
-				{
-					pending[event.key].push(event.track_id, &note);
-				}
-				catch (...)
-				{
-					notes->pop_back();
-					if (notes->empty())
-						notes.reset();
-					throw;
-				}
-				return;
-			}
-
-			buffered_note* note = pending[event.key].find_and_remove(event.track_id);
-			if (note)
-				note->end_time_us = event.time_us;
-		}
-
-		// Drain only the boundary visible at entry. A continuously producing parser
-		// therefore cannot monopolize one render frame.
-		SIMPLE_PLAYER_FORCE_NO_INLINE void drain_queued_events()
-		{
-			size_t remaining = queued_events.approximate_size();
-			while (remaining-- != 0 && !queued_events.empty())
-			{
-				const queued_visual_event event = queued_events.front();
-				queued_events.pop();
-				apply_visual_event(event);
-			}
-		}
-
-		// Push a note_on event to the visual consumer.
-		// Called from parser thread only - no locking needed.
-		SIMPLE_PLAYER_FORCE_NO_INLINE void push_note_on(uint8_t key, uint64_t time_us, size_t track_index, uint8_t channel, uint8_t velocity)
-		{
-			if (key >= key_count)
-				return;
-
-			(void)velocity;
-			queued_events.push({time_us, make_color_id(track_index, channel), key, true});
-		}
-
-		// Push a note_off event to the visual consumer.
-		// Called from parser thread only - no locking needed.
-		SIMPLE_PLAYER_FORCE_NO_INLINE void push_note_off(uint8_t key, uint64_t time_us, size_t track_index, uint8_t channel)
-		{
-			if (key >= key_count)
-				return;
-
-			queued_events.push({time_us, make_color_id(track_index, channel), key, false});
-		}
-
-		// Remove every note that has fully scrolled past, including expired notes
-		// behind an older note that is still held. Lists are ordered by start time,
-		// so no later note can be expired once start_time reaches the cutoff.
-		// Called from the visual consumer only.
-		SIMPLE_PLAYER_FORCE_NO_INLINE void cull_expired(int64_t cutoff_time_us)
-		{
-			drain_queued_events();
-			if (cutoff_time_us <= 0)
-				return;
-
-			const uint64_t cutoff = static_cast<uint64_t>(cutoff_time_us);
-			for (size_t key = 0; key < key_count; ++key)
-			{
-				auto& notes = falling_notes[key];
-				if (!notes)
-					continue;
-
-				for (auto current = notes->begin(); current != notes->end();)
-				{
-					if (current->start_time_us >= cutoff)
-						break;
-
-					const uint64_t end_time = current->end_time_us;
-					if (end_time != ~0ULL && end_time < cutoff)
-						current = notes->erase(current);
-					else
-						++current;
-				}
-
-				if (notes->empty())
-					notes.reset();
-			}
-		}
-
-		// Clear all visual state
-		// Should only be called when no concurrent access (e.g., during reset)
-		void clear()
-		{
-			queued_events.clear();
-			for (auto& p : pending)
-				p.clear();
-			for (auto& notes : falling_notes)
-				notes.reset();
-		}
-
-		// reset for new playback
-		// Acquires access_mutex to synchronize with render thread iteration.
-		void reset()
-		{
-			std::lock_guard<std::mutex> lock(access_mutex);
-			clear();
-		}
-
-		std::size_t buffered_note_count()
-		{
-			std::lock_guard<std::mutex> lock(access_mutex);
-			drain_queued_events();
-			std::size_t result = 0;
-			for (const auto& notes : falling_notes)
-				if (notes)
-					result += notes->size();
-			return result;
-		}
-	};
+	// Visuals viewport: see player_visuals.h.
+	using visuals_viewport = simple_player_visuals;
 
 	struct send_event
 	{
@@ -2183,6 +1934,252 @@ struct simple_player
 		std::vector<outline_vert> outline_verts;
 		std::vector<note_span>  key_note_spans;
 		std::vector<interval>   covered_intervals;
+		// CPU path scratch: this frame's visible spans bucketed per key.
+		std::array<std::vector<note_span>, 128> key_spans;
+
+		// GPU-resident falling notes. Each visuals ring is mirrored into one
+		// vertex buffer of quads whose y is time in seconds from an epoch; the
+		// modelview matrix scrolls them, so a frame uploads only the notes
+		// that arrived or ended since the last one. Off, or when buffer
+		// objects are unavailable, the CPU path rebuilds geometry per frame.
+		// The overlap removal modes apply to the CPU path only.
+		bool gpu_notes_enabled = true;
+		// A ring retaining more notes than this is drawn without outlines.
+		size_t gpu_outline_note_limit = size_t{1} << 18;
+
+		struct gpu_note_vertex { float x, y; uint8_t r, g, b, a; };
+		struct gpu_note_mirror
+		{
+			unsigned buffer = 0;			// GL buffer object name
+			uint32_t layout_generation = 0; // ring layout mirrored
+			uint32_t geometry_generation = 0; // keyboard geometry mirrored
+			size_t capacity = 0;			// notes the buffer holds
+			uint64_t epoch_us = 0;			// y = seconds since this
+		};
+		struct gl_buffer_api
+		{
+			using gl_sizeiptr = std::ptrdiff_t;
+			using gl_intptr = std::ptrdiff_t;
+			void (APIENTRY* gen_buffers)(GLsizei, GLuint*) = nullptr;
+			void (APIENTRY* delete_buffers)(GLsizei, const GLuint*) = nullptr;
+			void (APIENTRY* bind_buffer)(GLenum, GLuint) = nullptr;
+			void (APIENTRY* buffer_data)(GLenum, gl_sizeiptr, const void*, GLenum) = nullptr;
+			void (APIENTRY* buffer_sub_data)(GLenum, gl_intptr, gl_sizeiptr, const void*) = nullptr;
+			bool probed = false;
+			bool available = false;
+
+			static PROC load(const char* core_name, const char* arb_name)
+			{
+				auto invalid = [](PROC value)
+				{
+					const auto address = reinterpret_cast<std::uintptr_t>(value);
+					return !value || address <= 3 ||
+						address == (std::numeric_limits<std::uintptr_t>::max)();
+				};
+				PROC result = wglGetProcAddress(core_name);
+				if (invalid(result))
+					result = wglGetProcAddress(arb_name);
+				return invalid(result) ? nullptr : result;
+			}
+
+			// Needs a current context. Probed once per draw_data.
+			bool ensure()
+			{
+				if (probed)
+					return available;
+				probed = true;
+				gen_buffers = reinterpret_cast<decltype(gen_buffers)>(load("glGenBuffers", "glGenBuffersARB"));
+				delete_buffers = reinterpret_cast<decltype(delete_buffers)>(load("glDeleteBuffers", "glDeleteBuffersARB"));
+				bind_buffer = reinterpret_cast<decltype(bind_buffer)>(load("glBindBuffer", "glBindBufferARB"));
+				buffer_data = reinterpret_cast<decltype(buffer_data)>(load("glBufferData", "glBufferDataARB"));
+				buffer_sub_data = reinterpret_cast<decltype(buffer_sub_data)>(load("glBufferSubData", "glBufferSubDataARB"));
+				available = gen_buffers && delete_buffers && bind_buffer && buffer_data && buffer_sub_data;
+				return available;
+			}
+		};
+		gl_buffer_api gl_buffers;
+		std::array<gpu_note_mirror, 2> gpu_rings;
+		std::vector<gpu_note_vertex> gpu_staging;
+		uint32_t geometry_generation = 1;	// bumped when key quads move
+		uint8_t key_index[128] = {};		// key -> keyboard index (inverse of key_n)
+
+		draw_data() = default;
+		draw_data(const draw_data&) = delete;
+		draw_data& operator=(const draw_data&) = delete;
+		~draw_data() { release_gpu(); }
+
+		// Deletes the buffer objects. Needs the owning context current; without
+		// a current context the driver ignores the call and the context's
+		// destruction reclaims them.
+		void release_gpu() noexcept
+		{
+			if (!gl_buffers.available)
+				return;
+			for (auto& mirror : gpu_rings)
+			{
+				if (mirror.buffer)
+					gl_buffers.delete_buffers(1, &mirror.buffer);
+				mirror = {};
+			}
+		}
+
+		static float seconds_since(uint64_t time_us, uint64_t epoch_us) noexcept
+		{
+			return time_us >= epoch_us
+				? static_cast<float>(static_cast<double>(time_us - epoch_us) * 1e-6)
+				: -static_cast<float>(static_cast<double>(epoch_us - time_us) * 1e-6);
+		}
+
+		// Four vertices for one note: left edge full colour, right edge shaded,
+		// the same gradient the CPU path emits. Expired notes become a point.
+		void write_note_quad(const visuals_viewport::note_record& note, uint64_t epoch_us,
+			gpu_note_vertex* out) const noexcept
+		{
+			if (note.dead)
+			{
+				for (int i = 0; i < 4; ++i)
+					out[i] = {0.f, 0.f, 0, 0, 0, 0};
+				return;
+			}
+			const auto& quad = keyboard[key_index[note.key]];
+			const float lx = quad.tl.x;
+			const float rx = quad.tr.x;
+			const float y0 = seconds_since(note.start_time_us, epoch_us);
+			const float y1 = note.end_time_us == visuals_viewport::held_end
+				? y0 + 1.0e6f
+				: seconds_since(note.end_time_us, epoch_us);
+			const uint32_t color = rotate(0xFF7F008F, note.track_id);
+			const uint8_t r = uint8_t(color >> 24), g = uint8_t(color >> 16), b = uint8_t(color >> 8);
+			out[0] = {lx, y0, r, g, b, 0xFF};
+			out[1] = {lx, y1, r, g, b, 0xFF};
+			out[2] = {rx, y1, scale<0.5f>(r), scale<0.5f>(g), scale<0.5f>(b), 0xFF};
+			out[3] = {rx, y0, scale<0.5f>(r), scale<0.5f>(g), scale<0.5f>(b), 0xFF};
+		}
+
+		// Uploads the records in 'count' consecutive slots starting at
+		// first_slot; slots outside the retained range become points.
+		void upload_slots(const visuals_viewport::note_ring& ring, const gpu_note_mirror& mirror,
+			size_t first_slot, size_t count)
+		{
+			gpu_staging.resize(count * 4);
+			const size_t tail_slot = ring.slot_of(ring.tail_seq);
+			for (size_t i = 0; i < count; ++i)
+			{
+				const size_t slot = first_slot + i;
+				const uint64_t seq = ring.tail_seq + ((slot - tail_slot) & ring.mask());
+				if (ring.contains(seq))
+					write_note_quad(ring.at(seq), mirror.epoch_us, &gpu_staging[i * 4]);
+				else
+					for (int v = 0; v < 4; ++v)
+						gpu_staging[i * 4 + v] = {0.f, 0.f, 0, 0, 0, 0};
+			}
+			gl_buffers.buffer_sub_data(GL_ARRAY_BUFFER,
+				static_cast<gl_buffer_api::gl_intptr>(first_slot * 4 * sizeof(gpu_note_vertex)),
+				static_cast<gl_buffer_api::gl_sizeiptr>(count * 4 * sizeof(gpu_note_vertex)),
+				gpu_staging.data());
+		}
+
+		// Brings the ring's buffer up to date: everything after a layout or
+		// geometry change or an epoch rebase, otherwise only the dirty pages.
+		// Leaves the buffer bound.
+		void sync_gpu_ring(size_t index, visuals_viewport::note_ring& ring, int64_t current_us)
+		{
+			auto& mirror = gpu_rings[index];
+			if (mirror.buffer == 0)
+				gl_buffers.gen_buffers(1, &mirror.buffer);
+			gl_buffers.bind_buffer(GL_ARRAY_BUFFER, mirror.buffer);
+
+			// Float seconds keep sub-pixel precision for about an hour from the
+			// epoch; move the epoch before that.
+			constexpr int64_t rebase_after_us = 1024LL * 1'000'000;
+			const int64_t since_epoch = current_us - clamp_to_i64(mirror.epoch_us);
+			const bool rebase = since_epoch > rebase_after_us || since_epoch < -rebase_after_us;
+
+			if (mirror.layout_generation != ring.layout_generation ||
+				mirror.geometry_generation != geometry_generation ||
+				mirror.capacity != ring.capacity() || rebase)
+			{
+				mirror.layout_generation = ring.layout_generation;
+				mirror.geometry_generation = geometry_generation;
+				mirror.capacity = ring.capacity();
+				mirror.epoch_us = current_us > 0 ? static_cast<uint64_t>(current_us) : 0;
+				gl_buffers.buffer_data(GL_ARRAY_BUFFER,
+					static_cast<gl_buffer_api::gl_sizeiptr>(mirror.capacity * 4 * sizeof(gpu_note_vertex)),
+					nullptr, GL_DYNAMIC_DRAW);
+				size_t slot = ring.slot_of(ring.tail_seq);
+				size_t remaining = ring.range();
+				while (remaining)
+				{
+					const size_t run = std::min(remaining, ring.capacity() - slot);
+					upload_slots(ring, mirror, slot, run);
+					slot = 0;
+					remaining -= run;
+				}
+				ring.clear_dirty();
+				return;
+			}
+
+			for (const auto page : ring.dirty_pages)
+				upload_slots(ring, mirror, static_cast<size_t>(page) * visuals_viewport::note_ring::page_notes,
+					visuals_viewport::note_ring::page_notes);
+			ring.clear_dirty();
+		}
+
+		struct gpu_ring_draw
+		{
+			unsigned buffer = 0;
+			size_t first_slot = 0;
+			size_t count = 0;
+			size_t capacity = 0;
+			bool outlines = false;
+		};
+
+		// Fills, then (within the outline limit) the edges darkened to a
+		// quarter of what they cover, like the CPU path's border colour.
+		void draw_gpu_ring(const gpu_ring_draw& ring) const
+		{
+			if (ring.count == 0 || ring.buffer == 0)
+				return;
+			gl_buffers.bind_buffer(GL_ARRAY_BUFFER, ring.buffer);
+			glVertexPointer(2, GL_FLOAT, sizeof(gpu_note_vertex),
+				reinterpret_cast<const void*>(std::uintptr_t{0}));
+			glColorPointer(4, GL_UNSIGNED_BYTE, sizeof(gpu_note_vertex),
+				reinterpret_cast<const void*>(std::uintptr_t{offsetof(gpu_note_vertex, r)}));
+
+			auto draw_ranges = [&]()
+			{
+				size_t slot = ring.first_slot;
+				size_t remaining = ring.count;
+				while (remaining)
+				{
+					const size_t run = std::min(remaining, ring.capacity - slot);
+					glDrawArrays(GL_QUADS, static_cast<GLint>(slot * 4), static_cast<GLsizei>(run * 4));
+					slot = 0;
+					remaining -= run;
+				}
+			};
+			draw_ranges();
+
+			if (ring.outlines)
+			{
+				GLint blend_src = GL_SRC_ALPHA, blend_dst = GL_ONE_MINUS_SRC_ALPHA;
+				glGetIntegerv(GL_BLEND_SRC, &blend_src);
+				glGetIntegerv(GL_BLEND_DST, &blend_dst);
+				const bool blend_was_enabled = glIsEnabled(GL_BLEND) == GL_TRUE;
+				glDisableClientState(GL_COLOR_ARRAY);
+				glColor4f(0.25f, 0.25f, 0.25f, 1.f);
+				glEnable(GL_BLEND);
+				glBlendFunc(GL_DST_COLOR, GL_ZERO);
+				glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+				draw_ranges();
+				glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+				glBlendFunc(static_cast<GLenum>(blend_src), static_cast<GLenum>(blend_dst));
+				if (!blend_was_enabled)
+					glDisable(GL_BLEND);
+				glColor4f(1.f, 1.f, 1.f, 1.f);
+				glEnableClientState(GL_COLOR_ARRAY);
+			}
+		}
 
 		// Six faces per key, three shadow quads per black key, and three case/rail
 		// quads: 1,860 triangles for all 128 keys, independent of the note count.
@@ -2405,6 +2402,9 @@ struct simple_player
 			}
 
 			last_keyboard_height = keyboard_height;
+			for (int index = 0; index < 128; ++index)
+				key_index[key_n[index]] = static_cast<uint8_t>(index);
+			++geometry_generation;
 			init_keyboard_mesh();
 		}
 
@@ -2429,6 +2429,7 @@ struct simple_player
 				keyboard_vertices[v].x += dx;
 				keyboard_vertices[v].y += dy;
 			}
+			++geometry_generation;
 		}
 
 		void reinit(float new_width, float new_height, float keyboard_height, float black_height, float black_margins)
@@ -2551,6 +2552,8 @@ struct simple_player
 
 		GLsizei white_fill_verts = 0;
 		GLsizei white_outline_verts = 0;
+		bool gpu = false;
+		std::array<draw_data::gpu_ring_draw, 2> gpu_draws{};
 
 		try
 		{
@@ -2558,153 +2561,39 @@ struct simple_player
 			std::lock_guard<std::mutex> visuals_lock(visuals.access_mutex);
 
 			visuals.cull_expired(current_us - clamp_to_i64(data.scroll_window_us));
+			visuals.advance_key_state(current_us);
 
-			size_t queued_notes = 0;
-			for (const auto& notes : visuals.falling_notes)
-				if (notes)
-					queued_notes += notes->size();
-
-			const size_t fill_vert_capacity = queued_notes * 4;
-			const size_t outline_vert_capacity = queued_notes * 8;
-			if (data.note_verts.capacity() < fill_vert_capacity)
-				data.note_verts.reserve(fill_vert_capacity);
-			if (data.note_colors.capacity() < fill_vert_capacity)
-				data.note_colors.reserve(fill_vert_capacity);
-			if (data.outline_verts.capacity() < outline_vert_capacity)
-				data.outline_verts.reserve(outline_vert_capacity);
-
-			auto batch_notes_for_index = [&](int index)
+			for (int index = 0; index < 128; ++index)
 			{
-				uint8_t key = data.key_n[index];
-				data.key_note_spans.clear();
-				const auto& notes = visuals.falling_notes[key];
-				if (!notes)
-					return;
-
-				for (auto it = notes->begin(); it != notes->end(); ++it)
-				{
-					auto& note = *it;
-
-					uint64_t end_time = note.end_time_us;
-
-					int64_t start_offset = clamp_to_i64(note.start_time_us) - current_us;
-					int64_t end_offset = 0;
-
-					float begin_y = float(start_offset) / float(data.scroll_window_us);
-					float end_y = 1;
-
-					if (end_time != ~0ULL)
-					{
-						end_offset = clamp_to_i64(end_time) - current_us;
-						end_y = float(end_offset) / float(data.scroll_window_us);
-					}
-
-					if (begin_y > 1.01f)
-						break; // Queue is ordered by start_time_us, so later notes are even further above view.
-
-					if (end_y < -0.01f)
-						continue;
-
-					data.key_note_spans.push_back({
-						std::clamp(begin_y, 0.f, 1.f),
-						std::clamp(end_y, 0.f, 1.f),
-						note.track_id,
-						rotate(0xFF7F008F, note.track_id),
-						begin_y <= 0 && end_y >= 0
-						});
-				}
-
-				if (data.key_note_spans.empty())
-					return;
-
-				for (auto it = data.key_note_spans.rbegin(); it != data.key_note_spans.rend(); ++it)
-				{
-					if (!it->touches_keyboard)
-						continue;
-
-					keyboard_colors[index] = {
-						uint8_t(it->color >> 24),
-						uint8_t(it->color >> 16),
-						uint8_t(it->color >> 8),
-					};
-					break;
-				}
-
-				const float lx = data.keyboard[index].tl.x;
-				const float rx = data.keyboard[index].tr.x;
-
-				auto emit_span = [&](float begin_y, float end_y, uint32_t color_value)
-				{
-					begin_y = data.keyboard->tr.y + data.height * begin_y;
-					end_y = data.keyboard->tr.y + data.height * end_y;
-
-					const draw_data::note_color note_color{
-						uint8_t(color_value >> 24),
-						uint8_t(color_value >> 16),
-						uint8_t(color_value >> 8),
-						0xFF
-					};
-
-					const draw_data::note_color note_color_shady{
-						scale<0.5f>(note_color.r),
-						scale<0.5f>(note_color.g),
-						scale<0.5f>(note_color.b),
-						0xFF
-					};
-
-					const draw_data::note_color note_border_col{
-						scale<0.25f>(note_color.r),
-						scale<0.25f>(note_color.g),
-						scale<0.25f>(note_color.b),
-						0xFF
-					};
-
-					data.note_verts.reserve(data.note_verts.size() + 4);
-					data.note_verts.push_back({lx, begin_y});
-					data.note_verts.push_back({lx, end_y});
-					data.note_verts.push_back({rx, end_y});
-					data.note_verts.push_back({rx, begin_y});
-
-					data.note_colors.reserve(data.note_colors.size() + 4);
-					data.note_colors.push_back(note_color);
-					data.note_colors.push_back(note_color);
-					data.note_colors.push_back(note_color_shady);
-					data.note_colors.push_back(note_color_shady);
-
-					data.outline_verts.insert(data.outline_verts.end(), {
-						{lx, begin_y, note_border_col}, {lx, end_y, note_border_col},
-						{lx, end_y, note_border_col},   {rx, end_y, note_border_col},
-						{rx, end_y, note_border_col},   {rx, begin_y, note_border_col},
-						{rx, begin_y, note_border_col}, {lx, begin_y, note_border_col},
-					});
+				uint32_t track_id = 0;
+				if (!visuals.pressed_track_id(data.key_n[index], current_us, track_id))
+					continue;
+				const uint32_t color = rotate(0xFF7F008F, track_id);
+				keyboard_colors[index] = {
+					uint8_t(color >> 24),
+					uint8_t(color >> 16),
+					uint8_t(color >> 8),
 				};
+			}
 
-				if (data.remove_overlaps <= draw_data::MAX_OVERLAPS_REMOVAL_VERSION)
+			gpu = data.gpu_notes_enabled && data.gl_buffers.ensure();
+			if (gpu)
+			{
+				for (size_t ring_index = 0; ring_index < visuals.rings.size(); ++ring_index)
 				{
-					if (data.remove_overlaps == 0)
-					{
-						overlaps_removal_v0(data, emit_span);
-						return;
-					}
-					else if (data.remove_overlaps == 1)
-					{
-						overlaps_removal_v1(data.key_note_spans);
-						// [[fallthrough]];
-					}
+					auto& ring = visuals.rings[ring_index];
+					data.sync_gpu_ring(ring_index, ring, current_us);
+					gpu_draws[ring_index] = {
+						data.gpu_rings[ring_index].buffer,
+						ring.range() ? ring.slot_of(ring.tail_seq) : 0,
+						ring.range(),
+						ring.capacity(),
+						ring.range() <= data.gpu_outline_note_limit,
+					};
 				}
-
-				for (const auto& span : data.key_note_spans)
-					emit_span(span.begin_y, span.end_y, span.color);
-			};
-
-			// White key notes first (drawn behind), record split point, then black key notes on top
-			for (int index = 0; index < total_white; ++index)
-				batch_notes_for_index(index);
-
-			white_fill_verts = static_cast<GLsizei>(data.note_verts.size());
-			white_outline_verts = static_cast<GLsizei>(data.outline_verts.size());
-			for (int index = total_white; index < 128; ++index)
-				batch_notes_for_index(index);
+			}
+			else
+				build_cpu_note_geometry(data, visuals, current_us, white_fill_verts, white_outline_verts);
 		}
 		catch (const std::bad_alloc&)
 		{
@@ -2721,7 +2610,39 @@ struct simple_player
 		glEnableClientState(GL_VERTEX_ARRAY);
 		glEnableClientState(GL_COLOR_ARRAY);
 
-		if (!data.note_verts.empty())
+		if (gpu)
+		{
+			// Notes are clipped to the area above the keyboard in the caller's
+			// coordinates, then scrolled: y = top + height * (t - now) / window.
+			const float top = data.keyboard->tr.y;
+			const double plane_bottom[4] = {0.0, 1.0, 0.0, -static_cast<double>(top)};
+			const double plane_top[4] = {0.0, -1.0, 0.0, static_cast<double>(top) + static_cast<double>(data.height)};
+			glMatrixMode(GL_MODELVIEW);
+			glClipPlane(GL_CLIP_PLANE0, plane_bottom);
+			glClipPlane(GL_CLIP_PLANE1, plane_top);
+			glEnable(GL_CLIP_PLANE0);
+			glEnable(GL_CLIP_PLANE1);
+			glPushMatrix();
+			const double window_seconds = static_cast<double>(data.scroll_window_us) * 1e-6;
+			glTranslatef(0.f, top, 0.f);
+			glScalef(1.f, static_cast<float>(static_cast<double>(data.height) / window_seconds), 1.f);
+			for (size_t ring_index = 0; ring_index < gpu_draws.size(); ++ring_index)
+			{
+				// Each ring has its own epoch; the scroll offset is per ring.
+				// |now - epoch| stays within the rebase bound, so float is exact enough.
+				const double now_seconds = (static_cast<double>(current_us) -
+					static_cast<double>(data.gpu_rings[ring_index].epoch_us)) * 1e-6;
+				glPushMatrix();
+				glTranslatef(0.f, -static_cast<float>(now_seconds), 0.f);
+				data.draw_gpu_ring(gpu_draws[ring_index]);
+				glPopMatrix();
+			}
+			glPopMatrix();
+			glDisable(GL_CLIP_PLANE0);
+			glDisable(GL_CLIP_PLANE1);
+			data.gl_buffers.bind_buffer(GL_ARRAY_BUFFER, 0);
+		}
+		else if (!data.note_verts.empty())
 		{
 			const GLsizei total_fill = static_cast<GLsizei>(data.note_verts.size());
 			const GLsizei total_outline = static_cast<GLsizei>(data.outline_verts.size());
@@ -2750,6 +2671,147 @@ struct simple_player
 		data.draw_keyboard(keyboard_colors);
 		glDisableClientState(GL_COLOR_ARRAY);
 		glDisableClientState(GL_VERTEX_ARRAY);
+	}
+
+	// CPU path: this frame's visible spans per key, overlap removal, and the
+	// client-array geometry the fixed-function draw consumes. Called under the
+	// visuals lock. Cost grows with the notes on screen; the GPU path replaces
+	// it whenever buffer objects are available.
+	SIMPLE_PLAYER_FORCE_NO_INLINE void build_cpu_note_geometry(draw_data& data, visuals_viewport& visuals,
+		int64_t current_us, GLsizei& white_fill_verts, GLsizei& white_outline_verts)
+	{
+		constexpr int total_white = draw_data::white_keys_count();
+
+		for (auto& spans : data.key_spans)
+			spans.clear();
+
+		size_t queued_notes = 0;
+		for (const auto& ring : visuals.rings)
+		{
+			for (uint64_t seq = ring.tail_seq; seq != ring.head_seq; ++seq)
+			{
+				const auto& note = ring.at(seq);
+				if (note.dead)
+					continue;
+
+				int64_t start_offset = clamp_to_i64(note.start_time_us) - current_us;
+				float begin_y = float(start_offset) / float(data.scroll_window_us);
+				float end_y = 1;
+
+				if (begin_y > 1.01f)
+					break; // Rings are ordered by start time, so later notes are even further above view.
+
+				if (note.end_time_us != visuals_viewport::held_end)
+				{
+					const int64_t end_offset = clamp_to_i64(note.end_time_us) - current_us;
+					end_y = float(end_offset) / float(data.scroll_window_us);
+				}
+
+				if (end_y < -0.01f)
+					continue;
+
+				data.key_spans[note.key].push_back({
+					std::clamp(begin_y, 0.f, 1.f),
+					std::clamp(end_y, 0.f, 1.f),
+					note.track_id,
+					rotate(0xFF7F008F, note.track_id),
+					begin_y <= 0 && end_y >= 0
+					});
+				++queued_notes;
+			}
+		}
+
+		const size_t fill_vert_capacity = queued_notes * 4;
+		const size_t outline_vert_capacity = queued_notes * 8;
+		if (data.note_verts.capacity() < fill_vert_capacity)
+			data.note_verts.reserve(fill_vert_capacity);
+		if (data.note_colors.capacity() < fill_vert_capacity)
+			data.note_colors.reserve(fill_vert_capacity);
+		if (data.outline_verts.capacity() < outline_vert_capacity)
+			data.outline_verts.reserve(outline_vert_capacity);
+
+		auto batch_notes_for_index = [&](int index)
+		{
+			uint8_t key = data.key_n[index];
+			data.key_note_spans.swap(data.key_spans[key]);
+			if (data.key_note_spans.empty())
+				return;
+
+			const float lx = data.keyboard[index].tl.x;
+			const float rx = data.keyboard[index].tr.x;
+
+			auto emit_span = [&](float begin_y, float end_y, uint32_t color_value)
+			{
+				begin_y = data.keyboard->tr.y + data.height * begin_y;
+				end_y = data.keyboard->tr.y + data.height * end_y;
+
+				const draw_data::note_color note_color{
+					uint8_t(color_value >> 24),
+					uint8_t(color_value >> 16),
+					uint8_t(color_value >> 8),
+					0xFF
+				};
+
+				const draw_data::note_color note_color_shady{
+					scale<0.5f>(note_color.r),
+					scale<0.5f>(note_color.g),
+					scale<0.5f>(note_color.b),
+					0xFF
+				};
+
+				const draw_data::note_color note_border_col{
+					scale<0.25f>(note_color.r),
+					scale<0.25f>(note_color.g),
+					scale<0.25f>(note_color.b),
+					0xFF
+				};
+
+				data.note_verts.reserve(data.note_verts.size() + 4);
+				data.note_verts.push_back({lx, begin_y});
+				data.note_verts.push_back({lx, end_y});
+				data.note_verts.push_back({rx, end_y});
+				data.note_verts.push_back({rx, begin_y});
+
+				data.note_colors.reserve(data.note_colors.size() + 4);
+				data.note_colors.push_back(note_color);
+				data.note_colors.push_back(note_color);
+				data.note_colors.push_back(note_color_shady);
+				data.note_colors.push_back(note_color_shady);
+
+				data.outline_verts.insert(data.outline_verts.end(), {
+					{lx, begin_y, note_border_col}, {lx, end_y, note_border_col},
+					{lx, end_y, note_border_col},   {rx, end_y, note_border_col},
+					{rx, end_y, note_border_col},   {rx, begin_y, note_border_col},
+					{rx, begin_y, note_border_col}, {lx, begin_y, note_border_col},
+				});
+			};
+
+			if (data.remove_overlaps <= draw_data::MAX_OVERLAPS_REMOVAL_VERSION)
+			{
+				if (data.remove_overlaps == 0)
+				{
+					overlaps_removal_v0(data, emit_span);
+					return;
+				}
+				else if (data.remove_overlaps == 1)
+				{
+					overlaps_removal_v1(data.key_note_spans);
+					// [[fallthrough]];
+				}
+			}
+
+			for (const auto& span : data.key_note_spans)
+				emit_span(span.begin_y, span.end_y, span.color);
+		};
+
+		// White key notes first (drawn behind), record split point, then black key notes on top
+		for (int index = 0; index < total_white; ++index)
+			batch_notes_for_index(index);
+
+		white_fill_verts = static_cast<GLsizei>(data.note_verts.size());
+		white_outline_verts = static_cast<GLsizei>(data.outline_verts.size());
+		for (int index = total_white; index < 128; ++index)
+			batch_notes_for_index(index);
 	}
 
 private:

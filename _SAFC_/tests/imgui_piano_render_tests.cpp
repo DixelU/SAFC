@@ -6,6 +6,7 @@
 #include <iostream>
 #include <memory>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
 namespace
@@ -41,8 +42,13 @@ void check_note_borders()
     glClearColor(background[0] / 255.f, background[1] / 255.f, background[2] / 255.f, 1.f);
 
     std::vector<unsigned char> pixels(width * height * 4);
+    // The GPU path keeps the notes in buffer objects and scrolls them with the
+    // modelview matrix; the CPU path rebuilds client arrays per frame and is
+    // the one the overlap modes apply to. Both must stay inside the rectangles.
+    for (bool gpu : {true, false})
     for (auto overlap_mode : {0, 1, 255})
     {
+        data->gpu_notes_enabled = gpu;
         data->remove_overlaps = static_cast<std::uint8_t>(overlap_mode);
         // Exercise reused client arrays, both key colors, and overlap splitting.
         for (int frame = 0; frame < 40; ++frame)
@@ -54,19 +60,23 @@ void check_note_borders()
         if (glGetError() != GL_NO_ERROR)
             throw std::runtime_error("OpenGL error during piano rendering");
 
+        const std::string variant = std::string(gpu ? "GPU" : "CPU") + " path, overlap mode " +
+            std::to_string(overlap_mode);
+
         // At 663 ms the last note ends at y=226. Diagonals from the broken
         // x86 separate-array path extended far above every note rectangle.
         for (int y = 240; y < height; ++y)
             for (int x = 0; x < width; ++x)
                 for (int channel = 0; channel < 3; ++channel)
                     if (pixels[(y * width + x) * 4 + channel] != background[channel])
-                        throw std::runtime_error("Note border escaped its rectangle, overlap mode " +
-                            std::to_string(overlap_mode));
+                        throw std::runtime_error("Note border escaped its rectangle, " + variant);
 
         // Also require a note fill, so an empty or skipped render cannot pass.
         if (pixels[(180 * width + 8) * 4] < 100)
-            throw std::runtime_error("Expected visible note fill");
+            throw std::runtime_error("Expected visible note fill, " + variant);
     }
+    if (!data->gl_buffers.available)
+        std::cout << "Buffer objects unavailable in this context; GPU path fell back to CPU\n";
 }
 }
 

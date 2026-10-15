@@ -27,6 +27,17 @@ if(SAFC_BUILD_PROCESSOR_TESTS)
     add_test(NAME safc-midi-scanner COMMAND safc-midi-scanner-tests)
     set_tests_properties(safc-midi-scanner PROPERTIES TIMEOUT 60)
 
+    add_executable(safc-player-visuals-tests player_visuals_tests.cpp)
+    target_include_directories(safc-player-visuals-tests PRIVATE
+        "${CMAKE_CURRENT_LIST_DIR}/../../utility/include")
+    target_compile_features(safc-player-visuals-tests PRIVATE cxx_std_23)
+    target_link_libraries(safc-player-visuals-tests PRIVATE Threads::Threads)
+    if(MSVC)
+        target_compile_options(safc-player-visuals-tests PRIVATE /EHsc)
+    endif()
+    add_test(NAME safc-player-visuals COMMAND safc-player-visuals-tests)
+    set_tests_properties(safc-player-visuals PROPERTIES TIMEOUT 120)
+
     add_executable(safc-midi-filter-tests single_midi_processor_filters_tests.cpp)
     target_include_directories(safc-midi-filter-tests PRIVATE
         "${CMAKE_CURRENT_LIST_DIR}/../../utility/include")

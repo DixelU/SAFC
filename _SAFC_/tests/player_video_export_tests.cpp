@@ -58,8 +58,9 @@ void test_visual_storage_has_no_artificial_limit()
 		"identical notes retain separate exact visual spans");
 	visuals.push_note_off(key, 20, 0, 0);
 	visuals.push_note_off(key, 30, 0, 0);
-	check(visuals.buffered_note_count() == 2 && visuals.falling_notes[key] &&
-		visuals.falling_notes[key]->front().end_time_us == 30,
+	const auto matched = visuals.notes_for_key(key);
+	check(visuals.buffered_note_count() == 2 && matched.size() == 2 &&
+		matched.front().end_time_us == 30,
 		"exact visual spans retain independent note-off matching");
 	visuals.clear();
 
@@ -95,23 +96,24 @@ void test_held_notes_do_not_block_reclamation()
 	visuals.cull_expired(cutoff);
 	check(visuals.buffered_note_count() == held_keys,
 		"held notes do not pin later expired notes on the same keys");
+	check(visuals.retained_note_count() == held_keys,
+		"expired notes behind held ones are compacted out of the rings");
 	for (std::size_t key_offset = 0; key_offset < held_keys; ++key_offset)
 	{
 		const auto key = static_cast<std::uint8_t>(first_key + key_offset);
-		check(visuals.falling_notes[key] &&
-			visuals.falling_notes[key]->size() == 1 &&
-			visuals.falling_notes[key]->block_count() == 1 &&
-			visuals.falling_notes[key]->front().end_time_us == ~0ULL,
-			"each held key retains only its live note and one list block");
+		const auto notes = visuals.notes_for_key(key);
+		check(notes.size() == 1 &&
+			notes.front().end_time_us == simple_player::visuals_viewport::held_end,
+			"each held key retains only its live note");
 		visuals.push_note_off(key, static_cast<std::uint64_t>(cutoff), 0, 0);
 	}
 
 	visuals.cull_expired(cutoff + 1);
 	check(visuals.buffered_note_count() == 0,
 		"released held notes are reclaimed after crossing the cutoff");
-	for (std::size_t key_offset = 0; key_offset < held_keys; ++key_offset)
-		check(!visuals.falling_notes[first_key + key_offset],
-			"empty per-key lists release their retained block-pool storage");
+	check(visuals.retained_note_count() == 0 &&
+		visuals.rings[0].capacity() == 0 && visuals.rings[1].capacity() == 0,
+		"empty rings release their retained storage");
 }
 
 class seek_probe_source final : public playback_event_source
