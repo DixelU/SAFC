@@ -157,12 +157,20 @@
       <AdditionalIncludeDirectories>$(SAFCRepositoryRoot)SYNCore\third_party\utility\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <ClCompile Include="..\..\SYNCore\SAFSYN\cohort_engine.cpp">
+      <FloatingPointModel>Precise</FloatingPointModel>
       <ConformanceMode>true</ConformanceMode>
       <WarningLevel>Level4</WarningLevel>
       <PreprocessorDefinitions>_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalIncludeDirectories>$(SAFCRepositoryRoot)SYNCore\third_party\utility\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
+    <ClCompile Include="..\..\SYNCore\SAFSYN\cohort_mixer_avx2.cpp">
+      <EnableEnhancedInstructionSet>AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
+      <FloatingPointModel>Precise</FloatingPointModel>
+      <WholeProgramOptimization>false</WholeProgramOptimization>
+      <ConformanceMode>true</ConformanceMode>
+    </ClCompile>
     <ClCompile Include="..\..\SYNCore\SAFSYN\engine.cpp">
+      <FloatingPointModel>Precise</FloatingPointModel>
       <ConformanceMode>true</ConformanceMode>
       <WarningLevel>Level4</WarningLevel>
       <PreprocessorDefinitions>_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>

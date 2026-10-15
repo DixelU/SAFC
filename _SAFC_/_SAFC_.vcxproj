@@ -433,8 +433,17 @@
   </ItemGroup>
   <ItemGroup Condition="'$(SYNCoreEnabled)'=='true'">
     <ClCompile Include="..\SYNCore\SAFSYN\core.cpp" />
-    <ClCompile Include="..\SYNCore\SAFSYN\cohort_engine.cpp" />
-    <ClCompile Include="..\SYNCore\SAFSYN\engine.cpp" />
+    <ClCompile Include="..\SYNCore\SAFSYN\cohort_engine.cpp">
+      <FloatingPointModel>Precise</FloatingPointModel>
+    </ClCompile>
+    <ClCompile Include="..\SYNCore\SAFSYN\cohort_mixer_avx2.cpp">
+      <EnableEnhancedInstructionSet>AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
+      <FloatingPointModel>Precise</FloatingPointModel>
+      <WholeProgramOptimization>false</WholeProgramOptimization>
+    </ClCompile>
+    <ClCompile Include="..\SYNCore\SAFSYN\engine.cpp">
+      <FloatingPointModel>Precise</FloatingPointModel>
+    </ClCompile>
     <ClCompile Include="..\SYNCore\SAFSYN\mastering.cpp" />
     <ClCompile Include="..\SYNCore\SAFSYN\phase.cpp" />
     <ClCompile Include="..\SYNCore\SAFSYN\playback.cpp" />

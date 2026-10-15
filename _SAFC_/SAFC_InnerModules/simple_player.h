@@ -1962,6 +1962,7 @@ struct simple_player
 		// Scratch buffers for batched note rendering (reused each frame)
 		struct note_vert { float x, y; };
 		struct note_color { uint8_t r, g, b, a; };
+		struct outline_vert { float x, y; note_color color; };
 
 		struct note_span
 		{
@@ -1981,8 +1982,9 @@ struct simple_player
 
 		std::vector<note_vert>  note_verts;
 		std::vector<note_color> note_colors;
-		std::vector<note_vert>  outline_verts;
-		std::vector<note_color> outline_colors;
+		// Keep border positions and colors together: separate client arrays can
+		// produce diagonal lines in the 32-bit Intel OpenGL compatibility driver.
+		std::vector<outline_vert> outline_verts;
 		std::vector<note_span>  key_note_spans;
 		std::vector<interval>   covered_intervals;
 
@@ -2394,8 +2396,6 @@ struct simple_player
 				data.note_colors.reserve(fill_vert_capacity);
 			if (data.outline_verts.capacity() < outline_vert_capacity)
 				data.outline_verts.reserve(outline_vert_capacity);
-			if (data.outline_colors.capacity() < outline_vert_capacity)
-				data.outline_colors.reserve(outline_vert_capacity);
 
 			auto batch_notes_for_index = [&](int index)
 			{
@@ -2495,14 +2495,12 @@ struct simple_player
 					data.note_colors.push_back(note_color_shady);
 					data.note_colors.push_back(note_color_shady);
 
-					data.outline_verts.reserve(data.outline_verts.size() + 16);
-					data.outline_verts.push_back({lx, begin_y}); data.outline_verts.push_back({lx, end_y});
-					data.outline_verts.push_back({lx, end_y});   data.outline_verts.push_back({rx, end_y});
-					data.outline_verts.push_back({rx, end_y});   data.outline_verts.push_back({rx, begin_y});
-					data.outline_verts.push_back({rx, begin_y}); data.outline_verts.push_back({lx, begin_y});
-
-					for (int e = 0; e < 8; ++e)
-						data.outline_colors.push_back(note_border_col);
+					data.outline_verts.insert(data.outline_verts.end(), {
+						{lx, begin_y, note_border_col}, {lx, end_y, note_border_col},
+						{lx, end_y, note_border_col},   {rx, end_y, note_border_col},
+						{rx, end_y, note_border_col},   {rx, begin_y, note_border_col},
+						{rx, begin_y, note_border_col}, {lx, begin_y, note_border_col},
+					});
 				};
 
 				if (data.remove_overlaps <= draw_data::MAX_OVERLAPS_REMOVAL_VERSION)
@@ -2534,6 +2532,10 @@ struct simple_player
 		}
 		catch (const std::bad_alloc&)
 		{
+			// Do not reuse a partially built frame after an allocation failure.
+			data.note_verts.clear();
+			data.note_colors.clear();
+			data.outline_verts.clear();
 			handle_memory_failure(true);
 			return;
 		}
@@ -2552,22 +2554,21 @@ struct simple_player
 			glColorPointer(4, GL_UNSIGNED_BYTE, 0, data.note_colors.data());
 			glDrawArrays(GL_QUADS, 0, white_fill_verts);						   // white fills
 
-			glVertexPointer(2, GL_FLOAT, 0, data.outline_verts.data());
-			glColorPointer(4, GL_UNSIGNED_BYTE, 0, data.outline_colors.data());
+			glVertexPointer(2, GL_FLOAT, sizeof(draw_data::outline_vert), data.outline_verts.data());
+			glColorPointer(4, GL_UNSIGNED_BYTE, sizeof(draw_data::outline_vert), &data.outline_verts[0].color);
 			glDrawArrays(GL_LINES, 0, white_outline_verts);						// white outlines
 
 			glVertexPointer(2, GL_FLOAT, 0, data.note_verts.data());
 			glColorPointer(4, GL_UNSIGNED_BYTE, 0, data.note_colors.data());
 			glDrawArrays(GL_QUADS, white_fill_verts, total_fill - white_fill_verts);	// black fills
 
-			glVertexPointer(2, GL_FLOAT, 0, data.outline_verts.data());
-			glColorPointer(4, GL_UNSIGNED_BYTE, 0, data.outline_colors.data());
+			glVertexPointer(2, GL_FLOAT, sizeof(draw_data::outline_vert), data.outline_verts.data());
+			glColorPointer(4, GL_UNSIGNED_BYTE, sizeof(draw_data::outline_vert), &data.outline_verts[0].color);
 			glDrawArrays(GL_LINES, white_outline_verts, total_outline - white_outline_verts); // black outlines
 
 			data.note_verts.clear();
 			data.note_colors.clear();
 			data.outline_verts.clear();
-			data.outline_colors.clear();
 		}
 
 		data.draw_keyboard(keyboard_colors);

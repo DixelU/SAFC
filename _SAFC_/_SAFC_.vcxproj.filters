@@ -227,6 +227,9 @@
     <ClCompile Include="..\SYNCore\SAFSYN\cohort_engine.cpp">
       <Filter>Исходные файлы\SYNCore</Filter>
     </ClCompile>
+    <ClCompile Include="..\SYNCore\SAFSYN\cohort_mixer_avx2.cpp">
+      <Filter>Исходные файлы\SYNCore</Filter>
+    </ClCompile>
     <ClCompile Include="..\SYNCore\SAFSYN\engine.cpp">
       <Filter>Исходные файлы\SYNCore</Filter>
     </ClCompile>
