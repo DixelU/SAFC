@@ -27,6 +27,7 @@ add_library(safc_imgui_core STATIC
 	../app/project_model.cpp
 	../SAFC_InnerModules/midi_editor_tools.cpp
 	../SAFC_InnerModules/compressed_midi_event_source.cpp
+	../SAFC_InnerModules/prepared_midi_event_source.cpp
 	../SAFC_InnerModules/simple_player_video_export.cpp
 	../SAFC_InnerModules/syncore_output.cpp)
 target_include_directories(safc_imgui_core PUBLIC

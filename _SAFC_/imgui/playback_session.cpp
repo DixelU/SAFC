@@ -19,6 +19,7 @@
 
 #include "../SAFC_InnerModules/simple_player.h"
 #include "../SAFC_InnerModules/compressed_midi_event_source.h"
+#include "../SAFC_InnerModules/prepared_midi_event_source.h"
 
 namespace
 {
@@ -69,6 +70,7 @@ struct playback_session::impl
 	std::atomic_bool stop_busy{false};
 	std::atomic_bool closing{false};
 	std::atomic_bool preparation_cancel{false};
+	std::atomic_bool parallel_file_decode{false};
 	// True only while a playback run is replacing/starting its output sink.
 	// Ordinary transport Stop must not tear down a ready SYNCore session,
 	// because its phase/sample-variant cache belongs to that output session.
@@ -226,6 +228,32 @@ struct playback_session::impl
 					{
 						return prepared->fork_reader();
 					};
+				}
+				else if (parallel_file_decode.load(std::memory_order_acquire))
+				{
+					// Opt-in: decode the tracks on a thread pool. A file the
+					// scanner cannot verify keeps the repair-tolerant serial parser.
+					set_status("Preparing parallel decode...");
+					std::string detail;
+					auto prepared = prepared_midi_event_source::open(path,
+						[this](const std::string& text) { set_status(text); }, &preparation_cancel, detail);
+					if (cancelled())
+					{
+						set_status("Stopped");
+						return;
+					}
+					if (prepared)
+					{
+						external = prepared;
+						std::lock_guard lock(source_mutex);
+						source = prepared;
+						export_factory = [prepared]
+						{
+							return prepared->fork_reader();
+						};
+					}
+					else
+						set_status("Parallel decode unavailable, using the serial parser", detail);
 				}
 			}
 			if (cancelled())
@@ -514,6 +542,11 @@ playback_snapshot playback_session::snapshot()
 			result.source_events = compressed->event_count();
 			result.source_archive_depth = compressed->archive_depth();
 		}
+		else if (auto prepared = std::dynamic_pointer_cast<prepared_midi_event_source>(impl_->source))
+		{
+			result.source_tracks = prepared->track_count();
+			result.source_events = prepared->event_count();
+		}
 	}
 	{
 		std::lock_guard lock(impl_->status_mutex);
@@ -675,6 +708,16 @@ void playback_session::set_visual_options(bool simulated_lag, std::uint8_t overl
 {
 	impl_->visuals.enable_simulated_lag = simulated_lag;
 	impl_->visuals.remove_overlaps = overlap_mode <= 1 ? overlap_mode : 0xff;
+}
+
+void playback_session::set_parallel_file_decode(bool enabled)
+{
+	impl_->parallel_file_decode.store(enabled, std::memory_order_release);
+}
+
+bool playback_session::parallel_file_decode() const
+{
+	return impl_->parallel_file_decode.load(std::memory_order_acquire);
 }
 
 void playback_session::draw_visuals(float width, float height, float visible_seconds)

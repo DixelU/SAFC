@@ -78,6 +78,9 @@
     <ClCompile Include="..\SAFC_InnerModules\compressed_midi_event_source.cpp">
       <Filter>Processing and playback</Filter>
     </ClCompile>
+    <ClCompile Include="..\SAFC_InnerModules\prepared_midi_event_source.cpp">
+      <Filter>Processing and playback</Filter>
+    </ClCompile>
     <ClCompile Include="..\SAFC_InnerModules\simple_player_video_export.cpp">
       <Filter>Processing and playback</Filter>
     </ClCompile>
@@ -189,6 +192,15 @@
       <Filter>Processing and playback</Filter>
     </ClInclude>
     <ClInclude Include="..\SAFC_InnerModules\compressed_midi_event_source.h">
+      <Filter>Processing and playback</Filter>
+    </ClInclude>
+    <ClInclude Include="..\SAFC_InnerModules\prepared_midi_event_source.h">
+      <Filter>Processing and playback</Filter>
+    </ClInclude>
+    <ClInclude Include="..\SAFC_InnerModules\midi_track_scanner.h">
+      <Filter>Processing and playback</Filter>
+    </ClInclude>
+    <ClInclude Include="..\SAFC_InnerModules\player_visuals.h">
       <Filter>Processing and playback</Filter>
     </ClInclude>
     <ClInclude Include="..\SAFC_InnerModules\core_support.h">

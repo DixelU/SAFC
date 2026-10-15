@@ -353,6 +353,8 @@
     <ClInclude Include="SAFC_InnerModules\midi_editor.h" />
     <ClInclude Include="SAFC_InnerModules\midi_file_reader.h" />
     <ClInclude Include="SAFC_InnerModules\compressed_midi_event_source.h" />
+    <ClInclude Include="SAFC_InnerModules\midi_track_scanner.h" />
+    <ClInclude Include="SAFC_InnerModules\player_visuals.h" />
     <ClInclude Include="SAFC_InnerModules\playback_event_source.h" />
     <ClInclude Include="SAFC_InnerModules\simple_player.h" />
     <ClInclude Include="SAFC_InnerModules\simple_player_video_export.h" />

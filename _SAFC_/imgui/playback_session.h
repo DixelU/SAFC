@@ -65,6 +65,10 @@ public:
 	syncore_preferences synth_preferences() const;
 	bool audition_note(std::uint8_t key, std::uint8_t velocity, std::uint8_t channel, bool on);
 	void set_visual_options(bool simulated_lag, std::uint8_t overlap_mode);
+	// Decode plain MIDI files on a thread pool (prepared_midi_event_source)
+	// instead of the player's serial parser. Applies to the next open.
+	void set_parallel_file_decode(bool enabled);
+	bool parallel_file_decode() const;
 	void toggle_pause();
 	void seek(double fraction);
 	void stop();

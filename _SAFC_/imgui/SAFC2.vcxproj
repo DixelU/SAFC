@@ -146,6 +146,7 @@
     <ClCompile Include="..\app\project_model.cpp" />
     <ClCompile Include="..\SAFC_InnerModules\midi_editor_tools.cpp" />
     <ClCompile Include="..\SAFC_InnerModules\compressed_midi_event_source.cpp" />
+    <ClCompile Include="..\SAFC_InnerModules\prepared_midi_event_source.cpp" />
     <ClCompile Include="..\SAFC_InnerModules\simple_player_video_export.cpp" />
     <ClCompile Include="..\SAFC_InnerModules\syncore_output.cpp" />
   </ItemGroup>
@@ -246,6 +247,9 @@
     <ClInclude Include="..\WinRegWrappers.h" />
     <ClInclude Include="..\SAFC_InnerModules\bool_settings.h" />
     <ClInclude Include="..\SAFC_InnerModules\compressed_midi_event_source.h" />
+    <ClInclude Include="..\SAFC_InnerModules\prepared_midi_event_source.h" />
+    <ClInclude Include="..\SAFC_InnerModules\midi_track_scanner.h" />
+    <ClInclude Include="..\SAFC_InnerModules\player_visuals.h" />
     <ClInclude Include="..\SAFC_InnerModules\core_support.h" />
     <ClInclude Include="..\SAFC_InnerModules\cut_and_transpose.h" />
     <ClInclude Include="..\SAFC_InnerModules\fast_midi_checker.h" />

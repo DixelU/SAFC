@@ -306,7 +306,7 @@ struct workspace
 	bool seek_editing{}, player_open = true, synth_open = true, reset_layout = true;
 	bool focus_player{}, focus_synth{};
 	bool project_open = true, editor_open = false, analysis_open = false, video_open = false, settings_open = false;
-	bool simulate_lag = false, exit_prompt = false, exiting = false;
+	bool simulate_lag = false, parallel_decode = false, exit_prompt = false, exiting = false;
 	bool restart_after_update = false;
 	int overlap_mode = 0;
 	bool test_mode = false;
@@ -715,6 +715,12 @@ void draw_player(
 		visuals_changed |= ImGui::Combo("Overlap", &app.overlap_mode, "Naive removal\0Realtime removal\0Draw all\0");
 		if (visuals_changed)
 			app.playback.set_visual_options(app.simulate_lag, static_cast<std::uint8_t>(app.overlap_mode));
+		ImGui::SameLine();
+		if (ImGui::Checkbox("Parallel decode", &app.parallel_decode))
+			app.playback.set_parallel_file_decode(app.parallel_decode);
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("Decode plain MIDI files on a thread pool for the next open.\n"
+				"Files whose track layout cannot be verified use the serial parser.");
 		if (status_wrapped)
 			ImGui::TextWrapped("%s", status_line->c_str());
 		else

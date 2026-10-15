@@ -65,7 +65,7 @@ struct midi_scanned_track
 	const std::uint8_t* begin = nullptr;		// first delta time
 	const std::uint8_t* end = nullptr;			// declared end of the chunk data
 	std::uint64_t length_ticks = 0;
-	std::uint64_t event_count = 0;
+	std::uint64_t event_count = 0;		// channel events (meta and sysex excluded)
 	std::uint64_t note_on_count = 0;
 	// (tick, microseconds per quarter) in file order; later entries at an equal
 	// tick win, exactly like the serial walk's map assignment.
@@ -295,13 +295,12 @@ inline void walk_track(midi_scanned_track& track, const midi_scan_options& optio
 			break;
 		}
 
-		++track.event_count;
-
 		switch (command >> 4)
 		{
 			case 0x8: case 0x9:
 			case 0xA: case 0xB: case 0xE:
 			{
+				++track.event_count;
 				const std::uint8_t data2 = *cur++;
 				const auto channel = static_cast<std::uint8_t>(command & 0x0F);
 				const auto kind = static_cast<std::uint8_t>(command >> 4);
@@ -325,6 +324,7 @@ inline void walk_track(midi_scanned_track& track, const midi_scan_options& optio
 			}
 			case 0xC: case 0xD:
 			{
+				++track.event_count;
 				if (record_state)
 					tracker.set(static_cast<std::uint8_t>(command & 0x0F),
 						(command >> 4) == 0xC ? track_state_tracker::program_slot

@@ -189,6 +189,12 @@
     <ClInclude Include="SAFC_InnerModules\compressed_midi_event_source.h">
       <Filter>Файлы заголовков\MIDI Processing</Filter>
     </ClInclude>
+    <ClInclude Include="SAFC_InnerModules\midi_track_scanner.h">
+      <Filter>Файлы заголовков\MIDI Processing</Filter>
+    </ClInclude>
+    <ClInclude Include="SAFC_InnerModules\player_visuals.h">
+      <Filter>Файлы заголовков\MIDI Processing</Filter>
+    </ClInclude>
     <ClInclude Include="SAFC_InnerModules\syncore_output.h">
       <Filter>Файлы заголовков\MIDI Processing</Filter>
     </ClInclude>
