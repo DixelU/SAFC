@@ -18,6 +18,15 @@ if(SAFC_BUILD_APP_TESTS)
 endif()
 
 if(SAFC_BUILD_PROCESSOR_TESTS)
+    add_executable(safc-midi-scanner-tests midi_track_scanner_tests.cpp)
+    target_compile_features(safc-midi-scanner-tests PRIVATE cxx_std_23)
+    target_link_libraries(safc-midi-scanner-tests PRIVATE Threads::Threads)
+    if(MSVC)
+        target_compile_options(safc-midi-scanner-tests PRIVATE /EHsc)
+    endif()
+    add_test(NAME safc-midi-scanner COMMAND safc-midi-scanner-tests)
+    set_tests_properties(safc-midi-scanner PROPERTIES TIMEOUT 60)
+
     add_executable(safc-midi-filter-tests single_midi_processor_filters_tests.cpp)
     target_include_directories(safc-midi-filter-tests PRIVATE
         "${CMAKE_CURRENT_LIST_DIR}/../../utility/include")

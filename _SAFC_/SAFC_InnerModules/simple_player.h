@@ -28,6 +28,7 @@
 
 #include "single_midi_processor_2.h"
 #include "single_midi_info_collector.h"
+#include "midi_track_scanner.h"
 #include "playback_event_source.h"
 #include "syncore_output.h"
 
@@ -558,6 +559,10 @@ struct simple_player
 	struct midi_info
 	{
 		std::vector<track_info> tracks;
+		// Seek index, one ascending list per track (empty when the track was
+		// walked serially). A seek fast-forwards from the latest checkpoint at
+		// or before the target instead of from the start of the file.
+		std::vector<std::vector<safc::midi_scan_checkpoint>> checkpoints;
 		std::map<uint64_t, uint32_t> tempo_tmp;
 		std::vector<std::pair<uint64_t, uint64_t>> time_map_mcsecs;
 		uint64_t ticks_length{};
@@ -572,6 +577,7 @@ struct simple_player
 		void reset()
 		{
 			tracks.clear();
+			checkpoints.clear();
 			tempo_tmp.clear();
 			time_map_mcsecs.clear();
 			ticks_length = 0;
@@ -1149,6 +1155,30 @@ struct simple_player
 
 		auto ptr = begin + 14;
 
+		// Tracks are located from their declared lengths and walked in parallel.
+		// The serial walk below takes over at the first chunk the scanner could
+		// not verify, so damaged files keep their legacy handling and messages.
+		{
+			safc::midi_scan_options options;
+			options.cancel = &cancel_requested;
+			options.scanned_bytes = &info.scanned;
+			auto scan = safc::scan_midi_tracks(ptr, end, options);
+			if (scan.cancelled || cancel_requested.load(std::memory_order_acquire))
+				return false;
+
+			for (auto& track : scan.tracks)
+			{
+				for (const auto& [tick, tempo] : track.tempos)
+					info.tempo_tmp[tick] = tempo;
+				info.ticks_length = std::max(track.length_ticks, info.ticks_length);
+				info.tracks.push_back({track.begin, track.end});
+				info.checkpoints.push_back(std::move(track.checkpoints));
+			}
+
+			ptr = scan.resume_at ? scan.resume_at : end;
+			info.scanned = ptr - begin;
+		}
+
 		while (ptr < end)
 		{
 			if (cancel_requested.load(std::memory_order_acquire))
@@ -1161,6 +1191,7 @@ struct simple_player
 		}
 
 		info.scanned = end - begin;
+		info.checkpoints.resize(info.tracks.size());
 
 		if (info.tracks.empty())
 			return false;
@@ -1287,20 +1318,78 @@ struct simple_player
 		// initialize track states and build priority queue
 		track_event_heap event_queue;
 		state.track_states.resize(info.tracks.size());
+		const size_t real_track_count = info.tracks.size();
 
-		for (size_t i = 0; i < info.tracks.size(); ++i)
+		// Seek index. A track whose latest checkpoint lies at or before the
+		// target starts there: the checkpoint's held notes seed the tracker and
+		// its channel state is replayed at the original ticks through a virtual
+		// track in the heap, so later real events still override it in order.
+		struct virtual_track
 		{
-			state.track_states[i].init(info.tracks[i]);
-			if (state.track_states[i].position < state.track_states[i].end)
+			const std::vector<safc::midi_scan_checkpoint::state_entry>* entries;
+			size_t cursor;
+		};
+		struct seeded_note
+		{
+			tick_type start_tick;
+			size_t track_index;
+			uint8_t key;
+			uint8_t channel;
+			uint8_t velocity;
+		};
+		std::vector<virtual_track> virtual_tracks;
+		std::vector<seeded_note> seeded_notes;
+		const tick_type seek_target_tick = fast_forwarding ? microseconds_to_tick(skip_to_us) : 0;
+
+		for (size_t i = 0; i < real_track_count; ++i)
+		{
+			auto& track = state.track_states[i];
+			track.init(info.tracks[i]);
+			tick_type base_tick = 0;
+
+			if (fast_forwarding && i < info.checkpoints.size() && !info.checkpoints[i].empty())
 			{
-				state.track_states[i].next_event_tick =
-					get_vlv(state.track_states[i].position, state.track_states[i].end);
-				event_queue.push({state.track_states[i].next_event_tick, i});
+				const auto& checkpoints = info.checkpoints[i];
+				auto next = std::upper_bound(checkpoints.begin(), checkpoints.end(), seek_target_tick,
+					[](tick_type target, const safc::midi_scan_checkpoint& checkpoint)
+				{
+					return target < checkpoint.tick;
+				});
+				if (next != checkpoints.begin())
+				{
+					const auto& checkpoint = *std::prev(next);
+					track.position = checkpoint.position;
+					track.rsb = checkpoint.running_status;
+					base_tick = checkpoint.tick;
+					for (const auto& note : checkpoint.held)
+						seeded_notes.push_back({note.start_tick, i, note.key, note.channel, note.velocity});
+					if (!checkpoint.state.empty())
+						virtual_tracks.push_back({&checkpoint.state, 0});
+				}
+			}
+
+			if (track.position < track.end)
+			{
+				track.next_event_tick = base_tick + get_vlv(track.position, track.end);
+				event_queue.push({track.next_event_tick, i});
 			}
 			else
 			{
-				state.track_states[i].done = true;
+				track.done = true;
 			}
+		}
+
+		for (size_t v = 0; v < virtual_tracks.size(); ++v)
+			event_queue.push({virtual_tracks[v].entries->front().tick, real_track_count + v});
+
+		if (!seeded_notes.empty())
+		{
+			// Per-key visual lists and the tracker's stacks expect note-on order.
+			std::stable_sort(seeded_notes.begin(), seeded_notes.end(),
+				[](const seeded_note& a, const seeded_note& b) { return a.start_tick < b.start_tick; });
+			for (const auto& note : seeded_notes)
+				held_notes.note_on(note.key, tick_to_microseconds(note.start_tick),
+					note.track_index, note.channel, note.velocity);
 		}
 
 		state.active_tracks = info.tracks.size();
@@ -1360,6 +1449,26 @@ struct simple_player
 
 				auto ref = event_queue.top();
 				// pop/replace_top deferred until the end of this track's run
+
+				if (ref.track_index >= real_track_count)
+				{
+					// Channel state from a seek checkpoint, at the ticks it was
+					// set. Present only while fast-forwarding; it belongs at the
+					// seek boundary like every other reconstructed state.
+					auto& source = virtual_tracks[ref.track_index - real_track_count];
+					const auto& entries = *source.entries;
+					while (source.cursor < entries.size() && entries[source.cursor].tick == batch_tick)
+					{
+						state.send_buffer.push({fast_forwarding ? skip_to_us : batch_time_us,
+							entries[source.cursor].message, batch_tick});
+						++source.cursor;
+					}
+					if (source.cursor < entries.size())
+						event_queue.replace_top({entries[source.cursor].tick, ref.track_index});
+					else
+						event_queue.pop();
+					continue;
+				}
 
 				auto& track = state.track_states[ref.track_index];
 
@@ -2845,6 +2954,35 @@ private:
 			GetProcAddress(moduleHandle, "SendDirectData"));
 		if (direct_send)
 			short_msg = direct_send;
+	}
+
+	// Inverse of tick_to_microseconds over the tempo map: the latest tick whose
+	// time is at or before time_us. Used to pick seek checkpoints.
+	tick_type microseconds_to_tick(uint64_t time_us) const
+	{
+		if (info.ppq == 0)
+			return 0;
+		const uint64_t default_tick = (time_us * info.ppq) / 500000ULL;
+		if (info.time_map_mcsecs.empty())
+			return default_tick;
+
+		auto it = std::upper_bound(
+			info.time_map_mcsecs.begin(),
+			info.time_map_mcsecs.end(),
+			time_us,
+			[](uint64_t t, const std::pair<uint64_t, uint64_t>& entry)
+		{
+			return t < entry.second;
+		});
+		if (it == info.time_map_mcsecs.begin())
+			return default_tick;
+
+		--it;
+		auto tempo_it = info.tempo_tmp.find(it->first);
+		const uint64_t tempo = (tempo_it != info.tempo_tmp.end()) ? tempo_it->second : 500000;
+		if (tempo == 0)
+			return it->first;
+		return it->first + ((time_us - it->second) * info.ppq) / tempo;
 	}
 
 	SIMPLE_PLAYER_FORCE_NO_INLINE void update_tempo_cache_at(size_t index) const
