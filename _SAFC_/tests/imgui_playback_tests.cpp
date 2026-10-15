@@ -146,6 +146,50 @@ void pending_stop_checks(const fs::path& directory)
     }
 }
 
+void sender_clock_checks()
+{
+    simple_player player;
+    require(player.use_silent_output(), "Prepare the isolated sender clock probe");
+    // Configure a stopped sender before starting its thread. The real pause
+    // and resume methods update the clock under its normal mutex afterward.
+    auto& state = const_cast<simple_player::playback_state&>(player.get_state());
+    state.reset();
+    state.start_offset_us = 0;
+    state.start_time = std::chrono::steady_clock::now();
+    const auto started = state.start_time;
+    state.playing = true;
+    state.parser_done = true;
+    for (unsigned i = 0; i < 10000; ++i) state.send_buffer.push({0, 0x643c90, 0});
+    state.send_buffer.push({500000, 0x003c80, 480});
+    std::atomic<bool> finished = false;
+    std::chrono::steady_clock::time_point finished_at;
+    std::thread sender([&] {
+        player.sender_thread_func();
+        finished_at = std::chrono::steady_clock::now();
+        finished.store(true, std::memory_order_release);
+    });
+    struct cleanup
+    {
+        simple_player& player;
+        std::thread& sender;
+        ~cleanup() { player.stop(); sender.join(); }
+    } cleanup{player, sender};
+    wait_for([&] { return state.send_buffer.approximate_size() == 1; },
+        "Same-tick burst drains before the later event");
+    player.pause();
+    const auto paused_at = std::chrono::steady_clock::now();
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    const auto resumed_at = std::chrono::steady_clock::now();
+    player.resume();
+    // A pause/resume may both happen between two sender polls. Its next clock
+    // snapshot still has to use the new origin even if no pause was observed.
+    for (unsigned i = 0; i < 8; ++i) { player.pause(); player.resume(); }
+    wait_for([&] { return finished.load(std::memory_order_acquire); },
+        "The later event eventually drains after resume");
+    require(finished_at - started >= std::chrono::milliseconds(490) + (resumed_at - paused_at),
+        "Cached burst timing cannot send the later event early after rebasing the playback clock");
+}
+
 void editor_snapshot_checks(const fs::path& directory)
 {
     const auto input = directory / "editor-snapshot.mid";
@@ -443,6 +487,7 @@ int wmain(int argc, wchar_t** argv)
             return 0;
         }
         pending_stop_checks(directory);
+        sender_clock_checks();
         editor_snapshot_checks(directory);
         cancellation_checks(directory);
         output_failure_checks(directory);
