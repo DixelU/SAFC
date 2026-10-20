@@ -333,3 +333,57 @@ std::size_t midi_editor::lfo_control_tool(control_lane lane, std::uint8_t channe
 		push_undo(std::move(op));
 	return count;
 }
+
+std::pair<std::size_t, std::size_t> midi_editor::glue_notes()
+{
+	std::lock_guard<std::recursive_mutex> lock(editor_mutex);
+	auto targets = get_tool_target_notes();
+	if (targets.size() < 2)
+		return {0, 0};
+
+	// Group by voice, then sweep each voice in time order so a chain of
+	// overlapping or touching notes collapses into one.
+	std::sort(targets.begin(), targets.end(), [](const piano_note& a, const piano_note& b)
+	{
+		if (a.track_index != b.track_index)
+			return a.track_index < b.track_index;
+		if (a.channel != b.channel)
+			return a.channel < b.channel;
+		if (a.key != b.key)
+			return a.key < b.key;
+		if (a.start_tick != b.start_tick)
+			return a.start_tick < b.start_tick;
+		if (a.end_tick != b.end_tick)
+			return a.end_tick < b.end_tick;
+		return a.id < b.id;
+	});
+
+	std::vector<piano_note> before, after;
+	for (std::size_t i = 0; i < targets.size();)
+	{
+		piano_note glued = targets[i];
+		std::size_t next = i + 1;
+		while (next < targets.size() && targets[next].track_index == glued.track_index &&
+			targets[next].channel == glued.channel && targets[next].key == glued.key &&
+			targets[next].start_tick <= glued.end_tick)
+		{
+			glued.end_tick = std::max(glued.end_tick, targets[next].end_tick);
+			++next;
+		}
+		if (next - i > 1)
+		{
+			before.insert(before.end(), targets.begin() + i, targets.begin() + next);
+			after.push_back(glued);
+		}
+		i = next;
+	}
+
+	if (before.empty())
+		return {0, 0};
+
+	const std::pair<std::size_t, std::size_t> result{before.size(), after.size()};
+	auto op = std::make_unique<note_tool_op>(std::move(before), std::move(after), "Glue Notes", true);
+	op->execute(*this);
+	push_undo(std::move(op));
+	return result;
+}

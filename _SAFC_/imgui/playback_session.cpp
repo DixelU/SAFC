@@ -119,7 +119,8 @@ struct playback_session::impl
 
 	void run(std::stop_token token, std::wstring path, std::string output_name, std::wstring sound_bank,
 		syncore_preferences synth, bool silent, bool start_paused, std::shared_ptr<playback_event_source> external,
-		double seek_fraction, bool output_only = false)
+		double seek_fraction, bool output_only = false,
+		std::uint64_t lead_in_us = simple_player::default_start_lead_in_us)
 	{
 		bool audition_ready = false;
 		struct completion
@@ -322,7 +323,7 @@ struct playback_session::impl
 			}
 			set_status("Reading MIDI...");
 			if (external)
-				engine.run_from_external(external.get(), seek_fraction, start_paused);
+				engine.run_from_external(external.get(), seek_fraction, start_paused, lead_in_us);
 			else
 				engine.simple_run(std::move(path), seek_fraction, start_paused);
 			if (!alerts.empty())
@@ -376,17 +377,18 @@ bool playback_session::restart(bool silent, bool start_paused)
 }
 
 bool playback_session::open_external(std::shared_ptr<playback_event_source> source, bool start_paused,
-	double seek_fraction, source_factory export_factory)
+	double seek_fraction, source_factory export_factory, std::optional<std::uint64_t> lead_in_us)
 {
 	if (!source || !std::isfinite(seek_fraction))
 		return false;
-	return start(
-		{}, std::move(source), false, start_paused, std::clamp(seek_fraction, 0.0, 1.0), std::move(export_factory));
+	return start({}, std::move(source), false, start_paused, std::clamp(seek_fraction, 0.0, 1.0),
+		std::move(export_factory), lead_in_us);
 }
 
 bool playback_session::start(std::wstring path, std::shared_ptr<playback_event_source> source, bool silent,
-	bool start_paused, double seek_fraction, source_factory export_factory)
+	bool start_paused, double seek_fraction, source_factory export_factory, std::optional<std::uint64_t> lead_in_us)
 {
+	const auto start_lead_in_us = lead_in_us.value_or(simple_player::default_start_lead_in_us);
 	if ((path.empty() && !source) || impl_->closing.load(std::memory_order_acquire) ||
 		impl_->busy.load(std::memory_order_acquire) || impl_->stop_busy.load(std::memory_order_acquire))
 		return false;
@@ -419,10 +421,11 @@ bool playback_session::start(std::wstring path, std::shared_ptr<playback_event_s
 			impl_->device < impl_->devices.size() ? impl_->devices[impl_->device] : std::string{};
 		impl_->worker = std::jthread([state = impl_.get(), path = std::move(path), output = selected_name,
 										 sound_bank = impl_->bank, synth = impl_->preferences, silent, start_paused,
-										 source = std::move(source), seek_fraction](std::stop_token token) mutable
+										 source = std::move(source), seek_fraction,
+										 start_lead_in_us](std::stop_token token) mutable
 		{
 			state->run(token, std::move(path), output, std::move(sound_bank), synth, silent, start_paused,
-				std::move(source), seek_fraction);
+				std::move(source), seek_fraction, false, start_lead_in_us);
 		});
 	}
 	catch (const std::exception& exception)

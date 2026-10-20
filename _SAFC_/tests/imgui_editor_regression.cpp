@@ -9,7 +9,9 @@
 
 #include <imgui.h>
 #include <imgui_internal.h>
+#include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstring>
 #include <filesystem>
 #include <iostream>
@@ -265,6 +267,75 @@ int main()
         saved = save();
         require(saved->get_note_count() == initial_count + 1,
             "Native right-click on empty space did not clear the selection.");
+        saved.reset();
+
+        // Glue: Ctrl+B places a duplicate touching the selected note's end on the
+        // same key, so Ctrl+G joins the pair into one note spanning both. Only
+        // the pair is selected (click, then Ctrl+click): the saved smoke fixture
+        // holds other stacked notes which a whole-track glue would also join.
+        const auto glue_at = position(240., 60);
+        drag(glue_at, glue_at);
+        key(ImGuiKey_B, true);
+        saved = save();
+        midi_editor::piano_note duplicate;
+        require(saved->get_note_count() == initial_count + 2 && saved->find_note_at(600, 60, duplicate) &&
+            duplicate.start_tick == 480, "Native Ctrl+B did not place a touching duplicate.");
+        saved.reset();
+        drag(glue_at, glue_at);
+        io.AddKeyEvent(ImGuiMod_Ctrl, true); frame();
+        drag(position(720., 60), position(720., 60));
+        io.AddKeyEvent(ImGuiMod_Ctrl, false); frame();
+        key(ImGuiKey_G, true);
+        saved = save();
+        midi_editor::piano_note glued;
+        require(saved->get_note_count() == initial_count + 1 && saved->find_note_at(240, 60, glued) &&
+            glued.start_tick == 0 && glued.end_tick == 960, "Native Ctrl+G did not glue the touching pair.");
+        saved.reset();
+        key(ImGuiKey_Z, true);
+        key(ImGuiKey_Z, true);
+        saved = save();
+        require(saved->get_note_count() == initial_count + 1 && saved->find_note_at(240, 60, glued) &&
+            glued.end_tick == 480, "Native glue and duplicate did not undo as two edits.");
+        saved.reset();
+
+        // Middle-drag pans both axes. The default view shows every key, where a
+        // vertical pan has nowhere to go, so first zoom the keyboard in with the
+        // wheel over the keys at key 76 (128 rows become 51, keys 46..96). After
+        // the roll is dragged down by three rows, the screen position that held
+        // key 76 shows key 79, so a note drawn there lands three semitones higher.
+        // Dragging back restores it.
+        const auto keys_at = ImVec2(origin.x + scaled(47.f) * .5f, position(0., 76).y);
+        io.AddMousePosEvent(keys_at.x, keys_at.y); frame();
+        io.AddMouseWheelEvent(0.f, 5.f); frame(); frame();
+        const int zoom_rows = int(std::lround(128. / std::pow(1.2, 5.)));
+        const int zoom_high = std::clamp(76 + int(zoom_rows * ((127. - 76.) / 128.)), zoom_rows - 1, 127);
+        const float zoom_key_height = (size_y - scaled(24.f) - 110.f - scaled(6.f)) / float(zoom_rows);
+        auto zoomed = [&](double tick, int key)
+        {
+            return ImVec2(origin.x + scaled(47.f) + float(tick / double(duration)) * note_width,
+                origin.y + scaled(24.f) + (zoom_high - key + .5f) * zoom_key_height);
+        };
+        const auto pan_at = zoomed(double(duration) * .7, 70);
+        drag_button(pan_at, {pan_at.x, pan_at.y + zoom_key_height * 3.f}, 2);
+        const auto panned_draw_at = zoomed(double(duration) * .3, 76);
+        drag(panned_draw_at, {panned_draw_at.x + 35.f, panned_draw_at.y});
+        saved = save();
+        midi_editor::piano_note panned;
+        require(saved->get_note_count() == initial_count + 2 &&
+            saved->find_note_at(midi_editor::tick_type(duration * .3), 79, panned),
+            "Native middle-drag did not pan the keys with the pointer.");
+        saved.reset();
+        key(ImGuiKey_Z, true);
+        drag_button(pan_at, {pan_at.x, pan_at.y - zoom_key_height * 3.f}, 2);
+        drag(panned_draw_at, {panned_draw_at.x + 35.f, panned_draw_at.y});
+        saved = save();
+        require(saved->get_note_count() == initial_count + 2 &&
+            saved->find_note_at(midi_editor::tick_type(duration * .3), 76, panned),
+            "Native middle-drag back did not restore the key range.");
+        saved.reset();
+        key(ImGuiKey_Z, true);
+        saved = save();
+        require(saved->get_note_count() == initial_count + 1, "Pan fixture draw did not undo.");
 
         // Track metadata is user data, including literal ImGui label delimiters.
         // Renaming a track must not alter its selectable ID or alias another row.

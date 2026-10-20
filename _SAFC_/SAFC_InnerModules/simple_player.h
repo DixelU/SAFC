@@ -624,8 +624,11 @@ struct simple_player
 	// Play events from an external source (e.g. the MIDI editor's live in-memory
 	// notes) instead of a file on disk. Mirrors simple_run: blocks until playback
 	// ends. The caller owns 'src' and must keep it alive for the whole call.
+	// start_lead_in_us delays the first audible event; the default gives the
+	// falling-notes view its run-up, while the editor passes a short lead-in so
+	// a hot start sounds at once.
 	void run_from_external(playback_event_source* src, double start_fraction = 0.0,
-		bool start_paused = true)
+		bool start_paused = true, std::uint64_t start_lead_in_us = default_start_lead_in_us)
 	{
 		if (!src || shutdown_requested.load(std::memory_order_acquire))
 			return;
@@ -654,7 +657,7 @@ struct simple_player
 
 			external_source = src;
 			playback_thread(static_cast<uint64_t>(start_fraction * info.total_duration_us),
-				start_paused);
+				start_paused, start_lead_in_us);
 			external_source = nullptr;
 		}
 		catch (const std::bad_alloc&)
@@ -1744,7 +1747,8 @@ struct simple_player
 		}
 	}
 
-	void playback_thread(uint64_t initial_skip_to_us = 0, bool start_paused = true)
+	void playback_thread(uint64_t initial_skip_to_us = 0, bool start_paused = true,
+		std::uint64_t start_lead_in_us = default_start_lead_in_us)
 	{
 		try
 		{
@@ -1758,7 +1762,7 @@ struct simple_player
 			// playback prepares its output first and requests immediate playback.
 			state.paused.store(start_paused, std::memory_order_release);
 			state.pause_position_us.store(0, std::memory_order_release);
-			state.pending_start_lead_in_us.store(default_start_lead_in_us,
+			state.pending_start_lead_in_us.store(start_lead_in_us,
 				std::memory_order_release);
 			if (!start_paused && initial_skip_to_us == 0)
 				set_playback_clock_from_pending_lead(0);

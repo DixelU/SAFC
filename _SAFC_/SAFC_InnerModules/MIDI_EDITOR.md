@@ -197,6 +197,11 @@ no note selection they operate on the active track.
 - **Claw machine (Alt+W)** slices and removes periodic regions, warps their
   timing, optionally removes very short results, and can stretch the result
   back to its original duration.
+- **Glue (Ctrl+G, toolbar)** joins notes of one track, channel and key that
+  overlap or touch into a single note spanning the chain, under the earliest
+  note's identity and velocity. It acts at once, without a preview window, on
+  the selection or on the whole active track; a glued selection is kept rather
+  than replaced, and the whole glue is one undo entry.
 - **LFO (Alt+O)** writes sine, triangle, or square modulation to the selected
   bottom lane. Note velocity is applied to target notes; pitch bend, pan CC10,
   and channel-volume CC7 are written as MIDI events over the selected or visible
@@ -224,6 +229,29 @@ Active-track notes are split where that line intersects each note's horizontal
 middle. The shorter piece from every cut is added to the selection (the left piece
 wins an exact tie), and the complete cut gesture is one undo entry. **P**, **E**,
 and **D** switch back to Draw, Select, and Erase respectively.
+
+The **Playback** tool (shortcut **Y**, FL Studio's playback cursor) sounds notes
+without editing them. A click sounds the visible notes under the pointer; while
+dragging, a note sounds once when the pointer crosses its start tick, never again
+while the pointer rests, and stops once the pointer leaves its span or the button
+is released. Ghost tracks take part while they are shown.
+
+Middle-drag over the notes pans time and keys together (over the controller lane,
+time only); right-drag on the keyboard still scrolls keys alone.
+
+The ruler is labelled with clock time (m:ss.t, following the tempo map) by default;
+the **Time ruler** checkbox switches to bar.beat labels. Hovering the ruler shows
+bar, time and tick together, and the footer repeats them for the pointer position.
+
+The track list marks tracks that have notes inside the visible time and key range
+with a dot and counts them; **In view** hides the other tracks (the active track
+always stays listed). The marks are recomputed only when the view or the notes
+change.
+
+Editor playback starts with a short lead-in instead of the player's three-second
+run-up, and preparing the playback snapshot no longer replaces the editor with a
+progress screen: the roll stays drawn and editable, and transport progress is
+reported in the footer status line.
 
 ### Integration with Processor
 

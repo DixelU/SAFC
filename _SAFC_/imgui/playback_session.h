@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -53,8 +54,11 @@ public:
 	bool open(std::wstring path, bool silent = false, bool start_paused = true);
 	bool restart(bool silent = false, bool start_paused = false);
 	using source_factory = std::function<std::shared_ptr<playback_event_source>()>;
+	// lead_in_us delays the first audible event; unset keeps the player's
+	// default run-up for the falling-notes view.
 	bool open_external(std::shared_ptr<playback_event_source> source, bool start_paused = false,
-		double seek_fraction = 0, source_factory export_factory = {});
+		double seek_fraction = 0, source_factory export_factory = {},
+		std::optional<std::uint64_t> lead_in_us = std::nullopt);
 	void choose_archive_member(std::size_t index);
 	// The active cursor must never be iterated by another consumer. Export uses
 	// export_source_factory() to create independent cursors over immutable data.
@@ -89,7 +93,7 @@ public:
 
 private:
 	bool start(std::wstring path, std::shared_ptr<playback_event_source> source, bool silent, bool start_paused,
-		double seek_fraction, source_factory export_factory);
+		double seek_fraction, source_factory export_factory, std::optional<std::uint64_t> lead_in_us = std::nullopt);
 	struct impl;
 	std::unique_ptr<impl> impl_;
 };

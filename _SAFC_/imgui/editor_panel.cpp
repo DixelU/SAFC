@@ -15,6 +15,7 @@
 #include <optional>
 #include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -39,7 +40,9 @@ enum class edit_mode
 	draw,
 	select,
 	erase,
-	split
+	split,
+	// FL Studio's playback tool: sounds the visible notes the pointer crosses.
+	playback
 };
 enum class lane_kind
 {
@@ -66,6 +69,48 @@ constexpr tick maximum_ramp_steps = 4096;
 // Pixel sizes at the workspace font size; apply scaled() where they are used.
 constexpr float note_resize_handle_width = 7.f;
 constexpr float velocity_brush_radius = 4.f;
+// Editor playback starts hot: the player's default three-second run-up serves
+// the falling-notes view, which the editor does not show. A short lead-in only
+// covers output buffering so the first notes are not late.
+constexpr std::uint64_t editor_start_lead_in_us = 120'000;
+// Note-ons one scrub step may trigger; a dense chord beyond this is clipped.
+constexpr std::size_t scrub_polyphony_limit = 128;
+
+// m:ss.t clock for the ruler and tooltips; hours appear once reached.
+std::string clock_label(double seconds)
+{
+	if (!std::isfinite(seconds) || seconds < 0.)
+		seconds = 0.;
+	auto tenths = std::llround(seconds * 10.);
+	const auto fraction = tenths % 10;
+	auto whole = tenths / 10;
+	const auto hours = whole / 3600;
+	whole %= 3600;
+	const auto minutes = whole / 60;
+	whole %= 60;
+	char text[48];
+	if (hours)
+		std::snprintf(text, sizeof(text), "%lld:%02lld:%02lld.%lld", hours, minutes, whole, fraction);
+	else
+		std::snprintf(text, sizeof(text), "%lld:%02lld.%lld", minutes, whole, fraction);
+	return text;
+}
+
+// Step between time-ruler labels: a round number of seconds (or tenths)
+// such that neighbouring labels sit at least `minimum_pixels` apart.
+double time_ruler_step(double seconds_per_pixel, float minimum_pixels)
+{
+	static constexpr double steps[] = {.1, .2, .5, 1., 2., 5., 10., 15., 30., 60., 120., 300., 600., 900., 1800.,
+		3600., 7200.};
+	const double wanted = seconds_per_pixel * double(minimum_pixels);
+	for (const double step : steps)
+		if (step >= wanted)
+			return step;
+	double step = 7200.;
+	while (step < wanted)
+		step *= 2.;
+	return step;
+}
 
 std::string utf8(const std::wstring& value)
 {
@@ -157,6 +202,10 @@ struct editor_panel::impl
 	std::shared_ptr<midi_editor> document = std::make_shared<midi_editor>();
 	std::jthread worker;
 	std::atomic<bool> busy = false;
+	// Loading, saving and tool previews own the document and replace the
+	// editor with a progress screen; preparing playback copies a snapshot
+	// under the model lock and leaves the editor drawn and usable.
+	bool job_hides_document = true;
 	std::atomic<std::uint64_t> progress = 0, total = 0;
 	std::string status = "Open a MIDI to edit its notes and controllers.";
 	std::string job_status, completed_status;
@@ -175,6 +224,19 @@ struct editor_panel::impl
 	edit_mode mode = edit_mode::draw;
 	lane_kind lane = lane_kind::velocity;
 	bool ghosts = true, show_lane = true, help = false;
+	// Ruler labels: clock time by default, or bar.beat positions.
+	bool time_ruler = true;
+	// Track list: only tracks with notes inside the visible time and key range.
+	bool tracks_in_view_only = false;
+	// Per-track flags for the current view, refreshed when the view or notes change.
+	std::vector<std::uint8_t> tracks_in_view;
+	std::uint64_t tracks_in_view_generation = ~std::uint64_t(0);
+	tick tracks_in_view_start = 0, tracks_in_view_duration = 0;
+	int tracks_in_view_low = -1, tracks_in_view_high = -1;
+	const midi_editor* tracks_in_view_document = nullptr;
+	// Transport state read once per frame; a new playback error becomes a status line.
+	playback_snapshot transport;
+	std::string last_playback_error;
 	float lane_height = 110.f;
 	double tempo_low = default_tempo_low_bpm;
 	double tempo_high = default_tempo_high_bpm;
@@ -199,13 +261,19 @@ struct editor_panel::impl
 		keyboard_pan,
 		velocity,
 		control,
-		divider
+		divider,
+		// Playback tool drag: sounds notes as the pointer crosses their starts.
+		scrub
 	};
 
 	gesture_kind gesture = gesture_kind::none;
 	ImVec2 anchor_mouse{}, current_mouse{};
 	tick anchor_tick = 0, current_tick = 0, pan_start = 0;
 	int anchor_key = 60, current_key = 60, pan_low = 0, pan_high = midi_key_max;
+	// A middle-drag started over the notes also scrolls keys; over the lane only time.
+	bool pan_keys = false;
+	// Notes sounding under the playback tool, released as the pointer leaves them.
+	std::vector<note> scrub_held;
 	std::int64_t delta_tick = 0;
 	int delta_key = 0;
 	tick gesture_length = 0, stretch_begin = 0, stretch_end = 1;
@@ -249,8 +317,11 @@ struct editor_panel::impl
 	{
 	}
 
+	// Whether the worker owns the document, so the editor must not be drawn.
+	bool blocking() const { return busy.load(std::memory_order_acquire) && job_hides_document; }
+
 	template<class Function>
-	void start_job(std::string message, Function function)
+	void start_job(std::string message, Function function, bool hides_document = true)
 	{
 		poll();
 
@@ -260,6 +331,7 @@ struct editor_panel::impl
 		if (worker.joinable())
 			worker.join();
 
+		job_hides_document = hides_document;
 		job_status = std::move(message);
 		completed_status.clear();
 		progress = total = 0;
@@ -316,7 +388,8 @@ struct editor_panel::impl
 				return pristine->fork_reader();
 			};
 
-			if (!playback.open_external(active_playback_source, false, prepared_seek, std::move(factory)))
+			if (!playback.open_external(
+					active_playback_source, false, prepared_seek, std::move(factory), editor_start_lead_in_us))
 				status = "Playback is busy; stop it before playing the editor.";
 		}
 	}
@@ -465,7 +538,7 @@ struct editor_panel::impl
 
 			prepared_source.reset(static_cast<midi_editor::editor_event_source*>(source.release()));
 			completed_status = "Playing a snapshot of the current edits.";
-		});
+		}, false);
 	}
 
 	tick snap_ticks() const
@@ -630,9 +703,59 @@ struct editor_panel::impl
 		}
 	}
 
+	struct canvas_view;
+
+	void release_scrub()
+	{
+		for (const auto& value : scrub_held)
+			playback.audition_note(value.key, 0, value.channel, false);
+		scrub_held.clear();
+	}
+
+	// Playback tool step. The first step sounds the visible notes under the
+	// pointer; later steps sound only notes whose start the pointer crossed
+	// since the previous frame, so a held pointer never retriggers. Notes stop
+	// once the pointer leaves their span, and all stop when the drag ends.
+	void scrub_step(const canvas_view& view, tick previous, tick current, bool initial)
+	{
+		for (auto it = scrub_held.begin(); it != scrub_held.end();)
+		{
+			if (current < it->start_tick || current >= it->end_tick)
+			{
+				playback.audition_note(it->key, 0, it->channel, false);
+				it = scrub_held.erase(it);
+			}
+			else
+				++it;
+		}
+
+		const auto track_filter = ghosts ? midi_editor::all_tracks : document->get_active_track();
+		const tick low = std::min(previous, current), high = std::max(previous, current);
+		std::size_t started = 0;
+		for (const auto& value : document->get_notes_in_range(
+				 low, high == std::numeric_limits<tick>::max() ? high : high + 1, std::uint8_t(view.low),
+				 std::uint8_t(view.high)))
+		{
+			if (track_filter != midi_editor::all_tracks && value.track_index != track_filter)
+				continue;
+			const bool crossed = initial ? value.start_tick <= current && current < value.end_tick
+				: current >= previous		 ? value.start_tick > previous && value.start_tick <= current
+											 : value.start_tick >= current && value.start_tick < previous;
+			if (!crossed || started >= scrub_polyphony_limit)
+				continue;
+			if (std::any_of(scrub_held.begin(), scrub_held.end(), [&](const note& held) { return held.id == value.id; }))
+				continue;
+
+			playback.audition_note(value.key, std::max<std::uint8_t>(1, value.velocity), value.channel, true);
+			scrub_held.push_back(value);
+			++started;
+		}
+	}
+
 	void finish_gesture(bool apply)
 	{
 		audition(-1);
+		release_scrub();
 		if (apply)
 			apply_gesture();
 		gesture = gesture_kind::none;
@@ -707,6 +830,19 @@ struct editor_panel::impl
 		const auto count = document->selection_count();
 		document->delete_selected_notes();
 		status = count ? "Deleted " + note_count(count) + "." : "Select notes to delete.";
+	}
+
+	// Glue joins overlapping or touching notes of one key and channel; the
+	// selection, or the active track when nothing is selected.
+	void glue_selection()
+	{
+		const bool selected = document->has_selection();
+		const auto [joined, produced] = document->glue_notes();
+		if (joined)
+			status = "Glued " + note_count(joined) + " into " + note_count(produced) + ".";
+		else
+			status = selected ? "No overlapping or touching notes of one key in the selection."
+							  : "No overlapping or touching notes of one key on the active track.";
 	}
 
 	void quantize_selection()
@@ -888,7 +1024,7 @@ struct editor_panel::impl
 		const bool popup_closed = popup_was_open;
 		popup_was_open = ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopup);
 		if (!ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) || io.WantTextInput ||
-			ImGui::IsAnyItemActive() || busy)
+			ImGui::IsAnyItemActive() || blocking())
 			return;
 
 		if (ImGui::IsKeyPressed(ImGuiKey_Escape))
@@ -929,6 +1065,8 @@ struct editor_panel::impl
 					0, document->get_total_ticks() + 1, 0, midi_key_max, document->get_active_track());
 			if (ImGui::IsKeyPressed(ImGuiKey_D, false))
 				deselect();
+			if (ImGui::IsKeyPressed(ImGuiKey_G, false))
+				glue_selection();
 			if (ImGui::IsKeyPressed(ImGuiKey_UpArrow))
 				nudge_selection(0, 12, 12);
 			if (ImGui::IsKeyPressed(ImGuiKey_DownArrow))
@@ -967,6 +1105,8 @@ struct editor_panel::impl
 					mode = edit_mode::select;
 				if (ImGui::IsKeyPressed(ImGuiKey_D, false))
 					mode = edit_mode::erase;
+				if (ImGui::IsKeyPressed(ImGuiKey_Y, false))
+					mode = edit_mode::playback;
 			}
 			if (ImGui::IsKeyPressed(ImGuiKey_Delete, false))
 				delete_selection();
@@ -1021,7 +1161,7 @@ struct editor_panel::impl
 		if (ImGui::Button("Help"))
 			help = !help;
 
-		if (busy || !loaded)
+		if (blocking() || !loaded)
 			return;
 
 		ImGui::BeginDisabled(tool != tool_kind::none);
@@ -1058,6 +1198,12 @@ struct editor_panel::impl
 			quantize_selection();
 
 		ImGui::SameLine();
+		if (ImGui::Button("Glue"))
+			glue_selection();
+		ImGui::SetItemTooltip("Join overlapping or touching notes of one key and channel into one note (Ctrl+G); "
+							  "the selection, or the whole active track.");
+
+		ImGui::SameLine();
 		ImGui::BeginDisabled(!document->has_selection());
 		if (ImGui::Button("Deselect"))
 			deselect();
@@ -1083,24 +1229,71 @@ struct editor_panel::impl
 		ImGui::EndDisabled();
 	}
 
+	// Which tracks have notes inside the visible time and key range. The scan
+	// costs about one frame of drawing, so it runs only when the view, the
+	// notes or the document changed.
+	void refresh_tracks_in_view()
+	{
+		const tick start = document->get_view_start_tick(), duration = document->get_view_duration_ticks();
+		const int low = document->get_view_key_low(), high = document->get_view_key_high();
+		const auto generation = document->get_note_generation();
+		if (tracks_in_view_document == document.get() && tracks_in_view_generation == generation &&
+			tracks_in_view_start == start && tracks_in_view_duration == duration && tracks_in_view_low == low &&
+			tracks_in_view_high == high)
+			return;
+
+		tracks_in_view_document = document.get();
+		tracks_in_view_generation = generation;
+		tracks_in_view_start = start;
+		tracks_in_view_duration = duration;
+		tracks_in_view_low = low;
+		tracks_in_view_high = high;
+		document->collect_tracks_in_range(tracks_in_view, start, start + duration, std::uint8_t(low), std::uint8_t(high));
+	}
+
+	bool track_in_view(std::uint16_t id) const
+	{
+		return id < tracks_in_view.size() && tracks_in_view[id];
+	}
+
 	void draw_tracks()
 	{
 		const auto active = document->get_active_track();
+		refresh_tracks_in_view();
+		std::size_t in_view = 0;
+		for (const auto flag : tracks_in_view)
+			in_view += flag ? 1 : 0;
 
 		ImGui::TextUnformatted("TRACKS");
+		ImGui::SameLine();
+		ImGui::TextDisabled("%zu in view", in_view);
+		help_tip("Tracks with notes inside the visible time and key range; their rows carry a dot.");
+		ImGui::SameLine(std::max(ImGui::GetCursorPosX(), ImGui::GetWindowContentRegionMax().x - scaled(76.f)));
+		ImGui::Checkbox("In view", &tracks_in_view_only);
+		help_tip("List only tracks with notes in the current view, plus the active track.");
 		ImGui::BeginChild("Track list", ImVec2(0, std::max(scaled(80.f), ImGui::GetContentRegionAvail().y * .38f)),
 			ImGuiChildFlags_Borders);
 
 		for (const auto& [id, info] : document->get_tracks())
 		{
+			const bool visible = track_in_view(id);
+			if (tracks_in_view_only && !visible && id != active)
+				continue;
+
 			ImGui::PushID(int(id));
-			const auto text = document->get_track_label(id);
+			// Room for the in-view dot ahead of the label.
+			const auto text = "    " + document->get_track_label(id);
+			const auto row = ImGui::GetCursorScreenPos();
 
 			if (literal_selectable("##track", text, id == active))
 			{
 				finish_gesture(false);
 				document->set_active_track(id);
 			}
+			if (visible && ImGui::IsItemVisible())
+				ImGui::GetWindowDrawList()->AddCircleFilled(
+					ImVec2(row.x + scaled(7.f), row.y + ImGui::GetTextLineHeight() * .5f), scaled(3.f),
+					IM_COL32(120, 214, 255, 255));
 
 			ImGui::PopID();
 		}
@@ -1376,6 +1569,49 @@ struct editor_panel::impl
 		return result;
 	}
 
+	// Clock labels at round time steps, following the tempo map. The beat grid
+	// below stays in ticks, so bar lines and time marks drift apart under
+	// tempo changes exactly as they do in the music.
+	void draw_time_ruler(const canvas_view& view)
+	{
+		auto* draw = ImGui::GetWindowDrawList();
+		const double begin_seconds = document->get_seconds_at_tick(view.start);
+		const double end_seconds = document->get_seconds_at_tick(view.start + view.duration);
+		if (!(end_seconds > begin_seconds) || !std::isfinite(begin_seconds) || !std::isfinite(end_seconds))
+			return;
+
+		const double step = time_ruler_step((end_seconds - begin_seconds) / double(view.width), scaled(84.f));
+		const float tick_top = view.roll_min.y - scaled(6.f);
+		for (double seconds = std::floor(begin_seconds / step) * step; seconds <= end_seconds; seconds += step)
+		{
+			if (seconds < begin_seconds - step * .5)
+				continue;
+			const float x = view.x_at(double(document->get_tick_at_seconds(seconds)));
+			if (x < view.roll_min.x || x > view.roll_max.x)
+				continue;
+
+			draw->AddLine(ImVec2(x, tick_top), ImVec2(x, view.roll_min.y), IM_COL32(155, 188, 211, 255));
+			draw->AddText(ImVec2(x + 3, view.origin.y + 3), IM_COL32(155, 188, 211, 255), clock_label(seconds).c_str());
+		}
+	}
+
+	// Bar.beat, clock time and tick at a position, for tooltips and the footer.
+	std::string describe_position(tick position) const
+	{
+		const tick beat = std::max<tick>(1, document->get_ppqn());
+		return "bar " + std::to_string(position / beat / 4 + 1) + "." + std::to_string(position / beat % 4 + 1) +
+			" | " + clock_label(document->get_seconds_at_tick(position)) + " | tick " + std::to_string(position);
+	}
+
+	void draw_ruler_tooltip(const canvas_view& view, bool hovered)
+	{
+		const auto mouse = ImGui::GetIO().MousePos;
+		if (!hovered || gesture != gesture_kind::none ||
+			!contains(mouse, ImVec2(view.roll_min.x, view.origin.y), ImVec2(view.roll_max.x, view.roll_min.y)))
+			return;
+		ImGui::SetTooltip("%s", describe_position(view.tick_at(mouse.x)).c_str());
+	}
+
 	void draw_piano_roll(const canvas_view& view)
 	{
 		auto* draw = ImGui::GetWindowDrawList();
@@ -1417,7 +1653,8 @@ struct editor_panel::impl
 			draw->AddLine(ImVec2(x, view.roll_min.y), ImVec2(x, view.roll_max.y),
 				bar ? IM_COL32(92, 139, 174, 170) : IM_COL32(57, 83, 104, 100));
 
-			if (bar || (grid >= beat && view.width * double(grid) / double(view.duration) > scaled(50.f)))
+			if (!time_ruler &&
+				(bar || (grid >= beat && view.width * double(grid) / double(view.duration) > scaled(50.f))))
 			{
 				const auto label =
 					std::to_string(position / beat / 4 + 1) + "." + std::to_string(position / beat % 4 + 1);
@@ -1427,6 +1664,9 @@ struct editor_panel::impl
 			if (position > std::numeric_limits<tick>::max() - grid)
 				break;
 		}
+
+		if (time_ruler)
+			draw_time_ruler(view);
 
 		draw->PushClipRect(view.roll_min, view.roll_max, true);
 
@@ -1521,11 +1761,23 @@ struct editor_panel::impl
 				draw->AddCircleFilled(last, 3.f, IM_COL32(255, 211, 112, 255));
 			}
 		}
-		const auto playback_state = playback.snapshot();
-		if (playback_state.busy && active_playback_source && playback.current_source() == active_playback_source)
+		else if (gesture == gesture_kind::scrub)
+		{
+			const float x = view.x_at(double(current_tick));
+			draw->AddLine(ImVec2(x, view.roll_min.y), ImVec2(x, view.roll_max.y), IM_COL32(116, 255, 176, 255), 2.f);
+			for (const auto& value : scrub_held)
+			{
+				const float y0 = view.y_at(value.key);
+				draw->AddRect(ImVec2(view.x_at(double(value.start_tick)), y0 + .5f),
+					ImVec2(std::max(view.x_at(double(value.start_tick)) + 2.f, view.x_at(double(value.end_tick))),
+						y0 + std::max(2.f, view.key_height - .5f)),
+					IM_COL32(116, 255, 176, 255), 1.f, 0, 2.f);
+			}
+		}
+		if (transport.busy && active_playback_source && playback.current_source() == active_playback_source)
 		{
 			const float x =
-				view.x_at(double(document->get_tick_at_seconds(double(playback_state.position_us) / 1000000.)));
+				view.x_at(double(document->get_tick_at_seconds(double(transport.position_us) / 1000000.)));
 			draw->AddLine(ImVec2(x, view.roll_min.y), ImVec2(x, view.roll_max.y), IM_COL32(255, 200, 92, 255), 2.f);
 		}
 
@@ -1693,6 +1945,9 @@ struct editor_panel::impl
 			gesture_button = ImGuiMouseButton_Middle;
 			anchor_mouse = mouse;
 			pan_start = view.start;
+			pan_keys = in_roll;
+			pan_low = view.low;
+			pan_high = view.high;
 		}
 		else if (ImGui::IsMouseClicked(ImGuiMouseButton_Right) && in_keys)
 		{
@@ -1742,6 +1997,14 @@ struct editor_panel::impl
 			anchor_key = current_key = view.key_at(mouse.y);
 			gesture_button = ImGuiMouseButton_Left;
 			note hit;
+
+			if (mode == edit_mode::playback)
+			{
+				gesture = gesture_kind::scrub;
+				scrub_held.clear();
+				scrub_step(view, anchor_tick, anchor_tick, true);
+				return;
+			}
 
 			const bool found =
 				document->find_note_at(anchor_tick, std::uint8_t(anchor_key), hit, 0, 0, document->get_active_track());
@@ -1834,10 +2097,19 @@ struct editor_panel::impl
 			document->set_view_range(
 				tick(std::max(0., double(pan_start) - (mouse.x - anchor_mouse.x) / view.width * double(view.duration))),
 				view.duration);
+			if (pan_keys)
+			{
+				// Content follows the pointer: dragging down reveals higher keys above.
+				const int shift = int(std::lround((mouse.y - anchor_mouse.y) / view.key_height));
+				const int next_low = std::clamp(pan_low + shift, 0, midi_key_max - (pan_high - pan_low));
+				document->set_view_keys(std::uint8_t(next_low), std::uint8_t(next_low + pan_high - pan_low));
+			}
 		}
+		else if (gesture == gesture_kind::scrub)
+			scrub_step(view, previous_tick, current_tick, false);
 		else if (gesture == gesture_kind::keyboard_pan)
 		{
-			const int shift = int((mouse.y - anchor_mouse.y) / view.key_height);
+			const int shift = int(std::lround((mouse.y - anchor_mouse.y) / view.key_height));
 			const int next_low = std::clamp(pan_low + shift, 0, midi_key_max - (pan_high - pan_low));
 
 			document->set_view_keys(std::uint8_t(next_low), std::uint8_t(next_low + pan_high - pan_low));
@@ -2029,6 +2301,7 @@ struct editor_panel::impl
 		if (interactive && (hovered || active || gesture != gesture_kind::none))
 			handle_canvas_input(view, hovered);
 		draw_lane_tooltip(view, interactive && hovered);
+		draw_ruler_tooltip(view, hovered);
 		if (!ImGui::IsMouseDown(ImGuiMouseButton_Left) && gesture == gesture_kind::none)
 			audition(-1);
 		draw_time_scrollbar(view);
@@ -2037,12 +2310,12 @@ struct editor_panel::impl
 	void draw_document()
 	{
 		shortcuts();
-		if (busy)
+		if (blocking())
 			return;
 
 		ImGui::BeginDisabled(tool != tool_kind::none);
 		ImGui::SetNextItemWidth(scaled(135.f));
-		enum_combo("Tool", mode, "Draw / move\0Select\0Erase\0Split\0");
+		enum_combo("Tool", mode, "Draw / move\0Select\0Erase\0Split\0Playback\0");
 		ImGui::SameLine();
 		ImGui::SetNextItemWidth(scaled(135.f));
 		// Order matches snap_ticks().
@@ -2071,6 +2344,10 @@ struct editor_panel::impl
 		ImGui::SameLine();
 		if (ImGui::Button("+"))
 			document->zoom_in();
+
+		ImGui::SameLine();
+		ImGui::Checkbox("Time ruler", &time_ruler);
+		help_tip("Label the ruler with clock time instead of bar.beat; hovering the ruler shows both.");
 
 		if (lane == lane_kind::tempo)
 		{
@@ -2133,10 +2410,25 @@ struct editor_panel::impl
 			ImGui::EndTable();
 		}
 
-		ImGui::Text("%s | %zu notes | %zu selected | PPQN %u%s",
+		ImGui::Text("%s | %zu notes | %zu selected | PPQN %u%s%s",
 			document->get_track_label(document->get_active_track()).c_str(), document->get_note_count(),
-			document->selection_count(), unsigned(document->get_ppqn()), document->is_modified() ? " | Modified" : "");
-		ImGui::TextUnformatted(status.c_str());
+			document->selection_count(), unsigned(document->get_ppqn()), document->is_modified() ? " | Modified" : "",
+			pointer_tick ? (" | " + describe_position(*pointer_tick)).c_str() : "");
+		// The status line doubles as the progress line, so preparing playback
+		// never inserts a bar above the roll and shifts it.
+		if (busy && !job_hides_document)
+			ImGui::TextUnformatted(job_status.c_str());
+		else if (transport.preparing)
+		{
+			ImGui::TextUnformatted(transport.message.c_str());
+			ImGui::SameLine();
+			ImGui::ProgressBar(transport.preparation_total
+					? float(double(transport.preparation_completed) / double(transport.preparation_total))
+					: -float(ImGui::GetTime()),
+				ImVec2(scaled(160.f), ImGui::GetTextLineHeight()), "");
+		}
+		else
+			ImGui::TextUnformatted(status.c_str());
 	}
 
 	void draw_help()
@@ -2149,13 +2441,16 @@ struct editor_panel::impl
 				"frames; over empty space it deselects. Double right-click a ghost note to switch to its track. "
 				"Split: drag a vertical or diagonal cut line; "
 				"each note is divided where the line crosses its middle, and its shorter piece is selected. "
-				"Middle-drag pans; wheel zooms. Alt bypasses snap. Wheel on keys zooms pitch; right-drag keys scrolls. "
+				"Playback: click or drag to sound the visible notes under the pointer; a note sounds once when the "
+				"pointer crosses its start. "
+				"Middle-drag pans time and keys; wheel zooms. Alt bypasses snap. Wheel on keys zooms pitch; "
+				"right-drag keys scrolls. Hover the ruler for bar, time and tick. "
 				"Controller lane: left paints, right draws a ramp; a value set before the view enters from its "
 				"left edge.");
 			ImGui::TextWrapped(
 				"Ctrl+Z/Y undo/redo; Ctrl+C/X/V/B copy/cut/paste/duplicate; Ctrl+A/D select track/deselect; Shift+C "
-				"selects channel; Alt+C assigns channel. P/E/D/C choose Draw/Select/Erase/Split. Arrows move; "
-				"Ctrl+Up/Down transposes octaves. Q quantizes. "
+				"selects channel; Alt+C assigns channel. P/E/D/C/Y choose Draw/Select/Erase/Split/Playback. Arrows "
+				"move; Ctrl+Up/Down transposes octaves. Q quantizes; Ctrl+G glues overlapping or touching notes. "
 				"Space plays from view. Alt+U/Y/W/O opens Chopper/Flip/Claw/LFO. Esc cancels a gesture, or "
 				"deselects.");
 		}
@@ -2171,7 +2466,14 @@ struct editor_panel::impl
 
 		if (begin_folded_window("MIDI editor", open, ImGuiWindowFlags_NoScrollWithMouse))
 		{
-			if (busy.load(std::memory_order_acquire))
+			transport = playback.snapshot();
+			if (transport.error != last_playback_error)
+			{
+				last_playback_error = transport.error;
+				if (!transport.error.empty())
+					status = "Playback: " + transport.error;
+			}
+			if (blocking())
 			{
 				ImGui::TextUnformatted(job_status.c_str());
 				const auto size = total.load();
@@ -2184,22 +2486,22 @@ struct editor_panel::impl
 			else
 			{
 				draw_toolbar();
-				const auto playback_state = playback.snapshot();
-				if (playback_state.preparing)
+				const bool loaded = document->is_file_loaded();
+				// With a document open these go to its footer, where they shift nothing.
+				if (!loaded && transport.preparing)
 				{
-					ImGui::TextWrapped("%s", playback_state.message.c_str());
-					ImGui::ProgressBar(playback_state.preparation_total
-							? float(double(playback_state.preparation_completed) /
-								  double(playback_state.preparation_total))
+					ImGui::TextWrapped("%s", transport.message.c_str());
+					ImGui::ProgressBar(transport.preparation_total
+							? float(double(transport.preparation_completed) / double(transport.preparation_total))
 							: -float(ImGui::GetTime()),
 						ImVec2(-1, 0));
 				}
-				else if (!playback_state.error.empty())
-					ImGui::TextWrapped("%s", playback_state.error.c_str());
+				else if (!loaded && !transport.error.empty())
+					ImGui::TextWrapped("%s", transport.error.c_str());
 
-				if (!busy && document->is_file_loaded())
+				if (loaded)
 					draw_document();
-				else if (!busy)
+				else
 				{
 					ImGui::TextWrapped(
 						"Open a MIDI file to begin. Unsaved edits can play and render through the shared player.");
@@ -2583,11 +2885,62 @@ bool editor_panel::run_smoke(const std::wstring& output_directory, std::string& 
 				model.undo();
 			require(model.get_note_count() == count, "Ghost pick fixture did not undo.");
 		}
+		{
+			// Glue joins only notes of one key and channel that overlap or touch,
+			// keeps the earliest note's identity, leaves the rest of the selection
+			// alone, and undoes as one edit.
+			const auto count = model.get_note_count();
+			model.clear_selection();
+			const auto first = model.insert_note(4000, 4200, 40, 90, 5, 0);
+			const auto second = model.insert_note(4100, 4500, 40, 70, 5, 0);
+			const auto third = model.insert_note(4500, 4600, 40, 60, 5, 0); // touches the second
+			const auto apart = model.insert_note(4700, 4800, 40, 60, 5, 0); // a gap: stays separate
+			const auto other_channel = model.insert_note(4000, 4600, 40, 60, 6, 0);
+			const auto other_key = model.insert_note(4000, 4600, 41, 60, 5, 0);
+			for (const auto id : {first, second, third, apart, other_channel, other_key})
+				model.select_note(id, midi_editor::select_mode::add);
+			// The chain's voice: key 40 on channel 5, between the fixture's ticks.
+			const auto voice = [&]
+			{
+				std::vector<note> result;
+				for (const auto& value : model.get_notes_on_key(40))
+					if (value.channel == 5 && value.start_tick >= 4000 && value.start_tick < 4900)
+						result.push_back(value);
+				return result;
+			};
+			const auto [joined, produced] = model.glue_notes();
+			const auto glued = voice();
+			require(joined == 3 && produced == 1 && model.get_note_count() == count + 4 && glued.size() == 2,
+				"Glue did not join exactly the overlapping and touching chain.");
+			require(glued.front().id == first && glued.front().start_tick == 4000 && glued.front().end_tick == 4600 &&
+					glued.front().velocity == 90 && glued.back().id == apart,
+				"Glue did not span the chain under the earliest note's identity.");
+			require(model.selection_count() == 4 && model.is_note_selected(first) && model.is_note_selected(apart) &&
+					model.is_note_selected(other_channel) && model.is_note_selected(other_key),
+				"Glue replaced the selection instead of keeping it.");
+			require(model.glue_notes().first == 0, "Glue found work in a selection without touching notes.");
+			model.undo();
+			require(model.get_note_count() == count + 6 && voice().size() == 4 && model.selection_count() == 6 &&
+					model.is_note_selected(second) && model.is_note_selected(third),
+				"Glue did not undo as one edit restoring the selection.");
+			model.redo();
+			require(model.get_note_count() == count + 4 && model.selection_count() == 4, "Glue redo lost its result.");
+			model.undo();
+			model.clear_selection();
+			// Without a selection the whole active track is glued and nothing becomes selected.
+			require(model.glue_notes().first >= 3 && !model.has_selection() && voice().size() == 2,
+				"Glue on the active track selected notes or missed the chain.");
+			model.undo();
+			require(model.get_note_count() == count + 6, "Active-track glue did not undo as one edit.");
+			for (int i = 0; i < 6; ++i)
+				model.undo();
+			require(model.get_note_count() == count, "Glue fixture did not undo.");
+		}
 		model.clear_selection();
 		model.reset_view_to_content();
 		state.lane = lane_kind::velocity;
 		state.draw_channel = -1;
-		state.status = "Editor workflow smoke passed: gestures, undo/redo, tracks, controllers, tools, save and "
+		state.status = "Editor workflow smoke passed: gestures, undo/redo, tracks, controllers, tools, glue, save and "
 					   "playback snapshot.";
 		report = state.status;
 		return true;

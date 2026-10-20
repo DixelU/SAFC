@@ -803,11 +803,15 @@ struct midi_editor
 		std::vector<piano_note> before;
 		std::vector<piano_note> after;
 		std::string label;
+		// Preview tools select their whole result. A direct edit such as Glue
+		// instead keeps the user's selection: the notes it replaced leave it and,
+		// when anything was selected, their replacements join it.
+		bool merge_selection = false;
 
 		note_tool_op(std::vector<piano_note> old_notes,
-			std::vector<piano_note> new_notes, std::string description)
+			std::vector<piano_note> new_notes, std::string description, bool keep_selection = false)
 			: before(std::move(old_notes)), after(std::move(new_notes)),
-			label(std::move(description))
+			label(std::move(description)), merge_selection(keep_selection)
 		{
 		}
 
@@ -820,12 +824,24 @@ struct midi_editor
 		void apply(midi_editor& editor, const std::vector<piano_note>& remove_values,
 			const std::vector<piano_note>& add_values)
 		{
+			const bool had_selection = !editor.selected_notes.empty();
 			remove(editor, remove_values);
 			for (const auto& note : add_values)
 				editor.add_note(note);
-			editor.selected_notes.clear();
-			for (const auto& note : add_values)
-				editor.selected_notes.insert(note.id);
+			if (merge_selection)
+			{
+				for (const auto& note : remove_values)
+					editor.selected_notes.erase(note.id);
+				if (had_selection)
+					for (const auto& note : add_values)
+						editor.selected_notes.insert(note.id);
+			}
+			else
+			{
+				editor.selected_notes.clear();
+				for (const auto& note : add_values)
+					editor.selected_notes.insert(note.id);
+			}
 			editor.mark_dirty_keep_order();
 		}
 
@@ -1086,6 +1102,9 @@ private:
 	std::unordered_set<note_id_type> suppressed_base_note_ids;
 	mutable std::vector<note_id_type> base_note_index_by_id;
 	std::size_t logical_note_count = 0;
+	// Advances on every note change (edit, undo, load), so a frontend can cache
+	// per-view derived data such as which tracks have notes in the viewport.
+	std::uint64_t note_generation = 0;
 	std::map<std::uint16_t, track_info> tracks;
 
 	// Sorted-base query acceleration (rebuilt after loading):
@@ -1385,6 +1404,7 @@ public:
 		is_dirty = false;
 		notes_storage = std::make_shared<loaded_note_data>();
 		edited_notes.clear();
+		++note_generation;
 		suppressed_base_note_ids.clear();
 		base_note_index_by_id.clear();
 		logical_note_count = 0;
@@ -1752,6 +1772,37 @@ public:
 				[](const display_note& a, const display_note& b) { return a.note < b.note; });
 	}
 
+	std::uint64_t get_note_generation() const
+	{
+		std::lock_guard<std::recursive_mutex> lock(editor_mutex);
+		return note_generation;
+	}
+
+	/**
+	 * Mark, per track index, whether any note intersects [start_tick, end_tick)
+	 * within [key_low, key_high]. `flags` is resized to cover every known track
+	 * and filled with 0/1; the scan costs as much as drawing that view.
+	 */
+	void collect_tracks_in_range(std::vector<std::uint8_t>& flags, tick_type start_tick, tick_type end_tick,
+		std::uint8_t key_low = 0, std::uint8_t key_high = 127) const
+	{
+		std::lock_guard<std::recursive_mutex> lock(editor_mutex);
+		flags.assign(tracks.empty() ? 0 : std::size_t(tracks.rbegin()->first) + 1, 0);
+		std::size_t remaining = tracks.size();
+		for_each_note_intersecting(start_tick, end_tick, [&](const piano_note& note)
+		{
+			if (!remaining || note.key < key_low || note.key > key_high)
+				return;
+			if (note.track_index >= flags.size())
+				flags.resize(std::size_t(note.track_index) + 1, 0);
+			if (!flags[note.track_index])
+			{
+				flags[note.track_index] = 1;
+				--remaining;
+			}
+		});
+	}
+
 	/**
 	 * Get notes at a specific time slice (for vertical selection)
 	 */
@@ -1934,6 +1985,16 @@ public:
 	void cancel_tool_preview();
 	void commit_note_tool(std::vector<piano_note> before,
 		std::vector<piano_note> after, const std::string& label, bool preview = false);
+
+	/**
+	 * Glue: join notes of one track, channel and key that overlap or touch into
+	 * a single note spanning the group, keeping the earliest note's identity and
+	 * velocity. Targets the selection, or the active track when nothing is
+	 * selected. One undo entry; the selection is kept rather than replaced.
+	 * Returns {notes joined away plus their survivors, glued notes produced},
+	 * both zero when nothing touched.
+	 */
+	std::pair<std::size_t, std::size_t> glue_notes();
 
 	/** Chop notes against a repeated beat subdivision, optionally aligned to the score grid. */
 	std::size_t chop_tool(unsigned divisions_per_beat, double time_multiplier,
@@ -2530,6 +2591,7 @@ private:
 	// to its loaded value (normally through undo), discard the overlay entry.
 	void replace_note(piano_note value)
 	{
+		++note_generation;
 		const auto id = value.id;
 		if (auto* base = find_base_note_by_id(id))
 		{
@@ -2561,6 +2623,7 @@ private:
 	{
 		if (!find_note_by_id(id))
 			return false;
+		++note_generation;
 		edited_notes.erase(id);
 		if (find_base_note_by_id(id))
 			suppressed_base_note_ids.insert(id);
