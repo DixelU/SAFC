@@ -2120,6 +2120,43 @@ public:
 	}
 
 	/**
+	 * Topmost note on key whose drawn span covers tick: it starts at or
+	 * before tick and either still sounds there or started at or after
+	 * earliest_start. A view passes as earliest_start the first start whose
+	 * minimum drawn width still reaches the pointer, so a note too short to
+	 * reach the pointer's tick is found under the pixels it paints, which
+	 * find_note_at's single tick misses.
+	 */
+	bool find_note_covering(tick_type tick, tick_type earliest_start, std::uint8_t key,
+		piano_note& out, std::uint16_t track_filter = all_tracks) const
+	{
+		std::lock_guard<std::recursive_mutex> lock(editor_mutex);
+
+		// A qualifying note ends after its own start, so scanning from the
+		// tick before earliest_start reaches every one of them
+		const auto scan_from = std::min(tick, earliest_start > 0 ? earliest_start - 1 : tick_type(0));
+		bool found = false;
+		for_each_note_intersecting(scan_from, tick + 1,
+			[&](const piano_note& note)
+		{
+			if (track_filter != all_tracks && note.track_index != track_filter)
+				return;
+			if (note.key != key || note.start_tick > tick)
+				return;
+			if (note.end_tick <= tick && note.start_tick < earliest_start)
+				return;
+
+			if (!found || out < note)
+			{
+				out = note;
+				found = true;
+			}
+		});
+
+		return found;
+	}
+
+	/**
 	 * Next/previous track that actually contains notes, in cyclic order.
 	 * Returns the current active track if no track has notes.
 	 */

@@ -1298,6 +1298,21 @@ struct editor_panel::impl
 		return {begin, last_tick + end_padding};
 	}
 
+	// The topmost note painted under the pointer on one track or, with
+	// all_tracks, any. Judged like the renderer rather than at one tick: at the
+	// pixel's centre and with the two-pixel minimum note width, so the pick is
+	// what is on screen when a pixel spans several ticks.
+	bool note_under_pointer(const canvas_view& view, ImVec2 mouse, std::uint16_t track_filter, note& out) const
+	{
+		const float x = std::floor(mouse.x) + .5f;
+		// The earliest start whose minimum width still reaches the pointer.
+		const double two_pixels_back =
+			double(view.start) + double(x - 2.f - view.roll_min.x) / view.width * double(view.duration);
+		const tick earliest_start = two_pixels_back < 0. ? 0 : tick(two_pixels_back) + 1;
+		return document->find_note_covering(
+			view.tick_at(x), earliest_start, std::uint8_t(view.key_at(mouse.y)), out, track_filter);
+	}
+
 	void collect_erased_notes(const canvas_view& view, ImVec2 first, ImVec2 last)
 	{
 		if (!clip_segment_to_rect(first, last, view.roll_min, view.roll_max))
@@ -1700,16 +1715,17 @@ struct editor_panel::impl
 		else if (in_roll && ImGui::IsMouseClicked(ImGuiMouseButton_Right))
 		{
 			note hit;
-			const auto position = view.tick_at(mouse.x);
-			const auto key = std::uint8_t(view.key_at(mouse.y));
-			const bool active_note = document->find_note_at(
-				position, key, hit, 0, 0, document->get_active_track());
+			const bool active_note = note_under_pointer(view, mouse, document->get_active_track(), hit);
 			// As in FL Studio, a double right-click on a ghost note switches to its
 			// track. The first click must have erased nothing: otherwise deleting a
 			// note stacked over a ghost with two quick clicks would also switch.
 			if (!active_note && ghosts && last_erase_was_empty &&
-				ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Right) && document->find_note_at(position, key, hit))
-				document->set_active_track(std::uint8_t(hit.track_index));
+				ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Right) &&
+				note_under_pointer(view, mouse, midi_editor::all_tracks, hit))
+			{
+				document->set_active_track(hit.track_index);
+				status = "Switched to " + document->get_track_label(hit.track_index) + ".";
+			}
 			else
 			{
 				gesture = gesture_kind::erase;
@@ -2528,6 +2544,29 @@ bool editor_panel::run_smoke(const std::wstring& output_directory, std::string& 
 				++note_ons;
 		}
 		require(note_ons == model.get_note_count(), "Editor playback snapshot lost notes.");
+		{
+			// A double right-click picks the ghost painted under the pointer: judged
+			// over the note's drawn span, not at one tick, so a note too short to
+			// reach the pointer's tick still counts from its start, and a stack on
+			// one key resolves to the note drawn last.
+			const auto count = model.get_note_count();
+			const auto lower = model.insert_note(2000, 2400, 30, 100, 0, 0);
+			const auto sliver = model.insert_note(2100, 2101, 30, 100, 0, 1);
+			const auto stacked = model.insert_note(2000, 2400, 30, 100, 0, 1);
+			note covering;
+			require(model.find_note_covering(2200, 2101, 30, covering) && covering.id == stacked,
+				"Ghost pick did not take the note drawn last on a key.");
+			require(model.find_note_covering(2200, 2101, 30, covering, 0) && covering.id == lower,
+				"Ghost pick ignored its track filter.");
+			require(model.find_note_covering(2200, 2100, 30, covering) && covering.id == sliver,
+				"Ghost pick missed a note drawn under the pointer that already ended.");
+			require(!model.find_note_covering(2200, 2101, 31, covering) &&
+					!model.find_note_covering(1999, 0, 30, covering),
+				"Ghost pick found a note off its key or before its start.");
+			for (int i = 0; i < 3; ++i)
+				model.undo();
+			require(model.get_note_count() == count, "Ghost pick fixture did not undo.");
+		}
 		model.clear_selection();
 		model.reset_view_to_content();
 		state.lane = lane_kind::velocity;
