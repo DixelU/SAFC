@@ -2309,13 +2309,26 @@ bool editor_panel::run_smoke(const std::wstring& output_directory, std::string& 
 		const auto directory = std::filesystem::path(output_directory);
 		std::filesystem::create_directories(directory);
 		const auto fixture = directory / L"editor-input.mid";
-		const unsigned char bytes[] = {'M', 'T', 'h', 'd', 0, 0, 0, 6, 0, 1, 0, 2, 1, 0xe0, 'M', 'T', 'r', 'k', 0, 0, 0,
-			38, 0, 0xff, 0x03, 5, 'P', 'i', 'a', 'n', 'o', 0, 0xff, 0x51, 3, 7, 0xa1, 0x20, 0, 0x90, 60, 100, 0x83,
-			0x60, 0x80, 60, 64, 0, 0x90, 64, 80, 0x83, 0x60, 0x80, 64, 64, 0, 0xff, 0x2f, 0, 'M', 'T', 'r', 'k', 0, 0,
-			0, 17, 0, 0x91, 67, 90, 0x87, 0x40, 0x81, 67, 64, 0, 0xb1, 10, 64, 0, 0xff, 0x2f, 0};
+		// 257 tracks with the ghost note on the last: the native ghost-switch test
+		// then drives a track index above 255, which a narrower cast once folded
+		// onto the first tracks.
+		constexpr std::size_t filler_tracks = 255;
+		const unsigned char header[] = {'M', 'T', 'h', 'd', 0, 0, 0, 6, 0, 1, 1, 1, 1, 0xe0};
+		const unsigned char piano[] = {'M', 'T', 'r', 'k', 0, 0, 0, 38, 0, 0xff, 0x03, 5, 'P', 'i', 'a', 'n', 'o', 0, 0xff,
+			0x51, 3, 7, 0xa1, 0x20, 0, 0x90, 60, 100, 0x83, 0x60, 0x80, 60, 64, 0, 0x90, 64, 80, 0x83, 0x60, 0x80, 64,
+			64, 0, 0xff, 0x2f, 0};
+		const unsigned char filler[] = {'M', 'T', 'r', 'k', 0, 0, 0, 4, 0, 0xff, 0x2f, 0};
+		const unsigned char ghost[] = {'M', 'T', 'r', 'k', 0, 0, 0, 17, 0, 0x91, 67, 90, 0x87, 0x40, 0x81, 67, 64, 0,
+			0xb1, 10, 64, 0, 0xff, 0x2f, 0};
 		{
 			std::ofstream out(fixture, std::ios::binary);
-			out.write(reinterpret_cast<const char*>(bytes), sizeof(bytes));
+			const auto write = [&](const unsigned char* bytes, std::size_t size)
+			{ out.write(reinterpret_cast<const char*>(bytes), std::streamsize(size)); };
+			write(header, sizeof(header));
+			write(piano, sizeof(piano));
+			for (std::size_t i = 0; i < filler_tracks; ++i)
+				write(filler, sizeof(filler));
+			write(ghost, sizeof(ghost));
 		}
 		state.load(fixture.wstring());
 		if (state.worker.joinable())
@@ -2323,6 +2336,9 @@ bool editor_panel::run_smoke(const std::wstring& output_directory, std::string& 
 		state.poll();
 		auto& model = *state.document;
 		require(model.is_file_loaded() && model.get_note_count() == 3, "Editor owned load did not read the fixture.");
+		note ghost_note;
+		require(model.find_note_at(0, 67, ghost_note) && ghost_note.track_index == filler_tracks + 1,
+			"Editor fixture ghost note is not on track 256.");
 		model.set_active_track(0);
 		note first_note, second_note;
 		require(model.find_note_at(0, 60, first_note) && model.find_note_at(480, 64, second_note),

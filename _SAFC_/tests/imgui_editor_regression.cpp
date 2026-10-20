@@ -141,7 +141,9 @@ int main()
 
         // FL-style ghost switch: only a double right-click on a ghost note makes
         // its track active. A switch is observed through the next right-click,
-        // which erases the note once it belongs to the active track.
+        // which erases the note once it belongs to the active track. The fixture
+        // keeps its ghost on track 256, so the switch must carry the full 16-bit
+        // track id: folded to 8 bits it lands on track 0 and erases nothing.
         const auto fixture_notes = baseline->get_all_notes();
         const auto ghost = std::find_if(fixture_notes.begin(), fixture_notes.end(),
             [](const auto& value) { return value.track_index != 0; });
