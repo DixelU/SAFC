@@ -82,9 +82,18 @@ bank (which also selects the embedded output), return to the built-in sine, and
 configure sample rate, buffering, cohort limit, render threads, phase mode,
 output gain, the limiter, and overload shedding. These preferences and the bank
 path are restored on the next run. Player playback, editor playback, and editor note audition all
-share the selected output. MP4 export uses the same SYNCore bank and synthesis
-preferences; its separate AAC rate controls only the encoded audio stream.
-MP4 export also uses the player's overlap removal mode (Overlaps drawn, Naive OR,
+share the selected output. Video export uses the same SYNCore bank and synthesis
+preferences; its separate audio rate controls only the encoded audio stream.
+It encodes through the installed Windows Media Foundation encoders: H.264, HEVC,
+or AV1 in MP4 with AAC, ALAC, or FLAC audio, and WMV 9 or VC-1 in WMV with WMA,
+WMA Pro, or PCM audio. Besides CBR and VBR it offers Quality and constant-QP rate
+control and a flat background colour for keying. **Advanced encoder options**
+choose GPU or software encoders, the H.264 profile, 4:2:2/4:4:4 chroma and
+10-bit depth (HEVC and AV1 on capable GPUs), the colour matrix and range, the
+chroma filter, the speed/quality preset, keyframe interval, B-frames, QP limits,
+and MP4 fast start. Settings an encoder rejects are named before rendering;
+settings it ignores are listed with the result.
+Video export also uses the player's overlap removal mode (Overlaps drawn, Naive OR,
 or R/t OR). The mode is captured when rendering starts and applies to both the
 render preview and the exported video.
 
@@ -105,7 +114,7 @@ measurements and design.
 **Shed quiet notes when overloaded** (off by default) trades completeness for
 timing in realtime playback: once the synth has used up half of its audio
 buffer, the quietest notes are dropped, loudest last, until it catches up.
-Controllers, program changes, and pitch bends are never dropped. MP4 export
+Controllers, program changes, and pitch bends are never dropped. Video export
 always renders every note.
 
 ## SAST Tools 

@@ -264,6 +264,8 @@
     <ClInclude Include="..\SAFC_InnerModules\playback_event_source.h" />
     <ClInclude Include="..\SAFC_InnerModules\simple_player.h" />
     <ClInclude Include="..\SAFC_InnerModules\simple_player_video_export.h" />
+    <ClInclude Include="..\SAFC_InnerModules\video_frame_conversion.h" />
+    <ClInclude Include="..\SAFC_InnerModules\video_parameter_sets.h" />
     <ClInclude Include="..\SAFC_InnerModules\single_midi_info_collector.h" />
     <ClInclude Include="..\SAFC_InnerModules\single_midi_processor_2.h" />
     <ClInclude Include="..\SAFC_InnerModules\single_midi_processor_lean.h" />

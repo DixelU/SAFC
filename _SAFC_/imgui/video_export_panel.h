@@ -36,6 +36,8 @@ public:
 	video_export_snapshot snapshot() const;
 	simple_player_video_settings settings() const;
 	void set_settings(const simple_player_video_settings& value);
+	// Opens the advanced encoder options and scrolls to them on the next draw.
+	void reveal_advanced_options();
 
 private:
 	struct impl;

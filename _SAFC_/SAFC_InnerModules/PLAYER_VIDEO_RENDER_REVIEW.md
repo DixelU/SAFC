@@ -206,9 +206,42 @@ Status values used below are `open`, `in progress`, `fixed`, and `accepted limit
   Media Foundation signed timestamp range before reserving output, and avoids multiplying
   a frame index by one million before division.
 
+## Encoder options and their platform behaviour
+
+The exporter offers H.264, HEVC and AV1 in MP4 and WMV 9/VC-1 in WMV, with AAC, ALAC or
+FLAC (MP4) and WMA, WMA Pro or PCM (WMV) audio, and exposes rate control, profiles,
+chroma format, bit depth, colour signalling and the usual GOP/QP controls. These behaviours
+were measured on Windows 10 21H2 (19044) with NVIDIA and AMD encoders and shaped the design:
+
+- SAFC converts frames to NV12/P010/YUY2/Y210/AYUV/Y410 itself
+  (`video_frame_conversion.h`). From RGB32 the pipeline's converter offers neither 10-bit
+  nor 4:2:2/4:4:4, and its matrix and range were not under SAFC's control.
+- HEVC 4:2:2/4:4:4 needs `MF_MT_MPEG2_PROFILE` on the output type; without it the NVIDIA
+  encoder accepts AYUV and quietly writes 4:2:0.
+- Constant QP is Quality mode plus `CODECAPI_AVEncVideoEncodeQP` (a `UINT64`). The QP
+  alone is ignored, and set as a `UINT32` the software encoder rejects it.
+- The NVIDIA H.264 and Microsoft software encoders mark full range from the output type's
+  `MF_MT_VIDEO_NOMINAL_RANGE`; the NVIDIA HEVC encoder never does. The exporter reads the
+  SPS from the encoder's `MF_MT_MPEG_SEQUENCE_HEADER` before rendering and refuses a range
+  the stream would mislabel. Media Foundation's own decoder ignores the flag, so the tests
+  read the SPS instead of decoding. The software H.264 encoder writes no colour matrix.
+- The NVIDIA AV1 encoder works, but this Windows version's MP4 writer fails `Finalize`
+  with `0xC00D4A45` (missing headers). The exporter writes eight test frames first, so the
+  failure arrives before the render.
+- PCM in MP4 also fails `Finalize`; PCM is offered only in WMV. ALAC and FLAC accept
+  resampled input only as float, so SAFC hands Media Foundation float audio whenever the
+  output rate differs from SYNCore's.
+- An encoder keeps its first accepted configuration and then accepts what it refused, so
+  naming a rejected setting uses a fresh in-memory sink writer per attempt.
+- `MF_MPEG4SINK_MOOV_BEFORE_MDAT` (fast start) needs a read/write byte stream, or
+  `Finalize` fails with `E_ACCESSDENIED`.
+- The sink writer always took the first hardware encoder (NVIDIA over AMD), even with an
+  AMD D3D manager, so the options offer GPU on/off rather than a GPU choice.
+
 ## Changes that are justified and should remain
 
-- Embedded Media Foundation H.264/AAC output without an external FFmpeg process.
+- Embedded Media Foundation output (H.264/HEVC/AV1 MP4, WMV 9/VC-1 WMV) without an
+  external FFmpeg process.
 - Offscreen OpenGL rendering for the existing player visuals.
 - The general three-second player lead-in and the matching approximately 4.2-second visible
   window.

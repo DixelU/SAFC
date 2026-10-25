@@ -23,6 +23,8 @@
 
 #include "simple_player_video_export.h"
 #include "simple_player.h"
+#include "video_frame_conversion.h"
+#include "video_parameter_sets.h"
 
 #include <algorithm>
 #include <chrono>
@@ -44,10 +46,13 @@
 #include <vector>
 
 #ifdef SAFC_WITH_SYNCORE
+#include <codecapi.h>
 #include <mfapi.h>
 #include <mferror.h>
 #include <mfidl.h>
 #include <mfreadwrite.h>
+#include <mftransform.h>
+#include <strmif.h>
 #include <wrl/client.h>
 
 #include <core.h>
@@ -59,6 +64,7 @@
 #pragma comment(lib, "mfreadwrite.lib")
 #pragma comment(lib, "mfuuid.lib")
 #pragma comment(lib, "mf.lib")
+#pragma comment(lib, "oleaut32.lib")
 
 namespace
 {
@@ -188,31 +194,19 @@ safsyn::MasteringSettings mastering_from_preferences(
 void validate_settings(const simple_player_video_settings& settings,
 	const syncore_preferences& preferences)
 {
-	if (settings.width < 16 || settings.width > 8192 ||
-		settings.height < 16 || settings.height > 8192 ||
-		(settings.width & 1U) || (settings.height & 1U))
-		throw std::runtime_error("video width and height must be even values from 16 to 8192");
-	if (settings.fps < 1 || settings.fps > 240)
-		throw std::runtime_error("FPS must be from 1 to 240");
-	if (settings.video_bitrate_kbps < 64 || settings.video_bitrate_kbps > 250000)
-		throw std::runtime_error("bitrate settings are outside the supported range");
-	if (settings.audio_bitrate_kbps != 96 && settings.audio_bitrate_kbps != 128 &&
-		settings.audio_bitrate_kbps != 160 && settings.audio_bitrate_kbps != 192)
-		throw std::runtime_error("AAC bitrate must be 96, 128, 160, or 192 kbps");
-	if (settings.audio_sample_rate != 44100 && settings.audio_sample_rate != 48000)
-		throw std::runtime_error("AAC sample rate must be 44100 or 48000 Hz");
-	if (!std::isfinite(settings.tail_seconds) || settings.tail_seconds < 0.0 ||
-		settings.tail_seconds > 60.0 || !std::isfinite(settings.visible_seconds) ||
-		settings.visible_seconds < 0.01 || settings.visible_seconds > 60.0)
-		throw std::runtime_error("tail and visible seconds are outside the supported range");
-	if (preferences.sample_rate < 8000 || preferences.sample_rate > 192000)
-		throw std::runtime_error("SYNCore sample rate is outside the supported range");
-	if (preferences.buffer_frames < 256 || preferences.buffer_frames > 1048576)
-		throw std::runtime_error("SYNCore buffer size is outside the supported range");
-	if (preferences.maximum_cohorts == 0 || preferences.maximum_cohorts > 1048576)
-		throw std::runtime_error("SYNCore cohort ceiling is outside the supported range");
-	if (preferences.render_threads > 64)
-		throw std::runtime_error("SYNCore thread setting is outside the supported range");
+	auto problem = simple_player_video_settings_problem(settings, preferences);
+	if (!problem.empty())
+		throw std::runtime_error(problem);
+}
+
+bool asf_container(simple_player_video_codec codec) noexcept
+{
+	return codec == simple_player_video_codec::wmv9 || codec == simple_player_video_codec::vc1;
+}
+
+const char* container_name(simple_player_video_codec codec) noexcept
+{
+	return asf_container(codec) ? "WMV" : "MP4";
 }
 
 std::wstring normalized_path(const std::wstring& value)
@@ -240,7 +234,8 @@ bool same_path(const std::wstring& left, const std::wstring& right)
 }
 
 void validate_paths(const std::wstring& source_path,
-	const std::wstring& output_path, const std::wstring& bank_path)
+	const std::wstring& output_path, const std::wstring& bank_path,
+	simple_player_video_codec codec)
 {
 	if (source_path.empty() || output_path.empty())
 		throw std::runtime_error("missing MIDI source or output path");
@@ -248,28 +243,34 @@ void validate_paths(const std::wstring& source_path,
 		throw std::runtime_error("output path must not overwrite the MIDI source");
 	if (!bank_path.empty() && same_path(bank_path, output_path))
 		throw std::runtime_error("output path must not overwrite the sound bank");
-	if (_wcsicmp(std::filesystem::path(output_path).extension().c_str(), L".mp4") != 0)
-		throw std::runtime_error("video output path must use the .mp4 extension");
+	if (_wcsicmp(std::filesystem::path(output_path).extension().c_str(),
+		simple_player_video_extension(codec)) != 0)
+		throw std::runtime_error(std::string(simple_player_video_codec_name(codec)) +
+			" video output path must use the " + (asf_container(codec) ? ".wmv" : ".mp4") +
+			" extension");
 	const auto parent = std::filesystem::path(output_path).parent_path();
 	std::error_code error;
 	if (!parent.empty() && !std::filesystem::is_directory(parent, error))
 		throw std::runtime_error("video output directory does not exist");
 }
 
-class temporary_mp4_output
+// Media Foundation picks the container from the extension, so the partial
+// file keeps the destination's.
+class temporary_video_output
 {
 public:
-	explicit temporary_mp4_output(std::wstring destination)
+	explicit temporary_video_output(std::wstring destination)
 		: destination_(std::move(destination))
 	{
 		const auto final_path = std::filesystem::path(destination_);
 		const auto directory = final_path.parent_path();
 		const auto stem = final_path.stem().wstring();
+		const auto extension = final_path.extension().wstring();
 		for (std::uint32_t attempt = 0; attempt < 1024; ++attempt)
 		{
 			const auto filename = stem + L".safc-part-" +
 				std::to_wstring(GetCurrentProcessId()) + L"-" +
-				std::to_wstring(attempt) + L".mp4";
+				std::to_wstring(attempt) + extension;
 			temporary_ = (directory / filename).wstring();
 			HANDLE file = CreateFileW(temporary_.c_str(), GENERIC_WRITE, 0, nullptr,
 				CREATE_NEW, FILE_ATTRIBUTE_TEMPORARY, nullptr);
@@ -281,10 +282,10 @@ public:
 			if (GetLastError() != ERROR_FILE_EXISTS && GetLastError() != ERROR_ALREADY_EXISTS)
 				break;
 		}
-		throw std::runtime_error("could not reserve a temporary MP4 output file");
+		throw std::runtime_error("could not reserve a temporary video output file");
 	}
 
-	~temporary_mp4_output()
+	~temporary_video_output()
 	{
 		if (!committed_ && !temporary_.empty())
 			DeleteFileW(temporary_.c_str());
@@ -296,7 +297,7 @@ public:
 	{
 		if (!MoveFileExW(temporary_.c_str(), destination_.c_str(),
 			MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
-			throw std::runtime_error("could not replace the destination with the completed MP4");
+			throw std::runtime_error("could not replace the destination with the completed video");
 		committed_ = true;
 	}
 
@@ -390,6 +391,333 @@ struct media_runtime
 	}
 };
 
+std::string narrow_text(const wchar_t* text)
+{
+	const int count = WideCharToMultiByte(CP_UTF8, 0, text, -1, nullptr, 0, nullptr, nullptr);
+	if (count <= 1)
+		return {};
+	std::string result(static_cast<std::size_t>(count), '\0');
+	WideCharToMultiByte(CP_UTF8, 0, text, -1, result.data(), count, nullptr, nullptr);
+	result.pop_back();
+	return result;
+}
+
+std::string hr_text(HRESULT result)
+{
+	std::ostringstream text;
+	text << " (0x" << std::hex << static_cast<std::uint32_t>(result) << ')';
+	return text.str();
+}
+
+GUID video_subtype(simple_player_video_codec codec) noexcept
+{
+	switch (codec)
+	{
+	case simple_player_video_codec::hevc: return MFVideoFormat_HEVC;
+	case simple_player_video_codec::av1: return MFVideoFormat_AV1;
+	case simple_player_video_codec::wmv9: return MFVideoFormat_WMV3;
+	case simple_player_video_codec::vc1: return MFVideoFormat_WVC1;
+	default: return MFVideoFormat_H264;
+	}
+}
+
+GUID yuv_subtype(video_yuv_layout layout) noexcept
+{
+	switch (layout)
+	{
+	case video_yuv_layout::p010: return MFVideoFormat_P010;
+	case video_yuv_layout::yuy2: return MFVideoFormat_YUY2;
+	case video_yuv_layout::y210: return MFVideoFormat_Y210;
+	case video_yuv_layout::ayuv: return MFVideoFormat_AYUV;
+	case video_yuv_layout::y410: return MFVideoFormat_Y410;
+	default: return MFVideoFormat_NV12;
+	}
+}
+
+std::string format_name(const simple_player_video_settings& settings)
+{
+	const char* chroma = settings.chroma == simple_player_video_chroma::yuv444 ? "4:4:4" :
+		settings.chroma == simple_player_video_chroma::yuv422 ? "4:2:2" : "4:2:0";
+	return std::string(chroma) + " " + std::to_string(settings.bit_depth) + "-bit";
+}
+
+// MF_MT_MPEG2_PROFILE for the output type, or 0 to leave the encoder's
+// default. HEVC needs it: without a 4:4:4 profile the encoder quietly
+// subsamples AYUV input to 4:2:0.
+UINT32 video_profile(const simple_player_video_settings& settings) noexcept
+{
+	const bool deep = settings.bit_depth > 8;
+	switch (settings.codec)
+	{
+	case simple_player_video_codec::h264:
+		switch (settings.h264_profile)
+		{
+		case simple_player_video_h264_profile::baseline: return eAVEncH264VProfile_Base;
+		case simple_player_video_h264_profile::main: return eAVEncH264VProfile_Main;
+		case simple_player_video_h264_profile::high: return eAVEncH264VProfile_High;
+		default: return 0;
+		}
+	case simple_player_video_codec::hevc:
+		switch (settings.chroma)
+		{
+		case simple_player_video_chroma::yuv422: return eAVEncH265VProfile_Main_422_10;
+		case simple_player_video_chroma::yuv444:
+			return deep ? eAVEncH265VProfile_Main_444_10 : eAVEncH265VProfile_Main_444_8;
+		default: return deep ? eAVEncH265VProfile_Main_420_10 : eAVEncH265VProfile_Main_420_8;
+		}
+	case simple_player_video_codec::av1:
+		return deep ? eAVEncAV1VProfile_Main_420_10 : eAVEncAV1VProfile_Main_420_8;
+	default:
+		return 0;
+	}
+}
+
+void set_color_attributes(IMFMediaType* type, const simple_player_video_settings& settings)
+{
+	const UINT32 matrix = settings.matrix == simple_player_video_matrix::bt601
+		? MFVideoTransferMatrix_BT601 : settings.matrix == simple_player_video_matrix::bt2020
+			? MFVideoTransferMatrix_BT2020_10 : MFVideoTransferMatrix_BT709;
+	require_hr(type->SetUINT32(MF_MT_YUV_MATRIX, matrix), "setting the YUV matrix");
+	require_hr(type->SetUINT32(MF_MT_VIDEO_NOMINAL_RANGE, settings.full_range
+		? MFNominalRange_0_255 : MFNominalRange_16_235), "setting the video range");
+	require_hr(type->SetUINT32(MF_MT_VIDEO_PRIMARIES, MFVideoPrimaries_BT709),
+		"setting the video primaries");
+	require_hr(type->SetUINT32(MF_MT_TRANSFER_FUNCTION, MFVideoTransFunc_709),
+		"setting the transfer function");
+}
+
+void set_frame_attributes(IMFMediaType* type, const simple_player_video_settings& settings)
+{
+	require_hr(type->SetUINT32(MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive),
+		"setting progressive video");
+	require_hr(MFSetAttributeSize(type, MF_MT_FRAME_SIZE, settings.width, settings.height),
+		"setting the video frame size");
+	require_hr(MFSetAttributeRatio(type, MF_MT_FRAME_RATE, settings.fps, 1),
+		"setting the video frame rate");
+	require_hr(MFSetAttributeRatio(type, MF_MT_PIXEL_ASPECT_RATIO, 1, 1),
+		"setting the video pixel aspect");
+}
+
+// One ICodecAPI property, passed to the encoder through the sink writer's
+// encoding parameters and read back once the encoder exists.
+struct encoder_property
+{
+	GUID key;
+	std::uint64_t value = 0;
+	bool wide = false;
+	const char* label = "";
+	// Encoders round some values; differences up to this are not reported.
+	std::uint64_t tolerance = 0;
+};
+
+std::vector<encoder_property> encoder_properties(const simple_player_video_settings& settings)
+{
+	using rate_control = simple_player_video_rate_control;
+	std::vector<encoder_property> properties;
+	const auto add = [&](const GUID& key, std::uint64_t value, const char* label,
+		bool wide = false, std::uint64_t tolerance = 0)
+	{
+		properties.push_back({key, value, wide, label, tolerance});
+	};
+	const bool constant_qp = settings.rate_control == rate_control::constant_qp;
+	add(CODECAPI_AVEncCommonRateControlMode, constant_qp
+		? static_cast<std::uint64_t>(eAVEncCommonRateControlMode_Quality)
+		: static_cast<std::uint64_t>(settings.rate_control), "rate control mode");
+	if (constant_qp)
+	{
+		if (settings.qp_p_offset == 0 && settings.qp_b_offset == 0)
+			add(CODECAPI_AVEncVideoEncodeQP, settings.qp, "QP", true);
+		else
+		{
+			// I, P and B QPs in the low, second and third 16-bit fields.
+			const auto qp = static_cast<std::int64_t>(settings.qp);
+			add(CODECAPI_AVEncVideoEncodeFrameTypeQP, static_cast<std::uint64_t>(qp) |
+				(static_cast<std::uint64_t>(qp + settings.qp_p_offset) << 16) |
+				(static_cast<std::uint64_t>(qp + settings.qp_b_offset) << 32),
+				"per-frame-type QP", true);
+		}
+	}
+	else if (settings.rate_control == rate_control::quality)
+		add(CODECAPI_AVEncCommonQuality, settings.quality, "quality", false, 5);
+	else
+	{
+		add(CODECAPI_AVEncCommonMeanBitRate, settings.video_bitrate_kbps * 1000ULL,
+			"mean bitrate");
+		if (settings.rate_control == rate_control::peak_constrained_vbr &&
+			settings.peak_bitrate_kbps != 0)
+			add(CODECAPI_AVEncCommonMaxBitRate, settings.peak_bitrate_kbps * 1000ULL,
+				"peak bitrate");
+	}
+	if (settings.buffer_kbits != 0)
+		add(CODECAPI_AVEncCommonBufferSize, settings.buffer_kbits * 1000ULL, "VBV buffer size");
+	const auto optional = [&](const GUID& key, std::int32_t value, const char* label,
+		std::uint64_t tolerance = 0)
+	{
+		if (value != simple_player_video_encoder_default)
+			add(key, static_cast<std::uint64_t>(value), label, false, tolerance);
+	};
+	optional(CODECAPI_AVEncVideoMinQP, settings.min_qp, "minimum QP");
+	optional(CODECAPI_AVEncVideoMaxQP, settings.max_qp, "maximum QP");
+	optional(CODECAPI_AVEncCommonQualityVsSpeed, settings.quality_vs_speed,
+		"speed/quality preset", 5);
+	optional(CODECAPI_AVEncMPVGOPSize, settings.gop_size, "keyframe interval");
+	optional(CODECAPI_AVEncMPVDefaultBPictureCount, settings.b_frames, "B-frame count");
+	optional(CODECAPI_AVEncVideoMaxNumRefFrame, settings.max_reference_frames,
+		"reference frame count");
+	optional(CODECAPI_AVEncNumWorkerThreads, settings.worker_threads, "worker thread count");
+	if (settings.codec == simple_player_video_codec::h264)
+		optional(CODECAPI_AVEncH264CABACEnable, settings.cabac, "CABAC");
+	optional(CODECAPI_AVLowLatencyMode, settings.low_latency, "low-latency mode");
+	return properties;
+}
+
+ComPtr<IMFAttributes> encoding_parameters(const std::vector<encoder_property>& properties,
+	const std::vector<std::size_t>& chosen)
+{
+	ComPtr<IMFAttributes> parameters;
+	require_hr(MFCreateAttributes(parameters.GetAddressOf(), static_cast<UINT32>(chosen.size() + 1)),
+		"creating encoder parameters");
+	for (const auto index : chosen)
+	{
+		const auto& property = properties[index];
+		require_hr(property.wide
+			? parameters->SetUINT64(property.key, property.value)
+			: parameters->SetUINT32(property.key, static_cast<UINT32>(property.value)),
+			"setting an encoder parameter");
+	}
+	return parameters;
+}
+
+ComPtr<IMFAttributes> sink_writer_attributes(const simple_player_video_settings& settings)
+{
+	ComPtr<IMFAttributes> attributes;
+	require_hr(MFCreateAttributes(attributes.GetAddressOf(), 2),
+		"creating sink writer attributes");
+	require_hr(attributes->SetUINT32(MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS,
+		settings.hardware_encoder), "configuring hardware media transforms");
+	if (settings.fast_start && !asf_container(settings.codec))
+		require_hr(attributes->SetUINT32(MF_MPEG4SINK_MOOV_BEFORE_MDAT, TRUE),
+			"requesting the MP4 index first");
+	return attributes;
+}
+
+ComPtr<IMFMediaType> video_output_type(const simple_player_video_settings& settings)
+{
+	ComPtr<IMFMediaType> type;
+	require_hr(MFCreateMediaType(type.GetAddressOf()), "creating video output type");
+	require_hr(type->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video), "setting video major type");
+	require_hr(type->SetGUID(MF_MT_SUBTYPE, video_subtype(settings.codec)),
+		"setting the video codec");
+	require_hr(type->SetUINT32(MF_MT_AVG_BITRATE, settings.video_bitrate_kbps * 1000U),
+		"setting video bitrate");
+	set_frame_attributes(type.Get(), settings);
+	if (const auto profile = video_profile(settings))
+		require_hr(type->SetUINT32(MF_MT_MPEG2_PROFILE, profile), "setting the video profile");
+	set_color_attributes(type.Get(), settings);
+	return type;
+}
+
+ComPtr<IMFMediaType> video_input_type(const simple_player_video_settings& settings)
+{
+	const auto layout = video_yuv_layout_for(settings.chroma, settings.bit_depth);
+	ComPtr<IMFMediaType> type;
+	require_hr(MFCreateMediaType(type.GetAddressOf()), "creating video input type");
+	require_hr(type->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video),
+		"setting video input major type");
+	require_hr(type->SetGUID(MF_MT_SUBTYPE, yuv_subtype(layout)), "setting the YUV input subtype");
+	set_frame_attributes(type.Get(), settings);
+	require_hr(type->SetUINT32(MF_MT_DEFAULT_STRIDE, video_yuv_stride(layout, settings.width)),
+		"setting input video stride");
+	require_hr(type->SetUINT32(MF_MT_SAMPLE_SIZE, static_cast<UINT32>(
+		video_yuv_frame_bytes(layout, settings.width, settings.height))),
+		"setting input video sample size");
+	require_hr(type->SetUINT32(MF_MT_ALL_SAMPLES_INDEPENDENT, TRUE),
+		"marking input frames independent");
+	set_color_attributes(type.Get(), settings);
+	if (settings.chroma != simple_player_video_chroma::yuv444)
+	{
+		const UINT32 siting = settings.chroma_filter == simple_player_video_chroma_filter::cosited
+			? MFVideoChromaSubsampling_MPEG2
+			: settings.chroma_filter == simple_player_video_chroma_filter::nearest
+				? MFVideoChromaSubsampling_Cosited : MFVideoChromaSubsampling_MPEG1;
+		require_hr(type->SetUINT32(MF_MT_VIDEO_CHROMA_SITING, siting), "setting chroma siting");
+	}
+	return type;
+}
+
+// Configures a throwaway writer on memory with some of the encoder
+// properties. An encoder keeps its first configuration and then accepts what
+// it refused, so each diagnostic attempt needs a writer of its own.
+HRESULT try_video_configuration(const std::wstring& output_path,
+	const simple_player_video_settings& settings,
+	const std::vector<encoder_property>& properties,
+	const std::vector<std::size_t>& chosen) noexcept
+{
+	try
+	{
+		ComPtr<IStream> memory;
+		ComPtr<IMFByteStream> stream;
+		ComPtr<IMFSinkWriter> writer;
+		DWORD index = 0;
+		HRESULT result = CreateStreamOnHGlobal(nullptr, TRUE, memory.GetAddressOf());
+		if (SUCCEEDED(result))
+			result = MFCreateMFByteStreamOnStream(memory.Get(), stream.GetAddressOf());
+		if (SUCCEEDED(result))
+			result = MFCreateSinkWriterFromURL(output_path.c_str(), stream.Get(),
+				sink_writer_attributes(settings).Get(), writer.GetAddressOf());
+		if (SUCCEEDED(result))
+			result = writer->AddStream(video_output_type(settings).Get(), &index);
+		if (SUCCEEDED(result))
+			result = writer->SetInputMediaType(index, video_input_type(settings).Get(),
+				encoding_parameters(properties, chosen).Get());
+		return result;
+	}
+	catch (...)
+	{
+		return E_FAIL;
+	}
+}
+
+// The installed WMA encoder's stereo type closest to the requested bitrate.
+ComPtr<IMFMediaType> wma_output_type(const GUID& subtype, const char* name,
+	std::uint32_t sample_rate, std::uint32_t bits, std::uint32_t bitrate_kbps)
+{
+	ComPtr<IMFCollection> types;
+	require_hr(MFTranscodeGetAudioOutputAvailableTypes(subtype, MFT_ENUM_FLAG_ALL, nullptr,
+		types.GetAddressOf()), "listing WMA encoder output types");
+	DWORD count = 0;
+	require_hr(types->GetElementCount(&count), "counting WMA encoder output types");
+	ComPtr<IMFMediaType> best;
+	std::uint64_t best_distance = (std::numeric_limits<std::uint64_t>::max)();
+	const std::int64_t wanted = static_cast<std::int64_t>(bitrate_kbps) * 125;
+	for (DWORD index = 0; index < count; ++index)
+	{
+		ComPtr<IUnknown> element;
+		ComPtr<IMFMediaType> type;
+		if (FAILED(types->GetElement(index, element.GetAddressOf())) ||
+			FAILED(element.As(&type)))
+			continue;
+		UINT32 channels = 0, rate = 0, sample_bits = 0, bytes_per_second = 0;
+		type->GetUINT32(MF_MT_AUDIO_NUM_CHANNELS, &channels);
+		type->GetUINT32(MF_MT_AUDIO_SAMPLES_PER_SECOND, &rate);
+		type->GetUINT32(MF_MT_AUDIO_BITS_PER_SAMPLE, &sample_bits);
+		type->GetUINT32(MF_MT_AUDIO_AVG_BYTES_PER_SECOND, &bytes_per_second);
+		if (channels != 2 || rate != sample_rate || sample_bits != bits)
+			continue;
+		const auto distance = static_cast<std::uint64_t>(
+			std::llabs(static_cast<std::int64_t>(bytes_per_second) - wanted));
+		if (distance < best_distance)
+		{
+			best_distance = distance;
+			best = type;
+		}
+	}
+	if (!best)
+		throw std::runtime_error(std::string("the ") + name + " encoder has no stereo " +
+			std::to_string(sample_rate) + " Hz " + std::to_string(bits) + "-bit type");
+	return best;
+}
+
 class media_foundation_writer
 {
 public:
@@ -399,105 +727,44 @@ public:
 		join_write_thread();
 	}
 
-	void open(const std::wstring& output_path,
-		const simple_player_video_settings& settings, std::uint32_t pcm_sample_rate)
+	// `output_rate` is the encoded audio rate; SYNCore's PCM arrives at
+	// `pcm_sample_rate`. Without audio only a video stream is written.
+	void open(const std::wstring& output_path, const simple_player_video_settings& settings,
+		std::uint32_t pcm_sample_rate, std::uint32_t output_rate, bool include_audio = true)
 	{
 		width_ = settings.width;
 		height_ = settings.height;
 		fps_ = settings.fps;
-		sample_rate_ = pcm_sample_rate;
-		ComPtr<IMFAttributes> writer_attributes;
-		require_hr(MFCreateAttributes(writer_attributes.GetAddressOf(), 1),
-			"creating MP4 sink writer attributes");
-		require_hr(writer_attributes->SetUINT32(
-			MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS, TRUE),
-			"enabling hardware media transforms");
-		require_hr(MFCreateSinkWriterFromURL(output_path.c_str(), nullptr,
-			writer_attributes.Get(),
-			writer_.GetAddressOf()), "creating MP4 sink writer");
+		layout_ = video_yuv_layout_for(settings.chroma, settings.bit_depth);
+		converter_.emplace(layout_, settings.matrix, settings.full_range, settings.chroma_filter);
+		frame_bytes_ = video_yuv_frame_bytes(layout_, width_, height_);
+		if (frame_bytes_ > (std::numeric_limits<DWORD>::max)())
+			throw std::runtime_error("video frame is too large");
 
-		ComPtr<IMFMediaType> video_out;
-		require_hr(MFCreateMediaType(video_out.GetAddressOf()), "creating video output type");
-		require_hr(video_out->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video),
-			"setting video major type");
-		require_hr(video_out->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_H264),
-			"setting H.264 output subtype");
-		require_hr(video_out->SetUINT32(MF_MT_AVG_BITRATE,
-			settings.video_bitrate_kbps * 1000U), "setting video bitrate");
-		require_hr(video_out->SetUINT32(MF_MT_INTERLACE_MODE,
-			MFVideoInterlace_Progressive), "setting progressive video");
-		require_hr(MFSetAttributeSize(video_out.Get(), MF_MT_FRAME_SIZE,
-			settings.width, settings.height), "setting video frame size");
-		require_hr(MFSetAttributeRatio(video_out.Get(), MF_MT_FRAME_RATE,
-			settings.fps, 1), "setting video frame rate");
-		require_hr(MFSetAttributeRatio(video_out.Get(), MF_MT_PIXEL_ASPECT_RATIO,
-			1, 1), "setting video pixel aspect");
-		require_hr(writer_->AddStream(video_out.Get(), &video_stream_),
-			"adding video stream");
+		// The MP4 writer reads its own output back to move the index first.
+		require_hr(MFCreateFile(MF_ACCESSMODE_READWRITE, MF_OPENMODE_DELETE_IF_EXIST,
+			MF_FILEFLAGS_NONE, output_path.c_str(), byte_stream_.GetAddressOf()),
+			"opening the video output file");
+		require_hr(MFCreateSinkWriterFromURL(output_path.c_str(), byte_stream_.Get(),
+			sink_writer_attributes(settings).Get(), writer_.GetAddressOf()),
+			(std::string("creating the ") + container_name(settings.codec) + " sink writer").c_str());
 
-		ComPtr<IMFMediaType> video_in;
-		require_hr(MFCreateMediaType(video_in.GetAddressOf()), "creating video input type");
-		require_hr(video_in->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video),
-			"setting video input major type");
-		require_hr(video_in->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_RGB32),
-			"setting RGB32 input subtype");
-		require_hr(video_in->SetUINT32(MF_MT_INTERLACE_MODE,
-			MFVideoInterlace_Progressive), "setting input progressive video");
-		require_hr(MFSetAttributeSize(video_in.Get(), MF_MT_FRAME_SIZE,
-			settings.width, settings.height), "setting input frame size");
-		require_hr(MFSetAttributeRatio(video_in.Get(), MF_MT_FRAME_RATE,
-			settings.fps, 1), "setting input frame rate");
-		require_hr(MFSetAttributeRatio(video_in.Get(), MF_MT_PIXEL_ASPECT_RATIO,
-			1, 1), "setting input pixel aspect");
-		require_hr(video_in->SetUINT32(MF_MT_DEFAULT_STRIDE,
-			settings.width * 4U), "setting input video stride");
-		require_hr(writer_->SetInputMediaType(video_stream_, video_in.Get(), nullptr),
-			"setting video input type");
+		open_video(settings, output_path);
+		if (include_audio)
+			open_audio(settings, pcm_sample_rate, output_rate);
+		else
+			audio_finished_ = true;
 
-		ComPtr<IMFMediaType> audio_out;
-		require_hr(MFCreateMediaType(audio_out.GetAddressOf()), "creating audio output type");
-		require_hr(audio_out->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Audio),
-			"setting audio major type");
-		require_hr(audio_out->SetGUID(MF_MT_SUBTYPE, MFAudioFormat_AAC),
-			"setting AAC output subtype");
-		require_hr(audio_out->SetUINT32(MF_MT_AUDIO_NUM_CHANNELS, 2),
-			"setting AAC channels");
-		require_hr(audio_out->SetUINT32(MF_MT_AUDIO_SAMPLES_PER_SECOND,
-			settings.audio_sample_rate),
-			"setting AAC sample rate");
-		require_hr(audio_out->SetUINT32(MF_MT_AUDIO_BITS_PER_SAMPLE, 16),
-			"setting AAC bits per sample");
-		require_hr(audio_out->SetUINT32(MF_MT_AUDIO_AVG_BYTES_PER_SECOND,
-			settings.audio_bitrate_kbps * 1000U / 8U), "setting AAC bitrate");
-		require_hr(writer_->AddStream(audio_out.Get(), &audio_stream_),
-			"adding audio stream");
-
-		ComPtr<IMFMediaType> audio_in;
-		require_hr(MFCreateMediaType(audio_in.GetAddressOf()), "creating audio input type");
-		require_hr(audio_in->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Audio),
-			"setting audio input major type");
-		require_hr(audio_in->SetGUID(MF_MT_SUBTYPE, MFAudioFormat_PCM),
-			"setting PCM input subtype");
-		require_hr(audio_in->SetUINT32(MF_MT_AUDIO_NUM_CHANNELS, 2),
-			"setting PCM channels");
-		require_hr(audio_in->SetUINT32(MF_MT_AUDIO_SAMPLES_PER_SECOND, pcm_sample_rate),
-			"setting PCM sample rate");
-		require_hr(audio_in->SetUINT32(MF_MT_AUDIO_BITS_PER_SAMPLE, 16),
-			"setting PCM bits per sample");
-		require_hr(audio_in->SetUINT32(MF_MT_AUDIO_BLOCK_ALIGNMENT, 4),
-			"setting PCM block alignment");
-		require_hr(audio_in->SetUINT32(MF_MT_AUDIO_AVG_BYTES_PER_SECOND,
-			pcm_sample_rate * 4U), "setting PCM byte rate");
-		require_hr(writer_->SetInputMediaType(audio_stream_, audio_in.Get(), nullptr),
-			"setting audio input type");
-
-		require_hr(writer_->BeginWriting(), "beginning MP4 write");
+		require_hr(writer_->BeginWriting(), "beginning the video write");
 		write_thread_ = std::thread([this]() { write_queued_samples(); });
 	}
 
-	void write_video_frame(const std::uint8_t* rgb32_top_down, std::uint64_t frame)
+	const std::string& encoder_name() const noexcept { return encoder_name_; }
+	const std::vector<std::string>& warnings() const noexcept { return warnings_; }
+
+	void write_video_frame(const std::uint8_t* bgra_top_down, std::uint64_t frame)
 	{
-		const DWORD bytes = width_ * height_ * 4U;
+		const auto bytes = static_cast<DWORD>(frame_bytes_);
 		ComPtr<IMFMediaBuffer> buffer;
 		require_hr(MFCreateMemoryBuffer(bytes, buffer.GetAddressOf()),
 			"creating video sample buffer");
@@ -506,7 +773,15 @@ public:
 		DWORD current = 0;
 		require_hr(buffer->Lock(&destination, &maximum, &current),
 			"locking video sample buffer");
-		std::memcpy(destination, rgb32_top_down, bytes);
+		try
+		{
+			convert_frame(bgra_top_down, destination);
+		}
+		catch (...)
+		{
+			buffer->Unlock();
+			throw;
+		}
 		require_hr(buffer->Unlock(), "unlocking video sample buffer");
 		require_hr(buffer->SetCurrentLength(bytes), "setting video buffer length");
 
@@ -524,12 +799,14 @@ public:
 		enqueue_sample(stream_kind::video, sample_time, std::move(sample));
 	}
 
-	void write_audio_frames(const std::int16_t* pcm_interleaved,
-		std::uint32_t frames, std::uint64_t first_frame)
+	// Interleaved stereo float; null writes silence. Converted to the
+	// sample format negotiated in open_audio().
+	void write_audio_frames(const float* interleaved, std::uint32_t frames,
+		std::uint64_t first_frame)
 	{
 		if (frames == 0)
 			return;
-		const DWORD bytes = frames * 2U * static_cast<DWORD>(sizeof(std::int16_t));
+		const auto bytes = static_cast<DWORD>(frames * 2U * (audio_input_bits_ / 8U));
 		ComPtr<IMFMediaBuffer> buffer;
 		require_hr(MFCreateMemoryBuffer(bytes, buffer.GetAddressOf()),
 			"creating audio sample buffer");
@@ -538,7 +815,7 @@ public:
 		DWORD current = 0;
 		require_hr(buffer->Lock(&destination, &maximum, &current),
 			"locking audio sample buffer");
-		std::memcpy(destination, pcm_interleaved, bytes);
+		convert_audio(interleaved, static_cast<std::size_t>(frames) * 2, destination);
 		require_hr(buffer->Unlock(), "unlocking audio sample buffer");
 		require_hr(buffer->SetCurrentLength(bytes), "setting audio buffer length");
 
@@ -586,11 +863,326 @@ public:
 		{
 			const HRESULT result = writer_->Finalize();
 			writer_.Reset();
-			require_hr(result, "finalizing MP4");
+			if (byte_stream_)
+				byte_stream_->Close();
+			byte_stream_.Reset();
+			require_hr(result, "finalizing the video file");
 		}
 	}
 
 private:
+	void open_video(const simple_player_video_settings& settings, const std::wstring& output_path)
+	{
+		const HRESULT added = writer_->AddStream(video_output_type(settings).Get(), &video_stream_);
+		if (FAILED(added))
+			throw std::runtime_error(std::string("the ") + container_name(settings.codec) +
+				" writer cannot store " + simple_player_video_codec_name(settings.codec) +
+				" video" + hr_text(added));
+		const auto properties = encoder_properties(settings);
+		set_video_input(properties, settings, output_path);
+		encoder_name_ = identify_encoder(settings);
+		check_properties(properties);
+		check_signalling(settings);
+	}
+
+	// Reads the colour description the encoder will write. A full-range
+	// stream marked limited (or the reverse) shows wrong black and white
+	// levels in every player, so that fails before anything renders.
+	void check_signalling(const simple_player_video_settings& settings)
+	{
+		const bool hevc = settings.codec == simple_player_video_codec::hevc;
+		if (!hevc && settings.codec != simple_player_video_codec::h264)
+			return;
+		ComPtr<IMFTransform> transform;
+		ComPtr<IMFMediaType> output;
+		UINT32 size = 0;
+		if (FAILED(writer_->GetServiceForStream(video_stream_, GUID_NULL,
+			IID_PPV_ARGS(transform.GetAddressOf()))) || !transform ||
+			FAILED(transform->GetOutputCurrentType(0, output.GetAddressOf())) ||
+			FAILED(output->GetBlobSize(MF_MT_MPEG_SEQUENCE_HEADER, &size)) || size == 0)
+			return;
+		std::vector<UINT8> header(size);
+		if (FAILED(output->GetBlob(MF_MT_MPEG_SEQUENCE_HEADER, header.data(), size, nullptr)))
+			return;
+		const auto signal = read_annex_b_signal(header.data(), header.size(), hevc);
+		if (!signal.parsed)
+			return;
+		const bool full_range = signal.signal_type_present && signal.full_range;
+		const auto range_name = [](bool full) { return full ? "full" : "limited"; };
+		if (full_range != settings.full_range)
+			throw std::runtime_error(encoder_name_ + " marks the video as " +
+				range_name(full_range) + " range, so players would show wrong black and white "
+				"levels; choose " + range_name(full_range) + " range for this encoder");
+		using matrix = simple_player_video_matrix;
+		const std::uint8_t expected = settings.matrix == matrix::bt601 ? 6 :
+			settings.matrix == matrix::bt2020 ? 9 : 1;
+		if (!signal.colour_description_present)
+		{
+			const auto assumed = settings.height >= 720 ? matrix::bt709 : matrix::bt601;
+			if (settings.matrix != assumed)
+				warnings_.push_back(encoder_name_ + " writes no colour matrix; players assume " +
+					(assumed == matrix::bt709 ? "BT.709" : "BT.601") + " at this frame size");
+		}
+		// BT.601 has two codes: 5 (BT.470 B/G) and 6 (SMPTE 170M).
+		else if (signal.matrix != expected && !(expected == 6 && signal.matrix == 5))
+			warnings_.push_back(encoder_name_ + " marks the colour matrix as H.273 code " +
+				std::to_string(signal.matrix));
+	}
+
+	void set_video_input(const std::vector<encoder_property>& properties,
+		const simple_player_video_settings& settings, const std::wstring& output_path)
+	{
+		std::vector<std::size_t> all(properties.size());
+		for (std::size_t index = 0; index < all.size(); ++index)
+			all[index] = index;
+		const HRESULT result = writer_->SetInputMediaType(video_stream_,
+			video_input_type(settings).Get(), encoding_parameters(properties, all).Get());
+		if (SUCCEEDED(result))
+			return;
+		const auto attempt = [&](const std::vector<std::size_t>& chosen)
+		{
+			return try_video_configuration(output_path, settings, properties, chosen);
+		};
+		const std::string codec = simple_player_video_codec_name(settings.codec);
+		const HRESULT plain = attempt({});
+		if (FAILED(plain))
+			throw std::runtime_error("no " + std::string(settings.hardware_encoder ? "" : "software ") +
+				codec + " encoder accepts " + format_name(settings) + " " +
+				std::to_string(width_) + "x" + std::to_string(height_) + " input" + hr_text(plain) +
+				(settings.hardware_encoder ? "" : "; hardware encoders are disabled"));
+		// Name what the encoder refused: add the settings back one at a time,
+		// then look for the earlier setting the failing one conflicts with.
+		const auto rejected = [&](const std::string& what, HRESULT error)
+		{
+			return std::runtime_error("the " + codec + " encoder rejected the " + what + hr_text(error));
+		};
+		for (std::size_t failing = 0; failing < properties.size(); ++failing)
+		{
+			const std::vector<std::size_t> prefix(all.begin(), all.begin() +
+				static_cast<std::ptrdiff_t>(failing + 1));
+			const HRESULT partial = attempt(prefix);
+			if (SUCCEEDED(partial))
+				continue;
+			const std::string label = properties[failing].label;
+			if (FAILED(attempt({failing})))
+				throw rejected(label + " setting", partial);
+			for (std::size_t earlier = 0; earlier < failing; ++earlier)
+				if (FAILED(attempt({earlier, failing})))
+					throw rejected(std::string(properties[earlier].label) + " and " + label +
+						" settings together", partial);
+			throw rejected(label + " setting with the settings before it", partial);
+		}
+		throw rejected("combined settings", result);
+	}
+
+	std::string identify_encoder(const simple_player_video_settings& settings)
+	{
+		ComPtr<IMFTransform> transform;
+		if (SUCCEEDED(writer_->GetServiceForStream(video_stream_, GUID_NULL,
+			IID_PPV_ARGS(transform.GetAddressOf()))) && transform)
+		{
+			ComPtr<IMFAttributes> attributes;
+			wchar_t* name = nullptr;
+			UINT32 length = 0;
+			if (SUCCEEDED(transform->GetAttributes(attributes.GetAddressOf())) && attributes &&
+				SUCCEEDED(attributes->GetAllocatedString(MFT_FRIENDLY_NAME_Attribute, &name, &length)))
+			{
+				auto result = narrow_text(name);
+				CoTaskMemFree(name);
+				if (!result.empty())
+					return result;
+			}
+		}
+		// Software encoders created by class ID carry no friendly name.
+		return asf_container(settings.codec) ? std::string("Windows Media Video encoder (software)")
+			: "Microsoft " + std::string(simple_player_video_codec_name(settings.codec)) +
+				" encoder (software)";
+	}
+
+	// Reports settings the encoder does not support or replaced; encoders
+	// accept many unknown properties silently.
+	void check_properties(const std::vector<encoder_property>& properties)
+	{
+		ComPtr<ICodecAPI> api;
+		if (FAILED(writer_->GetServiceForStream(video_stream_, GUID_NULL,
+			IID_PPV_ARGS(api.GetAddressOf()))) || !api)
+			return;
+		for (const auto& property : properties)
+		{
+			VARIANT value;
+			VariantInit(&value);
+			if (api->IsSupported(&property.key) != S_OK ||
+				FAILED(api->GetValue(&property.key, &value)))
+			{
+				warnings_.push_back(std::string(property.label) + " is not supported by " +
+					encoder_name_);
+				continue;
+			}
+			std::uint64_t actual = 0;
+			bool known = true;
+			switch (value.vt)
+			{
+			case VT_UI8: actual = value.ullVal; break;
+			case VT_I8: actual = static_cast<std::uint64_t>(value.llVal); break;
+			case VT_UI4: actual = value.ulVal; break;
+			case VT_I4: actual = static_cast<std::uint32_t>(value.lVal); break;
+			case VT_BOOL: actual = value.boolVal != VARIANT_FALSE; break;
+			default: known = false; break;
+			}
+			VariantClear(&value);
+			const auto difference = actual > property.value
+				? actual - property.value : property.value - actual;
+			if (known && difference > property.tolerance)
+				warnings_.push_back(std::string(property.label) + ": " + encoder_name_ +
+					" uses " + std::to_string(actual) + " instead of " +
+					std::to_string(property.value));
+		}
+	}
+
+	void open_audio(const simple_player_video_settings& settings,
+		std::uint32_t pcm_sample_rate, std::uint32_t output_rate)
+	{
+		using audio_codec = simple_player_video_audio_codec;
+		sample_rate_ = pcm_sample_rate;
+		const std::string name = simple_player_video_audio_codec_name(settings.audio_codec);
+		const bool sixteen_bit = settings.audio_codec == audio_codec::aac ||
+			settings.audio_codec == audio_codec::wma;
+		const std::uint32_t output_bits = sixteen_bit ? 16U : settings.audio_bits;
+		// SAFC writes the encoder's own sample format. Media Foundation's
+		// resampler, which runs when the rates differ, needs float input.
+		audio_input_bits_ = output_rate == pcm_sample_rate ? output_bits : 32U;
+		audio_dither_ = settings.audio_dither && audio_input_bits_ == 16;
+
+		ComPtr<IMFMediaType> audio_out;
+		if (settings.audio_codec == audio_codec::wma)
+			audio_out = wma_output_type(MFAudioFormat_WMAudioV8, "WMA", output_rate, 16,
+				settings.audio_bitrate_kbps);
+		else if (settings.audio_codec == audio_codec::wma_pro)
+			audio_out = wma_output_type(MFAudioFormat_WMAudioV9, "WMA Pro", output_rate,
+				output_bits, settings.audio_bitrate_kbps);
+		else
+		{
+			const bool float_pcm = settings.audio_codec == audio_codec::pcm && output_bits == 32;
+			const GUID subtype = settings.audio_codec == audio_codec::aac ? MFAudioFormat_AAC :
+				settings.audio_codec == audio_codec::alac ? MFAudioFormat_ALAC :
+				settings.audio_codec == audio_codec::flac ? MFAudioFormat_FLAC :
+				float_pcm ? MFAudioFormat_Float : MFAudioFormat_PCM;
+			require_hr(MFCreateMediaType(audio_out.GetAddressOf()), "creating audio output type");
+			require_hr(audio_out->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Audio),
+				"setting audio major type");
+			require_hr(audio_out->SetGUID(MF_MT_SUBTYPE, subtype), "setting the audio codec");
+			require_hr(audio_out->SetUINT32(MF_MT_AUDIO_NUM_CHANNELS, 2),
+				"setting audio channels");
+			require_hr(audio_out->SetUINT32(MF_MT_AUDIO_SAMPLES_PER_SECOND, output_rate),
+				"setting audio sample rate");
+			require_hr(audio_out->SetUINT32(MF_MT_AUDIO_BITS_PER_SAMPLE, output_bits),
+				"setting audio bits per sample");
+			if (settings.audio_codec == audio_codec::aac)
+				require_hr(audio_out->SetUINT32(MF_MT_AUDIO_AVG_BYTES_PER_SECOND,
+					settings.audio_bitrate_kbps * 1000U / 8U), "setting AAC bitrate");
+			else if (settings.audio_codec == audio_codec::pcm)
+			{
+				const UINT32 block = 2U * output_bits / 8U;
+				require_hr(audio_out->SetUINT32(MF_MT_AUDIO_BLOCK_ALIGNMENT, block),
+					"setting PCM block alignment");
+				require_hr(audio_out->SetUINT32(MF_MT_AUDIO_AVG_BYTES_PER_SECOND,
+					output_rate * block), "setting PCM byte rate");
+			}
+		}
+		const HRESULT added = writer_->AddStream(audio_out.Get(), &audio_stream_);
+		if (FAILED(added))
+			throw std::runtime_error(std::string("the ") + container_name(settings.codec) +
+				" writer cannot store " + name + " audio" + hr_text(added));
+
+		const UINT32 block = 2U * audio_input_bits_ / 8U;
+		ComPtr<IMFMediaType> audio_in;
+		require_hr(MFCreateMediaType(audio_in.GetAddressOf()), "creating audio input type");
+		require_hr(audio_in->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Audio),
+			"setting audio input major type");
+		require_hr(audio_in->SetGUID(MF_MT_SUBTYPE,
+			audio_input_bits_ == 32 ? MFAudioFormat_Float : MFAudioFormat_PCM),
+			"setting PCM input subtype");
+		require_hr(audio_in->SetUINT32(MF_MT_AUDIO_NUM_CHANNELS, 2),
+			"setting PCM channels");
+		require_hr(audio_in->SetUINT32(MF_MT_AUDIO_SAMPLES_PER_SECOND, pcm_sample_rate),
+			"setting PCM sample rate");
+		require_hr(audio_in->SetUINT32(MF_MT_AUDIO_BITS_PER_SAMPLE, audio_input_bits_),
+			"setting PCM bits per sample");
+		require_hr(audio_in->SetUINT32(MF_MT_AUDIO_BLOCK_ALIGNMENT, block),
+			"setting PCM block alignment");
+		require_hr(audio_in->SetUINT32(MF_MT_AUDIO_AVG_BYTES_PER_SECOND,
+			pcm_sample_rate * block), "setting PCM byte rate");
+		const HRESULT input = writer_->SetInputMediaType(audio_stream_, audio_in.Get(), nullptr);
+		if (FAILED(input))
+			throw std::runtime_error("the " + name + " encoder cannot take " +
+				std::to_string(output_rate) + " Hz " + std::to_string(output_bits) +
+				"-bit stereo" + (output_rate != pcm_sample_rate
+					? " resampled from " + std::to_string(pcm_sample_rate) + " Hz" : std::string()) +
+				hr_text(input));
+	}
+
+	// Large frames convert in parallel row bands; bands start on even rows,
+	// as 4:2:0 chroma rows pair up luma rows.
+	void convert_frame(const std::uint8_t* bgra, BYTE* destination) const
+	{
+		const auto pixels = static_cast<std::uint64_t>(width_) * height_;
+		const auto cpus = std::thread::hardware_concurrency();
+		const std::uint32_t bands = pixels < 2'000'000ULL
+			? 1U : (std::min)(8U, (std::max)(1U, cpus / 2));
+		const std::uint32_t band_rows = bands <= 1
+			? height_ : ((height_ + bands - 1) / bands + 1) & ~1U;
+		std::vector<std::jthread> workers;
+		for (std::uint32_t first = band_rows; first < height_; first += band_rows)
+			workers.emplace_back([this, bgra, destination, first, band_rows]()
+			{
+				converter_->convert(bgra, width_, height_, destination, first, band_rows);
+			});
+		converter_->convert(bgra, width_, height_, destination, 0, band_rows);
+	}
+
+	void convert_audio(const float* source, std::size_t samples, BYTE* destination) noexcept
+	{
+		const std::size_t bytes = audio_input_bits_ / 8U;
+		if (!source)
+		{
+			std::memset(destination, 0, samples * bytes);
+			return;
+		}
+		if (audio_input_bits_ == 32)
+		{
+			std::memcpy(destination, source, samples * sizeof(float));
+			return;
+		}
+		for (std::size_t index = 0; index < samples; ++index)
+		{
+			const float value = std::clamp(source[index], -1.0f, 1.0f);
+			if (audio_input_bits_ == 24)
+			{
+				const auto sample = static_cast<std::int32_t>(
+					std::lrint(value * (value < 0.0f ? 8388608.0f : 8388607.0f)));
+				destination[index * 3 + 0] = static_cast<BYTE>(sample);
+				destination[index * 3 + 1] = static_cast<BYTE>(sample >> 8);
+				destination[index * 3 + 2] = static_cast<BYTE>(sample >> 16);
+				continue;
+			}
+			float scaled = value * (value < 0.0f ? 32768.0f : 32767.0f);
+			// Triangular dither of one LSB peak, from two uniform values.
+			if (audio_dither_)
+				scaled += next_uniform() - next_uniform();
+			const auto sample = static_cast<std::int16_t>(
+				std::clamp(std::lrint(scaled), -32768L, 32767L));
+			std::memcpy(destination + index * 2, &sample, 2);
+		}
+	}
+
+	float next_uniform() noexcept
+	{
+		dither_state_ ^= dither_state_ << 13;
+		dither_state_ ^= dither_state_ >> 17;
+		dither_state_ ^= dither_state_ << 5;
+		return static_cast<float>(dither_state_ >> 8) * (1.0f / 16777216.0f);
+	}
+
 	enum class stream_kind { audio, video };
 
 	struct queued_sample
@@ -693,6 +1285,7 @@ private:
 			write_thread_.join();
 	}
 
+	ComPtr<IMFByteStream> byte_stream_;
 	ComPtr<IMFSinkWriter> writer_;
 	DWORD video_stream_ = 0;
 	DWORD audio_stream_ = 0;
@@ -700,6 +1293,14 @@ private:
 	std::uint32_t height_ = 0;
 	std::uint32_t fps_ = 0;
 	std::uint32_t sample_rate_ = 0;
+	video_yuv_layout layout_ = video_yuv_layout::nv12;
+	std::optional<video_yuv_converter> converter_;
+	std::size_t frame_bytes_ = 0;
+	std::uint32_t audio_input_bits_ = 16;
+	bool audio_dither_ = false;
+	std::uint32_t dither_state_ = 0x2545F491U;
+	std::string encoder_name_;
+	std::vector<std::string> warnings_;
 	std::mutex queue_mutex_;
 	std::condition_variable queue_changed_;
 	std::deque<queued_sample> audio_queue_;
@@ -719,10 +1320,13 @@ public:
 		destroy();
 	}
 
-	void create(std::uint32_t width, std::uint32_t height)
+	void create(std::uint32_t width, std::uint32_t height, std::uint32_t background_rgb)
 	{
 		width_ = width;
 		height_ = height;
+		background_[0] = static_cast<float>((background_rgb >> 16) & 0xFF) / 255.0f;
+		background_[1] = static_cast<float>((background_rgb >> 8) & 0xFF) / 255.0f;
+		background_[2] = static_cast<float>(background_rgb & 0xFF) / 255.0f;
 		if (!create_window_surface())
 		{
 			destroy();
@@ -788,7 +1392,7 @@ public:
 		glDisable(GL_DEPTH_TEST);
 		glEnable(GL_BLEND);
 		glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-		glClearColor(0.02f, 0.025f, 0.03f, 1.0f);
+		glClearColor(background_[0], background_[1], background_[2], 1.0f);
 		glClear(GL_COLOR_BUFFER_BIT);
 		player.draw_at(data, position_us);
 		glPixelStorei(GL_PACK_ALIGNMENT, 1);
@@ -1029,6 +1633,7 @@ private:
 	GLuint color_texture_ = 0;
 	std::uint32_t width_ = 0;
 	std::uint32_t height_ = 0;
+	float background_[3]{};
 	bool double_buffered_ = false;
 	bool hardware_accelerated_ = false;
 	bool bgra_readback_ = false;
@@ -1041,18 +1646,6 @@ private:
 	std::vector<std::uint8_t> readback_;
 	std::vector<std::uint8_t> rgb32_;
 };
-
-void float_to_pcm16(const float* source, std::uint32_t frames,
-	std::vector<std::int16_t>& destination)
-{
-	destination.resize(static_cast<std::size_t>(frames) * 2);
-	for (std::size_t i = 0; i < static_cast<std::size_t>(frames) * 2; ++i)
-	{
-		const float value = std::clamp(source[i], -1.0f, 1.0f);
-		destination[i] = static_cast<std::int16_t>(
-			std::lrint(value * (value < 0.0f ? 32768.0f : 32767.0f)));
-	}
-}
 
 void build_preview_frame(const std::uint8_t* source_bgra, std::uint32_t source_width,
 	std::uint32_t source_height, std::vector<std::uint8_t>& preview,
@@ -1405,7 +1998,6 @@ struct media_foundation_pcm_sink
 {
 	media_foundation_writer* writer = nullptr;
 	std::uint64_t output_offset = 0;
-	std::vector<std::int16_t> pcm;
 	std::exception_ptr error;
 };
 
@@ -1415,11 +2007,7 @@ bool write_media_foundation_pcm(const float* audio, std::uint32_t frames,
 	auto& sink = *static_cast<media_foundation_pcm_sink*>(user_data);
 	try
 	{
-		if (frames == 0)
-			return true;
-		float_to_pcm16(audio, frames, sink.pcm);
-		sink.writer->write_audio_frames(sink.pcm.data(), frames,
-			sink.output_offset + first_frame);
+		sink.writer->write_audio_frames(audio, frames, sink.output_offset + first_frame);
 		return true;
 	}
 	catch (...)
@@ -1453,7 +2041,6 @@ void write_audio_lead_in(media_foundation_writer& writer,
 	export_progress_state& progress_state, render_cancellation* cancel,
 	simple_player_video_progress_callback progress, void* progress_user_data)
 {
-	std::vector<std::int16_t> silence(static_cast<std::size_t>(block_frames) * 2, 0);
 	std::uint64_t cursor = 0;
 	while (cursor < lead_in_frames)
 	{
@@ -1461,7 +2048,7 @@ void write_audio_lead_in(media_foundation_writer& writer,
 			throw std::runtime_error("cancelled");
 		const auto frames = static_cast<std::uint32_t>((std::min)(
 			lead_in_frames - cursor, static_cast<std::uint64_t>(block_frames)));
-		writer.write_audio_frames(silence.data(), frames, cursor);
+		writer.write_audio_frames(nullptr, frames, cursor);
 		cursor += frames;
 		progress_state.completed_audio_frames.store(cursor, std::memory_order_relaxed);
 		if (!report_progress(progress, progress_user_data, progress_state,
@@ -1513,7 +2100,7 @@ std::uint64_t render_video_stream(media_foundation_writer& writer,
 	void* progress_user_data)
 {
 	offscreen_gl_surface surface;
-	surface.create(settings.width, settings.height);
+	surface.create(settings.width, settings.height, settings.background_rgb);
 	progress_state.software_video_renderer.store(
 		!surface.hardware_accelerated(), std::memory_order_relaxed);
 	progress_state.framebuffer_video_renderer.store(
@@ -1610,6 +2197,142 @@ std::uint64_t video_frame_count(std::uint64_t clip_us, std::uint32_t fps)
 	return whole + (round_up ? 1 : 0);
 }
 
+// The encoded audio rate: the setting, or SYNCore's rate where the codec
+// can take it.
+std::uint32_t resolved_audio_rate(const simple_player_video_settings& settings,
+	const syncore_preferences& preferences) noexcept
+{
+	if (settings.audio_sample_rate != 0)
+		return settings.audio_sample_rate;
+	const bool lossy_44_or_48 = settings.audio_codec == simple_player_video_audio_codec::aac ||
+		settings.audio_codec == simple_player_video_audio_codec::wma;
+	if (lossy_44_or_48 && preferences.sample_rate != 44100 && preferences.sample_rate != 48000)
+		return 48000;
+	return preferences.sample_rate;
+}
+
+// Some Windows versions encode AV1 but their MP4 writer cannot store it, and
+// says so only when it finalizes. A few frames find that out before a render.
+void check_container_accepts(const std::wstring& output_path,
+	const simple_player_video_settings& settings)
+{
+	auto check_path = std::filesystem::path(output_path);
+	check_path.replace_filename(check_path.stem().wstring() + L".safc-check" +
+		check_path.extension().wstring());
+	temporary_video_output check(check_path.wstring());
+	media_foundation_writer writer;
+	writer.open(check.path(), settings, 48000, 48000, false);
+	const std::vector<std::uint8_t> black(
+		static_cast<std::size_t>(settings.width) * settings.height * 4, 0);
+	for (std::uint64_t frame = 0; frame < 8; ++frame)
+		writer.write_video_frame(black.data(), frame);
+	writer.finish_video_stream();
+	try
+	{
+		writer.finalize();
+	}
+	catch (const std::exception& error)
+	{
+		throw std::runtime_error(std::string("this Windows version cannot store ") +
+			simple_player_video_codec_name(settings.codec) + " video in " +
+			container_name(settings.codec) + ": " + error.what());
+	}
+}
+
+void enumerate_video_encoders(std::vector<simple_player_video_encoder_info>& encoders)
+{
+	constexpr simple_player_video_codec codecs[] = {
+		simple_player_video_codec::h264, simple_player_video_codec::hevc,
+		simple_player_video_codec::av1, simple_player_video_codec::wmv9,
+		simple_player_video_codec::vc1};
+	for (const auto codec : codecs)
+	{
+		const MFT_REGISTER_TYPE_INFO output{MFMediaType_Video, video_subtype(codec)};
+		IMFActivate** activates = nullptr;
+		UINT32 count = 0;
+		if (FAILED(MFTEnumEx(MFT_CATEGORY_VIDEO_ENCODER, MFT_ENUM_FLAG_ALL, nullptr,
+			&output, &activates, &count)))
+			continue;
+		for (UINT32 index = 0; index < count; ++index)
+		{
+			ComPtr<IMFActivate> activate;
+			activate.Attach(activates[index]);
+			simple_player_video_encoder_info info;
+			info.codec = codec;
+			wchar_t* name = nullptr;
+			UINT32 length = 0;
+			if (SUCCEEDED(activate->GetAllocatedString(MFT_FRIENDLY_NAME_Attribute, &name, &length)))
+			{
+				info.name = narrow_text(name);
+				CoTaskMemFree(name);
+			}
+			UINT32 flags = 0;
+			activate->GetUINT32(MF_TRANSFORM_FLAGS_Attribute, &flags);
+			info.hardware = (flags & MFT_ENUM_FLAG_HARDWARE) != 0;
+			UINT32 size = 0;
+			if (SUCCEEDED(activate->GetBlobSize(MFT_INPUT_TYPES_Attributes, &size)) &&
+				size >= sizeof(MFT_REGISTER_TYPE_INFO))
+			{
+				std::vector<MFT_REGISTER_TYPE_INFO> inputs(size / sizeof(MFT_REGISTER_TYPE_INFO));
+				if (SUCCEEDED(activate->GetBlob(MFT_INPUT_TYPES_Attributes,
+					reinterpret_cast<UINT8*>(inputs.data()),
+					static_cast<UINT32>(inputs.size() * sizeof(MFT_REGISTER_TYPE_INFO)), nullptr)))
+				{
+					for (const auto& input : inputs)
+					{
+						const auto& subtype = input.guidSubtype;
+						if (subtype == MFVideoFormat_NV12) info.inputs[0][0] = true;
+						else if (subtype == MFVideoFormat_P010) info.inputs[0][1] = true;
+						else if (subtype == MFVideoFormat_YUY2) info.inputs[1][0] = true;
+						else if (subtype == MFVideoFormat_Y210) info.inputs[1][1] = true;
+						else if (subtype == MFVideoFormat_AYUV) info.inputs[2][0] = true;
+						else if (subtype == MFVideoFormat_Y410) info.inputs[2][1] = true;
+					}
+				}
+			}
+			// Drivers can register one encoder per adapter under one name.
+			const auto existing = std::find_if(encoders.begin(), encoders.end(),
+				[&](const simple_player_video_encoder_info& value)
+				{
+					return value.codec == codec && value.name == info.name;
+				});
+			if (existing == encoders.end())
+				encoders.push_back(std::move(info));
+			else
+				for (int chroma = 0; chroma < 3; ++chroma)
+					for (int depth = 0; depth < 2; ++depth)
+						existing->inputs[chroma][depth] |= info.inputs[chroma][depth];
+		}
+		CoTaskMemFree(activates);
+	}
+
+	const bool av1 = std::any_of(encoders.begin(), encoders.end(),
+		[](const simple_player_video_encoder_info& value)
+		{
+			return value.codec == simple_player_video_codec::av1;
+		});
+	if (!av1)
+		return;
+	bool writable = true;
+	try
+	{
+		wchar_t directory[MAX_PATH + 1]{};
+		if (!GetTempPathW(MAX_PATH + 1, directory))
+			throw std::runtime_error("no temporary directory");
+		simple_player_video_settings check;
+		check.codec = simple_player_video_codec::av1;
+		check_container_accepts(
+			(std::filesystem::path(directory) / L"safc-encoder-check.mp4").wstring(), check);
+	}
+	catch (...)
+	{
+		writable = false;
+	}
+	for (auto& encoder : encoders)
+		if (encoder.codec == simple_player_video_codec::av1)
+			encoder.writable = writable;
+}
+
 template<class RenderAudio>
 simple_player_video_result render_video_and_audio(
 	const std::wstring& source_path, playback_event_source& visual_events,
@@ -1621,7 +2344,7 @@ simple_player_video_result render_video_and_audio(
 	RenderAudio&& render_audio)
 {
 	validate_settings(settings, synth_preferences);
-	validate_paths(source_path, output_path, bank_path);
+	validate_paths(source_path, output_path, bank_path, settings.codec);
 	render_cancellation effective_cancel;
 	effective_cancel.external = cancel;
 	if (effective_cancel.requested())
@@ -1660,9 +2383,12 @@ simple_player_video_result render_video_and_audio(
 	progress_state.total_audio_frames.store(total_audio_frames, std::memory_order_relaxed);
 
 	media_runtime runtime;
-	temporary_mp4_output temporary(output_path);
+	if (settings.codec == simple_player_video_codec::av1)
+		check_container_accepts(output_path, settings);
+	temporary_video_output temporary(output_path);
 	media_foundation_writer writer;
-	writer.open(temporary.path(), settings, synth_preferences.sample_rate);
+	writer.open(temporary.path(), settings, synth_preferences.sample_rate,
+		resolved_audio_rate(settings, synth_preferences));
 
 	std::exception_ptr first_error;
 	bool first_error_is_cancellation = false;
@@ -1745,13 +2471,15 @@ simple_player_video_result render_video_and_audio(
 		std::rethrow_exception(first_error);
 
 	if (!report_progress(progress, progress_user_data, progress_state,
-		"Finalizing MP4", &effective_cancel, nullptr, 0, 0, 0, true))
+		std::string("Finalizing ") + container_name(settings.codec), &effective_cancel,
+		nullptr, 0, 0, 0, true))
 		throw std::runtime_error("cancelled");
 	writer.finalize();
 	temporary.commit();
 
 	simple_player_video_result result;
 	result.ok = true;
+	result.video_encoder = writer.encoder_name();
 	result.audio_frames = audio_frames;
 	result.video_frames = video_frames;
 	result.cohort_capacity_steals = progress_state.cohort_capacity_steals.load(
@@ -1764,6 +2492,12 @@ simple_player_video_result render_video_and_audio(
 		if (!result.warning.empty())
 			result.warning += "; ";
 		result.warning += "video frames used the software OpenGL fallback";
+	}
+	for (const auto& warning : writer.warnings())
+	{
+		if (!result.warning.empty())
+			result.warning += "; ";
+		result.warning += warning;
 	}
 	return result;
 }
@@ -1814,6 +2548,222 @@ bool simple_player_video_export_available() noexcept
 #endif
 }
 
+std::vector<simple_player_video_encoder_info> simple_player_video_encoders() noexcept
+{
+	std::vector<simple_player_video_encoder_info> encoders;
+#ifdef SAFC_WITH_SYNCORE
+	try
+	{
+		// A private MTA thread: the caller's thread may already be an STA.
+		std::thread([&encoders]()
+		{
+			try
+			{
+				media_runtime runtime;
+				enumerate_video_encoders(encoders);
+			}
+			catch (...)
+			{
+			}
+		}).join();
+	}
+	catch (...)
+	{
+	}
+#endif
+	return encoders;
+}
+
+const char* simple_player_video_codec_name(simple_player_video_codec codec) noexcept
+{
+	switch (codec)
+	{
+	case simple_player_video_codec::h264: return "H.264";
+	case simple_player_video_codec::hevc: return "HEVC";
+	case simple_player_video_codec::av1: return "AV1";
+	case simple_player_video_codec::wmv9: return "WMV 9";
+	case simple_player_video_codec::vc1: return "VC-1";
+	}
+	return "unknown";
+}
+
+const char* simple_player_video_audio_codec_name(simple_player_video_audio_codec codec) noexcept
+{
+	switch (codec)
+	{
+	case simple_player_video_audio_codec::aac: return "AAC";
+	case simple_player_video_audio_codec::alac: return "ALAC";
+	case simple_player_video_audio_codec::flac: return "FLAC";
+	case simple_player_video_audio_codec::wma: return "WMA";
+	case simple_player_video_audio_codec::wma_pro: return "WMA Pro";
+	case simple_player_video_audio_codec::pcm: return "PCM";
+	}
+	return "unknown";
+}
+
+const wchar_t* simple_player_video_extension(simple_player_video_codec codec) noexcept
+{
+	return codec == simple_player_video_codec::wmv9 || codec == simple_player_video_codec::vc1
+		? L".wmv" : L".mp4";
+}
+
+bool simple_player_video_audio_supported(simple_player_video_codec video,
+	simple_player_video_audio_codec audio) noexcept
+{
+	const bool asf = video == simple_player_video_codec::wmv9 ||
+		video == simple_player_video_codec::vc1;
+	switch (audio)
+	{
+	case simple_player_video_audio_codec::aac:
+	case simple_player_video_audio_codec::alac:
+	case simple_player_video_audio_codec::flac:
+		return !asf;
+	case simple_player_video_audio_codec::wma:
+	case simple_player_video_audio_codec::wma_pro:
+	case simple_player_video_audio_codec::pcm:
+		return asf;
+	}
+	return false;
+}
+
+std::string simple_player_video_settings_problem(
+	const simple_player_video_settings& settings,
+	const syncore_preferences& preferences)
+{
+	using codec = simple_player_video_codec;
+	using audio = simple_player_video_audio_codec;
+	constexpr auto automatic = simple_player_video_encoder_default;
+	const auto one_of = [](std::uint32_t value, std::initializer_list<std::uint32_t> options)
+	{
+		return std::find(options.begin(), options.end(), value) != options.end();
+	};
+	const auto optional_in = [](std::int32_t value, std::int32_t minimum, std::int32_t maximum)
+	{
+		return value == automatic || (value >= minimum && value <= maximum);
+	};
+
+	if (settings.width < 16 || settings.width > 8192 || settings.height < 16 ||
+		settings.height > 8192 || (settings.width & 1U) || (settings.height & 1U))
+		return "Width and height must be even values from 16 to 8192";
+	if (settings.fps < 1 || settings.fps > 240)
+		return "FPS must be from 1 to 240";
+	if (settings.codec > codec::vc1)
+		return "Unknown video codec";
+	if (settings.rate_control > simple_player_video_rate_control::constant_qp)
+		return "Unknown rate control mode";
+	if (settings.video_bitrate_kbps < 64 || settings.video_bitrate_kbps > 250000)
+		return "Video bitrate must be from 64 to 250000 kbps";
+	if (settings.quality > 100)
+		return "Quality must be from 0 to 100";
+	const std::int64_t qp_limit = settings.codec == codec::av1 ? 255 : 51;
+	const auto qp_range = "0 to " + std::to_string(qp_limit);
+	const auto qp = static_cast<std::int64_t>(settings.qp);
+	if (qp > qp_limit)
+		return "QP must be from " + qp_range;
+	if (qp + settings.qp_p_offset < 0 || qp + settings.qp_p_offset > qp_limit ||
+		qp + settings.qp_b_offset < 0 || qp + settings.qp_b_offset > qp_limit)
+		return "QP with its P- and B-frame offsets must stay from " + qp_range;
+	if (settings.peak_bitrate_kbps != 0 && (settings.peak_bitrate_kbps < settings.video_bitrate_kbps ||
+		settings.peak_bitrate_kbps > 1000000))
+		return "Peak bitrate must be 0 (encoder default) or from the video bitrate to 1000000 kbps";
+	if (settings.buffer_kbits > 4000000)
+		return "VBV buffer must be at most 4000000 kbits";
+	if (!optional_in(settings.min_qp, 0, static_cast<std::int32_t>(qp_limit)) ||
+		!optional_in(settings.max_qp, 0, static_cast<std::int32_t>(qp_limit)))
+		return "Minimum and maximum QP must be from " + qp_range;
+	if (settings.min_qp != automatic && settings.max_qp != automatic &&
+		settings.min_qp > settings.max_qp)
+		return "Minimum QP must not exceed maximum QP";
+	if (!optional_in(settings.quality_vs_speed, 0, 100))
+		return "Speed/quality preset must be from 0 to 100";
+	if (!optional_in(settings.gop_size, 1, 1000000))
+		return "Keyframe interval must be from 1 to 1000000 frames";
+	if (!optional_in(settings.b_frames, 0, 16))
+		return "B-frame count must be from 0 to 16";
+	if (!optional_in(settings.max_reference_frames, 1, 16))
+		return "Reference frame count must be from 1 to 16";
+	if (!optional_in(settings.worker_threads, 1, 64))
+		return "Encoder worker threads must be from 1 to 64";
+	if (!optional_in(settings.cabac, 0, 1) || !optional_in(settings.low_latency, 0, 1))
+		return "CABAC and low-latency mode must be default, on, or off";
+	if (settings.h264_profile > simple_player_video_h264_profile::high)
+		return "Unknown H.264 profile";
+	if (settings.codec == codec::h264 && settings.cabac == 1 &&
+		settings.h264_profile == simple_player_video_h264_profile::baseline)
+		return "CABAC needs the Main or High H.264 profile";
+	if (settings.chroma > simple_player_video_chroma::yuv444 ||
+		(settings.bit_depth != 8 && settings.bit_depth != 10))
+		return "Chroma must be 4:2:0, 4:2:2, or 4:4:4 at 8 or 10 bits";
+	if (settings.codec != codec::hevc && settings.chroma != simple_player_video_chroma::yuv420)
+		return "Only HEVC can encode 4:2:2 or 4:4:4";
+	if (settings.bit_depth == 10 && settings.codec != codec::hevc && settings.codec != codec::av1)
+		return "Only HEVC and AV1 can encode 10-bit video";
+	if (settings.matrix > simple_player_video_matrix::bt2020 ||
+		settings.chroma_filter > simple_player_video_chroma_filter::nearest)
+		return "Unknown colour matrix or chroma filter";
+	if (settings.background_rgb > 0xFFFFFF)
+		return "Background must be an RGB colour";
+
+	if (settings.audio_codec > audio::pcm)
+		return "Unknown audio codec";
+	if (!simple_player_video_audio_supported(settings.codec, settings.audio_codec))
+		return settings.codec == codec::wmv9 || settings.codec == codec::vc1
+			? "WMV video carries WMA, WMA Pro, or PCM audio"
+			: "MP4 video carries AAC, ALAC, or FLAC audio";
+	const auto rate = settings.audio_sample_rate;
+	const auto bitrate = settings.audio_bitrate_kbps;
+	const auto bits = settings.audio_bits;
+	const std::string audio_name = simple_player_video_audio_codec_name(settings.audio_codec);
+	switch (settings.audio_codec)
+	{
+	case audio::aac:
+		if (!one_of(bitrate, {96, 128, 160, 192}))
+			return "AAC bitrate must be 96, 128, 160, or 192 kbps";
+		if (rate != 0 && !one_of(rate, {44100, 48000}))
+			return "AAC sample rate must be 44100 or 48000 Hz";
+		break;
+	case audio::wma:
+		if (bitrate < 32 || bitrate > 320)
+			return "WMA bitrate must be from 32 to 320 kbps";
+		if (rate != 0 && !one_of(rate, {44100, 48000}))
+			return "WMA sample rate must be 44100 or 48000 Hz";
+		break;
+	case audio::wma_pro:
+		if (bitrate < 32 || bitrate > 768)
+			return "WMA Pro bitrate must be from 32 to 768 kbps";
+		if (rate != 0 && !one_of(rate, {44100, 48000, 88200, 96000}))
+			return "WMA Pro sample rate must be 44100, 48000, 88200, or 96000 Hz";
+		if (!one_of(bits, {16, 24}))
+			return "WMA Pro samples must be 16 or 24 bits";
+		break;
+	default:
+		if (rate != 0 && !one_of(rate, {32000, 44100, 48000, 88200, 96000, 176400, 192000}))
+			return audio_name + " sample rate must be 32000, 44100, 48000, 88200, 96000, "
+				"176400, or 192000 Hz";
+		if (settings.audio_codec == audio::pcm ? !one_of(bits, {16, 24, 32}) : !one_of(bits, {16, 24}))
+			return settings.audio_codec == audio::pcm
+				? "PCM samples must be 16 or 24 bits, or 32-bit float"
+				: audio_name + " samples must be 16 or 24 bits";
+		break;
+	}
+
+	if (!std::isfinite(settings.tail_seconds) || settings.tail_seconds < 0.0 ||
+		settings.tail_seconds > 60.0)
+		return "Tail seconds must be from 0 to 60";
+	if (!std::isfinite(settings.visible_seconds) || settings.visible_seconds < 0.01 ||
+		settings.visible_seconds > 60.0)
+		return "Visible seconds must be from 0.01 to 60";
+	if (preferences.sample_rate < 8000 || preferences.sample_rate > 192000)
+		return "SYNCore sample rate is outside the supported range";
+	if (preferences.buffer_frames < 256 || preferences.buffer_frames > 1048576)
+		return "SYNCore buffer size is outside the supported range";
+	if (preferences.maximum_cohorts == 0 || preferences.maximum_cohorts > 1048576)
+		return "SYNCore cohort ceiling is outside the supported range";
+	if (preferences.render_threads > 64)
+		return "SYNCore thread setting is outside the supported range";
+	return {};
+}
+
 simple_player_video_result render_simple_player_video(
 	const std::wstring& midi_path,
 	const std::wstring& output_path,
@@ -1840,7 +2790,7 @@ simple_player_video_result render_simple_player_video(
 	return guard_video_render([&]()
 	{
 		validate_settings(settings, synth_preferences);
-		validate_paths(midi_path, output_path, bank_path);
+		validate_paths(midi_path, output_path, bank_path, settings.codec);
 		if (cancel && cancel->load(std::memory_order_acquire))
 			throw std::runtime_error("cancelled");
 
@@ -1909,7 +2859,7 @@ simple_player_video_result render_simple_player_video_events(
 	return guard_video_render([&]()
 	{
 		validate_settings(settings, synth_preferences);
-		validate_paths(source_path, output_path, bank_path);
+		validate_paths(source_path, output_path, bank_path, settings.codec);
 		if (cancel && cancel->load(std::memory_order_acquire))
 			throw std::runtime_error("cancelled");
 

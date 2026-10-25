@@ -14,8 +14,10 @@
 #include <cwctype>
 #include <filesystem>
 #include <mutex>
+#include <optional>
 #include <stdexcept>
 #include <thread>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -54,32 +56,100 @@ bool midi_extension(const std::wstring& path)
 	return extension == L".mid" || extension == L".midi";
 }
 
-// Mirrors validate_settings() in simple_player_video_export.cpp, so invalid
-// settings are reported before the save dialog instead of after it.
+// The exporter's own check, so invalid settings are reported before the
+// save dialog instead of after it.
 std::string settings_problem(const simple_player_video_settings& settings, const syncore_preferences& preferences)
 {
-	if (settings.width < 16 || settings.width > 8192 || settings.height < 16 || settings.height > 8192 ||
-		(settings.width & 1U) || (settings.height & 1U))
-		return "Width and height must be even values from 16 to 8192";
-	if (settings.fps < 1 || settings.fps > 240)
-		return "FPS must be from 1 to 240";
-	if (settings.video_bitrate_kbps < 64 || settings.video_bitrate_kbps > 250000)
-		return "Video bitrate must be from 64 to 250000 kbps";
-	if (settings.audio_bitrate_kbps != 96 && settings.audio_bitrate_kbps != 128 &&
-		settings.audio_bitrate_kbps != 160 && settings.audio_bitrate_kbps != 192)
-		return "AAC bitrate must be 96, 128, 160, or 192 kbps";
-	if (settings.audio_sample_rate != 44100 && settings.audio_sample_rate != 48000)
-		return "AAC sample rate must be 44100 or 48000 Hz";
-	if (!std::isfinite(settings.tail_seconds) || settings.tail_seconds < 0.0 || settings.tail_seconds > 60.0)
-		return "Tail seconds must be from 0 to 60";
-	if (!std::isfinite(settings.visible_seconds) || settings.visible_seconds < 0.01 || settings.visible_seconds > 60.0)
-		return "Visible seconds must be from 0.01 to 60";
-	if (preferences.sample_rate < 8000 || preferences.sample_rate > 192000 || preferences.buffer_frames < 256 ||
-		preferences.buffer_frames > 1048576 || preferences.maximum_cohorts == 0 ||
-		preferences.maximum_cohorts > 1048576 || preferences.render_threads > 64)
-		return "Apply valid SYNCore settings before rendering";
-	return {};
+	return simple_player_video_settings_problem(settings, preferences);
 }
+
+using video_codec = simple_player_video_codec;
+using audio_codec = simple_player_video_audio_codec;
+using encoder_list = std::vector<simple_player_video_encoder_info>;
+
+bool asf_codec(video_codec codec)
+{
+	return codec == video_codec::wmv9 || codec == video_codec::vc1;
+}
+
+bool usable(const simple_player_video_encoder_info& encoder, video_codec codec, bool hardware)
+{
+	return encoder.codec == codec && encoder.writable && (hardware || !encoder.hardware);
+}
+
+bool codec_available(const encoder_list& encoders, video_codec codec, bool hardware)
+{
+	return std::any_of(encoders.begin(), encoders.end(),
+		[&](const auto& encoder) { return usable(encoder, codec, hardware); });
+}
+
+bool input_available(const encoder_list& encoders, const simple_player_video_settings& settings,
+	simple_player_video_chroma chroma, std::uint32_t bit_depth)
+{
+	return std::any_of(encoders.begin(), encoders.end(), [&](const auto& encoder)
+	{
+		return usable(encoder, settings.codec, settings.hardware_encoder) &&
+			encoder.inputs[static_cast<int>(chroma)][bit_depth > 8 ? 1 : 0];
+	});
+}
+
+std::uint32_t nearest_of(std::uint32_t value, std::initializer_list<std::uint32_t> options)
+{
+	return *std::min_element(options.begin(), options.end(), [&](std::uint32_t left, std::uint32_t right)
+	{
+		return (std::max)(left, value) - (std::min)(left, value) < (std::max)(right, value) - (std::min)(right, value);
+	});
+}
+
+// Keeps dependent choices valid after the codec or audio codec changes, so a
+// combo never shows a value the new codec cannot take.
+void fit_to_codec(simple_player_video_settings& settings)
+{
+	if (settings.codec != video_codec::hevc)
+		settings.chroma = simple_player_video_chroma::yuv420;
+	if (settings.codec != video_codec::hevc && settings.codec != video_codec::av1)
+		settings.bit_depth = 8;
+	if (!simple_player_video_audio_supported(settings.codec, settings.audio_codec))
+	{
+		const bool lossy = settings.audio_codec == audio_codec::aac || settings.audio_codec == audio_codec::wma ||
+			settings.audio_codec == audio_codec::wma_pro;
+		settings.audio_codec = asf_codec(settings.codec) ? (lossy ? audio_codec::wma : audio_codec::pcm)
+			: (lossy ? audio_codec::aac : audio_codec::flac);
+	}
+	const std::uint32_t qp_limit = settings.codec == video_codec::av1 ? 255 : 51;
+	settings.qp = (std::min)(settings.qp, qp_limit);
+	for (auto* qp : {&settings.min_qp, &settings.max_qp})
+		if (*qp != simple_player_video_encoder_default)
+			*qp = (std::min)(*qp, static_cast<std::int32_t>(qp_limit));
+	auto& rate = settings.audio_sample_rate;
+	switch (settings.audio_codec)
+	{
+	case audio_codec::aac:
+		settings.audio_bitrate_kbps = nearest_of(settings.audio_bitrate_kbps, {96, 128, 160, 192});
+		if (rate != 0 && rate != 44100 && rate != 48000)
+			rate = 48000;
+		break;
+	case audio_codec::wma:
+		settings.audio_bitrate_kbps = std::clamp(settings.audio_bitrate_kbps, 32U, 320U);
+		if (rate != 0 && rate != 44100 && rate != 48000)
+			rate = 48000;
+		break;
+	case audio_codec::wma_pro:
+		settings.audio_bitrate_kbps = std::clamp(settings.audio_bitrate_kbps, 32U, 768U);
+		if (rate != 0 && rate != 44100 && rate != 48000 && rate != 88200 && rate != 96000)
+			rate = 48000;
+		settings.audio_bits = settings.audio_bits > 16 ? 24 : 16;
+		break;
+	default:
+		if (settings.audio_codec != audio_codec::pcm || settings.audio_bits < 32)
+			settings.audio_bits = settings.audio_bits > 16 ? 24 : 16;
+		break;
+	}
+}
+
+// Indexed by simple_player_video_rate_control.
+constexpr const char* rate_control_names[] = {"CBR", "VBR, peak constrained", "VBR, unconstrained", "Quality",
+	"Low-delay VBR", "Global VBR", "Global low-delay VBR", "Constant QP"};
 }
 
 struct video_export_panel::impl
@@ -101,10 +171,53 @@ struct video_export_panel::impl
 	std::uint64_t uploaded_serial = 0;
 	std::uint32_t texture_width = 0;
 	std::uint32_t texture_height = 0;
+	// Installed encoders, enumerated once in the background when the panel
+	// first draws; until then every codec is offered.
+	encoder_list encoders;
+	bool encoders_ready = false;
+	std::jthread encoder_probe;
+	bool reveal_advanced = false;
 
 	impl(playback_session& service, native_dialogs native) : playback(service), dialogs(std::move(native))
 	{
 		state.status = "Ready";
+	}
+
+	void probe_encoders()
+	{
+		if (encoder_probe.joinable() || !simple_player_video_export_available())
+			return;
+		encoder_probe = std::jthread([this]()
+		{
+			auto found = simple_player_video_encoders();
+			std::lock_guard lock(mutex);
+			encoders = std::move(found);
+			encoders_ready = true;
+		});
+	}
+
+	// The probe result, or null while it runs.
+	std::optional<encoder_list> known_encoders() const
+	{
+		std::lock_guard lock(mutex);
+		return encoders_ready ? std::optional<encoder_list>(encoders) : std::nullopt;
+	}
+
+	// The settings check plus what the installed encoders cannot do; the
+	// render would otherwise report it only after the save dialog.
+	std::string problem(const syncore_preferences& synth) const
+	{
+		auto result = settings_problem(settings, synth);
+		const auto found = known_encoders();
+		if (!result.empty() || !found)
+			return result;
+		const std::string codec = simple_player_video_codec_name(settings.codec);
+		if (!codec_available(*found, settings.codec, settings.hardware_encoder))
+			return "No usable " + codec + " encoder is installed" +
+				(settings.hardware_encoder ? std::string() : "; GPU encoders are off");
+		if (!input_available(*found, settings, settings.chroma, settings.bit_depth))
+			return "No installed " + codec + " encoder takes this chroma format and bit depth";
+		return {};
 	}
 
 	static bool progress_callback(const simple_player_video_progress& progress, void* user) noexcept
@@ -211,6 +324,8 @@ struct video_export_panel::impl
 		if (current.progress.total_frames)
 			ImGui::Text("Frames %llu / %llu  |  Events %llu  |  Voices %llu", current.progress.completed_frames,
 				current.progress.total_frames, current.progress.completed_events, current.progress.active_voices);
+		if (!current.result.video_encoder.empty())
+			ImGui::TextWrapped("Encoder: %s", current.result.video_encoder.c_str());
 		if (!current.result.error.empty())
 			ImGui::TextWrapped("%s", current.result.error.c_str());
 		if (!current.result.warning.empty())
@@ -239,77 +354,370 @@ struct video_export_panel::impl
 
 	void draw_settings()
 	{
+		probe_encoders();
+		const auto found = known_encoders();
+		// Labels get rows of their own. A table carries the text baseline of a
+		// cell's last line into the next cell of the row, so a right-hand label
+		// would drop to its left neighbour's field text and shift the column down.
+		const auto labels = [](const char* left, const char* right)
+		{
+			ImGui::TableNextRow();
+			ImGui::TableNextColumn();
+			ImGui::TextUnformatted(left);
+			if (right)
+			{
+				ImGui::TableNextColumn();
+				ImGui::TextUnformatted(right);
+			}
+			ImGui::TableNextRow();
+		};
+		const auto integer = [](const char* id, std::uint32_t& value)
+		{
+			ImGui::TableNextColumn();
+			ImGui::SetNextItemWidth(-1);
+			ImGui::InputScalar(id, ImGuiDataType_U32, &value);
+		};
+		// Only these values, with an optional caption for a special one.
+		const auto choice = [](const char* id, std::uint32_t& value, std::initializer_list<std::uint32_t> options,
+			std::uint32_t special = UINT32_MAX, const char* special_text = nullptr)
+		{
+			ImGui::TableNextColumn();
+			ImGui::SetNextItemWidth(-1);
+			const auto text = [&](std::uint32_t option)
+			{
+				return option == special && special_text ? std::string(special_text) : std::to_string(option);
+			};
+			if (ImGui::BeginCombo(id, text(value).c_str()))
+			{
+				for (const auto option : options)
+				{
+					if (ImGui::Selectable(text(option).c_str(), option == value))
+						value = option;
+					if (option == value)
+						ImGui::SetItemDefaultFocus();
+				}
+				ImGui::EndCombo();
+			}
+		};
+		// A combo over an enum's values; `enabled` greys out what cannot work.
+		const auto options = [](const char* id, auto& value, std::initializer_list<const char*> names,
+			const auto& enabled)
+		{
+			using value_type = std::remove_reference_t<decltype(value)>;
+			ImGui::TableNextColumn();
+			ImGui::SetNextItemWidth(-1);
+			const auto current = static_cast<std::size_t>(value);
+			const auto* preview = current < names.size() ? names.begin()[current] : "?";
+			bool changed = false;
+			if (ImGui::BeginCombo(id, preview))
+			{
+				for (std::size_t index = 0; index < names.size(); ++index)
+				{
+					const bool usable = enabled(index);
+					if (ImGui::Selectable(names.begin()[index], index == current,
+						usable ? 0 : ImGuiSelectableFlags_Disabled))
+					{
+						value = static_cast<value_type>(index);
+						changed = true;
+					}
+					if (index == current)
+						ImGui::SetItemDefaultFocus();
+				}
+				ImGui::EndCombo();
+			}
+			return changed;
+		};
+		const auto always = [](std::size_t) { return true; };
+		// Clamp only once editing ends, so typing is not rewritten mid-value.
+		const auto seconds = [](const char* id, double& value, double step, double fast, double minimum)
+		{
+			ImGui::TableNextColumn();
+			ImGui::SetNextItemWidth(-1);
+			ImGui::InputDouble(id, &value, step, fast, "%.3f");
+			if (!ImGui::IsItemActive())
+				value = std::isfinite(value) ? std::clamp(value, minimum, 60.0) : minimum;
+		};
+		// An encoder property: unchecked leaves the encoder's default.
+		const auto optional = [](const char* id, std::int32_t& value, int minimum, int maximum, int fallback)
+		{
+			ImGui::TableNextColumn();
+			ImGui::PushID(id);
+			bool set = value != simple_player_video_encoder_default;
+			if (ImGui::Checkbox("##set", &set))
+				value = set ? fallback : simple_player_video_encoder_default;
+			ImGui::SetItemTooltip("Unchecked keeps the encoder's default");
+			ImGui::SameLine();
+			ImGui::SetNextItemWidth(-1);
+			ImGui::BeginDisabled(!set);
+			int shown = set ? value : fallback;
+			if (ImGui::InputInt("##value", &shown) && set)
+				value = shown;
+			if (set && !ImGui::IsItemActive())
+				value = std::clamp(value, minimum, maximum);
+			ImGui::EndDisabled();
+			ImGui::PopID();
+		};
+		const auto toggle = [&](const char* id, std::int32_t& value)
+		{
+			// -1 (encoder default), 0 (off), 1 (on) shown as Default, Off, On.
+			int index = value + 1;
+			if (options(id, index, {"Default", "Off", "On"}, always))
+				value = index - 1;
+		};
+
+		auto& s = settings;
+		const bool asf = asf_codec(s.codec);
+		const bool h264 = s.codec == video_codec::h264;
+		const std::uint32_t qp_limit = s.codec == video_codec::av1 ? 255 : 51;
+		const auto mode = s.rate_control;
+		using rate_control = simple_player_video_rate_control;
+		const bool bitrate_mode = mode != rate_control::quality && mode != rate_control::constant_qp;
+
 		if (ImGui::BeginTable("Render settings", 2, ImGuiTableFlags_SizingStretchSame))
 		{
-			// Labels get rows of their own. A table carries the text baseline of a
-			// cell's last line into the next cell of the row, so a right-hand label
-			// would drop to its left neighbour's field text and shift the column down.
-			const auto labels = [](const char* left, const char* right)
+			labels("Width", "Height");
+			integer("##width", s.width);
+			integer("##height", s.height);
+			labels("FPS", "Codec");
+			integer("##fps", s.fps);
 			{
-				ImGui::TableNextRow();
-				ImGui::TableNextColumn();
-				ImGui::TextUnformatted(left);
-				if (right)
+				std::vector<std::string> names;
+				for (const auto codec : {video_codec::h264, video_codec::hevc, video_codec::av1,
+					video_codec::wmv9, video_codec::vc1})
 				{
-					ImGui::TableNextColumn();
-					ImGui::TextUnformatted(right);
-				}
-				ImGui::TableNextRow();
-			};
-			const auto integer = [](const char* id, std::uint32_t& value)
-			{
-				ImGui::TableNextColumn();
-				ImGui::SetNextItemWidth(-1);
-				ImGui::InputScalar(id, ImGuiDataType_U32, &value);
-			};
-			// The AAC encoder accepts only these values.
-			const auto choice = [](const char* id, std::uint32_t& value, std::initializer_list<std::uint32_t> options)
-			{
-				ImGui::TableNextColumn();
-				ImGui::SetNextItemWidth(-1);
-				const auto preview = std::to_string(value);
-				if (ImGui::BeginCombo(id, preview.c_str()))
-				{
-					for (const auto option : options)
+					std::string name = std::string(simple_player_video_codec_name(codec)) +
+						(asf_codec(codec) ? " (WMV)" : " (MP4)");
+					if (found && !codec_available(*found, codec, s.hardware_encoder))
 					{
-						const auto text = std::to_string(option);
-						if (ImGui::Selectable(text.c_str(), option == value))
-							value = option;
-						if (option == value)
-							ImGui::SetItemDefaultFocus();
+						const bool unwritable = std::any_of(found->begin(), found->end(), [&](const auto& encoder)
+							{ return encoder.codec == codec && !encoder.writable; });
+						name += unwritable ? " - Windows cannot store it" : " - no encoder";
+					}
+					names.push_back(std::move(name));
+				}
+				ImGui::TableNextColumn();
+				ImGui::SetNextItemWidth(-1);
+				if (ImGui::BeginCombo("##codec", names[static_cast<std::size_t>(s.codec)].c_str()))
+				{
+					for (std::size_t index = 0; index < names.size(); ++index)
+					{
+						const auto codec = static_cast<video_codec>(index);
+						const bool usable = !found || codec_available(*found, codec, s.hardware_encoder);
+						if (ImGui::Selectable(names[index].c_str(), codec == s.codec,
+							usable ? 0 : ImGuiSelectableFlags_Disabled))
+						{
+							s.codec = codec;
+							fit_to_codec(s);
+						}
 					}
 					ImGui::EndCombo();
 				}
-			};
-			// Clamp only once editing ends, so typing is not rewritten mid-value.
-			const auto seconds = [](const char* id, double& value, double step, double fast, double minimum)
+			}
+			labels("Rate control", bitrate_mode ? "Video kbps" : mode == rate_control::quality ? "Quality (0-100)" : "QP");
+			ImGui::TableNextColumn();
+			ImGui::SetNextItemWidth(-1);
+			if (ImGui::BeginCombo("##rate_control", rate_control_names[static_cast<std::size_t>(mode)]))
+			{
+				for (std::size_t index = 0; index < std::size(rate_control_names); ++index)
+					if (ImGui::Selectable(rate_control_names[index], index == static_cast<std::size_t>(mode)))
+						s.rate_control = static_cast<rate_control>(index);
+				ImGui::EndCombo();
+			}
+			ImGui::SetItemTooltip("CBR and VBR aim at a bitrate. Quality and constant QP aim at a picture quality and\n"
+				"let the file size follow; they keep flat backgrounds clean at a far lower average rate.");
+			if (bitrate_mode)
+				integer("##video_kbps", s.video_bitrate_kbps);
+			else if (mode == rate_control::quality)
 			{
 				ImGui::TableNextColumn();
 				ImGui::SetNextItemWidth(-1);
-				ImGui::InputDouble(id, &value, step, fast, "%.3f");
-				if (!ImGui::IsItemActive())
-					value = std::isfinite(value) ? std::clamp(value, minimum, 60.0) : minimum;
-			};
-			labels("Width", "Height");
-			integer("##width", settings.width);
-			integer("##height", settings.height);
-			labels("FPS", "Video kbps");
-			integer("##fps", settings.fps);
-			integer("##video_kbps", settings.video_bitrate_kbps);
-			labels("AAC kbps", "AAC Hz");
-			choice("##aac_kbps", settings.audio_bitrate_kbps, {96, 128, 160, 192});
-			choice("##aac_hz", settings.audio_sample_rate, {44100, 48000});
+				int quality = static_cast<int>(s.quality);
+				if (ImGui::SliderInt("##quality", &quality, 0, 100))
+					s.quality = static_cast<std::uint32_t>(quality);
+			}
+			else
+			{
+				ImGui::TableNextColumn();
+				ImGui::SetNextItemWidth(-1);
+				int qp = static_cast<int>(s.qp);
+				if (ImGui::SliderInt("##qp", &qp, 0, static_cast<int>(qp_limit)))
+					s.qp = static_cast<std::uint32_t>(qp);
+				ImGui::SetItemTooltip("Lower is better and larger");
+			}
+			if (mode == rate_control::peak_constrained_vbr)
+			{
+				labels("Peak kbps (0 = encoder default)", nullptr);
+				integer("##peak_kbps", s.peak_bitrate_kbps);
+			}
+
+			const bool lossy_audio = s.audio_codec == audio_codec::aac || s.audio_codec == audio_codec::wma ||
+				s.audio_codec == audio_codec::wma_pro;
+			labels("Audio codec", lossy_audio ? "Audio kbps" : "Audio bits");
+			if (options("##audio_codec", s.audio_codec, {"AAC", "ALAC (lossless)", "FLAC (lossless)", "WMA",
+				"WMA Pro", "PCM (uncompressed)"}, [&](std::size_t index)
+				{
+					return simple_player_video_audio_supported(s.codec, static_cast<audio_codec>(index));
+				}))
+				fit_to_codec(s);
+			if (s.audio_codec == audio_codec::aac)
+				choice("##audio_kbps", s.audio_bitrate_kbps, {96, 128, 160, 192});
+			else if (lossy_audio)
+			{
+				integer("##audio_kbps", s.audio_bitrate_kbps);
+				ImGui::SetItemTooltip("The encoder's closest supported rate is used");
+			}
+			else if (s.audio_codec == audio_codec::pcm)
+				choice("##audio_bits", s.audio_bits, {16, 24, 32}, 32, "32 (float)");
+			else
+				choice("##audio_bits", s.audio_bits, {16, 24});
+			labels("Audio Hz", "Background");
+			{
+				const auto synth_rate = playback.synth_preferences().sample_rate;
+				const auto same = "Same as SYNCore (" + std::to_string(synth_rate) + ")";
+				if (s.audio_codec == audio_codec::aac || s.audio_codec == audio_codec::wma)
+					choice("##audio_hz", s.audio_sample_rate, {0, 44100, 48000}, 0, same.c_str());
+				else if (s.audio_codec == audio_codec::wma_pro)
+					choice("##audio_hz", s.audio_sample_rate, {0, 44100, 48000, 88200, 96000}, 0, same.c_str());
+				else
+					choice("##audio_hz", s.audio_sample_rate, {0, 32000, 44100, 48000, 88200, 96000, 176400, 192000},
+						0, same.c_str());
+				ImGui::SetItemTooltip("A rate other than SYNCore's is resampled by Windows");
+			}
+			ImGui::TableNextColumn();
+			ImGui::SetNextItemWidth(-1);
+			float background[3] = {static_cast<float>((s.background_rgb >> 16) & 0xFF) / 255.f,
+				static_cast<float>((s.background_rgb >> 8) & 0xFF) / 255.f,
+				static_cast<float>(s.background_rgb & 0xFF) / 255.f};
+			if (ImGui::ColorEdit3("##background", background, ImGuiColorEditFlags_DisplayHex))
+			{
+				const auto channel = [](float value)
+				{
+					return static_cast<std::uint32_t>(std::lround(std::clamp(value, 0.f, 1.f) * 255.f));
+				};
+				s.background_rgb = channel(background[0]) << 16 | channel(background[1]) << 8 | channel(background[2]);
+			}
+			ImGui::SetItemTooltip("A flat colour the notes never use is easy to key out");
 			labels("Visible seconds", "Tail seconds");
-			seconds("##visible_seconds", settings.visible_seconds, .01, .1, .01);
-			seconds("##tail_seconds", settings.tail_seconds, .5, 1, 0);
+			seconds("##visible_seconds", s.visible_seconds, .01, .1, .01);
+			seconds("##tail_seconds", s.tail_seconds, .5, 1, 0);
 			labels("Overlaps", nullptr);
 			ImGui::TableNextColumn();
 			ImGui::SetNextItemWidth(-1);
-			int overlap = settings.remove_overlaps <= 1 ? settings.remove_overlaps : 2;
+			int overlap = s.remove_overlaps <= 1 ? s.remove_overlaps : 2;
 			if (ImGui::Combo("##overlaps", &overlap, "Naive removal\0Realtime removal\0Draw all\0"))
-				settings.remove_overlaps = overlap == 2 ? 0xff : static_cast<std::uint8_t>(overlap);
+				s.remove_overlaps = overlap == 2 ? 0xff : static_cast<std::uint8_t>(overlap);
 			ImGui::EndTable();
 		}
+
+		if (reveal_advanced)
+			ImGui::SetNextItemOpen(true);
+		const bool advanced = ImGui::CollapsingHeader("Advanced encoder options");
+		if (reveal_advanced)
+			ImGui::SetScrollHereY(0.f);
+		reveal_advanced = false;
+		if (!advanced)
+			return;
+		if (found)
+		{
+			std::string installed;
+			for (const auto& encoder : *found)
+				if (encoder.codec == s.codec)
+					installed += (installed.empty() ? "" : ", ") + encoder.name + (encoder.hardware ? " (GPU)" : "");
+			ImGui::TextWrapped("%s encoders: %s", simple_player_video_codec_name(s.codec),
+				installed.empty() ? "none" : installed.c_str());
+		}
+		else
+			ImGui::TextDisabled("Looking for installed encoders...");
+		ImGui::TextWrapped("Unchecked values keep the encoder's default. After a render, the status names the "
+			"encoder and any option it ignored.");
+		if (!ImGui::BeginTable("Advanced settings", 2, ImGuiTableFlags_SizingStretchSame))
+			return;
+		labels("GPU encoders", h264 ? "H.264 profile" : nullptr);
+		ImGui::TableNextColumn();
+		if (ImGui::Checkbox("Use when available##hardware", &s.hardware_encoder))
+			fit_to_codec(s);
+		ImGui::SetItemTooltip("Off uses the software encoders only; HEVC and AV1 usually have none");
+		if (h264)
+			options("##h264_profile", s.h264_profile, {"Encoder default", "Baseline", "Main", "High"}, always);
+
+		labels("Chroma", "Bit depth");
+		const auto input_ok = [&](simple_player_video_chroma chroma, std::uint32_t depth)
+		{
+			const bool codec_ok = (s.codec == video_codec::hevc || chroma == simple_player_video_chroma::yuv420) &&
+				(depth == 8 || s.codec == video_codec::hevc || s.codec == video_codec::av1);
+			return codec_ok && (!found || input_available(*found, s, chroma, depth));
+		};
+		options("##chroma", s.chroma, {"4:2:0", "4:2:2", "4:4:4 (no chroma loss)"}, [&](std::size_t index)
+			{
+				return input_ok(static_cast<simple_player_video_chroma>(index), s.bit_depth);
+			});
+		ImGui::SetItemTooltip("4:2:0 stores colour at half resolution, which blurs colour at note edges.\n"
+			"4:4:4 keeps full colour resolution; HEVC on a capable GPU encodes it.");
+		{
+			int depth = s.bit_depth > 8 ? 1 : 0;
+			if (options("##bit_depth", depth, {"8-bit", "10-bit"}, [&](std::size_t index)
+				{
+					return input_ok(s.chroma, index ? 10U : 8U);
+				}))
+				s.bit_depth = depth ? 10 : 8;
+		}
+		labels("Colour matrix", "Range");
+		options("##matrix", s.matrix, {"BT.601", "BT.709", "BT.2020"}, always);
+		{
+			int full = s.full_range ? 1 : 0;
+			if (options("##range", full, {"Limited (16-235)", "Full (0-255)"}, always))
+				s.full_range = full != 0;
+			ImGui::SetItemTooltip("Full range is refused before rendering when the encoder cannot mark it");
+		}
+		labels("Chroma filter", "Speed/quality preset");
+		ImGui::BeginDisabled(s.chroma == simple_player_video_chroma::yuv444);
+		options("##chroma_filter", s.chroma_filter, {"Box average", "Co-sited [1 2 1]", "Nearest"}, always);
+		ImGui::EndDisabled();
+		optional("##speed", s.quality_vs_speed, 0, 100, 100);
+		ImGui::SetItemTooltip("0 is fastest, 100 is best");
+		labels("Keyframe interval (frames)", "B-frames");
+		optional("##gop", s.gop_size, 1, 1000000, static_cast<int>(s.fps) * 2);
+		optional("##b_frames", s.b_frames, 0, 16, 2);
+		labels("Reference frames", "Encoder threads (software)");
+		optional("##references", s.max_reference_frames, 1, 16, 4);
+		optional("##threads", s.worker_threads, 1, 64, 4);
+		labels("Minimum QP", "Maximum QP");
+		ImGui::BeginDisabled(!bitrate_mode);
+		optional("##min_qp", s.min_qp, 0, static_cast<int>(qp_limit), 10);
+		optional("##max_qp", s.max_qp, 0, static_cast<int>(qp_limit), 40);
+		ImGui::EndDisabled();
+		labels("VBV buffer kbits (0 = default)", mode == rate_control::constant_qp ? "P / B-frame QP offset" : nullptr);
+		integer("##buffer", s.buffer_kbits);
+		if (mode == rate_control::constant_qp)
+		{
+			ImGui::TableNextColumn();
+			ImGui::SetNextItemWidth(-1);
+			int offsets[2] = {s.qp_p_offset, s.qp_b_offset};
+			if (ImGui::InputInt2("##qp_offsets", offsets))
+			{
+				s.qp_p_offset = std::clamp(offsets[0], -static_cast<int>(qp_limit), static_cast<int>(qp_limit));
+				s.qp_b_offset = std::clamp(offsets[1], -static_cast<int>(qp_limit), static_cast<int>(qp_limit));
+			}
+		}
+		labels(h264 ? "CABAC" : "Low latency", h264 ? "Low latency" : nullptr);
+		if (h264)
+			toggle("##cabac", s.cabac);
+		toggle("##low_latency", s.low_latency);
+		labels("MP4 fast start", s.audio_codec == audio_codec::wma_pro ? "WMA Pro bits" : "Audio dither");
+		ImGui::TableNextColumn();
+		ImGui::BeginDisabled(asf);
+		ImGui::Checkbox("Index first##fast_start", &s.fast_start);
+		ImGui::EndDisabled();
+		ImGui::SetItemTooltip("Puts the MP4 index before the media, so playback can start while downloading");
+		if (s.audio_codec == audio_codec::wma_pro)
+			choice("##wma_pro_bits", s.audio_bits, {16, 24});
+		else
+		{
+			ImGui::TableNextColumn();
+			ImGui::Checkbox("TPDF to 16-bit##dither", &s.audio_dither);
+			ImGui::SetItemTooltip("Dither when SAFC reduces SYNCore's float output to 16-bit samples");
+		}
+		ImGui::EndTable();
 	}
 };
 
@@ -330,6 +738,11 @@ void video_export_panel::set_settings(const simple_player_video_settings& value)
 {
 	if (!impl_->running.load(std::memory_order_acquire))
 		impl_->settings = value;
+}
+
+void video_export_panel::reveal_advanced_options()
+{
+	impl_->reveal_advanced = true;
 }
 
 video_export_snapshot video_export_panel::snapshot() const
@@ -353,7 +766,7 @@ bool video_export_panel::start_export(std::wstring output_path)
 	const auto playback = impl_->playback.snapshot();
 	auto unavailable = impl_->source_problem(source, factory, source_path, playback);
 	if (unavailable.empty())
-		unavailable = settings_problem(impl_->settings, impl_->playback.synth_preferences());
+		unavailable = impl_->problem(impl_->playback.synth_preferences());
 	if (!unavailable.empty())
 	{
 		std::lock_guard lock(impl_->mutex);
@@ -412,7 +825,7 @@ bool video_export_panel::start_export(std::wstring output_path)
 				std::lock_guard lock(self->mutex);
 				self->state.result = result;
 				if (result.ok)
-					self->state.status = "MP4 saved";
+					self->state.status = "Video saved";
 				else if (result.cancelled)
 					self->state.status = "Render cancelled";
 				else
@@ -475,15 +888,15 @@ void video_export_panel::draw(bool* open)
 			problem = impl_->source_problem(impl_->playback.current_source(),
 				impl_->playback.export_source_factory(), impl_->playback.current_path(), impl_->playback.snapshot());
 			if (problem.empty())
-				problem = settings_problem(impl_->settings, impl_->playback.synth_preferences());
+				problem = impl_->problem(impl_->playback.synth_preferences());
 		}
 		ImGui::BeginDisabled(!problem.empty());
-		if (ImGui::Button("Render MP4", {scaled(150), 0}) && impl_->dialogs.save_video)
+		if (ImGui::Button("Render video", {scaled(150), 0}) && impl_->dialogs.save_video)
 		{
 			auto suggestion = std::filesystem::path(impl_->playback.current_path());
 			if (suggestion.empty())
 				suggestion = "Editor.mp4";
-			suggestion.replace_extension(".mp4");
+			suggestion.replace_extension(simple_player_video_extension(impl_->settings.codec));
 			try
 			{
 				auto destination = impl_->dialogs.save_video(suggestion.wstring());

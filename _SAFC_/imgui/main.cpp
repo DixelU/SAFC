@@ -178,9 +178,12 @@ ui::native_dialogs make_dialogs(GLFWwindow* window)
 	{
 		return one(file_dialog(window, midi, true, name, L"mid"));
 	};
+	// The suggested name's extension follows the chosen codec's container.
 	d.save_video = [=](const std::wstring& name)
 	{
-		return one(file_dialog(window, L"MPEG-4 video (*.mp4)\0*.mp4\0\0", true, name, L"mp4"));
+		const bool wmv = _wcsicmp(std::filesystem::path(name).extension().c_str(), L".wmv") == 0;
+		return one(wmv ? file_dialog(window, L"Windows Media video (*.wmv)\0*.wmv\0\0", true, name, L"wmv")
+			: file_dialog(window, L"MPEG-4 video (*.mp4)\0*.mp4\0\0", true, name, L"mp4"));
 	};
 	d.save_data = [=](const std::wstring& name)
 	{
@@ -1416,6 +1419,7 @@ int run(bool smoke, bool workflows, const std::filesystem::path& capture_path, c
 	if (smoke && !workflows)
 		test = std::make_unique<smoke_run>(capture_path);
 	int workflow_frame = 0;
+	int video_frame = 0;
 	if (workflows)
 	{
 		const auto directory = std::filesystem::absolute(capture_path).parent_path();
@@ -1513,12 +1517,25 @@ int run(bool smoke, bool workflows, const std::filesystem::path& capture_path, c
 					app.editor_open = false;
 					app.analysis_open = true;
 				}
-				if (workflow_frame >= 9 && !app.analysis.busy())
+				if (video_frame == 0 && workflow_frame >= 9 && !app.analysis.busy())
 				{
 					if (!app.analysis.result())
 						throw std::runtime_error(app.analysis.status());
 					write_capture(capture_path.parent_path() / "analysis-workflow.bmp", width, height);
-					std::cout << "PASS: complete project/editor/analysis workspace GL composition\n";
+					app.analysis_open = false;
+					app.video_open = true;
+					video_frame = workflow_frame;
+				}
+				// The encoder list arrives from a background probe within a few hundred frames.
+				if (video_frame != 0 && workflow_frame == video_frame + 200)
+				{
+					write_capture(capture_path.parent_path() / "video-workflow.bmp", width, height);
+					app.video.reveal_advanced_options();
+				}
+				if (video_frame != 0 && workflow_frame == video_frame + 204)
+				{
+					write_capture(capture_path.parent_path() / "video-advanced-workflow.bmp", width, height);
+					std::cout << "PASS: complete project/editor/analysis/video workspace GL composition\n";
 					break;
 				}
 				if (workflow_frame > 3000)

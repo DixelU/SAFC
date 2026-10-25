@@ -106,7 +106,7 @@ if(SAFC_ENABLE_SYNCORE)
 				_SAFC_/SAFC_InnerModules/syncore_output.cpp)
 			target_link_libraries(safc-video-export-tests PRIVATE
 				Boost::headers GLUT::GLUT LibArchive::LibArchive zstd::libzstd
-				safsyn-windows mfplat mfreadwrite mfuuid mf)
+				safsyn-windows mfplat mfreadwrite mfuuid mf oleaut32)
 			target_compile_definitions(safc-video-export-tests PRIVATE SAFC_WITH_SYNCORE=1)
 			target_compile_features(safc-video-export-tests PRIVATE cxx_std_23)
 			if(MSVC)

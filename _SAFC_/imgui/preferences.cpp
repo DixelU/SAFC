@@ -19,6 +19,62 @@ constexpr std::uint32_t maximum_cohorts = 1048576;
 constexpr std::uint32_t maximum_render_threads = 64;
 constexpr double minimum_gain_db = -60.;
 constexpr double maximum_gain_db = 12.;
+
+// Encoder options stored as DWORDs; -1 (encoder default) round-trips as 0xFFFFFFFF.
+template<class Field>
+void video_encoder_fields(simple_player_video_settings& video, Field&& field)
+{
+	field(L"PLAYER_RENDER_BACKGROUND", video.background_rgb);
+	field(L"PLAYER_RENDER_CODEC", video.codec);
+	field(L"PLAYER_RENDER_RATE_CONTROL", video.rate_control);
+	field(L"PLAYER_RENDER_QUALITY", video.quality);
+	field(L"PLAYER_RENDER_QP", video.qp);
+	field(L"PLAYER_RENDER_QP_P_OFFSET", video.qp_p_offset);
+	field(L"PLAYER_RENDER_QP_B_OFFSET", video.qp_b_offset);
+	field(L"PLAYER_RENDER_PEAK_KBPS", video.peak_bitrate_kbps);
+	field(L"PLAYER_RENDER_BUFFER_KBITS", video.buffer_kbits);
+	field(L"PLAYER_RENDER_MIN_QP", video.min_qp);
+	field(L"PLAYER_RENDER_MAX_QP", video.max_qp);
+	field(L"PLAYER_RENDER_SPEED_QUALITY", video.quality_vs_speed);
+	field(L"PLAYER_RENDER_GOP", video.gop_size);
+	field(L"PLAYER_RENDER_B_FRAMES", video.b_frames);
+	field(L"PLAYER_RENDER_REFERENCES", video.max_reference_frames);
+	field(L"PLAYER_RENDER_ENCODER_THREADS", video.worker_threads);
+	field(L"PLAYER_RENDER_CABAC", video.cabac);
+	field(L"PLAYER_RENDER_LOW_LATENCY", video.low_latency);
+	field(L"PLAYER_RENDER_HARDWARE", video.hardware_encoder);
+	field(L"PLAYER_RENDER_H264_PROFILE", video.h264_profile);
+	field(L"PLAYER_RENDER_CHROMA", video.chroma);
+	field(L"PLAYER_RENDER_BIT_DEPTH", video.bit_depth);
+	field(L"PLAYER_RENDER_MATRIX", video.matrix);
+	field(L"PLAYER_RENDER_FULL_RANGE", video.full_range);
+	field(L"PLAYER_RENDER_CHROMA_FILTER", video.chroma_filter);
+	field(L"PLAYER_RENDER_FAST_START", video.fast_start);
+	field(L"PLAYER_RENDER_AUDIO_CODEC", video.audio_codec);
+	field(L"PLAYER_RENDER_AUDIO_BITS", video.audio_bits);
+	field(L"PLAYER_RENDER_AUDIO_DITHER", video.audio_dither);
+}
+
+// Unknown stored enum values fall back to the defaults, so combos never
+// index past their names; other bad values are reported by the exporter.
+void sanitize_video_enums(simple_player_video_settings& video)
+{
+	const simple_player_video_settings defaults;
+	if (video.codec > simple_player_video_codec::vc1)
+		video.codec = defaults.codec;
+	if (video.rate_control > simple_player_video_rate_control::constant_qp)
+		video.rate_control = defaults.rate_control;
+	if (video.h264_profile > simple_player_video_h264_profile::high)
+		video.h264_profile = defaults.h264_profile;
+	if (video.chroma > simple_player_video_chroma::yuv444)
+		video.chroma = defaults.chroma;
+	if (video.matrix > simple_player_video_matrix::bt2020)
+		video.matrix = defaults.matrix;
+	if (video.chroma_filter > simple_player_video_chroma_filter::nearest)
+		video.chroma_filter = defaults.chroma_filter;
+	if (video.audio_codec > simple_player_video_audio_codec::pcm)
+		video.audio_codec = defaults.audio_codec;
+}
 }
 
 bool valid_synth_preferences(const syncore_preferences& preferences)
@@ -88,6 +144,8 @@ application_preferences preferences_store::load() const
 	number(L"PLAYER_RENDER_VIDEO_KBPS", p.video.video_bitrate_kbps);
 	number(L"PLAYER_RENDER_AUDIO_KBPS", p.video.audio_bitrate_kbps);
 	number(L"PLAYER_RENDER_AUDIO_RATE", p.video.audio_sample_rate);
+	video_encoder_fields(p.video, number);
+	sanitize_video_enums(p.video);
 	try
 	{
 		p.video.tail_seconds = std::stod(key.GetStringValue(L"PLAYER_RENDER_TAIL_SECONDS"));
@@ -162,6 +220,11 @@ void preferences_store::save(const application_preferences& p) const
 	key.SetDwordValue(L"PLAYER_RENDER_VIDEO_KBPS", p.video.video_bitrate_kbps);
 	key.SetDwordValue(L"PLAYER_RENDER_AUDIO_KBPS", p.video.audio_bitrate_kbps);
 	key.SetDwordValue(L"PLAYER_RENDER_AUDIO_RATE", p.video.audio_sample_rate);
+	auto video = p.video;
+	video_encoder_fields(video, [&](const wchar_t* name, const auto& value)
+	{
+		key.SetDwordValue(name, static_cast<DWORD>(value));
+	});
 	key.SetStringValue(L"PLAYER_RENDER_TAIL_SECONDS", std::to_wstring(p.video.tail_seconds));
 	key.SetStringValue(L"PLAYER_RENDER_VISIBLE_SECONDS", std::to_wstring(p.video.visible_seconds));
 }

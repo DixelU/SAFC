@@ -233,6 +233,12 @@
     <ClInclude Include="..\SAFC_InnerModules\simple_player_video_export.h">
       <Filter>Processing and playback</Filter>
     </ClInclude>
+    <ClInclude Include="..\SAFC_InnerModules\video_frame_conversion.h">
+      <Filter>Processing and playback</Filter>
+    </ClInclude>
+    <ClInclude Include="..\SAFC_InnerModules\video_parameter_sets.h">
+      <Filter>Processing and playback</Filter>
+    </ClInclude>
     <ClInclude Include="..\SAFC_InnerModules\single_midi_info_collector.h">
       <Filter>Processing and playback</Filter>
     </ClInclude>
