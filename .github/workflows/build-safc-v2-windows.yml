@@ -15,11 +15,11 @@ concurrency:
 
 jobs:
   build:
-    name: x64 Release (develop)
+    name: x64 + x86 Release (develop)
     runs-on: windows-2025-vs2026
     timeout-minutes: 360
     env:
-      VCPKG_DEFAULT_BINARY_CACHE: ${{ runner.temp }}\vcpkg-binary-cache
+      VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}\vcpkg-binary-cache
     defaults:
       run:
         shell: pwsh
@@ -34,10 +34,10 @@ jobs:
       - name: Restore compiled vcpkg packages
         uses: actions/cache@v4
         with:
-          path: ${{ runner.temp }}\vcpkg-binary-cache
-          key: safc-v2-vs2026-x64-vcpkg-${{ hashFiles('dependencies.txt') }}-v1
+          path: ${{ github.workspace }}\vcpkg-binary-cache
+          key: safc-v2-vs2026-x64-x86-vcpkg-${{ hashFiles('dependencies.txt') }}-v1
           restore-keys: |
-            safc-v2-vs2026-x64-vcpkg-
+            safc-v2-vs2026-x64-x86-vcpkg-
 
       - name: Install static x64 dependencies
         run: |
@@ -62,7 +62,7 @@ jobs:
           & $vcpkg integrate install
           if ($LASTEXITCODE -ne 0) { throw "vcpkg integration failed (exit code $LASTEXITCODE)." }
 
-      - name: Build SAFC2 with MSVC v145
+      - name: Build SAFC2 x64 with MSVC v145
         run: |
           $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
           if (-not (Test-Path -LiteralPath $vswhere -PathType Leaf)) {
@@ -80,7 +80,7 @@ jobs:
             /m:2 /v:minimal /nologo
           if ($LASTEXITCODE -ne 0) { throw "SAFC2 build failed (exit code $LASTEXITCODE)." }
 
-      - name: Assemble build artifact
+      - name: Assemble x64 build artifact
         run: |
           $exe = 'build\msbuild\x64\Release\SAFC2\SAFC.exe'
           if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) {
@@ -103,11 +103,84 @@ jobs:
           Write-Host "Source revision: $revision"
           Write-Host "SHA-256: $sha256"
 
-      - name: Upload SAF-C v2 executable
+      - name: Upload x64 SAF-C v2 executable
         uses: actions/upload-artifact@v4
         with:
           name: SAFC-v2-develop-x64-${{ github.run_number }}
           path: dist/SAFC-v2-develop-x64/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
+      - name: Install static x86 dependencies
+        run: |
+          if (-not $env:VCPKG_INSTALLATION_ROOT) {
+            throw 'This runner does not provide VCPKG_INSTALLATION_ROOT.'
+          }
+          $vcpkg = Join-Path $env:VCPKG_INSTALLATION_ROOT 'vcpkg.exe'
+          if (-not (Test-Path -LiteralPath $vcpkg -PathType Leaf)) {
+            throw "vcpkg.exe not found at $vcpkg"
+          }
+          New-Item -ItemType Directory -Force -Path $env:VCPKG_DEFAULT_BINARY_CACHE | Out-Null
+          # Install the ImGui frontend's Boost modules, not the full Boost meta-package;
+          # the legacy GUI's freeglut dependency is also intentionally omitted.
+          & $vcpkg install `
+            'boost-algorithm:x86-windows-static' `
+            'boost-container:x86-windows-static' `
+            'libarchive[core,bzip2,lz4,lzma,xar,zstd]:x86-windows-static' `
+            'zstd:x86-windows-static' `
+            'glfw3:x86-windows-static' `
+            'imgui[glfw-binding,opengl3-binding]:x86-windows-static'
+          if ($LASTEXITCODE -ne 0) { throw "vcpkg install failed (exit code $LASTEXITCODE)." }
+          & $vcpkg integrate install
+          if ($LASTEXITCODE -ne 0) { throw "vcpkg integration failed (exit code $LASTEXITCODE)." }
+
+      - name: Build SAFC2 x86 with MSVC v145
+        run: |
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          if (-not (Test-Path -LiteralPath $vswhere -PathType Leaf)) {
+            throw 'Visual Studio vswhere.exe was not found.'
+          }
+          $vsPath = (& $vswhere -latest -products '*' -requires Microsoft.Component.MSBuild -property installationPath | Select-Object -First 1)
+          if (-not $vsPath) { throw 'Visual Studio with MSBuild is not installed.' }
+          $msbuild = Join-Path $vsPath 'MSBuild\Current\Bin\MSBuild.exe'
+          if (-not (Test-Path -LiteralPath $msbuild -PathType Leaf)) {
+            throw "MSBuild.exe not found at $msbuild"
+          }
+          & $msbuild '_SAFC_\imgui\SAFC2.vcxproj' `
+            /p:Configuration=Release /p:Platform=Win32 `
+            "/p:VcpkgRoot=$env:VCPKG_INSTALLATION_ROOT" `
+            /m:2 /v:minimal /nologo
+          if ($LASTEXITCODE -ne 0) { throw "SAFC2 build failed (exit code $LASTEXITCODE)." }
+
+      - name: Assemble x86 build artifact
+        run: |
+          $exe = 'build\msbuild\Win32\Release\SAFC2\SAFC.exe'
+          if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) {
+            throw "Expected SAFC v2 executable not found: $exe"
+          }
+          $out = 'dist\SAFC-v2-develop-x86'
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          Copy-Item -LiteralPath $exe -Destination (Join-Path $out 'SAFC.exe')
+          $revision = (& git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot determine checked-out source revision.' }
+          $sha256 = (Get-FileHash -LiteralPath (Join-Path $out 'SAFC.exe') -Algorithm SHA256).Hash
+          @(
+            'Repository: DixelU/SAFC'
+            'Source branch: develop'
+            "Source commit: $revision"
+            'Build: x86 Release, MSVC v145, static vcpkg dependencies'
+            "SAFC.exe SHA-256: $sha256"
+          ) | Set-Content -LiteralPath (Join-Path $out 'BUILD-INFO.txt') -Encoding utf8
+          Get-Item -LiteralPath (Join-Path $out 'SAFC.exe') | Select-Object Name, Length
+          Write-Host "Source revision: $revision"
+          Write-Host "SHA-256: $sha256"
+
+      - name: Upload x86 SAF-C v2 executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: SAFC-v2-develop-x86-${{ github.run_number }}
+          path: dist/SAFC-v2-develop-x86/
           if-no-files-found: error
           compression-level: 0
           retention-days: 14
