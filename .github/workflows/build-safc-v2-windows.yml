@@ -19,7 +19,7 @@ jobs:
     runs-on: windows-2025-vs2026
     timeout-minutes: 360
     env:
-      VCPKG_DEFAULT_BINARY_CACHE: \${{ runner.temp }}\vcpkg-binary-cache
+      VCPKG_DEFAULT_BINARY_CACHE: ${{ runner.temp }}\vcpkg-binary-cache
     defaults:
       run:
         shell: pwsh
@@ -34,8 +34,8 @@ jobs:
       - name: Restore compiled vcpkg packages
         uses: actions/cache@v4
         with:
-          path: \${{ runner.temp }}\vcpkg-binary-cache
-          key: safc-v2-vs2026-x64-vcpkg-\${{ hashFiles('dependencies.txt') }}-v1
+          path: ${{ runner.temp }}\vcpkg-binary-cache
+          key: safc-v2-vs2026-x64-vcpkg-${{ hashFiles('dependencies.txt') }}-v1
           restore-keys: |
             safc-v2-vs2026-x64-vcpkg-
 
@@ -64,7 +64,7 @@ jobs:
 
       - name: Build SAFC2 with MSVC v145
         run: |
-          $vswhere = Join-Path \${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
           if (-not (Test-Path -LiteralPath $vswhere -PathType Leaf)) {
             throw 'Visual Studio vswhere.exe was not found.'
           }
