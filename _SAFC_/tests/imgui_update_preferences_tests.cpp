@@ -158,6 +158,7 @@ try
         {
             preferences.automatic_updates = enabled;
             preferences.synth.shed_quiet_notes = !enabled;
+            preferences.video.audio_only = enabled;
             store.save(preferences);
             require(read_dword(key.value, L"AUTOUPDATECHECK") == static_cast<DWORD>(enabled), "Full preferences save must persist update flag");
             require(read_dword(key.value, L"SYNCORE_SHED_NOTES") == static_cast<DWORD>(!enabled), "Full preferences save must persist the SYNCore shedding flag");
@@ -165,6 +166,7 @@ try
             require(loaded.automatic_updates == enabled && loaded.video.width == 1920 && loaded.sound_bank == bank,
                 "Full preferences reload preserves the update flag and other settings");
             require(loaded.synth.shed_quiet_notes == !enabled, "Full preferences reload preserves the SYNCore shedding flag");
+            require(loaded.video.audio_only == enabled, "Full preferences reload preserves the audio-only export mode");
         }
     }
     require(isolated.restore(), "Restore HKCU override and remove only the private test subtree");

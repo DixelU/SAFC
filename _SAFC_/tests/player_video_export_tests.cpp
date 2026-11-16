@@ -1,6 +1,7 @@
 #define NOMINMAX
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdlib>
 #include <cstring>
 
@@ -776,6 +777,102 @@ bool decoded_pixel(const std::filesystem::path& path, std::uint32_t x, std::uint
 	return ok;
 }
 
+// Decodes the first audio stream to float PCM and counts its frames; also
+// reports whether the file has a video stream. -1 when it cannot be read.
+struct decoded_audio
+{
+	std::int64_t frames = -1;
+	std::uint32_t sample_rate = 0;
+	bool has_video = false;
+	float peak = 0.0f;
+};
+
+decoded_audio decode_audio(const std::filesystem::path& path)
+{
+	using Microsoft::WRL::ComPtr;
+	decoded_audio result;
+	const HRESULT com = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+	if (FAILED(MFStartup(MF_VERSION)))
+		return result;
+	{
+		ComPtr<IMFSourceReader> reader;
+		ComPtr<IMFMediaType> pcm;
+		ComPtr<IMFMediaType> current;
+		ComPtr<IMFMediaType> video;
+		if (SUCCEEDED(MFCreateSourceReaderFromURL(path.c_str(), nullptr, reader.GetAddressOf())) &&
+			SUCCEEDED(MFCreateMediaType(pcm.GetAddressOf())) &&
+			SUCCEEDED(pcm->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Audio)) &&
+			SUCCEEDED(pcm->SetGUID(MF_MT_SUBTYPE, MFAudioFormat_Float)) &&
+			SUCCEEDED(reader->SetCurrentMediaType(MF_SOURCE_READER_FIRST_AUDIO_STREAM, nullptr, pcm.Get())) &&
+			SUCCEEDED(reader->GetCurrentMediaType(MF_SOURCE_READER_FIRST_AUDIO_STREAM, current.GetAddressOf())))
+		{
+			result.has_video = SUCCEEDED(reader->GetNativeMediaType(
+				MF_SOURCE_READER_FIRST_VIDEO_STREAM, 0, video.GetAddressOf()));
+			result.sample_rate = MFGetAttributeUINT32(current.Get(), MF_MT_AUDIO_SAMPLES_PER_SECOND, 0);
+			const auto channels = MFGetAttributeUINT32(current.Get(), MF_MT_AUDIO_NUM_CHANNELS, 0);
+			std::int64_t frames = 0;
+			bool ok = channels != 0;
+			while (ok)
+			{
+				DWORD flags = 0;
+				ComPtr<IMFSample> sample;
+				if (FAILED(reader->ReadSample(MF_SOURCE_READER_FIRST_AUDIO_STREAM, 0, nullptr,
+					&flags, nullptr, sample.GetAddressOf())))
+				{
+					ok = false;
+					break;
+				}
+				if (flags & MF_SOURCE_READERF_ENDOFSTREAM)
+					break;
+				ComPtr<IMFMediaBuffer> buffer;
+				BYTE* data = nullptr;
+				DWORD length = 0;
+				if (!sample || FAILED(sample->ConvertToContiguousBuffer(buffer.GetAddressOf())) ||
+					FAILED(buffer->Lock(&data, nullptr, &length)))
+					continue;
+				const auto* samples = reinterpret_cast<const float*>(data);
+				for (DWORD index = 0; index < length / sizeof(float); ++index)
+					result.peak = (std::max)(result.peak, std::abs(samples[index]));
+				frames += length / (sizeof(float) * channels);
+				buffer->Unlock();
+			}
+			if (ok)
+				result.frames = frames;
+		}
+	}
+	MFShutdown();
+	if (SUCCEEDED(com))
+		CoUninitialize();
+	return result;
+}
+
+std::uint32_t le32(const std::vector<std::uint8_t>& bytes, std::size_t offset)
+{
+	return offset + 4 > bytes.size() ? 0 : static_cast<std::uint32_t>(bytes[offset]) |
+		static_cast<std::uint32_t>(bytes[offset + 1]) << 8 |
+		static_cast<std::uint32_t>(bytes[offset + 2]) << 16 |
+		static_cast<std::uint32_t>(bytes[offset + 3]) << 24;
+}
+
+std::uint16_t le16(const std::vector<std::uint8_t>& bytes, std::size_t offset)
+{
+	return offset + 2 > bytes.size() ? 0 : static_cast<std::uint16_t>(bytes[offset] | bytes[offset + 1] << 8);
+}
+
+// Chunk body offset and size in a RIFF WAVE file, or {0, 0}.
+std::pair<std::size_t, std::uint32_t> wav_chunk(const std::vector<std::uint8_t>& bytes, const char (&id)[5])
+{
+	std::size_t cursor = 12;
+	while (cursor + 8 <= bytes.size())
+	{
+		const auto size = le32(bytes, cursor + 4);
+		if (std::memcmp(bytes.data() + cursor, id, 4) == 0)
+			return {cursor + 8, size};
+		cursor += 8 + size + (size & 1U);
+	}
+	return {0, 0};
+}
+
 simple_player_video_result render_codec_case(const std::filesystem::path& output,
 	const simple_player_video_settings& settings, const syncore_preferences& preferences)
 {
@@ -795,6 +892,136 @@ void report_case(const char* label, const simple_player_video_result& result)
 	std::cout << label << ": " << (result.ok ? "ok" : result.error) <<
 		(result.video_encoder.empty() ? "" : " [" + result.video_encoder + "]") <<
 		(result.warning.empty() ? "" : " warnings: " + result.warning) << '\n';
+}
+
+void test_audio_only(const std::filesystem::path& directory, const syncore_preferences& preferences,
+	const std::filesystem::path& midi_path)
+{
+	using audio = simple_player_video_audio_codec;
+	struct audio_case
+	{
+		const char* name;
+		audio codec;
+		std::uint32_t bits;
+		std::uint32_t bitrate;
+		bool lossless;
+	};
+	const audio_case cases[] = {
+		{"aac", audio::aac, 16, 192, false},
+		{"alac-24", audio::alac, 24, 192, true},
+		{"flac-16", audio::flac, 16, 192, true},
+		{"flac-24", audio::flac, 24, 192, true},
+		{"wma", audio::wma, 16, 192, false},
+		{"wma-pro", audio::wma_pro, 24, 384, false},
+		{"pcm-16", audio::pcm, 16, 192, true},
+		{"pcm-24", audio::pcm, 24, 192, true},
+		{"pcm-float", audio::pcm, 32, 192, true},
+	};
+	constexpr std::int64_t expected_frames = 48000;
+	for (const auto& entry : cases)
+	{
+		auto settings = test_settings(0, entry.bitrate);
+		settings.audio_only = true;
+		settings.audio_codec = entry.codec;
+		settings.audio_bits = entry.bits;
+		// Video settings the exporter would refuse are ignored without video.
+		settings.width = 0;
+		const auto output = directory /
+			(std::string("audio-only-") + entry.name + std::filesystem::path(
+				simple_player_output_extension(settings)).string());
+		const auto result = render_codec_case(output, settings, preferences);
+		report_case((std::string("Audio only ") + entry.name).c_str(), result);
+		const auto bytes = read_bytes(output);
+		const auto decoded = decode_audio(output);
+		const auto frame_error = decoded.frames - expected_frames;
+		std::cout << "  decoded " << decoded.frames << " frames at " << decoded.sample_rate <<
+			" Hz, peak " << decoded.peak << '\n';
+		// Media Foundation's MP4 writer pads ALAC's last 4096-frame packet
+		// with silence; it has no edit list to trim it.
+		const bool length_ok = entry.codec == audio::alac ? frame_error >= 0 && frame_error < 4096
+			: entry.lossless ? frame_error == 0 : frame_error >= -2048 && frame_error <= 4096;
+		check(result.ok && result.video_frames == 0 && result.video_encoder.empty() &&
+			result.audio_frames == static_cast<std::uint64_t>(expected_frames) &&
+			decoded.frames > 0 && !decoded.has_video && length_ok && decoded.peak > 0.01f &&
+			decoded.sample_rate == 48000 && no_partial_outputs(directory, output),
+			"audio-only output decodes at SYNCore's length without a lead-in or video stream");
+
+		switch (entry.codec)
+		{
+		case audio::aac:
+		case audio::alac:
+			check(contains_atom(bytes, "soun") && !contains_atom(bytes, "vide") &&
+				contains_atom(bytes, entry.codec == audio::aac ? "mp4a" : "alac"),
+				"AAC and ALAC audio-only output is an M4A with one sound track");
+			break;
+		case audio::flac:
+			check(bytes.size() > 4 && std::memcmp(bytes.data(), "fLaC", 4) == 0,
+				"FLAC audio-only output is a native FLAC stream");
+			break;
+		case audio::wma:
+		case audio::wma_pro:
+			check(is_asf(bytes), "WMA audio-only output is an ASF file");
+			break;
+		case audio::pcm:
+		{
+			const auto [format, format_size] = wav_chunk(bytes, "fmt ");
+			const auto [data, data_size] = wav_chunk(bytes, "data");
+			const auto [fact, fact_size] = wav_chunk(bytes, "fact");
+			const auto block = 2U * entry.bits / 8U;
+			const bool header_ok = bytes.size() > 12 && std::memcmp(bytes.data(), "RIFF", 4) == 0 &&
+				std::memcmp(bytes.data() + 8, "WAVE", 4) == 0 && le32(bytes, 4) == bytes.size() - 8 &&
+				format != 0 && le16(bytes, format) == (entry.bits == 32 ? 3 : 1) &&
+				le16(bytes, format + 2) == 2 && le32(bytes, format + 4) == 48000 &&
+				le16(bytes, format + 12) == block && le16(bytes, format + 14) == entry.bits &&
+				data != 0 && data_size == expected_frames * block && data + data_size == bytes.size() &&
+				(entry.bits != 32 || (fact != 0 && fact_size == 4 && le32(bytes, fact) == expected_frames));
+			check(header_ok, "WAV output has an exact PCM or float header and data size");
+			break;
+		}
+		}
+	}
+
+	{
+		auto settings = test_settings(0);
+		settings.audio_only = true;
+		settings.audio_codec = audio::pcm;
+		settings.audio_bits = 24;
+		settings.tail_seconds = 0.5;
+		const auto output = directory / "audio-only-smf.wav";
+		std::filesystem::remove(output);
+		const auto result = render_simple_player_video(midi_path.wstring(), output.wstring(),
+			{}, preferences, settings, nullptr, nullptr, nullptr);
+		const auto lead_in = static_cast<std::uint64_t>(std::llround(
+			simple_player::default_start_lead_in_us / 1'000'000.0 * 48000));
+		// The SMPTE fixture renders 192000 frames with the video's lead-in.
+		check(result.ok && result.audio_frames == 192000 - lead_in + 24000 &&
+			decode_audio(output).frames == static_cast<std::int64_t>(result.audio_frames),
+			"a standard MIDI file renders to WAV with its tail and without the video lead-in");
+	}
+
+	{
+		const std::vector<std::uint8_t> sentinel{'k', 'e', 'e', 'p'};
+		auto settings = test_settings(0);
+		settings.audio_only = true;
+		const auto output = directory / "audio-only-wrong-extension.mp4";
+		write_bytes(output, sentinel);
+		const auto result = render_simple_player_video(midi_path.wstring(), output.wstring(),
+			{}, preferences, settings, nullptr, nullptr, nullptr);
+		check(!result.ok && result.error.find(".m4a") != std::string::npos &&
+			read_bytes(output) == sentinel,
+			"audio-only AAC refuses a path without the .m4a extension");
+	}
+
+	{
+		auto settings = test_settings(44100);
+		settings.audio_only = true;
+		settings.audio_codec = audio::pcm;
+		check(simple_player_video_settings_problem(settings, preferences).find("SYNCore's sample rate") !=
+			std::string::npos, "WAV output refuses a rate other than SYNCore's");
+		settings.audio_codec = audio::flac;
+		check(simple_player_video_settings_problem(settings, preferences).empty(),
+			"FLAC audio-only output may resample through Media Foundation");
+	}
 }
 
 void test_codecs(const std::filesystem::path& directory, const syncore_preferences& preferences)
@@ -1294,6 +1521,7 @@ int main(int argc, char** argv)
 	}
 
 	test_yuv_conversion();
+	test_audio_only(directory, preferences, midi_path);
 	test_codecs(directory, preferences);
 
 	if (failures != 0)

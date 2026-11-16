@@ -109,7 +109,10 @@ void fit_to_codec(simple_player_video_settings& settings)
 		settings.chroma = simple_player_video_chroma::yuv420;
 	if (settings.codec != video_codec::hevc && settings.codec != video_codec::av1)
 		settings.bit_depth = 8;
-	if (!simple_player_video_audio_supported(settings.codec, settings.audio_codec))
+	// WAV keeps SYNCore's rate; the other audio-only containers take any codec.
+	if (settings.audio_only && settings.audio_codec == audio_codec::pcm)
+		settings.audio_sample_rate = 0;
+	if (!settings.audio_only && !simple_player_video_audio_supported(settings.codec, settings.audio_codec))
 	{
 		const bool lossy = settings.audio_codec == audio_codec::aac || settings.audio_codec == audio_codec::wma ||
 			settings.audio_codec == audio_codec::wma_pro;
@@ -209,7 +212,7 @@ struct video_export_panel::impl
 	{
 		auto result = settings_problem(settings, synth);
 		const auto found = known_encoders();
-		if (!result.empty() || !found)
+		if (!result.empty() || !found || settings.audio_only)
 			return result;
 		const std::string codec = simple_player_video_codec_name(settings.codec);
 		if (!codec_available(*found, settings.codec, settings.hardware_encoder))
@@ -300,6 +303,8 @@ struct video_export_panel::impl
 		const auto path = current.busy ? current.source_path : playback.current_path();
 		const bool has_source = current.busy || !path.empty() || playback.current_source();
 		ImGui::TextWrapped("Source: %s", has_source ? display_path(path).c_str() : "none");
+		if (settings.audio_only)
+			return;
 		if (texture && texture_width && texture_height)
 		{
 			// The preview is at most 320 px wide; never upscale it past the UI scale.
@@ -317,13 +322,18 @@ struct video_export_panel::impl
 	void draw_progress(const video_export_snapshot& current)
 	{
 		ImGui::TextWrapped("%s", current.cancelling ? "Cancelling..." : current.status.c_str());
-		ImGui::ProgressBar(
-			fraction(current.progress.completed_frames, current.progress.total_frames), {-1, 0}, "Video");
+		// Settings cannot change while a render runs, so they describe it.
+		if (!settings.audio_only)
+			ImGui::ProgressBar(
+				fraction(current.progress.completed_frames, current.progress.total_frames), {-1, 0}, "Video");
 		ImGui::ProgressBar(
 			fraction(current.progress.completed_audio_frames, current.progress.total_audio_frames), {-1, 0}, "Audio");
 		if (current.progress.total_frames)
 			ImGui::Text("Frames %llu / %llu  |  Events %llu  |  Voices %llu", current.progress.completed_frames,
 				current.progress.total_frames, current.progress.completed_events, current.progress.active_voices);
+		else if (current.progress.total_audio_frames)
+			ImGui::Text("Events %llu / %llu  |  Voices %llu", current.progress.completed_events,
+				current.progress.total_events, current.progress.active_voices);
 		if (!current.result.video_encoder.empty())
 			ImGui::TextWrapped("Encoder: %s", current.result.video_encoder.c_str());
 		if (!current.result.error.empty())
@@ -475,89 +485,107 @@ struct video_export_panel::impl
 
 		if (ImGui::BeginTable("Render settings", 2, ImGuiTableFlags_SizingStretchSame))
 		{
-			labels("Width", "Height");
-			integer("##width", s.width);
-			integer("##height", s.height);
-			labels("FPS", "Codec");
-			integer("##fps", s.fps);
+			labels("Output", nullptr);
 			{
-				std::vector<std::string> names;
-				for (const auto codec : {video_codec::h264, video_codec::hevc, video_codec::av1,
-					video_codec::wmv9, video_codec::vc1})
+				int output = s.audio_only ? 1 : 0;
+				if (options("##output", output, {"Video with audio", "Audio only"}, always))
 				{
-					std::string name = std::string(simple_player_video_codec_name(codec)) +
-						(asf_codec(codec) ? " (WMV)" : " (MP4)");
-					if (found && !codec_available(*found, codec, s.hardware_encoder))
-					{
-						const bool unwritable = std::any_of(found->begin(), found->end(), [&](const auto& encoder)
-							{ return encoder.codec == codec && !encoder.writable; });
-						name += unwritable ? " - Windows cannot store it" : " - no encoder";
-					}
-					names.push_back(std::move(name));
+					s.audio_only = output != 0;
+					fit_to_codec(s);
 				}
+				ImGui::SetItemTooltip("Audio only renders SYNCore's output by itself, starting with the music\n"
+					"instead of the video's lead-in");
+			}
+			if (!s.audio_only)
+			{
+				labels("Width", "Height");
+				integer("##width", s.width);
+				integer("##height", s.height);
+				labels("FPS", "Codec");
+				integer("##fps", s.fps);
+				{
+					std::vector<std::string> names;
+					for (const auto codec : {video_codec::h264, video_codec::hevc, video_codec::av1,
+						video_codec::wmv9, video_codec::vc1})
+					{
+						std::string name = std::string(simple_player_video_codec_name(codec)) +
+							(asf_codec(codec) ? " (WMV)" : " (MP4)");
+						if (found && !codec_available(*found, codec, s.hardware_encoder))
+						{
+							const bool unwritable = std::any_of(found->begin(), found->end(), [&](const auto& encoder)
+								{ return encoder.codec == codec && !encoder.writable; });
+							name += unwritable ? " - Windows cannot store it" : " - no encoder";
+						}
+						names.push_back(std::move(name));
+					}
+					ImGui::TableNextColumn();
+					ImGui::SetNextItemWidth(-1);
+					if (ImGui::BeginCombo("##codec", names[static_cast<std::size_t>(s.codec)].c_str()))
+					{
+						for (std::size_t index = 0; index < names.size(); ++index)
+						{
+							const auto codec = static_cast<video_codec>(index);
+							const bool usable = !found || codec_available(*found, codec, s.hardware_encoder);
+							if (ImGui::Selectable(names[index].c_str(), codec == s.codec,
+								usable ? 0 : ImGuiSelectableFlags_Disabled))
+							{
+								s.codec = codec;
+								fit_to_codec(s);
+							}
+						}
+						ImGui::EndCombo();
+					}
+				}
+				labels("Rate control", bitrate_mode ? "Video kbps" : mode == rate_control::quality ? "Quality (0-100)" : "QP");
 				ImGui::TableNextColumn();
 				ImGui::SetNextItemWidth(-1);
-				if (ImGui::BeginCombo("##codec", names[static_cast<std::size_t>(s.codec)].c_str()))
+				if (ImGui::BeginCombo("##rate_control", rate_control_names[static_cast<std::size_t>(mode)]))
 				{
-					for (std::size_t index = 0; index < names.size(); ++index)
-					{
-						const auto codec = static_cast<video_codec>(index);
-						const bool usable = !found || codec_available(*found, codec, s.hardware_encoder);
-						if (ImGui::Selectable(names[index].c_str(), codec == s.codec,
-							usable ? 0 : ImGuiSelectableFlags_Disabled))
-						{
-							s.codec = codec;
-							fit_to_codec(s);
-						}
-					}
+					for (std::size_t index = 0; index < std::size(rate_control_names); ++index)
+						if (ImGui::Selectable(rate_control_names[index], index == static_cast<std::size_t>(mode)))
+							s.rate_control = static_cast<rate_control>(index);
 					ImGui::EndCombo();
 				}
-			}
-			labels("Rate control", bitrate_mode ? "Video kbps" : mode == rate_control::quality ? "Quality (0-100)" : "QP");
-			ImGui::TableNextColumn();
-			ImGui::SetNextItemWidth(-1);
-			if (ImGui::BeginCombo("##rate_control", rate_control_names[static_cast<std::size_t>(mode)]))
-			{
-				for (std::size_t index = 0; index < std::size(rate_control_names); ++index)
-					if (ImGui::Selectable(rate_control_names[index], index == static_cast<std::size_t>(mode)))
-						s.rate_control = static_cast<rate_control>(index);
-				ImGui::EndCombo();
-			}
-			ImGui::SetItemTooltip("CBR and VBR aim at a bitrate. Quality and constant QP aim at a picture quality and\n"
-				"let the file size follow; they keep flat backgrounds clean at a far lower average rate.");
-			if (bitrate_mode)
-				integer("##video_kbps", s.video_bitrate_kbps);
-			else if (mode == rate_control::quality)
-			{
-				ImGui::TableNextColumn();
-				ImGui::SetNextItemWidth(-1);
-				int quality = static_cast<int>(s.quality);
-				if (ImGui::SliderInt("##quality", &quality, 0, 100))
-					s.quality = static_cast<std::uint32_t>(quality);
-			}
-			else
-			{
-				ImGui::TableNextColumn();
-				ImGui::SetNextItemWidth(-1);
-				int qp = static_cast<int>(s.qp);
-				if (ImGui::SliderInt("##qp", &qp, 0, static_cast<int>(qp_limit)))
-					s.qp = static_cast<std::uint32_t>(qp);
-				ImGui::SetItemTooltip("Lower is better and larger");
-			}
-			if (mode == rate_control::peak_constrained_vbr)
-			{
-				labels("Peak kbps (0 = encoder default)", nullptr);
-				integer("##peak_kbps", s.peak_bitrate_kbps);
+				ImGui::SetItemTooltip("CBR and VBR aim at a bitrate. Quality and constant QP aim at a picture quality and\n"
+					"let the file size follow; they keep flat backgrounds clean at a far lower average rate.");
+				if (bitrate_mode)
+					integer("##video_kbps", s.video_bitrate_kbps);
+				else if (mode == rate_control::quality)
+				{
+					ImGui::TableNextColumn();
+					ImGui::SetNextItemWidth(-1);
+					int quality = static_cast<int>(s.quality);
+					if (ImGui::SliderInt("##quality", &quality, 0, 100))
+						s.quality = static_cast<std::uint32_t>(quality);
+				}
+				else
+				{
+					ImGui::TableNextColumn();
+					ImGui::SetNextItemWidth(-1);
+					int qp = static_cast<int>(s.qp);
+					if (ImGui::SliderInt("##qp", &qp, 0, static_cast<int>(qp_limit)))
+						s.qp = static_cast<std::uint32_t>(qp);
+					ImGui::SetItemTooltip("Lower is better and larger");
+				}
+				if (mode == rate_control::peak_constrained_vbr)
+				{
+					labels("Peak kbps (0 = encoder default)", nullptr);
+					integer("##peak_kbps", s.peak_bitrate_kbps);
+				}
 			}
 
 			const bool lossy_audio = s.audio_codec == audio_codec::aac || s.audio_codec == audio_codec::wma ||
 				s.audio_codec == audio_codec::wma_pro;
 			labels("Audio codec", lossy_audio ? "Audio kbps" : "Audio bits");
-			if (options("##audio_codec", s.audio_codec, {"AAC", "ALAC (lossless)", "FLAC (lossless)", "WMA",
-				"WMA Pro", "PCM (uncompressed)"}, [&](std::size_t index)
-				{
-					return simple_player_video_audio_supported(s.codec, static_cast<audio_codec>(index));
-				}))
+			// Audio alone takes every codec; its container follows the codec.
+			const auto audio_usable = [&](std::size_t index)
+			{
+				return s.audio_only || simple_player_video_audio_supported(s.codec, static_cast<audio_codec>(index));
+			};
+			if (s.audio_only ? options("##audio_codec", s.audio_codec, {"AAC (.m4a)", "ALAC (.m4a, lossless)",
+					"FLAC (.flac, lossless)", "WMA (.wma)", "WMA Pro (.wma)", "WAV (uncompressed)"}, audio_usable)
+				: options("##audio_codec", s.audio_codec, {"AAC", "ALAC (lossless)", "FLAC (lossless)", "WMA",
+					"WMA Pro", "PCM (uncompressed)"}, audio_usable))
 				fit_to_codec(s);
 			if (s.audio_codec == audio_codec::aac)
 				choice("##audio_kbps", s.audio_bitrate_kbps, {96, 128, 160, 192});
@@ -570,18 +598,40 @@ struct video_export_panel::impl
 				choice("##audio_bits", s.audio_bits, {16, 24, 32}, 32, "32 (float)");
 			else
 				choice("##audio_bits", s.audio_bits, {16, 24});
-			labels("Audio Hz", "Background");
+			labels("Audio Hz", s.audio_only ? "Tail seconds" : "Background");
 			{
 				const auto synth_rate = playback.synth_preferences().sample_rate;
 				const auto same = "Same as SYNCore (" + std::to_string(synth_rate) + ")";
-				if (s.audio_codec == audio_codec::aac || s.audio_codec == audio_codec::wma)
+				if (s.audio_only && s.audio_codec == audio_codec::pcm)
+				{
+					choice("##audio_hz", s.audio_sample_rate, {0}, 0, same.c_str());
+					ImGui::SetItemTooltip("WAV keeps SYNCore's samples; change the rate in the SYNCore settings");
+				}
+				else if (s.audio_codec == audio_codec::aac || s.audio_codec == audio_codec::wma)
 					choice("##audio_hz", s.audio_sample_rate, {0, 44100, 48000}, 0, same.c_str());
 				else if (s.audio_codec == audio_codec::wma_pro)
 					choice("##audio_hz", s.audio_sample_rate, {0, 44100, 48000, 88200, 96000}, 0, same.c_str());
 				else
 					choice("##audio_hz", s.audio_sample_rate, {0, 32000, 44100, 48000, 88200, 96000, 176400, 192000},
 						0, same.c_str());
-				ImGui::SetItemTooltip("A rate other than SYNCore's is resampled by Windows");
+				if (!s.audio_only || s.audio_codec != audio_codec::pcm)
+					ImGui::SetItemTooltip("A rate other than SYNCore's is resampled by Windows");
+			}
+			if (s.audio_only)
+			{
+				seconds("##tail_seconds", s.tail_seconds, .5, 1, 0);
+				ImGui::SetItemTooltip("Silence rendered after the last event, so releases and reverb ring out");
+				labels(s.audio_codec == audio_codec::wma_pro ? "WMA Pro bits" : "Audio dither", nullptr);
+				if (s.audio_codec == audio_codec::wma_pro)
+					choice("##wma_pro_bits", s.audio_bits, {16, 24});
+				else
+				{
+					ImGui::TableNextColumn();
+					ImGui::Checkbox("TPDF to 16-bit##dither", &s.audio_dither);
+					ImGui::SetItemTooltip("Dither when SAFC reduces SYNCore's float output to 16-bit samples");
+				}
+				ImGui::EndTable();
+				return;
 			}
 			ImGui::TableNextColumn();
 			ImGui::SetNextItemWidth(-1);
@@ -825,7 +875,7 @@ bool video_export_panel::start_export(std::wstring output_path)
 				std::lock_guard lock(self->mutex);
 				self->state.result = result;
 				if (result.ok)
-					self->state.status = "Video saved";
+					self->state.status = settings.audio_only ? "Audio saved" : "Video saved";
 				else if (result.cancelled)
 					self->state.status = "Render cancelled";
 				else
@@ -880,7 +930,9 @@ void video_export_panel::draw(bool* open)
 		ImGui::Separator();
 		ImGui::BeginDisabled(current.busy);
 		impl_->draw_settings();
-		ImGui::TextWrapped("Uses applied SYNCore settings. Audio and video render independently from playback.");
+		ImGui::TextWrapped(impl_->settings.audio_only
+			? "Uses applied SYNCore settings. Audio renders independently from playback."
+			: "Uses applied SYNCore settings. Audio and video render independently from playback.");
 		// Validate before the save dialog, so it is never shown for a render that cannot start.
 		std::string problem;
 		if (!current.busy)
@@ -891,12 +943,13 @@ void video_export_panel::draw(bool* open)
 				problem = impl_->problem(impl_->playback.synth_preferences());
 		}
 		ImGui::BeginDisabled(!problem.empty());
-		if (ImGui::Button("Render video", {scaled(150), 0}) && impl_->dialogs.save_video)
+		if (ImGui::Button(impl_->settings.audio_only ? "Render audio###render" : "Render video###render",
+			{scaled(150), 0}) && impl_->dialogs.save_video)
 		{
 			auto suggestion = std::filesystem::path(impl_->playback.current_path());
 			if (suggestion.empty())
 				suggestion = "Editor.mp4";
-			suggestion.replace_extension(simple_player_video_extension(impl_->settings.codec));
+			suggestion.replace_extension(simple_player_output_extension(impl_->settings));
 			try
 			{
 				auto destination = impl_->dialogs.save_video(suggestion.wstring());

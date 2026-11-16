@@ -148,6 +148,11 @@ struct simple_player_video_settings
 	std::uint32_t audio_bits = 16;
 	// TPDF dither when SAFC reduces SYNCore's float output to 16-bit samples.
 	bool audio_dither = false;
+
+	// Renders only SYNCore's audio. The video fields are ignored, the audio
+	// starts without the player's visual lead-in, and the container follows
+	// the audio codec (simple_player_audio_extension).
+	bool audio_only = false;
 };
 
 struct simple_player_video_progress
@@ -216,6 +221,11 @@ std::vector<simple_player_video_encoder_info> simple_player_video_encoders() noe
 const char* simple_player_video_codec_name(simple_player_video_codec codec) noexcept;
 const char* simple_player_video_audio_codec_name(simple_player_video_audio_codec codec) noexcept;
 const wchar_t* simple_player_video_extension(simple_player_video_codec codec) noexcept;
+// Audio-only containers: AAC and ALAC in ".m4a", FLAC in ".flac", WMA and
+// WMA Pro in ".wma", PCM in ".wav" (RF64 once it passes 4 GB).
+const wchar_t* simple_player_audio_extension(simple_player_video_audio_codec codec) noexcept;
+// The extension the settings' output must use, video or audio-only.
+const wchar_t* simple_player_output_extension(const simple_player_video_settings& settings) noexcept;
 bool simple_player_video_audio_supported(simple_player_video_codec video,
 	simple_player_video_audio_codec audio) noexcept;
 

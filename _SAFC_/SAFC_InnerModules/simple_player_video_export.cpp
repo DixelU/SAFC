@@ -209,6 +209,59 @@ const char* container_name(simple_player_video_codec codec) noexcept
 	return asf_container(codec) ? "WMV" : "MP4";
 }
 
+enum class output_container { mp4, wmv, m4a, flac, wma, wav };
+
+output_container container_of(const simple_player_video_settings& settings) noexcept
+{
+	if (!settings.audio_only)
+		return asf_container(settings.codec) ? output_container::wmv : output_container::mp4;
+	switch (settings.audio_codec)
+	{
+	case simple_player_video_audio_codec::aac:
+	case simple_player_video_audio_codec::alac:
+		return output_container::m4a;
+	case simple_player_video_audio_codec::flac:
+		return output_container::flac;
+	case simple_player_video_audio_codec::wma:
+	case simple_player_video_audio_codec::wma_pro:
+		return output_container::wma;
+	case simple_player_video_audio_codec::pcm:
+		break;
+	}
+	return output_container::wav;
+}
+
+// The MPEG-4 writer, which can move its index before the media data.
+bool mp4_family(output_container container) noexcept
+{
+	return container == output_container::mp4 || container == output_container::m4a;
+}
+
+const char* container_name(const simple_player_video_settings& settings) noexcept
+{
+	switch (container_of(settings))
+	{
+	case output_container::mp4: return "MP4";
+	case output_container::wmv: return "WMV";
+	case output_container::m4a: return "M4A";
+	case output_container::flac: return "FLAC";
+	case output_container::wma: return "WMA";
+	case output_container::wav: return "WAV";
+	}
+	return "output";
+}
+
+std::string narrow_text(const wchar_t* text)
+{
+	const int count = WideCharToMultiByte(CP_UTF8, 0, text, -1, nullptr, 0, nullptr, nullptr);
+	if (count <= 1)
+		return {};
+	std::string result(static_cast<std::size_t>(count), '\0');
+	WideCharToMultiByte(CP_UTF8, 0, text, -1, result.data(), count, nullptr, nullptr);
+	result.pop_back();
+	return result;
+}
+
 std::wstring normalized_path(const std::wstring& value)
 {
 	std::error_code error;
@@ -235,7 +288,7 @@ bool same_path(const std::wstring& left, const std::wstring& right)
 
 void validate_paths(const std::wstring& source_path,
 	const std::wstring& output_path, const std::wstring& bank_path,
-	simple_player_video_codec codec)
+	const simple_player_video_settings& settings)
 {
 	if (source_path.empty() || output_path.empty())
 		throw std::runtime_error("missing MIDI source or output path");
@@ -243,15 +296,16 @@ void validate_paths(const std::wstring& source_path,
 		throw std::runtime_error("output path must not overwrite the MIDI source");
 	if (!bank_path.empty() && same_path(bank_path, output_path))
 		throw std::runtime_error("output path must not overwrite the sound bank");
-	if (_wcsicmp(std::filesystem::path(output_path).extension().c_str(),
-		simple_player_video_extension(codec)) != 0)
-		throw std::runtime_error(std::string(simple_player_video_codec_name(codec)) +
-			" video output path must use the " + (asf_container(codec) ? ".wmv" : ".mp4") +
-			" extension");
+	const auto* extension = simple_player_output_extension(settings);
+	if (_wcsicmp(std::filesystem::path(output_path).extension().c_str(), extension) != 0)
+		throw std::runtime_error((settings.audio_only
+			? std::string(simple_player_video_audio_codec_name(settings.audio_codec)) + " audio"
+			: std::string(simple_player_video_codec_name(settings.codec)) + " video") +
+			" output path must use the " + narrow_text(extension) + " extension");
 	const auto parent = std::filesystem::path(output_path).parent_path();
 	std::error_code error;
 	if (!parent.empty() && !std::filesystem::is_directory(parent, error))
-		throw std::runtime_error("video output directory does not exist");
+		throw std::runtime_error("output directory does not exist");
 }
 
 // Media Foundation picks the container from the extension, so the partial
@@ -390,17 +444,6 @@ struct media_runtime
 			MFShutdown();
 	}
 };
-
-std::string narrow_text(const wchar_t* text)
-{
-	const int count = WideCharToMultiByte(CP_UTF8, 0, text, -1, nullptr, 0, nullptr, nullptr);
-	if (count <= 1)
-		return {};
-	std::string result(static_cast<std::size_t>(count), '\0');
-	WideCharToMultiByte(CP_UTF8, 0, text, -1, result.data(), count, nullptr, nullptr);
-	result.pop_back();
-	return result;
-}
 
 std::string hr_text(HRESULT result)
 {
@@ -595,7 +638,7 @@ ComPtr<IMFAttributes> sink_writer_attributes(const simple_player_video_settings&
 		"creating sink writer attributes");
 	require_hr(attributes->SetUINT32(MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS,
 		settings.hardware_encoder), "configuring hardware media transforms");
-	if (settings.fast_start && !asf_container(settings.codec))
+	if (settings.fast_start && mp4_family(container_of(settings)))
 		require_hr(attributes->SetUINT32(MF_MPEG4SINK_MOOV_BEFORE_MDAT, TRUE),
 			"requesting the MP4 index first");
 	return attributes;
@@ -718,7 +761,82 @@ ComPtr<IMFMediaType> wma_output_type(const GUID& subtype, const char* name,
 	return best;
 }
 
-class media_foundation_writer
+// SYNCore's interleaved stereo float as 16-bit (optionally TPDF dithered),
+// 24-bit, or 32-bit float little-endian samples.
+class pcm_sample_converter
+{
+public:
+	void configure(std::uint32_t bits, bool dither) noexcept
+	{
+		bits_ = bits;
+		dither_ = dither && bits == 16;
+	}
+
+	std::uint32_t bits() const noexcept { return bits_; }
+	std::uint32_t frame_bytes() const noexcept { return 2U * bits_ / 8U; }
+
+	// Null writes silence.
+	void convert(const float* source, std::size_t samples, std::uint8_t* destination) noexcept
+	{
+		const std::size_t bytes = bits_ / 8U;
+		if (!source)
+		{
+			std::memset(destination, 0, samples * bytes);
+			return;
+		}
+		if (bits_ == 32)
+		{
+			std::memcpy(destination, source, samples * sizeof(float));
+			return;
+		}
+		for (std::size_t index = 0; index < samples; ++index)
+		{
+			const float value = std::clamp(source[index], -1.0f, 1.0f);
+			if (bits_ == 24)
+			{
+				const auto sample = static_cast<std::int32_t>(
+					std::lrint(value * (value < 0.0f ? 8388608.0f : 8388607.0f)));
+				destination[index * 3 + 0] = static_cast<std::uint8_t>(sample);
+				destination[index * 3 + 1] = static_cast<std::uint8_t>(sample >> 8);
+				destination[index * 3 + 2] = static_cast<std::uint8_t>(sample >> 16);
+				continue;
+			}
+			float scaled = value * (value < 0.0f ? 32768.0f : 32767.0f);
+			// Triangular dither of one LSB peak, from two uniform values.
+			if (dither_)
+				scaled += next_uniform() - next_uniform();
+			const auto sample = static_cast<std::int16_t>(
+				std::clamp(std::lrint(scaled), -32768L, 32767L));
+			std::memcpy(destination + index * 2, &sample, 2);
+		}
+	}
+
+private:
+	float next_uniform() noexcept
+	{
+		dither_state_ ^= dither_state_ << 13;
+		dither_state_ ^= dither_state_ >> 17;
+		dither_state_ ^= dither_state_ << 5;
+		return static_cast<float>(dither_state_ >> 8) * (1.0f / 16777216.0f);
+	}
+
+	std::uint32_t bits_ = 16;
+	bool dither_ = false;
+	std::uint32_t dither_state_ = 0x2545F491U;
+};
+
+// Where the audio thread delivers SYNCore's PCM.
+class pcm_audio_sink
+{
+public:
+	virtual ~pcm_audio_sink() = default;
+	// Interleaved stereo float; null writes silence. `first_frame` counts
+	// from the start of the output.
+	virtual void write_audio_frames(const float* interleaved, std::uint32_t frames,
+		std::uint64_t first_frame) = 0;
+};
+
+class media_foundation_writer final : public pcm_audio_sink
 {
 public:
 	~media_foundation_writer()
@@ -728,34 +846,44 @@ public:
 	}
 
 	// `output_rate` is the encoded audio rate; SYNCore's PCM arrives at
-	// `pcm_sample_rate`. Without audio only a video stream is written.
+	// `pcm_sample_rate`. Without audio only a video stream is written, and
+	// audio-only settings write no video stream.
 	void open(const std::wstring& output_path, const simple_player_video_settings& settings,
 		std::uint32_t pcm_sample_rate, std::uint32_t output_rate, bool include_audio = true)
 	{
-		width_ = settings.width;
-		height_ = settings.height;
-		fps_ = settings.fps;
-		layout_ = video_yuv_layout_for(settings.chroma, settings.bit_depth);
-		converter_.emplace(layout_, settings.matrix, settings.full_range, settings.chroma_filter);
-		frame_bytes_ = video_yuv_frame_bytes(layout_, width_, height_);
-		if (frame_bytes_ > (std::numeric_limits<DWORD>::max)())
-			throw std::runtime_error("video frame is too large");
+		const bool include_video = !settings.audio_only;
+		if (!include_video && !include_audio)
+			throw std::runtime_error("the output has no streams");
+		if (include_video)
+		{
+			width_ = settings.width;
+			height_ = settings.height;
+			fps_ = settings.fps;
+			layout_ = video_yuv_layout_for(settings.chroma, settings.bit_depth);
+			converter_.emplace(layout_, settings.matrix, settings.full_range, settings.chroma_filter);
+			frame_bytes_ = video_yuv_frame_bytes(layout_, width_, height_);
+			if (frame_bytes_ > (std::numeric_limits<DWORD>::max)())
+				throw std::runtime_error("video frame is too large");
+		}
 
 		// The MP4 writer reads its own output back to move the index first.
 		require_hr(MFCreateFile(MF_ACCESSMODE_READWRITE, MF_OPENMODE_DELETE_IF_EXIST,
 			MF_FILEFLAGS_NONE, output_path.c_str(), byte_stream_.GetAddressOf()),
-			"opening the video output file");
+			"opening the output file");
 		require_hr(MFCreateSinkWriterFromURL(output_path.c_str(), byte_stream_.Get(),
 			sink_writer_attributes(settings).Get(), writer_.GetAddressOf()),
-			(std::string("creating the ") + container_name(settings.codec) + " sink writer").c_str());
+			(std::string("creating the ") + container_name(settings) + " sink writer").c_str());
 
-		open_video(settings, output_path);
+		if (include_video)
+			open_video(settings, output_path);
+		else
+			video_finished_ = true;
 		if (include_audio)
 			open_audio(settings, pcm_sample_rate, output_rate);
 		else
 			audio_finished_ = true;
 
-		require_hr(writer_->BeginWriting(), "beginning the video write");
+		require_hr(writer_->BeginWriting(), "beginning the output write");
 		write_thread_ = std::thread([this]() { write_queued_samples(); });
 	}
 
@@ -802,11 +930,11 @@ public:
 	// Interleaved stereo float; null writes silence. Converted to the
 	// sample format negotiated in open_audio().
 	void write_audio_frames(const float* interleaved, std::uint32_t frames,
-		std::uint64_t first_frame)
+		std::uint64_t first_frame) override
 	{
 		if (frames == 0)
 			return;
-		const auto bytes = static_cast<DWORD>(frames * 2U * (audio_input_bits_ / 8U));
+		const auto bytes = static_cast<DWORD>(frames * audio_converter_.frame_bytes());
 		ComPtr<IMFMediaBuffer> buffer;
 		require_hr(MFCreateMemoryBuffer(bytes, buffer.GetAddressOf()),
 			"creating audio sample buffer");
@@ -815,7 +943,7 @@ public:
 		DWORD current = 0;
 		require_hr(buffer->Lock(&destination, &maximum, &current),
 			"locking audio sample buffer");
-		convert_audio(interleaved, static_cast<std::size_t>(frames) * 2, destination);
+		audio_converter_.convert(interleaved, static_cast<std::size_t>(frames) * 2, destination);
 		require_hr(buffer->Unlock(), "unlocking audio sample buffer");
 		require_hr(buffer->SetCurrentLength(bytes), "setting audio buffer length");
 
@@ -866,7 +994,7 @@ public:
 			if (byte_stream_)
 				byte_stream_->Close();
 			byte_stream_.Reset();
-			require_hr(result, "finalizing the video file");
+			require_hr(result, "finalizing the output file");
 		}
 	}
 
@@ -875,7 +1003,7 @@ private:
 	{
 		const HRESULT added = writer_->AddStream(video_output_type(settings).Get(), &video_stream_);
 		if (FAILED(added))
-			throw std::runtime_error(std::string("the ") + container_name(settings.codec) +
+			throw std::runtime_error(std::string("the ") + container_name(settings) +
 				" writer cannot store " + simple_player_video_codec_name(settings.codec) +
 				" video" + hr_text(added));
 		const auto properties = encoder_properties(settings);
@@ -1050,8 +1178,9 @@ private:
 		const std::uint32_t output_bits = sixteen_bit ? 16U : settings.audio_bits;
 		// SAFC writes the encoder's own sample format. Media Foundation's
 		// resampler, which runs when the rates differ, needs float input.
-		audio_input_bits_ = output_rate == pcm_sample_rate ? output_bits : 32U;
-		audio_dither_ = settings.audio_dither && audio_input_bits_ == 16;
+		audio_converter_.configure(output_rate == pcm_sample_rate ? output_bits : 32U,
+			settings.audio_dither);
+		const auto audio_input_bits = audio_converter_.bits();
 
 		ComPtr<IMFMediaType> audio_out;
 		if (settings.audio_codec == audio_codec::wma)
@@ -1091,22 +1220,22 @@ private:
 		}
 		const HRESULT added = writer_->AddStream(audio_out.Get(), &audio_stream_);
 		if (FAILED(added))
-			throw std::runtime_error(std::string("the ") + container_name(settings.codec) +
+			throw std::runtime_error(std::string("the ") + container_name(settings) +
 				" writer cannot store " + name + " audio" + hr_text(added));
 
-		const UINT32 block = 2U * audio_input_bits_ / 8U;
+		const UINT32 block = 2U * audio_input_bits / 8U;
 		ComPtr<IMFMediaType> audio_in;
 		require_hr(MFCreateMediaType(audio_in.GetAddressOf()), "creating audio input type");
 		require_hr(audio_in->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Audio),
 			"setting audio input major type");
 		require_hr(audio_in->SetGUID(MF_MT_SUBTYPE,
-			audio_input_bits_ == 32 ? MFAudioFormat_Float : MFAudioFormat_PCM),
+			audio_input_bits == 32 ? MFAudioFormat_Float : MFAudioFormat_PCM),
 			"setting PCM input subtype");
 		require_hr(audio_in->SetUINT32(MF_MT_AUDIO_NUM_CHANNELS, 2),
 			"setting PCM channels");
 		require_hr(audio_in->SetUINT32(MF_MT_AUDIO_SAMPLES_PER_SECOND, pcm_sample_rate),
 			"setting PCM sample rate");
-		require_hr(audio_in->SetUINT32(MF_MT_AUDIO_BITS_PER_SAMPLE, audio_input_bits_),
+		require_hr(audio_in->SetUINT32(MF_MT_AUDIO_BITS_PER_SAMPLE, audio_input_bits),
 			"setting PCM bits per sample");
 		require_hr(audio_in->SetUINT32(MF_MT_AUDIO_BLOCK_ALIGNMENT, block),
 			"setting PCM block alignment");
@@ -1138,49 +1267,6 @@ private:
 				converter_->convert(bgra, width_, height_, destination, first, band_rows);
 			});
 		converter_->convert(bgra, width_, height_, destination, 0, band_rows);
-	}
-
-	void convert_audio(const float* source, std::size_t samples, BYTE* destination) noexcept
-	{
-		const std::size_t bytes = audio_input_bits_ / 8U;
-		if (!source)
-		{
-			std::memset(destination, 0, samples * bytes);
-			return;
-		}
-		if (audio_input_bits_ == 32)
-		{
-			std::memcpy(destination, source, samples * sizeof(float));
-			return;
-		}
-		for (std::size_t index = 0; index < samples; ++index)
-		{
-			const float value = std::clamp(source[index], -1.0f, 1.0f);
-			if (audio_input_bits_ == 24)
-			{
-				const auto sample = static_cast<std::int32_t>(
-					std::lrint(value * (value < 0.0f ? 8388608.0f : 8388607.0f)));
-				destination[index * 3 + 0] = static_cast<BYTE>(sample);
-				destination[index * 3 + 1] = static_cast<BYTE>(sample >> 8);
-				destination[index * 3 + 2] = static_cast<BYTE>(sample >> 16);
-				continue;
-			}
-			float scaled = value * (value < 0.0f ? 32768.0f : 32767.0f);
-			// Triangular dither of one LSB peak, from two uniform values.
-			if (audio_dither_)
-				scaled += next_uniform() - next_uniform();
-			const auto sample = static_cast<std::int16_t>(
-				std::clamp(std::lrint(scaled), -32768L, 32767L));
-			std::memcpy(destination + index * 2, &sample, 2);
-		}
-	}
-
-	float next_uniform() noexcept
-	{
-		dither_state_ ^= dither_state_ << 13;
-		dither_state_ ^= dither_state_ >> 17;
-		dither_state_ ^= dither_state_ << 5;
-		return static_cast<float>(dither_state_ >> 8) * (1.0f / 16777216.0f);
 	}
 
 	enum class stream_kind { audio, video };
@@ -1296,9 +1382,7 @@ private:
 	video_yuv_layout layout_ = video_yuv_layout::nv12;
 	std::optional<video_yuv_converter> converter_;
 	std::size_t frame_bytes_ = 0;
-	std::uint32_t audio_input_bits_ = 16;
-	bool audio_dither_ = false;
-	std::uint32_t dither_state_ = 0x2545F491U;
+	pcm_sample_converter audio_converter_;
 	std::string encoder_name_;
 	std::vector<std::string> warnings_;
 	std::mutex queue_mutex_;
@@ -1310,6 +1394,157 @@ private:
 	bool aborted_ = false;
 	std::exception_ptr write_error_;
 	std::thread write_thread_;
+};
+
+// Stereo WAV at SYNCore's rate: 16- or 24-bit PCM, or 32-bit float. It starts
+// as RIFF with a JUNK chunk sized for a ds64 chunk, and finalize() turns that
+// into RF64 when the data passes RIFF's 4 GB limit (EBU Tech 3306).
+class wav_file_writer final : public pcm_audio_sink
+{
+public:
+	void open(const std::wstring& path, std::uint32_t sample_rate, std::uint32_t bits, bool dither)
+	{
+		converter_.configure(bits, dither);
+		float_ = bits == 32;
+		stream_.open(std::filesystem::path(path), std::ios::binary | std::ios::trunc);
+		if (!stream_)
+			throw std::runtime_error("could not open the WAV output file");
+		const std::uint16_t block = static_cast<std::uint16_t>(converter_.frame_bytes());
+		write_text("RIFF");
+		write_u32(0);
+		write_text("WAVE");
+		write_text("JUNK");
+		write_u32(ds64_body_bytes);
+		write_zeros(ds64_body_bytes);
+		write_text("fmt ");
+		write_u32(float_ ? 18 : 16);
+		write_u16(float_ ? 3 : 1); // WAVE_FORMAT_IEEE_FLOAT : WAVE_FORMAT_PCM
+		write_u16(2);
+		write_u32(sample_rate);
+		write_u32(sample_rate * block);
+		write_u16(block);
+		write_u16(static_cast<std::uint16_t>(bits));
+		if (float_)
+		{
+			write_u16(0); // cbSize
+			write_text("fact");
+			write_u32(4);
+			fact_offset_ = static_cast<std::uint64_t>(stream_.tellp());
+			write_u32(0);
+		}
+		write_text("data");
+		data_size_offset_ = static_cast<std::uint64_t>(stream_.tellp());
+		write_u32(0);
+		data_offset_ = data_size_offset_ + 4;
+		check("writing the WAV header");
+	}
+
+	void write_audio_frames(const float* interleaved, std::uint32_t frames,
+		std::uint64_t first_frame) override
+	{
+		if (first_frame < frames_)
+			throw std::runtime_error("WAV audio arrived out of order");
+		// A gap is silence; SYNCore delivers contiguous blocks.
+		while (frames_ < first_frame)
+		{
+			const auto gap = static_cast<std::uint32_t>((std::min)(
+				first_frame - frames_, std::uint64_t{65536}));
+			write_block(nullptr, gap);
+		}
+		write_block(interleaved, frames);
+	}
+
+	void finalize()
+	{
+		const std::uint64_t data_bytes = frames_ * converter_.frame_bytes();
+		const std::uint64_t riff_bytes = data_offset_ - 8 + data_bytes;
+		constexpr std::uint64_t riff_limit = (std::numeric_limits<std::uint32_t>::max)();
+		if (riff_bytes <= riff_limit)
+		{
+			seek_write_u32(4, static_cast<std::uint32_t>(riff_bytes));
+			seek_write_u32(data_size_offset_, static_cast<std::uint32_t>(data_bytes));
+			if (fact_offset_)
+				seek_write_u32(fact_offset_, static_cast<std::uint32_t>(frames_));
+		}
+		else
+		{
+			stream_.seekp(0);
+			write_text("RF64");
+			write_u32(0xFFFFFFFFU);
+			stream_.seekp(12);
+			write_text("ds64");
+			write_u32(ds64_body_bytes);
+			write_u64(riff_bytes);
+			write_u64(data_bytes);
+			write_u64(frames_);
+			write_u32(0); // table entries
+			seek_write_u32(data_size_offset_, 0xFFFFFFFFU);
+			if (fact_offset_)
+				seek_write_u32(fact_offset_, 0xFFFFFFFFU);
+		}
+		stream_.flush();
+		check("finalizing the WAV file");
+		stream_.close();
+		if (stream_.fail())
+			throw std::runtime_error("finalizing the WAV file failed");
+	}
+
+private:
+	static constexpr std::uint32_t ds64_body_bytes = 28;
+
+	void write_block(const float* interleaved, std::uint32_t frames)
+	{
+		if (frames == 0)
+			return;
+		const std::size_t samples = static_cast<std::size_t>(frames) * 2;
+		scratch_.resize(static_cast<std::size_t>(frames) * converter_.frame_bytes());
+		converter_.convert(interleaved, samples, scratch_.data());
+		stream_.write(reinterpret_cast<const char*>(scratch_.data()),
+			static_cast<std::streamsize>(scratch_.size()));
+		check("writing WAV audio");
+		frames_ += frames;
+	}
+
+	void write_text(const char (&text)[5]) { stream_.write(text, 4); }
+	void write_zeros(std::uint32_t bytes)
+	{
+		for (std::uint32_t index = 0; index < bytes; ++index)
+			stream_.put('\0');
+	}
+	void write_u16(std::uint16_t value)
+	{
+		const char bytes[] = {static_cast<char>(value), static_cast<char>(value >> 8)};
+		stream_.write(bytes, sizeof(bytes));
+	}
+	void write_u32(std::uint32_t value)
+	{
+		write_u16(static_cast<std::uint16_t>(value));
+		write_u16(static_cast<std::uint16_t>(value >> 16));
+	}
+	void write_u64(std::uint64_t value)
+	{
+		write_u32(static_cast<std::uint32_t>(value));
+		write_u32(static_cast<std::uint32_t>(value >> 32));
+	}
+	void seek_write_u32(std::uint64_t offset, std::uint32_t value)
+	{
+		stream_.seekp(static_cast<std::streamoff>(offset));
+		write_u32(value);
+	}
+	void check(const char* operation)
+	{
+		if (!stream_)
+			throw std::runtime_error(std::string(operation) + " failed");
+	}
+
+	std::ofstream stream_;
+	pcm_sample_converter converter_;
+	std::vector<std::uint8_t> scratch_;
+	std::uint64_t frames_ = 0;
+	std::uint64_t data_size_offset_ = 0;
+	std::uint64_t data_offset_ = 0;
+	std::uint64_t fact_offset_ = 0;
+	bool float_ = false;
 };
 
 class offscreen_gl_surface
@@ -1994,17 +2229,17 @@ bool on_audio_progress(const safsyn::SmfRenderProgress& value,
 	}
 }
 
-struct media_foundation_pcm_sink
+struct pcm_sink_bridge
 {
-	media_foundation_writer* writer = nullptr;
+	pcm_audio_sink* writer = nullptr;
 	std::uint64_t output_offset = 0;
 	std::exception_ptr error;
 };
 
-bool write_media_foundation_pcm(const float* audio, std::uint32_t frames,
+bool write_sink_pcm(const float* audio, std::uint32_t frames,
 	std::uint64_t first_frame, void* user_data) noexcept
 {
-	auto& sink = *static_cast<media_foundation_pcm_sink*>(user_data);
+	auto& sink = *static_cast<pcm_sink_bridge*>(user_data);
 	try
 	{
 		sink.writer->write_audio_frames(audio, frames, sink.output_offset + first_frame);
@@ -2037,7 +2272,7 @@ safsyn::SmfRenderOptions make_audio_options(
 	return options;
 }
 
-void write_audio_lead_in(media_foundation_writer& writer,
+void write_audio_lead_in(pcm_audio_sink& writer,
 	std::uint64_t lead_in_frames, std::uint32_t block_frames,
 	export_progress_state& progress_state, render_cancellation* cancel,
 	simple_player_video_progress_callback progress, void* progress_user_data)
@@ -2059,7 +2294,7 @@ void write_audio_lead_in(media_foundation_writer& writer,
 }
 
 template<class Render>
-std::uint64_t render_audio_stream(media_foundation_writer& writer,
+std::uint64_t render_audio_stream(pcm_audio_sink& writer,
 	const syncore_preferences& preferences,
 	std::uint64_t lead_in_frames, std::uint64_t tail_frames,
 	export_progress_state& progress_state, render_cancellation* cancel,
@@ -2073,10 +2308,10 @@ std::uint64_t render_audio_stream(media_foundation_writer& writer,
 	audio_progress_bridge bridge{&progress_state, lead_in_frames, cancel,
 		progress, progress_user_data};
 	auto options = make_audio_options(preferences, tail_frames, bridge);
-	media_foundation_pcm_sink sink{&writer, lead_in_frames};
+	pcm_sink_bridge sink{&writer, lead_in_frames};
 	safsyn::SmfRenderResult render_result;
 	const bool rendered = render(options, render_result,
-		write_media_foundation_pcm, &sink);
+		write_sink_pcm, &sink);
 	if (sink.error)
 		std::rethrow_exception(sink.error);
 	publish_audio_result(progress_state, render_result, lead_in_frames);
@@ -2345,7 +2580,7 @@ simple_player_video_result render_video_and_audio(
 	RenderAudio&& render_audio)
 {
 	validate_settings(settings, synth_preferences);
-	validate_paths(source_path, output_path, bank_path, settings.codec);
+	validate_paths(source_path, output_path, bank_path, settings);
 	render_cancellation effective_cancel;
 	effective_cancel.external = cancel;
 	if (effective_cancel.requested())
@@ -2360,36 +2595,50 @@ simple_player_video_result render_video_and_audio(
 		throw std::runtime_error("cancelled");
 
 	auto bank = load_bank(bank_path);
-	const auto lead_in_frames = seconds_to_frames(
-		simple_player::default_start_lead_in_us / 1'000'000.0,
+	// The video's lead-in shows the first notes approaching; audio alone
+	// starts with the music.
+	const bool audio_only = settings.audio_only;
+	const auto lead_in_us = audio_only ? 0ULL : simple_player::default_start_lead_in_us;
+	const auto lead_in_frames = seconds_to_frames(lead_in_us / 1'000'000.0,
 		synth_preferences.sample_rate);
 	const auto tail_frames = seconds_to_frames(
 		settings.tail_seconds, synth_preferences.sample_rate);
 	const auto tail_us = seconds_to_us(settings.tail_seconds);
 	const auto maximum_clip_us = static_cast<std::uint64_t>(
 		(std::numeric_limits<LONGLONG>::max)()) / 10ULL;
-	if (duration_us > maximum_clip_us -
-		simple_player::default_start_lead_in_us - tail_us)
-		throw std::runtime_error("video duration is too large");
-	const auto clip_us = simple_player::default_start_lead_in_us + duration_us +
-		tail_us;
-	const auto total_video_frames = video_frame_count(clip_us, settings.fps);
+	if (duration_us > maximum_clip_us - lead_in_us - tail_us)
+		throw std::runtime_error(audio_only ? "audio duration is too large"
+			: "video duration is too large");
+	const auto clip_us = lead_in_us + duration_us + tail_us;
+	const auto total_video_frames = audio_only ? 0 : video_frame_count(clip_us, settings.fps);
 	if (duration_frames > (std::numeric_limits<std::uint64_t>::max)() -
 		lead_in_frames - tail_frames)
 		throw std::runtime_error("audio duration is too large");
 	const auto total_audio_frames = lead_in_frames + duration_frames + tail_frames;
-	(void)frame_to_time(total_audio_frames, synth_preferences.sample_rate);
-	(void)video_sample_time(total_video_frames, settings.fps);
+	const bool wav_output = container_of(settings) == output_container::wav;
+	if (!wav_output)
+		(void)frame_to_time(total_audio_frames, synth_preferences.sample_rate);
+	if (!audio_only)
+		(void)video_sample_time(total_video_frames, settings.fps);
 	progress_state.total_frames.store(total_video_frames, std::memory_order_relaxed);
 	progress_state.total_audio_frames.store(total_audio_frames, std::memory_order_relaxed);
 
 	media_runtime runtime;
-	if (settings.codec == simple_player_video_codec::av1)
+	if (!audio_only && settings.codec == simple_player_video_codec::av1)
 		check_container_accepts(output_path, settings);
 	temporary_video_output temporary(output_path);
 	media_foundation_writer writer;
-	writer.open(temporary.path(), settings, synth_preferences.sample_rate,
-		resolved_audio_rate(settings, synth_preferences));
+	wav_file_writer wav;
+	pcm_audio_sink* audio_sink = &writer;
+	if (wav_output)
+	{
+		wav.open(temporary.path(), synth_preferences.sample_rate, settings.audio_bits,
+			settings.audio_dither);
+		audio_sink = &wav;
+	}
+	else
+		writer.open(temporary.path(), settings, synth_preferences.sample_rate,
+			resolved_audio_rate(settings, synth_preferences));
 
 	std::exception_ptr first_error;
 	bool first_error_is_cancellation = false;
@@ -2428,7 +2677,7 @@ simple_player_video_result render_video_and_audio(
 					return render_audio(*bank, effective_cancel, options, result,
 						write_pcm, write_user_data);
 				};
-				audio_frames = render_audio_stream(writer, synth_preferences,
+				audio_frames = render_audio_stream(*audio_sink, synth_preferences,
 					lead_in_frames, tail_frames, progress_state, &effective_cancel,
 					progress, progress_user_data, render_with_bank);
 				writer.finish_audio_stream();
@@ -2439,22 +2688,23 @@ simple_player_video_result render_video_and_audio(
 				capture_error();
 			}
 		});
-		video_thread = std::thread([&]()
-		{
-			try
+		if (!audio_only)
+			video_thread = std::thread([&]()
 			{
-				com_mta_scope thread_com;
-				video_frames = render_video_stream(writer, visual_events, settings,
-					clip_us, total_video_frames, progress_state, &effective_cancel,
-					progress, progress_user_data);
-				writer.finish_video_stream();
-			}
-			catch (...)
-			{
-				writer.finish_video_stream();
-				capture_error();
-			}
-		});
+				try
+				{
+					com_mta_scope thread_com;
+					video_frames = render_video_stream(writer, visual_events, settings,
+						clip_us, total_video_frames, progress_state, &effective_cancel,
+						progress, progress_user_data);
+					writer.finish_video_stream();
+				}
+				catch (...)
+				{
+					writer.finish_video_stream();
+					capture_error();
+				}
+			});
 	}
 	catch (...)
 	{
@@ -2467,15 +2717,19 @@ simple_player_video_result render_video_and_audio(
 		throw;
 	}
 	audio_thread.join();
-	video_thread.join();
+	if (video_thread.joinable())
+		video_thread.join();
 	if (first_error)
 		std::rethrow_exception(first_error);
 
 	if (!report_progress(progress, progress_user_data, progress_state,
-		std::string("Finalizing ") + container_name(settings.codec), &effective_cancel,
+		std::string("Finalizing ") + container_name(settings), &effective_cancel,
 		nullptr, 0, 0, 0, true))
 		throw std::runtime_error("cancelled");
-	writer.finalize();
+	if (wav_output)
+		wav.finalize();
+	else
+		writer.finalize();
 	temporary.commit();
 
 	simple_player_video_result result;
@@ -2513,7 +2767,7 @@ simple_player_video_result guard_video_render(Render&& render) noexcept
 	catch (const std::bad_alloc&)
 	{
 		simple_player_video_result result;
-		result.error = "not enough memory while rendering video";
+		result.error = "not enough memory while rendering";
 		return result;
 	}
 	catch (const std::runtime_error& error)
@@ -2521,7 +2775,7 @@ simple_player_video_result guard_video_render(Render&& render) noexcept
 		simple_player_video_result result;
 		result.cancelled = std::string(error.what()) == "cancelled" ||
 			std::string(error.what()) == "visual render was cancelled";
-		result.error = result.cancelled ? "video render cancelled" : error.what();
+		result.error = result.cancelled ? "render cancelled" : error.what();
 		return result;
 	}
 	catch (const std::exception& error)
@@ -2533,7 +2787,7 @@ simple_player_video_result guard_video_render(Render&& render) noexcept
 	catch (...)
 	{
 		simple_player_video_result result;
-		result.error = "unknown video render failure";
+		result.error = "unknown render failure";
 		return result;
 	}
 }
@@ -2608,6 +2862,30 @@ const wchar_t* simple_player_video_extension(simple_player_video_codec codec) no
 		? L".wmv" : L".mp4";
 }
 
+const wchar_t* simple_player_audio_extension(simple_player_video_audio_codec codec) noexcept
+{
+	switch (codec)
+	{
+	case simple_player_video_audio_codec::aac:
+	case simple_player_video_audio_codec::alac:
+		return L".m4a";
+	case simple_player_video_audio_codec::flac:
+		return L".flac";
+	case simple_player_video_audio_codec::wma:
+	case simple_player_video_audio_codec::wma_pro:
+		return L".wma";
+	case simple_player_video_audio_codec::pcm:
+		break;
+	}
+	return L".wav";
+}
+
+const wchar_t* simple_player_output_extension(const simple_player_video_settings& settings) noexcept
+{
+	return settings.audio_only ? simple_player_audio_extension(settings.audio_codec)
+		: simple_player_video_extension(settings.codec);
+}
+
 bool simple_player_video_audio_supported(simple_player_video_codec video,
 	simple_player_video_audio_codec audio) noexcept
 {
@@ -2643,71 +2921,76 @@ std::string simple_player_video_settings_problem(
 		return value == automatic || (value >= minimum && value <= maximum);
 	};
 
-	if (settings.width < 16 || settings.width > 8192 || settings.height < 16 ||
-		settings.height > 8192 || (settings.width & 1U) || (settings.height & 1U))
-		return "Width and height must be even values from 16 to 8192";
-	if (settings.fps < 1 || settings.fps > 240)
-		return "FPS must be from 1 to 240";
-	if (settings.codec > codec::vc1)
-		return "Unknown video codec";
-	if (settings.rate_control > simple_player_video_rate_control::constant_qp)
-		return "Unknown rate control mode";
-	if (settings.video_bitrate_kbps < 64 || settings.video_bitrate_kbps > 250000)
-		return "Video bitrate must be from 64 to 250000 kbps";
-	if (settings.quality > 100)
-		return "Quality must be from 0 to 100";
-	const std::int64_t qp_limit = settings.codec == codec::av1 ? 255 : 51;
-	const auto qp_range = "0 to " + std::to_string(qp_limit);
-	const auto qp = static_cast<std::int64_t>(settings.qp);
-	if (qp > qp_limit)
-		return "QP must be from " + qp_range;
-	if (qp + settings.qp_p_offset < 0 || qp + settings.qp_p_offset > qp_limit ||
-		qp + settings.qp_b_offset < 0 || qp + settings.qp_b_offset > qp_limit)
-		return "QP with its P- and B-frame offsets must stay from " + qp_range;
-	if (settings.peak_bitrate_kbps != 0 && (settings.peak_bitrate_kbps < settings.video_bitrate_kbps ||
-		settings.peak_bitrate_kbps > 1000000))
-		return "Peak bitrate must be 0 (encoder default) or from the video bitrate to 1000000 kbps";
-	if (settings.buffer_kbits > 4000000)
-		return "VBV buffer must be at most 4000000 kbits";
-	if (!optional_in(settings.min_qp, 0, static_cast<std::int32_t>(qp_limit)) ||
-		!optional_in(settings.max_qp, 0, static_cast<std::int32_t>(qp_limit)))
-		return "Minimum and maximum QP must be from " + qp_range;
-	if (settings.min_qp != automatic && settings.max_qp != automatic &&
-		settings.min_qp > settings.max_qp)
-		return "Minimum QP must not exceed maximum QP";
-	if (!optional_in(settings.quality_vs_speed, 0, 100))
-		return "Speed/quality preset must be from 0 to 100";
-	if (!optional_in(settings.gop_size, 1, 1000000))
-		return "Keyframe interval must be from 1 to 1000000 frames";
-	if (!optional_in(settings.b_frames, 0, 16))
-		return "B-frame count must be from 0 to 16";
-	if (!optional_in(settings.max_reference_frames, 1, 16))
-		return "Reference frame count must be from 1 to 16";
-	if (!optional_in(settings.worker_threads, 1, 64))
-		return "Encoder worker threads must be from 1 to 64";
-	if (!optional_in(settings.cabac, 0, 1) || !optional_in(settings.low_latency, 0, 1))
-		return "CABAC and low-latency mode must be default, on, or off";
-	if (settings.h264_profile > simple_player_video_h264_profile::high)
-		return "Unknown H.264 profile";
-	if (settings.codec == codec::h264 && settings.cabac == 1 &&
-		settings.h264_profile == simple_player_video_h264_profile::baseline)
-		return "CABAC needs the Main or High H.264 profile";
-	if (settings.chroma > simple_player_video_chroma::yuv444 ||
-		(settings.bit_depth != 8 && settings.bit_depth != 10))
-		return "Chroma must be 4:2:0, 4:2:2, or 4:4:4 at 8 or 10 bits";
-	if (settings.codec != codec::hevc && settings.chroma != simple_player_video_chroma::yuv420)
-		return "Only HEVC can encode 4:2:2 or 4:4:4";
-	if (settings.bit_depth == 10 && settings.codec != codec::hevc && settings.codec != codec::av1)
-		return "Only HEVC and AV1 can encode 10-bit video";
-	if (settings.matrix > simple_player_video_matrix::bt2020 ||
-		settings.chroma_filter > simple_player_video_chroma_filter::nearest)
-		return "Unknown colour matrix or chroma filter";
-	if (settings.background_rgb > 0xFFFFFF)
-		return "Background must be an RGB colour";
+	// Audio-only output ignores the video settings.
+	if (!settings.audio_only)
+	{
+		if (settings.width < 16 || settings.width > 8192 || settings.height < 16 ||
+			settings.height > 8192 || (settings.width & 1U) || (settings.height & 1U))
+			return "Width and height must be even values from 16 to 8192";
+		if (settings.fps < 1 || settings.fps > 240)
+			return "FPS must be from 1 to 240";
+		if (settings.codec > codec::vc1)
+			return "Unknown video codec";
+		if (settings.rate_control > simple_player_video_rate_control::constant_qp)
+			return "Unknown rate control mode";
+		if (settings.video_bitrate_kbps < 64 || settings.video_bitrate_kbps > 250000)
+			return "Video bitrate must be from 64 to 250000 kbps";
+		if (settings.quality > 100)
+			return "Quality must be from 0 to 100";
+		const std::int64_t qp_limit = settings.codec == codec::av1 ? 255 : 51;
+		const auto qp_range = "0 to " + std::to_string(qp_limit);
+		const auto qp = static_cast<std::int64_t>(settings.qp);
+		if (qp > qp_limit)
+			return "QP must be from " + qp_range;
+		if (qp + settings.qp_p_offset < 0 || qp + settings.qp_p_offset > qp_limit ||
+			qp + settings.qp_b_offset < 0 || qp + settings.qp_b_offset > qp_limit)
+			return "QP with its P- and B-frame offsets must stay from " + qp_range;
+		if (settings.peak_bitrate_kbps != 0 && (settings.peak_bitrate_kbps < settings.video_bitrate_kbps ||
+			settings.peak_bitrate_kbps > 1000000))
+			return "Peak bitrate must be 0 (encoder default) or from the video bitrate to 1000000 kbps";
+		if (settings.buffer_kbits > 4000000)
+			return "VBV buffer must be at most 4000000 kbits";
+		if (!optional_in(settings.min_qp, 0, static_cast<std::int32_t>(qp_limit)) ||
+			!optional_in(settings.max_qp, 0, static_cast<std::int32_t>(qp_limit)))
+			return "Minimum and maximum QP must be from " + qp_range;
+		if (settings.min_qp != automatic && settings.max_qp != automatic &&
+			settings.min_qp > settings.max_qp)
+			return "Minimum QP must not exceed maximum QP";
+		if (!optional_in(settings.quality_vs_speed, 0, 100))
+			return "Speed/quality preset must be from 0 to 100";
+		if (!optional_in(settings.gop_size, 1, 1000000))
+			return "Keyframe interval must be from 1 to 1000000 frames";
+		if (!optional_in(settings.b_frames, 0, 16))
+			return "B-frame count must be from 0 to 16";
+		if (!optional_in(settings.max_reference_frames, 1, 16))
+			return "Reference frame count must be from 1 to 16";
+		if (!optional_in(settings.worker_threads, 1, 64))
+			return "Encoder worker threads must be from 1 to 64";
+		if (!optional_in(settings.cabac, 0, 1) || !optional_in(settings.low_latency, 0, 1))
+			return "CABAC and low-latency mode must be default, on, or off";
+		if (settings.h264_profile > simple_player_video_h264_profile::high)
+			return "Unknown H.264 profile";
+		if (settings.codec == codec::h264 && settings.cabac == 1 &&
+			settings.h264_profile == simple_player_video_h264_profile::baseline)
+			return "CABAC needs the Main or High H.264 profile";
+		if (settings.chroma > simple_player_video_chroma::yuv444 ||
+			(settings.bit_depth != 8 && settings.bit_depth != 10))
+			return "Chroma must be 4:2:0, 4:2:2, or 4:4:4 at 8 or 10 bits";
+		if (settings.codec != codec::hevc && settings.chroma != simple_player_video_chroma::yuv420)
+			return "Only HEVC can encode 4:2:2 or 4:4:4";
+		if (settings.bit_depth == 10 && settings.codec != codec::hevc && settings.codec != codec::av1)
+			return "Only HEVC and AV1 can encode 10-bit video";
+		if (settings.matrix > simple_player_video_matrix::bt2020 ||
+			settings.chroma_filter > simple_player_video_chroma_filter::nearest)
+			return "Unknown colour matrix or chroma filter";
+		if (settings.background_rgb > 0xFFFFFF)
+			return "Background must be an RGB colour";
+	}
 
 	if (settings.audio_codec > audio::pcm)
 		return "Unknown audio codec";
-	if (!simple_player_video_audio_supported(settings.codec, settings.audio_codec))
+	if (!settings.audio_only &&
+		!simple_player_video_audio_supported(settings.codec, settings.audio_codec))
 		return settings.codec == codec::wmv9 || settings.codec == codec::vc1
 			? "WMV video carries WMA, WMA Pro, or PCM audio"
 			: "MP4 video carries AAC, ALAC, or FLAC audio";
@@ -2741,6 +3024,10 @@ std::string simple_player_video_settings_problem(
 		if (rate != 0 && !one_of(rate, {32000, 44100, 48000, 88200, 96000, 176400, 192000}))
 			return audio_name + " sample rate must be 32000, 44100, 48000, 88200, 96000, "
 				"176400, or 192000 Hz";
+		// WAV keeps SYNCore's samples; nothing in SAFC resamples them.
+		if (settings.audio_only && settings.audio_codec == audio::pcm && rate != 0 &&
+			rate != preferences.sample_rate)
+			return "WAV output uses SYNCore's sample rate; change it in the SYNCore settings";
 		if (settings.audio_codec == audio::pcm ? !one_of(bits, {16, 24, 32}) : !one_of(bits, {16, 24}))
 			return settings.audio_codec == audio::pcm
 				? "PCM samples must be 16 or 24 bits, or 32-bit float"
@@ -2751,8 +3038,8 @@ std::string simple_player_video_settings_problem(
 	if (!std::isfinite(settings.tail_seconds) || settings.tail_seconds < 0.0 ||
 		settings.tail_seconds > 60.0)
 		return "Tail seconds must be from 0 to 60";
-	if (!std::isfinite(settings.visible_seconds) || settings.visible_seconds < 0.01 ||
-		settings.visible_seconds > 60.0)
+	if (!settings.audio_only && (!std::isfinite(settings.visible_seconds) ||
+		settings.visible_seconds < 0.01 || settings.visible_seconds > 60.0))
 		return "Visible seconds must be from 0.01 to 60";
 	if (preferences.sample_rate < 8000 || preferences.sample_rate > 192000)
 		return "SYNCore sample rate is outside the supported range";
@@ -2791,7 +3078,7 @@ simple_player_video_result render_simple_player_video(
 	return guard_video_render([&]()
 	{
 		validate_settings(settings, synth_preferences);
-		validate_paths(midi_path, output_path, bank_path, settings.codec);
+		validate_paths(midi_path, output_path, bank_path, settings);
 		if (cancel && cancel->load(std::memory_order_acquire))
 			throw std::runtime_error("cancelled");
 
@@ -2860,7 +3147,7 @@ simple_player_video_result render_simple_player_video_events(
 	return guard_video_render([&]()
 	{
 		validate_settings(settings, synth_preferences);
-		validate_paths(source_path, output_path, bank_path, settings.codec);
+		validate_paths(source_path, output_path, bank_path, settings);
 		if (cancel && cancel->load(std::memory_order_acquire))
 			throw std::runtime_error("cancelled");
 

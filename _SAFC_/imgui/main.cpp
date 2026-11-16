@@ -178,12 +178,26 @@ ui::native_dialogs make_dialogs(GLFWwindow* window)
 	{
 		return one(file_dialog(window, midi, true, name, L"mid"));
 	};
-	// The suggested name's extension follows the chosen codec's container.
+	// The suggested name's extension follows the chosen container.
 	d.save_video = [=](const std::wstring& name)
 	{
-		const bool wmv = _wcsicmp(std::filesystem::path(name).extension().c_str(), L".wmv") == 0;
-		return one(wmv ? file_dialog(window, L"Windows Media video (*.wmv)\0*.wmv\0\0", true, name, L"wmv")
-			: file_dialog(window, L"MPEG-4 video (*.mp4)\0*.mp4\0\0", true, name, L"mp4"));
+		struct container
+		{
+			const wchar_t* extension;
+			const wchar_t* filter;
+		};
+		static constexpr container containers[] = {
+			{L"wmv", L"Windows Media video (*.wmv)\0*.wmv\0\0"},
+			{L"m4a", L"MPEG-4 audio (*.m4a)\0*.m4a\0\0"},
+			{L"flac", L"FLAC audio (*.flac)\0*.flac\0\0"},
+			{L"wma", L"Windows Media audio (*.wma)\0*.wma\0\0"},
+			{L"wav", L"WAV audio (*.wav)\0*.wav\0\0"},
+		};
+		const auto extension = std::filesystem::path(name).extension().wstring();
+		for (const auto& entry : containers)
+			if (extension.size() > 1 && _wcsicmp(extension.c_str() + 1, entry.extension) == 0)
+				return one(file_dialog(window, entry.filter, true, name, entry.extension));
+		return one(file_dialog(window, L"MPEG-4 video (*.mp4)\0*.mp4\0\0", true, name, L"mp4"));
 	};
 	d.save_data = [=](const std::wstring& name)
 	{
@@ -541,7 +555,8 @@ void draw_workspace_navigation(workspace& app, const workspace_layout& layout)
 		app.synth_open = true;
 		app.focus_synth = true;
 	}
-	if (panel_button("Video export", app.video_open, "Render the player view to MP4"))
+	if (panel_button("Video export", app.video_open,
+			"Render the player view to MP4 or WMV, or SYNCore's audio alone"))
 	{
 		app.video_open = true;
 		ImGui::SetWindowFocus("Player video render");
@@ -1535,6 +1550,14 @@ int run(bool smoke, bool workflows, const std::filesystem::path& capture_path, c
 				if (video_frame != 0 && workflow_frame == video_frame + 204)
 				{
 					write_capture(capture_path.parent_path() / "video-advanced-workflow.bmp", width, height);
+					auto audio = app.video.settings();
+					audio.audio_only = true;
+					audio.audio_codec = simple_player_video_audio_codec::flac;
+					app.video.set_settings(audio);
+				}
+				if (video_frame != 0 && workflow_frame == video_frame + 208)
+				{
+					write_capture(capture_path.parent_path() / "audio-workflow.bmp", width, height);
 					std::cout << "PASS: complete project/editor/analysis/video workspace GL composition\n";
 					break;
 				}

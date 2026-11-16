@@ -53,6 +53,7 @@ void video_encoder_fields(simple_player_video_settings& video, Field&& field)
 	field(L"PLAYER_RENDER_AUDIO_CODEC", video.audio_codec);
 	field(L"PLAYER_RENDER_AUDIO_BITS", video.audio_bits);
 	field(L"PLAYER_RENDER_AUDIO_DITHER", video.audio_dither);
+	field(L"PLAYER_RENDER_AUDIO_ONLY", video.audio_only);
 }
 
 // Unknown stored enum values fall back to the defaults, so combos never
