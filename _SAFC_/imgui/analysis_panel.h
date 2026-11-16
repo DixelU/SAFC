@@ -10,10 +10,25 @@
 
 namespace safc::imgui_ui
 {
-struct analysis_point
+// Min/max index over a graph's raw points, in blocks of `block` consecutive
+// points. Lets the plot draw at screen-pixel resolution at any zoom level by
+// combining short exact scans of the source btree with block range queries.
+struct analysis_plot_index
 {
-	std::int64_t tick = 0;
-	double value = 0;
+	static constexpr std::size_t block = 32;
+	std::vector<std::int64_t> block_start; // tick of each block's first point
+	std::vector<double> low, high;         // iterative segment trees, leaves at [size, 2 * size)
+	std::size_t blocks() const { return block_start.size(); }
+	// Block that holds the last point at or before `tick` (0 when none).
+	std::size_t block_of(std::int64_t tick) const;
+	// Min/max over whole blocks [first, last).
+	void range(std::size_t first, std::size_t last, double& minimum, double& maximum) const;
+	double peak() const
+	{
+		double minimum, maximum;
+		range(0, blocks(), minimum, maximum);
+		return blocks() ? maximum : 0;
+	}
 };
 struct analysis_tempo
 {
@@ -24,10 +39,10 @@ struct analysis_tempo
 };
 struct analysis_result
 {
-	// Immutable only after the analysis worker has finished. Exact btree
-	// queries/export coexist with bounded display envelopes for dense files.
+	// Immutable only after the analysis worker has finished. The plots read the
+	// exact btrees through these compact min/max indexes.
 	std::shared_ptr<const single_midi_info_collector> source;
-	std::vector<analysis_point> tempo_plot, polyphony_plot, nps_plot;
+	analysis_plot_index tempo_plot, polyphony_plot, nps_plot;
 	std::vector<analysis_tempo> timing;
 	std::int64_t last_tick = 0;
 	double duration_seconds = 0;

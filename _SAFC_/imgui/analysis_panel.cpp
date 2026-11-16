@@ -19,6 +19,7 @@
 #include <mutex>
 #include <stdexcept>
 #include <thread>
+#include <type_traits>
 
 namespace safc::imgui_ui
 {
@@ -63,19 +64,18 @@ double exact_value(const Graph& graph, std::int64_t tick)
 	return double(it->second);
 }
 
-// Each bin emits first/min/max/last in time order. Peaks survive decimation,
-// and draw cost is bounded independently of the MIDI event count. Tooltips
-// still query the original graph at the exact hovered tick.
+// Builds the block min/max index the plots draw from. Memory is about one byte
+// per raw point, so dense files keep exact detail at every zoom level.
 template<class Graph>
-std::vector<analysis_point> envelope(const Graph& graph, std::int64_t end, std::stop_token stop)
+analysis_plot_index build_plot_index(const Graph& graph, std::stop_token stop)
 {
-	constexpr std::size_t bin_count = 8192;
-	struct bin
-	{
-		bool used = false;
-		analysis_point first, last, minimum, maximum;
-	};
-	std::vector<bin> bins(bin_count);
+	constexpr auto block = analysis_plot_index::block;
+	analysis_plot_index index;
+	const std::size_t count = (graph.size() + block - 1) / block;
+	index.block_start.reserve(count);
+	index.low.assign(2 * count, std::numeric_limits<double>::infinity());
+	index.high.assign(2 * count, -std::numeric_limits<double>::infinity());
+	std::size_t position = 0;
 	for (const auto& [tick, raw_value] : graph)
 	{
 		if (stop.stop_requested())
@@ -83,34 +83,62 @@ std::vector<analysis_point> envelope(const Graph& graph, std::int64_t end, std::
 		const double value = double(raw_value);
 		if (!std::isfinite(value))
 			throw std::runtime_error("MIDI contains an invalid zero tempo.");
-		const std::size_t index = std::min(bin_count - 1,
-			static_cast<std::size_t>(std::max(0., double(tick)) / std::max(1., double(end)) * (bin_count - 1)));
-		auto& b = bins[index];
-		const analysis_point p{tick, value};
-		if (!b.used)
-		{
-			b.used = true;
-			b.first = b.minimum = b.maximum = p;
-		}
-		b.last = p;
-		if (value < b.minimum.value)
-			b.minimum = p;
-		if (value > b.maximum.value)
-			b.maximum = p;
+		const std::size_t b = position++ / block;
+		if (b == index.block_start.size())
+			index.block_start.push_back(tick);
+		index.low[count + b] = std::min(index.low[count + b], value);
+		index.high[count + b] = std::max(index.high[count + b], value);
 	}
-	std::vector<analysis_point> result;
-	result.reserve(bin_count * 4);
-	for (const auto& b : bins)
+	for (std::size_t i = count; i-- > 1;)
 	{
-		if (!b.used)
-			continue;
-		std::array<analysis_point, 4> points{b.first, b.minimum, b.maximum, b.last};
-		std::sort(points.begin(), points.end(), [](const auto& a, const auto& b) { return a.tick < b.tick; });
-		for (const auto& p : points)
-			if (result.empty() || result.back().tick != p.tick)
-				result.push_back(p);
+		index.low[i] = std::min(index.low[2 * i], index.low[2 * i + 1]);
+		index.high[i] = std::max(index.high[2 * i], index.high[2 * i + 1]);
 	}
-	return result;
+	return index;
+}
+
+// Min/max of the raw points whose ticks are in [first, last), the value in force
+// just before `first`, and the value in force at `last - 1`.
+struct plot_column
+{
+	bool any = false;
+	double minimum = 0, maximum = 0, exit = 0;
+};
+
+template<class Graph>
+plot_column column_stats(const Graph& graph, const analysis_plot_index& index, std::int64_t first,
+	std::int64_t last, double enter)
+{
+	plot_column column{false, enter, enter, enter};
+	if (first >= last || graph.empty())
+		return column;
+	const auto scan = [&](auto it, std::int64_t stop_tick)
+	{
+		for (; it != graph.end() && it->first < stop_tick; ++it)
+		{
+			const double value = double(it->second);
+			column.any = true;
+			column.minimum = std::min(column.minimum, value);
+			column.maximum = std::max(column.maximum, value);
+			column.exit = value;
+		}
+	};
+	const auto head = index.block_of(first);
+	const auto tail = index.block_of(last - 1);
+	if (tail <= head + 1)
+	{
+		scan(graph.lower_bound(first), last);
+		return column;
+	}
+	// Partial head block, whole blocks in between, partial tail block.
+	scan(graph.lower_bound(first), index.block_start[head + 1]);
+	double low, high;
+	index.range(head + 1, tail, low, high);
+	column.any = true;
+	column.minimum = std::min(column.minimum, low);
+	column.maximum = std::max(column.maximum, high);
+	scan(graph.lower_bound(index.block_start[tail]), last);
+	return column;
 }
 
 void validate_header(const std::wstring& path)
@@ -158,13 +186,11 @@ std::shared_ptr<analysis_result> make_result(std::shared_ptr<single_midi_info_co
 		previous_tick = tick;
 	}
 	result->duration_seconds = result->ticks_to_seconds(result->last_tick);
-	result->tempo_plot = envelope(source->tempo_map, result->last_tick, stop);
-	result->polyphony_plot = envelope(source->polyphony, result->last_tick, stop);
-	result->nps_plot = envelope(source->notes_per_second, result->last_tick, stop);
-	for (const auto& p : result->polyphony_plot)
-		result->peak_polyphony = std::max(result->peak_polyphony, std::int64_t(p.value));
-	for (const auto& p : result->nps_plot)
-		result->peak_nps = std::max(result->peak_nps, std::int64_t(p.value));
+	result->tempo_plot = build_plot_index(source->tempo_map, stop);
+	result->polyphony_plot = build_plot_index(source->polyphony, stop);
+	result->nps_plot = build_plot_index(source->notes_per_second, stop);
+	result->peak_polyphony = std::max<std::int64_t>(0, std::llround(result->polyphony_plot.peak()));
+	result->peak_nps = std::max<std::int64_t>(0, std::llround(result->nps_plot.peak()));
 	return stop.stop_requested() ? nullptr : result;
 }
 
@@ -263,6 +289,32 @@ void write_analysis_export(const analysis_result& result, const std::wstring& pa
 			"Could not replace the destination file (Windows error " + std::to_string(GetLastError()) + ").");
 }
 
+}
+
+std::size_t analysis_plot_index::block_of(std::int64_t tick) const
+{
+	const auto it = std::upper_bound(block_start.begin(), block_start.end(), tick);
+	return it == block_start.begin() ? 0 : std::size_t(it - block_start.begin()) - 1;
+}
+
+void analysis_plot_index::range(std::size_t first, std::size_t last, double& minimum, double& maximum) const
+{
+	minimum = std::numeric_limits<double>::infinity();
+	maximum = -std::numeric_limits<double>::infinity();
+	const std::size_t size = blocks();
+	for (first += size, last += size; first < last; first >>= 1, last >>= 1)
+	{
+		if (first & 1)
+		{
+			minimum = std::min(minimum, low[first]);
+			maximum = std::max(maximum, high[first++]);
+		}
+		if (last & 1)
+		{
+			minimum = std::min(minimum, low[--last]);
+			maximum = std::max(maximum, high[last]);
+		}
+	}
 }
 
 double analysis_result::ticks_to_seconds(std::int64_t tick) const
@@ -388,7 +440,7 @@ struct analysis_panel::impl
 	}
 
 	template<class Graph>
-	void plot(const char* id, const char* label, const std::vector<analysis_point>& points, const Graph& exact,
+	void plot(const char* id, const char* label, const analysis_plot_index& index, const Graph& exact,
 		ImU32 color, const analysis_result& data)
 	{
 		ImGui::TextUnformatted(label);
@@ -413,37 +465,90 @@ struct analysis_panel::impl
 			return static_cast<std::int64_t>(std::max(0., x));
 		};
 		const double span = std::max(.000001, view_end - view_start);
-		auto first = std::lower_bound(points.begin(), points.end(), to_tick(view_start),
-			[](const analysis_point& p, auto tick) { return p.tick < tick; });
-		if (first != points.begin())
-			--first;
-		double maximum = auto_scale ? 1 : std::max(1., manual_max);
-		if (auto_scale)
-			for (auto it = first; it != points.end() && to_axis(it->tick) <= view_end; ++it)
-				maximum = std::max(maximum, it->value);
-		if (auto_scale)
-			maximum *= 1.05;
+		const int columns = std::max(1, int(size.x));
+		const auto first_tick = to_tick(view_start);
+		const auto last_tick = to_tick(view_end);
+		// Few raw points in view: draw their exact steps. Otherwise reduce the
+		// raw data to one min/max column per screen pixel, so the drawn shape
+		// always matches the exact values the tooltip reports.
+		const auto first_block = index.block_of(first_tick);
+		const std::size_t visible_points =
+			(std::max(first_block, index.block_of(last_tick)) - first_block + 1) * analysis_plot_index::block;
+		const bool exact_steps = visible_points <= std::size_t(columns) * 2;
+		std::vector<std::pair<double, double>> steps; // axis x, value
+		std::vector<plot_column> pixel_columns;
+		double enter = 0;
+		double peak = -std::numeric_limits<double>::infinity();
+		if (exact_steps)
+		{
+			enter = exact_value(exact, first_tick);
+			peak = enter;
+			for (auto it = exact.upper_bound(first_tick); it != exact.end(); ++it)
+			{
+				const double x = to_axis(it->first);
+				if (x > view_end)
+					break;
+				steps.emplace_back(x, double(it->second));
+				peak = std::max(peak, steps.back().second);
+			}
+		}
+		else
+		{
+			enter = exact_value(exact, first_tick - 1);
+			peak = enter;
+			pixel_columns.resize(columns);
+			std::int64_t column_start = first_tick;
+			double carried = enter;
+			for (int c = 0; c < columns; ++c)
+			{
+				const std::int64_t column_end = c + 1 == columns
+					? (last_tick == INT64_MAX ? INT64_MAX : last_tick + 1)
+					: std::max(column_start, to_tick(view_start + span * (c + 1) / columns));
+				pixel_columns[c] = column_stats(exact, index, column_start, column_end, carried);
+				carried = pixel_columns[c].exit;
+				peak = std::max(peak, pixel_columns[c].maximum);
+				column_start = column_end;
+			}
+		}
+		double maximum = auto_scale ? std::max(1., peak) * 1.05 : std::max(1., manual_max);
+		const auto value_y = [&](double y)
+		{
+			return corner.y - float(std::clamp(y / maximum, 0., 1.)) * (size.y - 9);
+		};
 		const auto position = [&](double x, double y)
 		{
-			return ImVec2(origin.x + float((x - view_start) / span) * size.x,
-				corner.y - float(std::clamp(y / maximum, 0., 1.)) * (size.y - 9));
+			return ImVec2(origin.x + float((x - view_start) / span) * size.x, value_y(y));
 		};
 		for (int i = 1; i < 4; ++i)
 			draw->AddLine(ImVec2(origin.x, origin.y + size.y * i / 4), ImVec2(corner.x, origin.y + size.y * i / 4),
 				IM_COL32(34, 56, 74, 190));
 		draw->PushClipRect(origin, corner, true);
-		ImVec2 previous = position(view_start, exact_value(exact, to_tick(view_start)));
-		for (auto it = first; it != points.end(); ++it)
+		ImVec2 previous(origin.x, value_y(enter));
+		if (exact_steps)
 		{
-			const double x = to_axis(it->tick);
-			if (x < view_start)
-				continue;
-			if (x > view_end)
-				break;
-			const auto current = position(x, it->value);
-			draw->AddLine(previous, ImVec2(current.x, previous.y), color, 1.3f);
-			draw->AddLine(ImVec2(current.x, previous.y), current, color, 1.3f);
-			previous = current;
+			for (const auto& [x, value] : steps)
+			{
+				const auto current = position(x, value);
+				draw->AddLine(previous, ImVec2(current.x, previous.y), color, 1.3f);
+				draw->AddLine(ImVec2(current.x, previous.y), current, color, 1.3f);
+				previous = current;
+			}
+		}
+		else
+		{
+			double carried = enter;
+			for (int c = 0; c < columns; ++c)
+			{
+				const auto& column = pixel_columns[c];
+				if (!column.any)
+					continue;
+				const float x = origin.x + float(c) * size.x / columns;
+				draw->AddLine(previous, ImVec2(x, previous.y), color, 1.3f);
+				draw->AddLine(ImVec2(x, value_y(std::min(carried, column.minimum))),
+					ImVec2(x, value_y(std::max(carried, column.maximum))), color, 1.3f);
+				carried = column.exit;
+				previous = ImVec2(x, value_y(carried));
+			}
 		}
 		draw->AddLine(previous, ImVec2(corner.x, previous.y), color, 1.3f);
 		const float selection_x = position(to_axis(selected_tick), 0).x;
@@ -455,8 +560,12 @@ struct analysis_panel::impl
 			const double ratio = std::clamp(double(mouse.x - origin.x) / size.x, 0., 1.);
 			const auto tick = to_tick(view_start + ratio * span);
 			draw->AddLine(ImVec2(mouse.x, origin.y), ImVec2(mouse.x, corner.y), IM_COL32(150, 190, 220, 150));
-			ImGui::SetTooltip("Tick %lld | %.6f s | %s %.6g", static_cast<long long>(tick), data.ticks_to_seconds(tick),
-				label, exact_value(exact, tick));
+			if constexpr (std::is_integral_v<typename Graph::mapped_type>)
+				ImGui::SetTooltip("Tick %lld | %.6f s | %s %lld", static_cast<long long>(tick), data.ticks_to_seconds(tick),
+					label, static_cast<long long>(std::llround(exact_value(exact, tick))));
+			else
+				ImGui::SetTooltip("Tick %lld | %.6f s | %s %.6g", static_cast<long long>(tick), data.ticks_to_seconds(tick),
+					label, exact_value(exact, tick));
 			if (ImGui::IsItemClicked(ImGuiMouseButton_Left) ||
 				(ImGui::IsItemActive() && ImGui::IsMouseDown(ImGuiMouseButton_Left)))
 				selected_tick = input_tick = tick;
@@ -480,7 +589,10 @@ struct analysis_panel::impl
 		draw->PopClipRect();
 		draw->AddRect(origin, corner, IM_COL32(63, 113, 151, 255));
 		char text[48];
-		std::snprintf(text, sizeof(text), "max %.6g", maximum);
+		if constexpr (std::is_integral_v<typename Graph::mapped_type>)
+			std::snprintf(text, sizeof(text), "max %lld", static_cast<long long>(std::llround(maximum)));
+		else
+			std::snprintf(text, sizeof(text), "max %.6g", maximum);
 		draw->AddText(ImVec2(origin.x + 5, origin.y + 3), color, text);
 	}
 
