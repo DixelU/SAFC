@@ -446,6 +446,40 @@ int main()
             ImGui::ActivateItemByID(content->GetID("Cancel"));
             frame(); frame();
         }
+        // Keyboard-only reapply: Esc cancels, and Enter accepts even when pressed
+        // before the preview job has finished.
+        {
+            auto tool_visible = [](const char* title)
+            {
+                const auto* window = ImGui::FindWindowByName(title);
+                return window != nullptr && window->WasActive;
+            };
+            auto wait_idle = [&]
+            {
+                const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+                while (editor.busy() && std::chrono::steady_clock::now() < deadline)
+                { std::this_thread::sleep_for(std::chrono::milliseconds(2)); frame(); }
+                frame(); frame();
+                require(!editor.busy(), "Editor tool preview timed out.");
+            };
+            auto open_flip = [&]
+            {
+                io.AddKeyEvent(ImGuiMod_Alt, true);
+                key(ImGuiKey_Y, false);
+                io.AddKeyEvent(ImGuiMod_Alt, false); frame();
+            };
+            require(!editor.has_unsaved_changes(), "Fixture unexpectedly had unsaved edits before Enter test.");
+            open_flip();
+            wait_idle();
+            require(tool_visible("Flip score"), "Alt+Y did not open Flip.");
+            key(ImGuiKey_Escape, false); frame();
+            require(!tool_visible("Flip score") && !editor.has_unsaved_changes(), "Esc did not cancel the Flip preview.");
+            open_flip();
+            key(ImGuiKey_Enter, false);
+            wait_idle();
+            require(!tool_visible("Flip score"), "Enter did not accept and close Flip.");
+            require(editor.has_unsaved_changes(), "Enter closed Flip without committing its edit.");
+        }
         auto* editor_content = content_window("MIDI editor");
         audit_combo(editor_content, "Tool", {"Draw / move", "Select", "Erase", "Split"}, 0);
         audit_combo(editor_content, "Snap",

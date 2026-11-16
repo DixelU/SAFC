@@ -307,6 +307,9 @@ struct editor_panel::impl
 
 	tool_kind tool = tool_kind::none;
 	bool tool_open = false, preview_dirty = false;
+	// Enter in the tool or editor window accepts once the preview catches up with
+	// the settings, so the same tool can be reapplied without reaching for Accept.
+	bool accept_pending = false, editor_focused = false;
 	int divisions = 4, trash_every = 4, lfo_shape = 0;
 	float time_multiplier = 1.f, gap = 0.f, period = 1.f, distortion = .5f;
 	bool absolute_pattern = false, horizontal = true, vertical = false, preserve_starts = false;
@@ -869,6 +872,7 @@ struct editor_panel::impl
 		tool = value;
 		tool_open = true;
 		preview_dirty = true;
+		accept_pending = false;
 
 		if (tool == tool_kind::lfo)
 		{
@@ -919,8 +923,20 @@ struct editor_panel::impl
 			default:
 				break;
 			}
-			completed_status = "Preview ready. Accept commits one undo step; Cancel restores the document.";
+			completed_status =
+				"Preview ready. Enter or Accept commits one undo step; Esc or Cancel restores the document.";
 		});
+	}
+
+	bool tool_acceptable() const { return !(tool == tool_kind::lfo && lane == lane_kind::tempo); }
+
+	void accept_tool()
+	{
+		document->accept_tool_preview();
+		tool = tool_kind::none;
+		tool_open = false;
+		accept_pending = false;
+		status = "Tool accepted as one undo step.";
 	}
 
 	void draw_tool()
@@ -931,6 +947,7 @@ struct editor_panel::impl
 		{
 			document->cancel_tool_preview();
 			tool = tool_kind::none;
+			accept_pending = false;
 			status = "Preview cancelled.";
 			return;
 		}
@@ -945,7 +962,25 @@ struct editor_panel::impl
 
 		if (begin_folded_window(title, &open))
 		{
-			ImGui::TextWrapped("Preview affects selected notes, or the active track when nothing is selected.");
+			// Enter accepts and Esc cancels while this window or the editor has focus.
+			// Owning the keys keeps keyboard navigation from also toggling a checkbox or
+			// opening a slider's text field; a text field or popup keeps its own keys.
+			const auto& io = ImGui::GetIO();
+			const bool keys = (editor_focused || ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)) &&
+				!io.WantTextInput && !ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopup);
+			if (keys)
+			{
+				const auto owner = ImGui::GetID("##tool-keys");
+				for (const auto key : {ImGuiKey_Enter, ImGuiKey_KeypadEnter, ImGuiKey_Escape})
+					ImGui::SetKeyOwner(key, owner);
+				if (ImGui::IsKeyPressed(ImGuiKey_Enter, false) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, false))
+					accept_pending = tool_acceptable();
+				else if (ImGui::IsKeyPressed(ImGuiKey_Escape, false))
+					open = false;
+			}
+
+			ImGui::TextWrapped("Preview affects selected notes, or the active track when nothing is selected. "
+							   "Enter accepts; Esc cancels.");
 			ImGui::Separator();
 			ImGui::BeginDisabled(busy);
 			bool changed = false;
@@ -990,14 +1025,9 @@ struct editor_panel::impl
 			if (changed)
 				preview_dirty = true;
 			ImGui::Separator();
-			ImGui::BeginDisabled(preview_dirty || (tool == tool_kind::lfo && lane == lane_kind::tempo));
+			ImGui::BeginDisabled(preview_dirty || !tool_acceptable());
 			if (ImGui::Button("Accept", ImVec2(scaled(100.f), 0)))
-			{
-				document->accept_tool_preview();
-				tool = tool_kind::none;
-				tool_open = false;
-				status = "Tool accepted as one undo step.";
-			}
+				accept_tool();
 			ImGui::EndDisabled();
 			ImGui::SameLine();
 
@@ -1011,6 +1041,16 @@ struct editor_panel::impl
 
 		if (tool != tool_kind::none)
 			tool_open = open;
+		if (!tool_open)
+			accept_pending = false;
+		// A pending Enter waits for the preview of the current settings to finish.
+		else if (accept_pending && !busy && !preview_dirty)
+		{
+			if (tool_acceptable())
+				accept_tool();
+			else
+				accept_pending = false;
+		}
 		// Wait until a slider or field is released so dragging does not restart
 		// the preview job, and the editor's progress screen, on every step.
 		if (preview_dirty && tool_open && !busy && !ImGui::IsAnyItemActive())
@@ -2451,8 +2491,8 @@ struct editor_panel::impl
 				"Ctrl+Z/Y undo/redo; Ctrl+C/X/V/B copy/cut/paste/duplicate; Ctrl+A/D select track/deselect; Shift+C "
 				"selects channel; Alt+C assigns channel. P/E/D/C/Y choose Draw/Select/Erase/Split/Playback. Arrows "
 				"move; Ctrl+Up/Down transposes octaves. Q quantizes; Ctrl+G glues overlapping or touching notes. "
-				"Space plays from view. Alt+U/Y/W/O opens Chopper/Flip/Claw/LFO. Esc cancels a gesture, or "
-				"deselects.");
+				"Space plays from view. Alt+U/Y/W/O opens Chopper/Flip/Claw/LFO with its last settings; Enter "
+				"accepts the tool and Esc cancels it. Esc cancels a gesture, or deselects.");
 		}
 	}
 
@@ -2464,8 +2504,10 @@ struct editor_panel::impl
 		ImGui::SetNextWindowSize({std::min(scaled(1180.f), display.x - 84.f),
 			std::max(scaled(420.f), std::min(scaled(790.f), display.y - 116.f))}, ImGuiCond_FirstUseEver);
 
+		editor_focused = false;
 		if (begin_folded_window("MIDI editor", open, ImGuiWindowFlags_NoScrollWithMouse))
 		{
+			editor_focused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
 			transport = playback.snapshot();
 			if (transport.error != last_playback_error)
 			{
