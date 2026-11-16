@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstdlib>
 #include <exception>
 #include <mutex>
 #include <thread>
@@ -105,6 +106,19 @@ syncore_runtime_status make_runtime_status(const safsyn::WindowsSynthStats& sour
 }
 #endif
 
+std::filesystem::path syncore_phase_disk_cache_directory()
+{
+	wchar_t* local_app_data = nullptr;
+	std::size_t length = 0;
+	if (_wdupenv_s(&local_app_data, &length, L"LOCALAPPDATA") != 0 || !local_app_data)
+		return {};
+	std::filesystem::path result;
+	if (*local_app_data)
+		result = std::filesystem::path(local_app_data) / L"SAFC" / L"SYNCore" / L"phase-cache";
+	std::free(local_app_data);
+	return result;
+}
+
 syncore_output::syncore_output() : impl_(std::make_unique<impl>()) {}
 syncore_output::~syncore_output() { stop(); }
 
@@ -154,6 +168,7 @@ bool syncore_output::start(const std::wstring& bank_path,
 			options.playback.phase.mode = safsyn::PhaseMode::Analytic;
 			break;
 		}
+		options.playback.phase_disk_cache_directory = syncore_phase_disk_cache_directory();
 		// Publish the session only after start() has created its delivery thread.
 		// A concurrent stop either sees the whole session and cancels it, or runs
 		// before this block and is followed by a still-observable session.

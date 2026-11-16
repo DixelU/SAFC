@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <filesystem>
 #include <memory>
 #include <optional>
 #include <span>
@@ -20,6 +21,11 @@ inline syncore_phase_mode syncore_phase_mode_from_stored(std::uint32_t value) no
 {
 	return value >= 1 && value <= 4 ? syncore_phase_mode::analytic : syncore_phase_mode::coherent;
 }
+
+// %LOCALAPPDATA%\SAFC\SYNCore\phase-cache: analytic-mode sample quadratures
+// persisted between sessions. Empty when LOCALAPPDATA is unavailable, which
+// disables the disk cache.
+std::filesystem::path syncore_phase_disk_cache_directory();
 
 enum class syncore_send_result { queued, full, unavailable };
 

@@ -2030,6 +2030,7 @@ safsyn::SmfRenderOptions make_audio_options(
 	options.tail_frames = tail_frames;
 	options.block_frames = preferences.buffer_frames;
 	options.phase = phase_settings_from_preferences(preferences);
+	options.phase_disk_cache_directory = syncore_phase_disk_cache_directory();
 	options.mastering = mastering_from_preferences(preferences);
 	options.progress_callback = on_audio_progress;
 	options.progress_user_data = &progress;
