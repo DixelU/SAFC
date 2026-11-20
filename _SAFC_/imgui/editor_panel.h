@@ -10,7 +10,7 @@ namespace safc::imgui_ui
 class playback_session;
 
 // Owns the editor document, all canvas gestures and the serialized I/O worker.
-// Public entry points belong to the UI thread. No SAFGUIF objects are used.
+// Public entry points belong to the UI thread.
 class editor_panel
 {
 public:

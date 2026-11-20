@@ -54,7 +54,7 @@ versions. Existing clients still use the tag feed until they have upgraded.
    and build Release `SAFC`; use the matching developer environment for each
    Ninja architecture and do not reuse caches across architectures. Run the
    CMake regression tests and the resulting release executable's `--smoke` and
-   `--workflow-smoke` checks. The original `_SAFC_.sln` builds the classic UI.
+   `--workflow-smoke` checks.
 5. Check ordinary startup, playback, editor changes/save, archive loading,
    processing, video export, shutdown, and update staging in the release builds.
    Test startup from a shortcut with a different working directory as well.
@@ -131,5 +131,4 @@ release. Do not rely on tag creation order alone; inspect the actual API result.
 
 GitHub's [release API documentation](https://docs.github.com/en/rest/releases/releases)
 describes draft visibility, stable latest releases, and the `make_latest` option.
-The compatibility details above come from SAFC's `../app/update.cpp`; old
-installations keep that behavior until their executable has been replaced.
+SAFC 1.x installations use the [original updater](https://github.com/DixelU/SAFC/blob/f58ab2ed5e93e7e74bc2ad28baa43f8a665876b6/_SAFC_/app/update.cpp) until their executable is replaced.

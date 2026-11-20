@@ -1,4 +1,6 @@
-# SAFC Documentation
+# SAFC 1.x Documentation
+
+This archived manual covers the original SAFGUIF interface. See the [Dear ImGui workspace guide](./_SAFC_/imgui/README.md) for the current application.
 
 ## Table of Contents
 - [General Info](#general-info)

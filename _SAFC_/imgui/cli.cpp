@@ -303,7 +303,7 @@ const char* cli_help()
 {
 	return R"(SAFC ImGui command-line MIDI processing
 
-Usage: SAFCImGui.exe "C:\configs\merge.json"
+Usage: SAFC.exe "C:\configs\merge.json"
 Help: --help, /help, -?, /?
 
 The UTF-8 JSON config uses the same processing core as the ImGui project.

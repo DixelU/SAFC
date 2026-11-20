@@ -22,7 +22,6 @@
 #include <utility>
 #include <vector>
 
-#include "../SAFGUIF/textbox.h"
 #include "../SAFC_InnerModules/video_frame_conversion.h"
 #include "../SAFC_InnerModules/video_parameter_sets.h"
 
@@ -45,18 +44,6 @@ void check(bool condition, const char* message)
 		std::cerr << "FAIL: " << message << '\n';
 		++failures;
 	}
-}
-
-void test_text_box_layout_isolation()
-{
-	single_text_line_settings shared_style("_", 0.0f, 0.0f, 5.0f, 0xFFFFFFFF);
-	text_box first("first", shared_style, 0.0f, 0.0f, 20.0f, 100.0f,
-		5.0f, 0, 0, 0, _Align::center);
-	text_box second("second", shared_style, 100.0f, 100.0f, 20.0f, 100.0f,
-		5.0f, 0, 0, 0, _Align::center);
-	check(&first.stls != &second.stls && &first.stls != &shared_style &&
-		&second.stls != &shared_style,
-		"text boxes keep independent mutable layout cursors");
 }
 
 void test_visual_storage_has_no_artificial_limit()
@@ -1306,7 +1293,6 @@ void test_codecs(const std::filesystem::path& directory, const syncore_preferenc
 
 int main(int argc, char** argv)
 {
-	test_text_box_layout_isolation();
 	test_visual_storage_has_no_artificial_limit();
 	test_held_notes_do_not_block_reclamation();
 	test_player_slider_seek_restart();

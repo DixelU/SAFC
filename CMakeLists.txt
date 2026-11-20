@@ -5,7 +5,6 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
 option(SAFC_ENABLE_SYNCORE "Enable the embedded SAFSYNCore output" ON)
-option(SAFC_BUILD_APP_TESTS "Build application worker lifecycle regression tests" OFF)
 option(SAFC_BUILD_PROCESSOR_TESTS "Build streaming MIDI processor regression tests" OFF)
 option(SAFC_BUILD_VIDEO_EXPORT_TESTS "Build the Windows MP4 exporter regression test" OFF)
 # The migration preview switch remains an enabling compatibility alias. An
@@ -15,11 +14,10 @@ if(SAFC_BUILD_IMGUI_PREVIEW AND NOT DEFINED SAFC_BUILD_IMGUI)
 	set(SAFC_BUILD_IMGUI ON CACHE BOOL "Build the Dear ImGui SAFC application")
 endif()
 option(SAFC_BUILD_IMGUI "Build the Dear ImGui SAFC application" ON)
-option(SAFC_BUILD_LEGACY_GUI "Build the former SAFGUIF application as SAFCLegacy" OFF)
 if(WIN32)
 	enable_language(RC)
 endif()
-if(SAFC_BUILD_APP_TESTS OR SAFC_BUILD_PROCESSOR_TESTS OR SAFC_BUILD_VIDEO_EXPORT_TESTS OR SAFC_BUILD_IMGUI)
+if(SAFC_BUILD_PROCESSOR_TESTS OR SAFC_BUILD_VIDEO_EXPORT_TESTS OR SAFC_BUILD_IMGUI)
 	include(CTest)
 endif()
 
@@ -38,54 +36,11 @@ if(POLICY CMP0167)
 	cmake_policy(SET CMP0167 OLD)
 endif()
 find_package(Boost REQUIRED)
-if(SAFC_BUILD_LEGACY_GUI OR SAFC_BUILD_PROCESSOR_TESTS OR SAFC_BUILD_VIDEO_EXPORT_TESTS)
-	find_package(GLUT REQUIRED)
-endif()
 find_package(LibArchive REQUIRED)
 find_package(zstd CONFIG REQUIRED)
 
-if(SAFC_BUILD_APP_TESTS OR SAFC_BUILD_PROCESSOR_TESTS)
+if(SAFC_BUILD_PROCESSOR_TESTS)
 	add_subdirectory(_SAFC_/tests)
-endif()
-
-if(SAFC_BUILD_LEGACY_GUI)
-	add_executable(SAFCLegacy
-		_SAFC_/SAFC_InnerModules/compressed_midi_event_source.cpp
-		_SAFC_/SAFC_InnerModules/midi_editor_tools.cpp
-		_SAFC_/SAFC_InnerModules/syncore_output.cpp
-		_SAFC_/SAFC_InnerModules/simple_player_video_export.cpp
-		_SAFC_/SAFCGUIF_Local/midi_editor_tools_ui.cpp
-		_SAFC_/SAFCGUIF_Local/player_video_render_ui.cpp
-		_SAFC_/JSON/JSON.cpp
-		_SAFC_/JSON/JSONValue.cpp
-		_SAFC_/app/app_state.cpp
-		_SAFC_/app/project_model.cpp
-		_SAFC_/app/cli_runtime.cpp
-		_SAFC_/app/dialogs.cpp
-		_SAFC_/app/editor.cpp
-		_SAFC_/app/file_actions.cpp
-		_SAFC_/app/file_properties.cpp
-		_SAFC_/app/gui_runtime.cpp
-		_SAFC_/app/merger.cpp
-		_SAFC_/app/midi_analysis.cpp
-		_SAFC_/app/playback_source.cpp
-		_SAFC_/app/player_controls.cpp
-		_SAFC_/app/settings.cpp
-		_SAFC_/app/syncore_settings.cpp
-		_SAFC_/app/ui.cpp
-		_SAFC_/app/update.cpp
-		_SAFC_/app/window_layout.cpp
-		_SAFC_/_SAFC_.cpp)
-	target_link_libraries(SAFCLegacy PRIVATE Boost::headers GLUT::GLUT
-		LibArchive::LibArchive zstd::libzstd)
-	if(WIN32)
-		target_link_libraries(SAFCLegacy PRIVATE mfplat mfreadwrite mfuuid mf)
-	endif()
-	if(MSVC)
-		# Match the maintained Visual Studio project; several legacy constexpr call
-		# sites still depend on permissive MSVC lookup behavior.
-		target_compile_options(SAFCLegacy PRIVATE /permissive)
-	endif()
 endif()
 
 if(SAFC_ENABLE_SYNCORE)
@@ -94,10 +49,6 @@ if(SAFC_ENABLE_SYNCORE)
 		set(SAFSYN_BUILD_WINMM OFF CACHE BOOL "" FORCE)
 		set(SAFSYN_BUILD_BENCHMARKS OFF CACHE BOOL "" FORCE)
 		add_subdirectory(SYNCore EXCLUDE_FROM_ALL)
-		if(TARGET SAFCLegacy)
-			target_link_libraries(SAFCLegacy PRIVATE safsyn-windows)
-			target_compile_definitions(SAFCLegacy PRIVATE SAFC_WITH_SYNCORE=1)
-		endif()
 		if(WIN32 AND SAFC_BUILD_VIDEO_EXPORT_TESTS)
 			add_executable(safc-video-export-tests
 				_SAFC_/tests/player_video_export_tests.cpp
@@ -105,8 +56,8 @@ if(SAFC_ENABLE_SYNCORE)
 				_SAFC_/SAFC_InnerModules/simple_player_video_export.cpp
 				_SAFC_/SAFC_InnerModules/syncore_output.cpp)
 			target_link_libraries(safc-video-export-tests PRIVATE
-				Boost::headers GLUT::GLUT LibArchive::LibArchive zstd::libzstd
-				safsyn-windows mfplat mfreadwrite mfuuid mf oleaut32)
+				Boost::headers LibArchive::LibArchive zstd::libzstd
+				safsyn-windows opengl32 winmm mfplat mfreadwrite mfuuid mf oleaut32)
 			target_compile_definitions(safc-video-export-tests PRIVATE SAFC_WITH_SYNCORE=1)
 			target_compile_features(safc-video-export-tests PRIVATE cxx_std_23)
 			if(MSVC)

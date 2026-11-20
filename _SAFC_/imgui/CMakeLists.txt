@@ -53,8 +53,6 @@ set_target_properties(SAFC PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_D
 add_executable(SAFCImGui WIN32 $<TARGET_OBJECTS:safc_imgui_entry>)
 target_link_libraries(SAFCImGui PRIVATE safc_imgui_core)
 
-# No SAFGUIF widget headers, GLUT event loop, or GLUT link dependency are part
-# of the application core. Legacy GUI code is isolated in the optional target.
 if(MSVC)
 	target_compile_options(safc_imgui_core PUBLIC /permissive /EHsc)
 endif()

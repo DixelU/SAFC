@@ -243,10 +243,8 @@
     <ClInclude Include="widgets.h" />
     <ClInclude Include="window_icon.h" />
     <ClInclude Include="..\app\project_model.h" />
-    <ClInclude Include="..\app\app_workers.h" />
     <ClInclude Include="..\JSON\JSON.h" />
     <ClInclude Include="..\JSON\JSONValue.h" />
-    <ClInclude Include="..\consts.h" />
     <ClInclude Include="..\resource.h" />
     <ClInclude Include="..\WinRegWrappers.h" />
     <ClInclude Include="..\SAFC_InnerModules\bool_settings.h" />

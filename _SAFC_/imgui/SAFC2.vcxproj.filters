@@ -170,17 +170,11 @@
     <ClInclude Include="..\app\project_model.h">
       <Filter>Shared application</Filter>
     </ClInclude>
-    <ClInclude Include="..\app\app_workers.h">
-      <Filter>Shared application</Filter>
-    </ClInclude>
     <ClInclude Include="..\JSON\JSON.h">
       <Filter>JSON</Filter>
     </ClInclude>
     <ClInclude Include="..\JSON\JSONValue.h">
       <Filter>JSON</Filter>
-    </ClInclude>
-    <ClInclude Include="..\consts.h">
-      <Filter>Resources</Filter>
     </ClInclude>
     <ClInclude Include="..\resource.h">
       <Filter>Resources</Filter>

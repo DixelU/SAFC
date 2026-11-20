@@ -1,22 +1,5 @@
 find_package(Threads REQUIRED)
 
-if(SAFC_BUILD_APP_TESTS)
-    add_executable(safc-app-workers-tests
-        app_workers_tests.cpp
-        app_workers_test_submission.cpp
-        app_workers_test_shutdown.cpp)
-    target_include_directories(safc-app-workers-tests PRIVATE
-        "${CMAKE_CURRENT_LIST_DIR}/../../utility/include")
-    target_compile_features(safc-app-workers-tests PRIVATE cxx_std_23)
-    target_link_libraries(safc-app-workers-tests PRIVATE Threads::Threads)
-    if(MSVC)
-        target_compile_options(safc-app-workers-tests PRIVATE /EHsc)
-    endif()
-
-    add_test(NAME safc-app-workers COMMAND safc-app-workers-tests)
-    set_tests_properties(safc-app-workers PROPERTIES TIMEOUT 15)
-endif()
-
 if(SAFC_BUILD_PROCESSOR_TESTS)
     add_executable(safc-midi-scanner-tests midi_track_scanner_tests.cpp)
     target_compile_features(safc-midi-scanner-tests PRIVATE cxx_std_23)
@@ -55,7 +38,7 @@ if(SAFC_BUILD_PROCESSOR_TESTS)
         "${CMAKE_CURRENT_LIST_DIR}/../../utility/include")
     target_compile_features(safc-midi-filter-tests PRIVATE cxx_std_23)
     target_link_libraries(safc-midi-filter-tests PRIVATE
-        Boost::headers GLUT::GLUT Threads::Threads)
+        Boost::headers Threads::Threads)
     if(MSVC)
         target_compile_options(safc-midi-filter-tests PRIVATE /permissive /EHsc)
     endif()
@@ -67,7 +50,7 @@ if(SAFC_BUILD_PROCESSOR_TESTS)
         "${CMAKE_CURRENT_LIST_DIR}/../../utility/include")
     target_compile_features(safc-midi-selection-tests PRIVATE cxx_std_23)
     target_link_libraries(safc-midi-selection-tests PRIVATE
-        Boost::headers GLUT::GLUT Threads::Threads)
+        Boost::headers Threads::Threads)
     if(MSVC)
         target_compile_options(safc-midi-selection-tests PRIVATE /permissive /EHsc)
     endif()
@@ -80,7 +63,7 @@ if(SAFC_BUILD_PROCESSOR_TESTS)
         "${CMAKE_CURRENT_LIST_DIR}/../../utility/include")
     target_compile_features(safc-cut-and-transpose-tests PRIVATE cxx_std_23)
     target_link_libraries(safc-cut-and-transpose-tests PRIVATE
-        Boost::headers GLUT::GLUT Threads::Threads)
+        Boost::headers Threads::Threads)
     if(MSVC)
         target_compile_options(safc-cut-and-transpose-tests PRIVATE /permissive /EHsc)
     endif()
@@ -92,7 +75,7 @@ if(SAFC_BUILD_PROCESSOR_TESTS)
         "${CMAKE_CURRENT_LIST_DIR}/../../utility/include")
     target_compile_features(safc-midi-processor-tests PRIVATE cxx_std_23)
     target_link_libraries(safc-midi-processor-tests PRIVATE
-        Boost::headers GLUT::GLUT Threads::Threads)
+        Boost::headers Threads::Threads)
     if(MSVC)
         target_compile_options(safc-midi-processor-tests PRIVATE /permissive /EHsc)
     endif()
@@ -105,7 +88,7 @@ if(SAFC_BUILD_PROCESSOR_TESTS)
         "${CMAKE_CURRENT_LIST_DIR}/../../utility/include")
     target_compile_features(safc-midi-merger-tests PRIVATE cxx_std_23)
     target_link_libraries(safc-midi-merger-tests PRIVATE
-        Boost::headers GLUT::GLUT Threads::Threads)
+        Boost::headers Threads::Threads)
     if(MSVC)
         target_compile_options(safc-midi-merger-tests PRIVATE /permissive /EHsc)
     endif()

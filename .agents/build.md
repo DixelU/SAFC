@@ -4,7 +4,7 @@ Use the non-`amd64` MSBuild launcher on this machine:
 
 ```powershell
 & 'C:\Program Files\Microsoft Visual Studio\18\Community\MSBuild\Current\Bin\MSBuild.exe' `
-  'D:\Progs\GitHub\SAFC\_SAFC_.sln' `
+  'D:\Progs\GitHub\SAFC\SAFC2.sln' `
   /p:Configuration=Release /p:Platform=x64 /m /v:m /nologo
 ```
 

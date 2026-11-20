@@ -1,9 +1,7 @@
 # SAFC with Dear ImGui
 
-The default CMake application now uses Dear ImGui for the complete SAFC workspace:
-project processing and merging, playback, the MIDI editor, analysis, transform
-maps, SYNCore settings, and MP4 rendering. `SAFC.exe` is the primary executable;
-`SAFCImGui.exe` runs the identical frontend at the former preview target path.
+SAFC uses Dear ImGui for processing and merging, playback, MIDI editing, analysis, transform maps, SYNCore settings, and video export.
+`SAFC.exe` is the primary executable. `SAFCImGui.exe` runs the same application at the preview-era executable path.
 
 ![The SAFC project workspace](workspace.png)
 
@@ -12,7 +10,7 @@ remain part of the window design. Ordinary controls are Dear ImGui buttons,
 inputs, sliders, tables, lists, checkboxes, and popups. Windows file pickers remain
 native OS dialogs. Specialized editors and plots use ImDrawList canvases; the
 existing falling-note player renderer is presented through an OpenGL framebuffer
-texture. No SAFGUIF widget tree or GLUT event loop is used by the new application.
+texture.
 
 ## Workflows
 
@@ -164,17 +162,6 @@ accepted enabling alias for old build scripts. The `_SAFC_` CMake entry point
 supports the same options. `SAFC_ENABLE_SYNCORE=OFF` builds with external MIDI
 output and disables functionality that requires embedded synthesis.
 
-The former interface is an optional compatibility target:
-
-```powershell
-cmake -S . -B build/legacy -G Ninja `
-  -DCMAKE_BUILD_TYPE=Release `
-  -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake `
-  -DVCPKG_TARGET_TRIPLET=x64-windows-static `
-  -DSAFC_BUILD_IMGUI=OFF -DSAFC_BUILD_LEGACY_GUI=ON
-cmake --build build/legacy --target SAFCLegacy
-```
-
 Alternatively, open the repository's `SAFC2.sln` in Visual Studio 2026, or build
 it directly with MSBuild after enabling vcpkg integration (`vcpkg integrate install`):
 
@@ -182,21 +169,10 @@ it directly with MSBuild after enabling vcpkg integration (`vcpkg integrate inst
 MSBuild.exe SAFC2.sln /m /p:Configuration=Release /p:Platform=x64
 ```
 
-Its native `SAFC2` project builds this frontend with the same application and
-SYNCore sources as CMake. `SAFCLegacy` builds the former interface. Outputs are
-`build/msbuild/x64/Release/SAFC2/SAFC.exe` and
-`build/msbuild/x64/Release/SAFCLegacy/SAFC.exe`; intermediates are separate too.
-Debug/Release and x64/x86 are available (x86 maps to the `Win32` project platform
-and output directory). Both configurations use matching static CRT/dependency
-libraries. Both projects use v145; the legacy project requires Windows SDK
-10.0.26100.0, while `SAFC2` selects the latest installed Windows 10 SDK. Add `/t:SAFC2` to
-build only the new application. Both frontends embed the existing icon/version
-resource; the new executable also assigns its embedded icon to the native window.
-
-The original `_SAFC_.sln` remains available for the classic application. The
-CMake `SAFC` and `SAFCImGui` executables continue to share one entry object and
-application library. MSBuild compiles those same source files directly; no CMake
-generation step is required.
+The native `SAFC2` project builds the same sources as CMake. The Release executable is `build/msbuild/x64/Release/SAFC2/SAFC.exe`.
+Debug/Release and x64/x86 are available. x86 maps to the `Win32` output directory.
+The project uses the v145 toolset and the latest installed Windows SDK.
+Both build systems embed the same icon and version resource.
 
 ### JSON command line
 
@@ -256,12 +232,7 @@ including while an editor panel is hidden. Shutdown cancels and joins workers,
 stops playback and the synth in their required order, and releases preview/GL
 resources before destroying the graphics context.
 
-The shared processor/player/editor domain is retained. `app/project_model.*`
-contains project data and processing conversion; `SAFC_InnerModules/core_support.h`
-provides the core helpers and diagnostics that previously arrived through the
-SAFGUIF umbrella. The new `safc_imgui_core` target does not link the legacy widget
-implementation or GLUT. The optional legacy target still uses its existing app
-and SAFGUIF modules.
+`app/project_model.*` defines the project data shared by the workspace and the CLI. `SAFC_InnerModules/core_support.h` declares common helpers and diagnostics for the MIDI core.
 
 Common application and SYNCore preferences are imported from
 `HKCU\Software\SAFC`. They are written through explicit **Apply and save**
