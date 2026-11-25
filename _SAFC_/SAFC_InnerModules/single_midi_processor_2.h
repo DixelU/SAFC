@@ -1495,7 +1495,7 @@ struct single_midi_processor_2
 			auto& program = get_value<base_type>(cur, event_param1);
 
 			if (filtering.piano_only)
-				program = 0;
+				tick = disable_tick;
 
 			return true;
 		};
