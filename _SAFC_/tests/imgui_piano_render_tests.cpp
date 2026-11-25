@@ -23,12 +23,16 @@ void check_note_borders()
     data->reinit(width, 580, 100, 56, 0);
     data->move(0, 390);
 
+    constexpr uint8_t black_key = 42;
+    const auto& black_quad = data->keyboard[data->key_index[black_key]];
+    const auto black_x = static_cast<int>((black_quad.tl.x + black_quad.tr.x) * 0.5f);
     auto& notes = player->get_visuals();
     for (int key = 0; key < 128; key += 7)
         for (int note = 0; note < 8; ++note)
         {
-            notes.push_note_on(key, note * 100'000, key, 0, 90);
-            notes.push_note_off(key, note * 100'000 + 180'000, key, 0);
+            const auto track = key == black_key ? 0 : key;
+            notes.push_note_on(key, note * 100'000, track, 0, 90);
+            notes.push_note_off(key, note * 100'000 + 180'000, track, 0);
         }
 
     glViewport(0, 0, width, height);
@@ -71,12 +75,33 @@ void check_note_borders()
                     if (pixels[(y * width + x) * 4 + channel] != background[channel])
                         throw std::runtime_error("Note border escaped its rectangle, " + variant);
 
-        // Also require a note fill, so an empty or skipped render cannot pass.
+        // The sampled interiors are red on track zero, outside the outline.
         if (pixels[(180 * width + 8) * 4] < 100)
-            throw std::runtime_error("Expected visible note fill, " + variant);
+            throw std::runtime_error("Expected visible white-key note fill, " + variant);
+        if (pixels[(180 * width + black_x) * 4] < 100)
+            throw std::runtime_error("Expected visible black-key note fill, " + variant);
     }
     if (!data->gl_buffers.available)
+    {
         std::cout << "Buffer objects unavailable in this context; GPU path fell back to CPU\n";
+        return;
+    }
+
+	// The first note in the second index batch must use its own vertices.
+	notes.reset();
+	for (size_t i = 0; i < simple_player::draw_data::NOTE_BATCH; ++i)
+	{
+		notes.push_note_on(1, i * 2, 0, 0, 90);
+		notes.push_note_off(1, i * 2 + 1, 0, 0);
+	}
+	notes.push_note_on(black_key, 100'000, 0, 0, 90);
+	notes.push_note_off(black_key, 200'000, 0, 0);
+	data->gpu_notes_enabled = true;
+	glClear(GL_COLOR_BUFFER_BIT);
+	player->draw_at(*data, 0);
+	glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
+	if (glGetError() != GL_NO_ERROR || pixels[(180 * width + black_x) * 4] < 100)
+		throw std::runtime_error("Expected visible black-key note fill in the second GPU batch");
 }
 }
 

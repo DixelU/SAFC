@@ -42,6 +42,12 @@
 #ifndef GL_ARRAY_BUFFER
 #define GL_ARRAY_BUFFER 0x8892
 #endif
+#ifndef GL_ELEMENT_ARRAY_BUFFER
+#define GL_ELEMENT_ARRAY_BUFFER 0x8893
+#endif
+#ifndef GL_STATIC_DRAW
+#define GL_STATIC_DRAW 0x88E4
+#endif
 #ifndef GL_DYNAMIC_DRAW
 #define GL_DYNAMIC_DRAW 0x88E8
 #endif
@@ -2006,6 +2012,7 @@ struct simple_player
 		gl_buffer_api gl_buffers;
 		std::array<gpu_note_mirror, 2> gpu_rings;
 		std::vector<gpu_note_vertex> gpu_staging;
+		GLuint note_indices = 0;
 		uint32_t geometry_generation = 1;	// bumped when key quads move
 		uint8_t key_index[128] = {};		// key -> keyboard index (inverse of key_n)
 
@@ -2027,6 +2034,9 @@ struct simple_player
 					gl_buffers.delete_buffers(1, &mirror.buffer);
 				mirror = {};
 			}
+			if (note_indices)
+				gl_buffers.delete_buffers(1, &note_indices);
+			note_indices = 0;
 		}
 
 		static float seconds_since(uint64_t time_us, uint64_t epoch_us) noexcept
@@ -2146,6 +2156,37 @@ struct simple_player
 			bool outlines = false;
 		};
 
+		static constexpr size_t NOTE_BATCH = (size_t{UINT16_MAX} + 1) / 4;
+		static constexpr size_t OUTLINE_OFFSET = NOTE_BATCH * 6 * sizeof(uint16_t);
+
+		auto ensure_note_indices() -> bool
+		{
+			if (note_indices)
+				return true;
+
+			// Vertex offsets select each batch, so both rings can reuse the same 16-bit indices.
+			std::vector<uint16_t> indices(NOTE_BATCH * 14);
+			auto fill = indices.begin();
+			auto outline = fill + NOTE_BATCH * 6;
+			for (size_t i = 0; i < NOTE_BATCH; ++i)
+			{
+				const auto a = static_cast<uint16_t>(i * 4);
+				const auto b = static_cast<uint16_t>(a + 1);
+				const auto c = static_cast<uint16_t>(a + 2);
+				const auto d = static_cast<uint16_t>(a + 3);
+				fill = std::ranges::copy(std::array{a, b, c, a, c, d}, fill).out;
+				outline = std::ranges::copy(std::array{a, b, b, c, c, d, d, a}, outline).out;
+			}
+			gl_buffers.gen_buffers(1, &note_indices);
+			if (!note_indices)
+				return false;
+
+			gl_buffers.bind_buffer(GL_ELEMENT_ARRAY_BUFFER, note_indices);
+			gl_buffers.buffer_data(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(uint16_t), indices.data(), GL_STATIC_DRAW);
+			gl_buffers.bind_buffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+			return true;
+		}
+
 		// Opaque fills, then (within the outline limit) the quad edges in the
 		// vertex colour scaled by its alpha: a quarter of the note colour, the
 		// CPU path's border colour. The scale uses only the source colour, so
@@ -2155,20 +2196,23 @@ struct simple_player
 			if (ring.count == 0 || ring.buffer == 0)
 				return;
 			gl_buffers.bind_buffer(GL_ARRAY_BUFFER, ring.buffer);
-			glVertexPointer(2, GL_FLOAT, sizeof(gpu_note_vertex),
-				reinterpret_cast<const void*>(std::uintptr_t{0}));
-			glColorPointer(4, GL_UNSIGNED_BYTE, sizeof(gpu_note_vertex),
-				reinterpret_cast<const void*>(std::uintptr_t{offsetof(gpu_note_vertex, r)}));
 
-			auto draw_ranges = [&]()
+			auto draw_ranges = [&](GLenum primitive, size_t indices_per_note, size_t index_offset)
 			{
 				size_t slot = ring.first_slot;
 				size_t remaining = ring.count;
 				while (remaining)
 				{
-					const size_t run = std::min(remaining, ring.capacity - slot);
-					glDrawArrays(GL_QUADS, static_cast<GLint>(slot * 4), static_cast<GLsizei>(run * 4));
-					slot = 0;
+					const size_t run = std::min({remaining, ring.capacity - slot, NOTE_BATCH});
+					const size_t vertex_offset = slot * 4 * sizeof(gpu_note_vertex);
+					glVertexPointer(2, GL_FLOAT, sizeof(gpu_note_vertex), reinterpret_cast<const void*>(vertex_offset));
+					glColorPointer(4, GL_UNSIGNED_BYTE, sizeof(gpu_note_vertex),
+						reinterpret_cast<const void*>(vertex_offset + offsetof(gpu_note_vertex, r)));
+					glDrawElements(primitive, static_cast<GLsizei>(run * indices_per_note), GL_UNSIGNED_SHORT,
+						reinterpret_cast<const void*>(index_offset));
+					slot += run;
+					if (slot == ring.capacity)
+						slot = 0;
 					remaining -= run;
 				}
 			};
@@ -2186,15 +2230,13 @@ struct simple_player
 			// it was cleared with.
 			glColorMask(color_mask[0], color_mask[1], color_mask[2], GL_FALSE);
 			glDisable(GL_BLEND);
-			draw_ranges();
+			draw_ranges(GL_TRIANGLES, 6, 0);
 
 			if (ring.outlines)
 			{
 				glEnable(GL_BLEND);
 				glBlendFunc(GL_SRC_ALPHA, GL_ZERO);
-				glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
-				draw_ranges();
-				glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+				draw_ranges(GL_LINES, 8, OUTLINE_OFFSET);
 			}
 
 			glColorMask(color_mask[0], color_mask[1], color_mask[2], color_mask[3]);
@@ -2601,6 +2643,9 @@ struct simple_player
 			}
 
 			gpu = data.gpu_notes_enabled && data.gl_buffers.ensure();
+			if (gpu && !data.note_indices &&
+				std::ranges::any_of(visuals.rings, [](const auto& ring) -> bool { return ring.range() != 0; }))
+				gpu = data.ensure_note_indices();
 			if (gpu)
 			{
 				for (size_t ring_index = 0; ring_index < visuals.rings.size(); ++ring_index)
@@ -2650,6 +2695,7 @@ struct simple_player
 			const double window_seconds = static_cast<double>(data.scroll_window_us) * 1e-6;
 			glTranslatef(0.f, top, 0.f);
 			glScalef(1.f, static_cast<float>(static_cast<double>(data.height) / window_seconds), 1.f);
+			data.gl_buffers.bind_buffer(GL_ELEMENT_ARRAY_BUFFER, data.note_indices);
 			for (size_t ring_index = 0; ring_index < gpu_draws.size(); ++ring_index)
 			{
 				// Each ring has its own epoch; the scroll offset is per ring.
@@ -2664,6 +2710,7 @@ struct simple_player
 			glPopMatrix();
 			glDisable(GL_CLIP_PLANE0);
 			glDisable(GL_CLIP_PLANE1);
+			data.gl_buffers.bind_buffer(GL_ELEMENT_ARRAY_BUFFER, 0);
 			data.gl_buffers.bind_buffer(GL_ARRAY_BUFFER, 0);
 		}
 		else if (!data.note_verts.empty())
