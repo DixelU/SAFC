@@ -1,7 +1,7 @@
-# Player pipeline performance, October 15, 2026
+# Player pipeline performance
 
 This pass targets dense ("black") MIDI playback: files with millions of notes
-per minute. The measurements below come from standalone ports of the player's
+per minute. The October 15, 2026 measurements below come from standalone ports of the player's
 hot loops run on a 4-core 2.8 GHz Xeon under Linux (ratios matter, not the
 absolute numbers), on a synthetic 16-track file of 2.26 million note pairs
 with running status and zero-delta chords. The Nuker 4 class target is about
@@ -19,10 +19,12 @@ with running status and zero-delta chords. The Nuker 4 class target is about
 
 ### Sender runs (`simple_player::sender_thread_func`)
 
-Events sharing a timestamp form a run. The sender waits once per run and
-hands the run to the output through `syncore_output::try_send_short_messages`,
-which takes the adapter lock and the synth reference once per span. The
-playback clock snapshot is copied under its mutex only when
+The parser packs 32-bit MIDI messages into 32 KiB pages and records the
+playback time and source tick once per run. The sender can read a single
+published message immediately and hands contiguous spans directly to
+`syncore_output::try_send_short_messages`. If the synth queue fills, the
+sender advances only past accepted messages. It copies the playback clock
+snapshot under its mutex only when
 `set_playback_clock()` bumped `playback_state::clock_generation`. The
 per-event mutex in `WindowsSynth::try_send_short_message` and the per-event
 ring push live in the SYNCore repository and are the remaining per-event
@@ -61,6 +63,12 @@ per-ring epoch; the modelview matrix scrolls them and two clip planes bound
 the note area. A frame uploads only the 256-note pages holding notes that
 arrived or ended since the last frame; growth, compaction, an epoch rebase
 (every 1024 s) or a keyboard geometry change re-upload a ring once.
+
+The live visual queue also stores each timestamp once per run. Drawing expands
+notes through the visible scroll window and its 1% overlap margin. A hidden
+player consumes events through the current playback position and releases its
+GPU buffers. A full buffer rebuild stages up to 16,384 notes per upload. The
+offline renderer applies events directly to its note rings on the export thread.
 
 Expired notes are marked dead and released from the ring tail; when the dead
 dominate the retained range the ring compacts, so a long held note cannot

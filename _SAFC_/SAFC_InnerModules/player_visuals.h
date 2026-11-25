@@ -11,7 +11,7 @@
 #include <utility>
 #include <vector>
 
-#include <buffered_queue_spsc.h>
+#include "timed_event_queue.h"
 
 #ifndef SIMPLE_PLAYER_FORCE_NO_INLINE
 #define SIMPLE_PLAYER_FORCE_NO_INLINE
@@ -34,9 +34,8 @@ struct simple_player_visuals
 	static constexpr uint64_t held_end = ~0ULL;	// end_time_us of a note awaiting its note_off
 	static constexpr uint64_t no_note = ~0ULL;	// "no sequence number"
 
-	struct queued_visual_event
+	struct note_event
 	{
-		uint64_t time_us;
 		uint32_t track_id;
 		uint8_t key;
 		bool note_on;
@@ -332,7 +331,7 @@ struct simple_player_visuals
 	// The parser publishes compact events through one SPSC queue. The visual
 	// consumer drains them into the rings, so ring mutation, pending
 	// matching, reclamation and GPU mirroring all stay on one thread.
-	dixelu::buffered_queue_spsc<queued_visual_event> queued_events;
+	timed_event_queue<uint64_t, note_event> queued_events;
 	std::array<note_ring, 2> rings;	// [0] white keys, [1] black keys
 
 	// Per-key pending note trackers for note_off matching
@@ -371,12 +370,12 @@ struct simple_player_visuals
 	note_ring& ring_for(uint8_t key) noexcept { return rings[ring_of_key(key)]; }
 	const note_ring& ring_for(uint8_t key) const noexcept { return rings[ring_of_key(key)]; }
 
-	void apply_visual_event(const queued_visual_event& event)
+	void apply_visual_event(uint64_t time_us, const note_event& event)
 	{
 		auto& ring = ring_for(event.key);
 		if (event.note_on)
 		{
-			const uint64_t seq = ring.push({event.time_us, held_end, event.track_id, event.key, 0});
+			const uint64_t seq = ring.push({time_us, held_end, event.track_id, event.key, 0});
 			try
 			{
 				pending[event.key].push(event.track_id, seq);
@@ -391,19 +390,24 @@ struct simple_player_visuals
 
 		const uint64_t seq = pending[event.key].find_and_remove(event.track_id);
 		if (seq != no_note)
-			ring.end_note(seq, event.time_us);
+			ring.end_note(seq, time_us);
 	}
 
 	// Drain only the boundary visible at entry. A continuously producing parser
 	// therefore cannot monopolize one render frame.
-	SIMPLE_PLAYER_FORCE_NO_INLINE void drain_queued_events()
+	SIMPLE_PLAYER_FORCE_NO_INLINE void drain_queued_events(uint64_t through_us = UINT64_MAX)
 	{
 		size_t remaining = queued_events.approximate_size();
-		while (remaining-- != 0 && !queued_events.empty())
+		while (remaining)
 		{
-			const queued_visual_event event = queued_events.front();
-			queued_events.pop();
-			apply_visual_event(event);
+			const auto run = queued_events.front();
+			if (run.events.empty() || run.stamp > through_us)
+				break;
+			const auto count = (std::min)(remaining, run.events.size());
+			for (const auto& event : run.events.first(count))
+				apply_visual_event(run.stamp, event);
+			queued_events.pop(count);
+			remaining -= count;
 		}
 	}
 
@@ -415,7 +419,7 @@ struct simple_player_visuals
 			return;
 
 		(void)velocity;
-		queued_events.push({time_us, make_color_id(track_index, channel), key, true});
+		queued_events.push(time_us, {make_color_id(track_index, channel), key, true});
 	}
 
 	// Push a note_off event to the visual consumer.
@@ -425,7 +429,7 @@ struct simple_player_visuals
 		if (key >= key_count)
 			return;
 
-		queued_events.push({time_us, make_color_id(track_index, channel), key, false});
+		queued_events.push(time_us, {make_color_id(track_index, channel), key, false});
 	}
 
 	// Rebuild the pending stacks of one ring from its records (after compaction).
@@ -455,9 +459,11 @@ struct simple_player_visuals
 	// Remove every note that has fully scrolled past, including expired notes
 	// behind an older note that is still held.
 	// Called from the visual consumer only.
-	SIMPLE_PLAYER_FORCE_NO_INLINE void cull_expired(int64_t cutoff_time_us)
+	SIMPLE_PLAYER_FORCE_NO_INLINE void cull_expired(int64_t cutoff_time_us, int64_t through_us = INT64_MAX)
 	{
-		drain_queued_events();
+		if (through_us < 0)
+			return;
+		drain_queued_events(static_cast<uint64_t>(through_us));
 		if (cutoff_time_us <= 0)
 			return;
 

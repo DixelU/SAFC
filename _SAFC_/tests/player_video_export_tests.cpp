@@ -534,6 +534,25 @@ generated_event short_event(std::uint64_t time_us, std::uint8_t status,
 	return event;
 }
 
+void test_offline_visual_horizon()
+{
+	simple_player player;
+	vector_event_source source(200, {short_event(0, 0x90, 60, 80),
+		short_event(100, 0x80, 60, 0), short_event(200, 0x90, 61, 90)});
+	check(player.begin_offline_visual_render(source), "offline visual source starts");
+	auto& visuals = player.get_visuals();
+	const auto& ring = visuals.ring_for(60);
+	check(player.advance_offline_visual_render_to(-101, 100) && ring.live() == 0,
+		"a negative visual horizon leaves the event at zero pending");
+	check(player.advance_offline_visual_render_to(-100, 100) && ring.live() == 1 &&
+		visuals.queued_events.approximate_size() == 0,
+		"the first visible event goes directly into the offline note ring");
+	check(player.advance_offline_visual_render_to(0, 100) && ring.live() == 1 &&
+		ring.at(ring.tail_seq).end_time_us == 100,
+		"the event at the right edge resolves the held note");
+	player.end_offline_visual_render();
+}
+
 std::array<std::uint8_t, 4> convert_pixel(video_yuv_layout layout,
 	simple_player_video_matrix matrix, bool full_range, std::uint8_t r, std::uint8_t g,
 	std::uint8_t b)
@@ -1294,6 +1313,7 @@ void test_codecs(const std::filesystem::path& directory, const syncore_preferenc
 int main(int argc, char** argv)
 {
 	test_visual_storage_has_no_artificial_limit();
+	test_offline_visual_horizon();
 	test_held_notes_do_not_block_reclamation();
 	test_player_slider_seek_restart();
 	test_stop_interrupts_distant_event_wait();

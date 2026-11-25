@@ -337,7 +337,7 @@ bool syncore_output::send_short_message(std::uint32_t message) noexcept
 }
 
 std::size_t syncore_output::try_send_short_messages(
-	std::span<const syncore_short_message> messages,
+	std::span<const std::uint32_t> messages, std::uint64_t tick,
 	std::optional<std::chrono::steady_clock::time_point> due,
 	syncore_send_result& last) noexcept
 {
@@ -359,9 +359,9 @@ std::size_t syncore_output::try_send_short_messages(
 		return 0;
 	}
 	std::size_t sent = 0;
-	for (const auto& entry : messages)
+	for (const auto message : messages)
 	{
-		switch (synth->try_send_short_message(entry.message, entry.tick, due))
+		switch (synth->try_send_short_message(message, tick, due))
 		{
 		case safsyn::MidiEnqueueResult::Queued:
 			++sent;
@@ -379,6 +379,7 @@ std::size_t syncore_output::try_send_short_messages(
 	return sent;
 #else
 	(void)messages;
+	(void)tick;
 	(void)due;
 	last = syncore_send_result::unavailable;
 	return 0;

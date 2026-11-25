@@ -723,6 +723,11 @@ bool playback_session::parallel_file_decode() const
 	return impl_->parallel_file_decode.load(std::memory_order_acquire);
 }
 
+void playback_session::advance_hidden_visuals()
+{
+	impl_->engine.advance_hidden_visuals(impl_->visuals);
+}
+
 void playback_session::draw_visuals(float width, float height, float visible_seconds)
 {
 	if (!std::isfinite(width) || !std::isfinite(height) || width < 1 || height < 1)

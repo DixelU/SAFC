@@ -89,6 +89,7 @@ public:
 
 	// Draws in the caller's compatibility OpenGL context and 0..width/0..height
 	// projection. All GL resources and per-frame draw data stay on the UI thread.
+	void advance_hidden_visuals();
 	void draw_visuals(float width, float height, float visible_seconds);
 
 private:

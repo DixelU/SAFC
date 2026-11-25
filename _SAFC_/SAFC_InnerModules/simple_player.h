@@ -30,12 +30,12 @@
 #include "single_midi_info_collector.h"
 #include "midi_track_scanner.h"
 #include "player_visuals.h"
+#include "timed_event_queue.h"
 #include "playback_event_source.h"
 #include "syncore_output.h"
 
 #define SIMPLE_PLAYER_FORCE_NO_INLINE
 #include <buffered_block_list.h>
-#include <buffered_queue_spsc.h>
 // __declspec(noinline)
 // __declspec(noinline)
 
@@ -85,12 +85,13 @@ struct simple_player
 	// Visuals viewport: see player_visuals.h.
 	using visuals_viewport = simple_player_visuals;
 
-	struct send_event
+	struct midi_timestamp
 	{
-		uint64_t time_us;	// target send time in microseconds from start
-		uint32_t short_msg;  // prepared MIDI short message (0 = invalid/empty)
-		std::optional<uint64_t> tick;
+		uint64_t time_us;
+		uint64_t tick;
+		bool operator==(const midi_timestamp&) const = default;
 	};
+	using message_queue = timed_event_queue<midi_timestamp, uint32_t>;
 
 	struct seek_held_note
 	{
@@ -269,7 +270,7 @@ struct simple_player
 
 		// Lookahead buffer for pre-parsed MIDI messages (SPSC; parser throttles
 		// when it gets too far ahead in time or holds too many pending events).
-		dixelu::buffered_queue_spsc<send_event> send_buffer;
+		message_queue send_buffer;
 		std::atomic<bool> seeking_ff{false};		// parser is fast-forwarding (sender drains immediately)
 		std::atomic<bool> parser_done{false};	   // parser finished all events
 		std::atomic<uint64_t> parsed_up_to_us{0};   // how far ahead the parser has reached (in us)
@@ -1020,11 +1021,11 @@ struct simple_player
 		state.current_time_us = current_us <= 0 ? 0 : static_cast<uint64_t>(current_us);
 		state.sender_position_us.store(state.current_time_us, std::memory_order_release);
 
-		const auto lookahead_i64 = clamp_to_i64(lookahead_us);
-		const int64_t target_i64 = current_us > (std::numeric_limits<int64_t>::max)() - lookahead_i64
-			? (std::numeric_limits<int64_t>::max)()
-			: current_us + lookahead_i64;
-		const uint64_t target_us = target_i64 <= 0 ? 0 : static_cast<uint64_t>(target_i64);
+		const auto horizon = visual_horizon(current_us, lookahead_us);
+		if (horizon < 0)
+			return !state.stop_requested;
+		const auto target_us = static_cast<uint64_t>(horizon);
+		std::lock_guard visuals_lock(state.visuals.access_mutex);
 
 		while (offline_visual.has_next_event && !state.stop_requested)
 		{
@@ -1036,12 +1037,11 @@ struct simple_player
 				break;
 
 			state.parsed_up_to_us.store(event.time_us, std::memory_order_release);
-			if (event.k == generated_event::kind::note_on)
-				state.visuals.push_note_on(event.key, event.time_us, event.track_index,
-					event.channel, event.velocity);
-			else if (event.k == generated_event::kind::note_off)
-				state.visuals.push_note_off(event.key, event.time_us, event.track_index,
-					event.channel);
+			if (event.key < visuals_viewport::key_count &&
+				(event.k == generated_event::kind::note_on || event.k == generated_event::kind::note_off))
+				state.visuals.apply_visual_event(event.time_us, {
+					visuals_viewport::make_color_id(event.track_index, event.channel),
+					event.key, event.k == generated_event::kind::note_on});
 
 			offline_visual.has_next_event =
 				offline_visual.source->next(offline_visual.next_event);
@@ -1219,8 +1219,8 @@ struct simple_player
 					const auto& entries = *source.entries;
 					while (source.cursor < entries.size() && entries[source.cursor].tick == batch_tick)
 					{
-						state.send_buffer.push({fast_forwarding ? skip_to_us : batch_time_us,
-							entries[source.cursor].message, batch_tick});
+						state.send_buffer.push({fast_forwarding ? skip_to_us : batch_time_us, batch_tick},
+							entries[source.cursor].message);
 						++source.cursor;
 					}
 					if (source.cursor < entries.size())
@@ -1372,8 +1372,7 @@ struct simple_player
 						// Reconstructed channel state belongs at the seek boundary.
 						// Historical timestamps would underflow against start_offset_us
 						// if the sender had not drained them before FF completed.
-						state.send_buffer.push({
-							fast_forwarding ? skip_to_us : batch_time_us, msg_to_send, batch_tick});
+						state.send_buffer.push({fast_forwarding ? skip_to_us : batch_time_us, batch_tick}, msg_to_send);
 
 						// Per-batch (outer) throttle only fires between unique
 						// ticks, so a single dense tick could otherwise push
@@ -1522,8 +1521,8 @@ struct simple_player
 
 			if (ev.short_msg != 0)
 			{
-				state.send_buffer.push({
-					fast_forwarding ? skip_to_us : batch_time_us, ev.short_msg, ev.tick});
+				const auto time_us = fast_forwarding ? skip_to_us : batch_time_us;
+				state.send_buffer.push({time_us, ev.tick.value_or(time_us)}, ev.short_msg);
 
 				// Same intra-batch size cap as the file parser (sampled every 1024).
 				if ((++cap_check_counter & 1023u) == 0)
@@ -1554,11 +1553,6 @@ struct simple_player
 	// costs one clock read and one synth reference per run instead of per event.
 	SIMPLE_PLAYER_FORCE_NO_INLINE void sender_thread_func()
 	{
-		// Up to this many same-time events go to the output in one call.
-		constexpr size_t run_limit = 1024;
-		std::vector<syncore_short_message> run;
-		run.reserve(run_limit);
-
 		// The clock snapshot is copied under its mutex only after something
 		// changed it (resume, seek completion), tracked by a generation counter.
 		playback_clock_snapshot clock{};
@@ -1573,50 +1567,29 @@ struct simple_player
 			}
 		};
 
-		// Collects the run at the queue front: the events whose time_us equals
-		// the front's (any time while fast-forwarding). Stops before an empty
-		// message so that entry is popped on its own.
-		auto gather_run = [&](bool any_time)
-		{
-			run.clear();
-			uint64_t run_time = 0;
-			for (auto it = state.send_buffer.begin(); it != state.send_buffer.end(); ++it)
-			{
-				if (run.empty())
-					run_time = it->time_us;
-				else if (!any_time && it->time_us != run_time)
-					break;
-				if (it->short_msg == 0)
-					break;
-				run.push_back({it->short_msg, it->tick.value_or(it->time_us)});
-				if (run.size() == run_limit)
-					break;
-			}
-		};
-
 		// Sends the run and returns the accepted prefix length. The remainder
 		// stays queued: a pause waits for resume, a full synth queue is retried
 		// after a short sleep, and a stopped synth stops playback. Dropping a
 		// dense burst through the live-input API would trigger panic recovery
 		// and erase held carriers, so the file sender waits for capacity.
-		auto send_run = [&](std::optional<std::chrono::steady_clock::time_point> due)
+		auto send_run = [&](message_queue::run run, std::optional<std::chrono::steady_clock::time_point> due)
 		{
 			if (!syncore.active())
 			{
-				for (const auto& entry : run)
-					send_output_message(entry.message);
-				return run.size();
+				for (const auto message : run.events)
+					send_output_message(message);
+				return run.events.size();
 			}
 			size_t sent = 0;
-			while (sent < run.size() && !state.stop_requested.load(std::memory_order_acquire))
+			while (sent < run.events.size() && !state.stop_requested.load(std::memory_order_acquire))
 			{
 				if (!state.seeking_ff.load(std::memory_order_acquire) &&
 					state.paused.load(std::memory_order_acquire))
 					break;
 				syncore_send_result last = syncore_send_result::queued;
 				sent += syncore.try_send_short_messages(
-					std::span<const syncore_short_message>(run).subspan(sent), due, last);
-				if (sent == run.size())
+					run.events.subspan(sent), run.stamp.tick, due, last);
+				if (sent == run.events.size())
 					break;
 				if (last == syncore_send_result::unavailable)
 				{
@@ -1629,61 +1602,30 @@ struct simple_player
 			return sent;
 		};
 
-		auto pop_front_events = [&](size_t count)
-		{
-			for (size_t i = 0; i < count; ++i)
-				state.send_buffer.pop();
-		};
-
 		uint64_t last_published_us = ~0ULL;
 
 		while (!state.stop_requested)
 		{
-			// Fast-forward mode: drain buffer immediately, no timing
-			if (state.seeking_ff.load(std::memory_order_acquire))
+			const bool fast_forward = state.seeking_ff.load(std::memory_order_acquire);
+			if (!fast_forward && state.paused.load(std::memory_order_acquire))
 			{
-				// Parser resets the clock when FF completes; the generation
-				// counter makes the next timed run re-read it.
-				last_published_us = ~0ULL;
-
-				if (!state.send_buffer.empty())
-				{
-					if (state.send_buffer.front().short_msg == 0)
-					{
-						state.send_buffer.pop();
-						continue;
-					}
-					gather_run(true);
-					pop_front_events(send_run({}));
-					continue;
-				}
-
-				// Buffer empty during FF - parser is still filling it
-				if (state.parser_done.load(std::memory_order_acquire))
-					break;
-				std::this_thread::yield();
+				std::this_thread::sleep_for(std::chrono::milliseconds(10));
 				continue;
 			}
 
-			// handle pause - wait until unpaused
-			if (state.paused.load(std::memory_order_acquire))
+			// EOF is published after the last message. Read it before sampling
+			// the queue so a concurrent final push cannot be mistaken for EOF.
+			const bool finished = state.parser_done.load(std::memory_order_acquire);
+			auto run = state.send_buffer.front();
+			if (run.events.empty())
 			{
-				// Wait until resumed or stopped
-				while (state.paused.load(std::memory_order_acquire) && !state.stop_requested)
-					std::this_thread::sleep_for(std::chrono::milliseconds(10));
-
-				if (state.stop_requested)
+				if (finished)
 					break;
-			}
-
-			if (state.stop_requested)
-				break;
-
-			if (state.send_buffer.empty())
-			{
-				// buffer empty - check if parser is done
-				if (state.parser_done.load(std::memory_order_acquire))
-					break; // all done
+				if (fast_forward)
+				{
+					std::this_thread::yield();
+					continue;
+				}
 
 				// With no queued event there is nothing else to publish the playback
 				// clock. Keep it moving so the parser can cross a long (> lookahead)
@@ -1698,13 +1640,17 @@ struct simple_player
 				continue;
 			}
 
-			const auto& front = state.send_buffer.front();
-			if (front.short_msg == 0)
+			run.events = run.events.first((std::min)(run.events.size(), size_t{1024}));
+			if (fast_forward)
 			{
-				state.send_buffer.pop();
+				// Restored notes are published after fast-forward ends; they must
+				// observe the new pause state and clock even if front() saw one.
+				if (state.seeking_ff.load(std::memory_order_acquire))
+					state.send_buffer.pop(send_run(run, {}));
+				last_published_us = ~0ULL;
 				continue;
 			}
-			const uint64_t run_time_us = front.time_us;
+			const uint64_t run_time_us = run.stamp.time_us;
 
 			// update current position for UI and parser throttling
 			// (only when it changes - events in a burst share one timestamp)
@@ -1748,8 +1694,7 @@ struct simple_player
 				continue;
 
 			// send the run
-			gather_run(false);
-			pop_front_events(send_run(due));
+			state.send_buffer.pop(send_run(run, due));
 		}
 	}
 
@@ -1900,6 +1845,11 @@ struct simple_player
 		}
 		else
 			all_notes_off();
+
+		// Both queue endpoints have exited. An early stop can leave the
+		// entire parser lookahead pending, even when the player is hidden.
+		state.send_buffer.clear();
+		state.visuals.reset();
 		state.playing.store(false, std::memory_order_release);
 	}
 
@@ -2123,8 +2073,10 @@ struct simple_player
 			{
 				mirror.layout_generation = ring.layout_generation;
 				mirror.geometry_generation = geometry_generation;
+				// Keep coordinates stable as the visible ring grows or compacts.
+				if (!mirror.capacity || rebase)
+					mirror.epoch_us = current_us > 0 ? static_cast<uint64_t>(current_us) : 0;
 				mirror.capacity = ring.capacity();
-				mirror.epoch_us = current_us > 0 ? static_cast<uint64_t>(current_us) : 0;
 				gl_buffers.buffer_data(GL_ARRAY_BUFFER,
 					static_cast<gl_buffer_api::gl_sizeiptr>(mirror.capacity * 4 * sizeof(gpu_note_vertex)),
 					nullptr, GL_DYNAMIC_DRAW);
@@ -2132,9 +2084,9 @@ struct simple_player
 				size_t remaining = ring.range();
 				while (remaining)
 				{
-					const size_t run = std::min(remaining, ring.capacity() - slot);
+					const size_t run = std::min({remaining, ring.capacity() - slot, NOTE_BATCH});
 					upload_slots(ring, mirror, slot, run);
-					slot = 0;
+					slot = (slot + run) & ring.mask();
 					remaining -= run;
 				}
 				ring.clear_dirty();
@@ -2596,20 +2548,54 @@ struct simple_player
 		draw_at(data, get_visual_position_us());
 	}
 
+	static int64_t visual_horizon(int64_t now, uint64_t lookahead_us)
+	{
+		const auto ahead = clamp_to_i64(lookahead_us);
+		return now > INT64_MAX - ahead ? INT64_MAX : now + ahead;
+	}
+
+	int64_t visual_frame_time(const draw_data& data, int64_t now) const
+	{
+		if (!data.enable_simulated_lag)
+			return now;
+		const auto parsed = clamp_to_i64(state.parsed_up_to_us.load(std::memory_order_relaxed));
+		return (std::min)(now, parsed - clamp_to_i64(data.scroll_window_us));
+	}
+
+	// The CPU overlap renderer includes a 1% margin at the top of the roll.
+	static uint64_t visual_lookahead(uint64_t window_us)
+	{
+		const auto window = clamp_to_i64(window_us);
+		return static_cast<uint64_t>(visual_horizon(window, window / 100 + 1));
+	}
+
+	static int64_t visual_cutoff(int64_t now, uint64_t window_us)
+	{
+		const auto window = clamp_to_i64(window_us);
+		return now <= window ? 0 : now - window;
+	}
+
+	void advance_hidden_visuals(draw_data& data)
+	{
+		data.release_gpu();
+		const auto now = visual_frame_time(data, get_visual_position_us());
+		try
+		{
+			auto& visuals = get_visuals();
+			std::lock_guard lock(visuals.access_mutex);
+			visuals.cull_expired(visual_cutoff(now, data.scroll_window_us), now);
+		}
+		catch (const std::bad_alloc&)
+		{
+			handle_memory_failure(true);
+		}
+	}
+
 	SIMPLE_PLAYER_FORCE_NO_INLINE void draw_at(draw_data& data, int64_t current_us)
 	{
 		constexpr int total_white = draw_data::white_keys_count();
 		auto& visuals = get_visuals();
-
-		if (data.enable_simulated_lag)
-		{
-			const auto max = clamp_to_i64(
-				state.parsed_up_to_us.load(std::memory_order_relaxed));
-			const auto latest_visible_start = max - clamp_to_i64(data.scroll_window_us);
-
-			if (current_us > latest_visible_start)
-				current_us = latest_visible_start;
-		}
+		current_us = visual_frame_time(data, current_us);
 
 		// draw falling notes
 		draw_data::color keyboard_colors[128];
@@ -2626,7 +2612,8 @@ struct simple_player
 			// lock against visuals.reset() which may be called by playback_thread on seek/restart.
 			std::lock_guard<std::mutex> visuals_lock(visuals.access_mutex);
 
-			visuals.cull_expired(current_us - clamp_to_i64(data.scroll_window_us));
+			visuals.cull_expired(visual_cutoff(current_us, data.scroll_window_us),
+				visual_horizon(current_us, visual_lookahead(data.scroll_window_us)));
 			visuals.advance_key_state(current_us);
 
 			for (int index = 0; index < 128; ++index)
@@ -3008,9 +2995,9 @@ private:
 		if (held_notes)
 		{
 			for (const auto& note : held_notes->active)
-				state.send_buffer.push({position_us, make_smsg(
+				state.send_buffer.push({position_us, position_us}, make_smsg(
 					static_cast<uint8_t>(0x90 | (note.channel & 0x0F)),
-					note.key, note.velocity)});
+					note.key, note.velocity));
 			held_notes->active.clear();
 			held_notes->pending.clear();
 		}

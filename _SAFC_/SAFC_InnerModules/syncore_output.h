@@ -29,13 +29,6 @@ std::filesystem::path syncore_phase_disk_cache_directory();
 
 enum class syncore_send_result { queued, full, unavailable };
 
-// One element of a same-time run the file sender hands to the synth at once.
-struct syncore_short_message
-{
-	std::uint32_t message = 0;
-	std::optional<std::uint64_t> tick;
-};
-
 struct syncore_preferences
 {
 	std::uint32_t sample_rate = 48000;
@@ -90,7 +83,7 @@ public:
 	// while holding the synth reference once instead of once per message.
 	// Returns how many were queued; 'last' says why a shorter prefix stopped
 	// (full or unavailable) and is 'queued' when every message went through.
-	std::size_t try_send_short_messages(std::span<const syncore_short_message> messages,
+	std::size_t try_send_short_messages(std::span<const std::uint32_t> messages, std::uint64_t tick,
 		std::optional<std::chrono::steady_clock::time_point> due,
 		syncore_send_result& last) noexcept;
 	bool active() const noexcept;

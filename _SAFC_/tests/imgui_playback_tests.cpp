@@ -159,8 +159,8 @@ void sender_clock_checks()
     const auto started = state.start_time;
     state.playing = true;
     state.parser_done = true;
-    for (unsigned i = 0; i < 10000; ++i) state.send_buffer.push({0, 0x643c90, 0});
-    state.send_buffer.push({500000, 0x003c80, 480});
+    for (unsigned i = 0; i < 10000; ++i) state.send_buffer.push({0, 0}, 0x643c90);
+    state.send_buffer.push({500000, 480}, 0x003c80);
     std::atomic<bool> finished = false;
     std::chrono::steady_clock::time_point finished_at;
     std::thread sender([&] {

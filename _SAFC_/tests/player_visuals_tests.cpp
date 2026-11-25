@@ -4,11 +4,13 @@
 #include "../SAFC_InnerModules/player_visuals.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cstdint>
 #include <iostream>
 #include <random>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace
@@ -18,6 +20,72 @@ using visuals = simple_player_visuals;
 void require(bool value, const char* message)
 {
 	if (!value) throw std::runtime_error(message);
+}
+
+void queue_runs()
+{
+	timed_event_queue<uint64_t, uint32_t> queue;
+	queue.push(17, 37);
+	require(queue.front().events.size() == 1 && queue.front().events[0] == 37,
+		"a lone event is visible on the unfinished page");
+	queue.clear();
+
+	constexpr uint32_t total = 300'000;
+	auto stamp = [](uint32_t i) -> uint64_t { return i < 12000 ? 1 : (uint64_t{1} << 40) + i / 7; };
+	std::atomic_bool finished = false;
+	std::jthread writer([&]
+	{
+		for (uint32_t i = 0; i < total; ++i)
+			queue.push(stamp(i), i);
+		finished.store(true, std::memory_order_release);
+	});
+	for (uint32_t next = 0; next < total;)
+	{
+		const bool done = finished.load(std::memory_order_acquire);
+		const auto run = queue.front();
+		if (run.events.empty())
+		{
+			require(!done, "the queue delivered all events before EOF");
+			std::this_thread::yield();
+			continue;
+		}
+		const auto prefix = run.events.first((std::min)(run.events.size(), size_t{13}));
+		for (auto value : prefix)
+		{
+			require(value == next && run.stamp == stamp(next),
+				"a partial read preserves every payload and timestamp across page boundaries");
+			++next;
+		}
+		queue.pop(prefix.size());
+	}
+	require(queue.front().events.empty() && queue.approximate_size() == 0, "all published events drained");
+}
+
+void visible_horizon()
+{
+	visuals v;
+	v.push_note_on(60, 10, 0, 0, 90);
+	for (uint64_t time = 100; time < 10'000; time += 2)
+	{
+		v.push_note_on(60, time, 0, 0, 80);
+		v.push_note_off(60, time + 1, 0, 0);
+	}
+	v.push_note_off(60, 20'000, 0, 0);
+	const auto total = v.queued_events.approximate_size();
+	v.cull_expired(-100, -1);
+	const auto& ring = v.ring_for(60);
+	require(ring.capacity() == 0, "lead-in outside the visible interval allocates no note geometry");
+	v.cull_expired(10, 101);
+	require(ring.live() == 2 && v.queued_events.approximate_size() == total - 3,
+		"only the visible prefix expands into notes");
+	v.cull_expired(10'000, 10'000);
+	require(ring.live() == 1 && v.queued_events.approximate_size() == 1,
+		"hidden playback retires repeated notes but keeps the older overlapping note");
+	v.advance_key_state(10'000);
+	uint32_t track = 1;
+	require(v.pressed_track_id(60, 10'000, track) && track == 0, "reopening shows the held key");
+	v.cull_expired(20'001, 20'001);
+	require(ring.capacity() == 0, "the matching note-off releases the last held note");
 }
 
 void matching_and_counts()
@@ -304,6 +372,8 @@ int main()
 {
 	try
 	{
+		queue_runs();
+		visible_horizon();
 		matching_and_counts();
 		held_notes_do_not_block_reclamation();
 		wraparound_and_compaction();

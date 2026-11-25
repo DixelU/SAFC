@@ -69,11 +69,11 @@ void player_sender_benchmark()
             state.start_time = clock_type::now();
             state.parser_done.store(true);
             for (size_t i = 0; i < events; ++i)
-                state.send_buffer.push({0, 0x643c90, 0});
+                state.send_buffer.push({0, 0}, 0x643c90);
             const auto started = clock_type::now();
             player->sender_thread_func();
             const double elapsed = std::chrono::duration<double, std::milli>(clock_type::now() - started).count();
-            if (!state.send_buffer.empty()) throw std::runtime_error("Sender did not drain the burst");
+            if (state.send_buffer.approximate_size() != 0) throw std::runtime_error("Sender did not drain the burst");
             if (repetition) times.push_back(elapsed);
         }
         std::sort(times.begin(), times.end());

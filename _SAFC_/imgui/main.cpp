@@ -744,6 +744,8 @@ void draw_player(
 		else
 			ImGui::TextDisabled("%s", status_line->c_str());
 	}
+	else
+		app.playback.advance_hidden_visuals();
 	ui::end_folded_window();
 }
 
@@ -1045,8 +1047,10 @@ void render_workspace(workspace& app, piano_texture& piano, GLFWwindow* window)
 	draw_workspace_navigation(app, layout);
 	if (app.reset_layout && !layout.split)
 		app.focus_player = true;
-	if (app.player_open)
+	if (app.player_open && !glfwGetWindowAttrib(window, GLFW_ICONIFIED))
 		draw_player(app, piano, status, layout);
+	else
+		app.playback.advance_hidden_visuals();
 	if (app.synth_open)
 		draw_synth_settings(app, status, layout);
 
@@ -1457,6 +1461,7 @@ int run(bool smoke, bool workflows, const std::filesystem::path& capture_path, c
 		glfwGetFramebufferSize(window, &width, &height);
 		if (!width || !height)
 		{
+			app.playback.advance_hidden_visuals();
 			glfwWaitEventsTimeout(.1);
 			continue;
 		}

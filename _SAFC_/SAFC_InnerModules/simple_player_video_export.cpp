@@ -71,7 +71,6 @@ namespace
 using Microsoft::WRL::ComPtr;
 
 constexpr LONGLONG mf_second = 10'000'000LL;
-constexpr std::uint64_t export_lookahead_guard_us = 500'000ULL;
 constexpr std::uint32_t preview_max_width = 320;
 constexpr std::uint32_t preview_max_height = 180;
 
@@ -93,21 +92,6 @@ std::string first_smf_error(const std::vector<safsyn::SmfDiagnostic>& diagnostic
 		if (diagnostic.severity == safsyn::SmfDiagnosticSeverity::Error)
 			return diagnostic.message;
 	return fallback;
-}
-
-std::vector<std::uint8_t> read_file_bytes(const std::wstring& path)
-{
-	std::ifstream source(std::filesystem::path(path), std::ios::binary | std::ios::ate);
-	if (!source)
-		throw std::runtime_error("could not open MIDI file");
-	const auto length = source.tellg();
-	if (length < 0 || static_cast<std::uint64_t>(length) > SIZE_MAX)
-		throw std::runtime_error("invalid MIDI file size");
-	std::vector<std::uint8_t> bytes(static_cast<std::size_t>(length));
-	source.seekg(0);
-	if (!bytes.empty() && !source.read(reinterpret_cast<char*>(bytes.data()), length))
-		throw std::runtime_error("could not read MIDI file");
-	return bytes;
 }
 
 std::shared_ptr<safsyn::Soundfont> load_bank(const std::wstring& path)
@@ -2361,8 +2345,7 @@ std::uint64_t render_video_stream(media_foundation_writer& writer,
 
 	simple_player::draw_data draw_data;
 	configure_draw_data(draw_data, settings);
-	const std::uint64_t visual_lookahead_us = draw_data.scroll_window_us +
-		export_lookahead_guard_us;
+	const std::uint64_t visual_lookahead_us = simple_player::visual_lookahead(draw_data.scroll_window_us);
 	const std::uint64_t frame_progress_step = (std::max)(
 		std::uint64_t{1}, static_cast<std::uint64_t>(settings.fps) / 4ULL);
 	std::uint64_t next_frame_progress = 0;
@@ -3083,7 +3066,7 @@ simple_player_video_result render_simple_player_video(
 			throw std::runtime_error("cancelled");
 
 		safsyn::SmfFile file;
-		if (!file.load_bytes(read_file_bytes(midi_path)))
+		if (!file.load(midi_path))
 			throw std::runtime_error(first_smf_error(file.diagnostics(),
 				"invalid MIDI file"));
 
