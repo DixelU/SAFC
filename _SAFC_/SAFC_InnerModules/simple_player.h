@@ -778,15 +778,14 @@ struct simple_player
 	// Stop playback completely
 	void stop()
 	{
-		{
-			std::lock_guard seek_lock(seek_request_mutex);
-			cancel_requested.store(true, std::memory_order_release);
-			state.seek_requested.store(false, std::memory_order_release);
-			state.stop_requested.store(true, std::memory_order_release);
+		std::lock_guard seek_lock(seek_request_mutex);
 
-			// If paused, unpause so threads can exit
-			state.paused.store(false, std::memory_order_release);
-		}
+		cancel_requested.store(true, std::memory_order_release);
+		state.seek_requested.store(false, std::memory_order_release);
+		state.stop_requested.store(true, std::memory_order_release);
+
+		// If paused, unpause so threads can exit
+		state.paused.store(false, std::memory_order_release);
 	}
 
 	// Cancel this dispatch, including a run that has not entered simple_run yet.
@@ -868,12 +867,16 @@ struct simple_player
 			const auto timeline_position = clamp_to_i64(audio_floor) +
 				std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count();
 			const auto floor_i64 = clamp_to_i64(audio_floor);
+
 			if (timeline_position <= floor_i64)
 				return audio_floor;
+
 			return static_cast<uint64_t>(timeline_position);
 		}
+
 		if (state.paused.load(std::memory_order_acquire))
 			return state.pause_position_us.load(std::memory_order_acquire);
+
 		return 0;
 	}
 
@@ -1024,7 +1027,9 @@ struct simple_player
 		const auto horizon = visual_horizon(current_us, lookahead_us);
 		if (horizon < 0)
 			return !state.stop_requested;
+
 		const auto target_us = static_cast<uint64_t>(horizon);
+
 		std::lock_guard visuals_lock(state.visuals.access_mutex);
 
 		while (offline_visual.has_next_event && !state.stop_requested)
@@ -1097,6 +1102,7 @@ struct simple_player
 			uint8_t channel;
 			uint8_t velocity;
 		};
+
 		std::vector<virtual_track> virtual_tracks;
 		std::vector<seeded_note> seeded_notes;
 		const tick_type seek_target_tick = fast_forwarding ? microseconds_to_tick(skip_to_us) : 0;
@@ -1115,14 +1121,17 @@ struct simple_player
 				{
 					return target < checkpoint.tick;
 				});
+
 				if (next != checkpoints.begin())
 				{
 					const auto& checkpoint = *std::prev(next);
 					track.position = checkpoint.position;
 					track.rsb = checkpoint.running_status;
 					base_tick = checkpoint.tick;
+
 					for (const auto& note : checkpoint.held)
 						seeded_notes.push_back({note.start_tick, i, note.key, note.channel, note.velocity});
+
 					if (!checkpoint.state.empty())
 						virtual_tracks.push_back({&checkpoint.state, 0});
 				}
@@ -1223,10 +1232,12 @@ struct simple_player
 							entries[source.cursor].message);
 						++source.cursor;
 					}
+
 					if (source.cursor < entries.size())
 						event_queue.replace_top({entries[source.cursor].tick, ref.track_index});
 					else
 						event_queue.pop();
+
 					continue;
 				}
 
@@ -1239,6 +1250,7 @@ struct simple_player
 						track.done = true;
 						--state.active_tracks;
 					}
+
 					event_queue.pop();
 					continue;
 				}
@@ -1503,10 +1515,13 @@ struct simple_player
 			if (fast_forwarding && is_note)
 			{
 				if (ev.k == generated_event::kind::note_on && ev.velocity != 0)
+				{
 					held_notes.note_on(ev.key, batch_time_us, ev.track_index,
 						ev.channel, ev.velocity);
+				}
 				else
 					held_notes.note_off(ev.key, ev.track_index, ev.channel);
+
 				continue;
 			}
 
@@ -1580,23 +1595,27 @@ struct simple_player
 					send_output_message(message);
 				return run.events.size();
 			}
+
 			size_t sent = 0;
 			while (sent < run.events.size() && !state.stop_requested.load(std::memory_order_acquire))
 			{
 				if (!state.seeking_ff.load(std::memory_order_acquire) &&
 					state.paused.load(std::memory_order_acquire))
 					break;
+
 				syncore_send_result last = syncore_send_result::queued;
 				sent += syncore.try_send_short_messages(
 					run.events.subspan(sent), run.stamp.tick, due, last);
 				if (sent == run.events.size())
 					break;
+
 				if (last == syncore_send_result::unavailable)
 				{
 					set_last_output_error("SYNCore stopped while sending MIDI");
 					state.stop_requested.store(true, std::memory_order_release);
 					break;
 				}
+
 				std::this_thread::sleep_for(std::chrono::milliseconds(1));
 			}
 			return sent;
@@ -1670,6 +1689,7 @@ struct simple_player
 				!state.paused.load(std::memory_order_acquire))
 			{
 				refresh_clock();
+
 				const uint64_t target_us = run_time_us > clock.start_offset_us
 					? run_time_us - clock.start_offset_us : 0;
 				const int64_t target_elapsed_us = clamp_to_i64(target_us);
@@ -1677,6 +1697,7 @@ struct simple_player
 				const auto elapsed = std::chrono::steady_clock::now() - clock.start_time;
 				const int64_t elapsed_us =
 					std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count();
+
 				if (elapsed_us >= target_elapsed_us)
 					break;
 
@@ -1978,12 +1999,14 @@ struct simple_player
 		{
 			if (!gl_buffers.available)
 				return;
+
 			for (auto& mirror : gpu_rings)
 			{
 				if (mirror.buffer)
 					gl_buffers.delete_buffers(1, &mirror.buffer);
 				mirror = {};
 			}
+
 			if (note_indices)
 				gl_buffers.delete_buffers(1, &note_indices);
 			note_indices = 0;
