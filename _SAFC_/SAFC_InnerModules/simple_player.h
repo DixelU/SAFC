@@ -3200,9 +3200,9 @@ private:
 			info.time_map_mcsecs.end(),
 			tick,
 			[](tick_type t, const std::pair<uint64_t, uint64_t>& entry)
-		{
-			return t < entry.first;
-		}
+			{
+				return t < entry.first;
+			}
 		);
 
 		if (it == info.time_map_mcsecs.begin())
