@@ -1687,14 +1687,14 @@ struct single_midi_processor_2
 			return true;
 		};
 
-		std::array<bool, 16> important_event_classes;
+		std::array<bool, 16> important_event_classes{};
 		important_event_classes.fill(settings.imp_events_filter.pass_other);
 
 		important_event_classes[0x8] = important_event_classes[0x9] = settings.imp_events_filter.pass_notes;
 		important_event_classes[0xC] = settings.imp_events_filter.pass_instument_cnage;
 		important_event_classes[0xE] = settings.imp_events_filter.pass_pitch;
 
-		std::array<bool, 256> important_meta_types;
+		std::array<bool, 256> important_meta_types{};
 		important_meta_types.fill(settings.imp_events_filter.pass_other);
 		important_meta_types[0x51] = settings.imp_events_filter.pass_tempo || settings.imp_events_filter.pass_other;
 
@@ -1823,7 +1823,8 @@ struct single_midi_processor_2
 		static constexpr bool fill_empty_track_with_at_least_one_event = false;
 
 		buffer_type data;
-		tick_type prev_tick;
+		tick_type prev_tick = 0;
+
 		inline buffer_type& get_vec(uint8_t)
 		{
 			return data;
